@@ -12,9 +12,9 @@
 ## 前置条件
 
 1. 当前工作树已通过 Prisma/迁移校验，Docker Desktop 正常运行。本演练是严格 local-only：拒绝 `DOCKER_HOST` 覆盖，并要求当前 Docker context 的实际 endpoint 是规范绝对路径的 `unix://` socket；远程 Docker context 不支持。
-2. 当前 Compose 的 `postgres`、`app` 和 `worker` 正在运行且健康；数据库可由 Compose 内部 cluster admin 只读导出。演练开始前会检查 app/worker 的不可变容器 ID、project/service 标签，以及二者均为 running 且未 paused；任一服务已被外部暂停都会 fail closed，演练不会替它恢复。
-3. 同一 source project 禁止并发演练。演练器在与状态根无关的稳定本机临时锁根中以原子目录创建锁；发现已有锁会返回 `RECOVERY_DRILL_SOURCE_BUSY`，不会自动判断或删除 stale lock。只有运维确认没有演练运行、且 source app/worker 未暂停后，才能针对精确锁目录人工处理 stale lock。
-4. 当前 app/worker 使用的凭据主密钥卷和 uploads 卷可读取。来源卷名称不从 `docker compose config` 推断，而是从正在运行的 app/worker 容器 Mounts 证明：两个固定 destination 各自恰好一个 named volume，且 app/worker 名称完全一致。若安全计数中的外部凭据为零，只有来源和目标两侧都没有 `master.key` 才能跳过 key 检查；若已有 `master.key`，即使凭据为零，也会在隔离 worker 中以非 root 用户执行只读可读性检查，不创建或修改密钥。空数据库和零项目是合法输入，不会跳过其余演练。
+2. 当前 Compose 的 `postgres`、`app` 和 `worker` 正在运行且健康；数据库可由 Compose 内部 cluster admin 只读导出。v0.6 Compose 未声明 `git-worker`，演练按旧服务集运行。若 Compose 声明 `git-worker`（v0.7），必须恰好发现一个属于该 project/service 的容器，且其状态为 running、未 paused、health 为 healthy；缺失、重复、孤立或不健康都会 fail closed。演练会记录 app/worker 以及存在时 git-worker 的不可变容器 ID，暂停这些精确 ID 后才导出数据库和复制卷，并在正常与失败清理路径中恢复这些 ID；任一写服务已被外部暂停都会 fail closed，演练不会替它恢复。
+3. 同一 source project 禁止并发演练。演练器在与状态根无关的稳定本机临时锁根中以原子目录创建锁；发现已有锁会返回 `RECOVERY_DRILL_SOURCE_BUSY`，不会自动判断或删除 stale lock。只有运维确认没有演练运行、且 source app/worker 和存在时的 git-worker 都未暂停后，才能针对精确锁目录人工处理 stale lock。
+4. 当前 app/worker 使用的凭据主密钥卷和 uploads 卷可读取。来源卷名称不从 `docker compose config` 推断，而是从正在运行的 app/worker 容器 Mounts 证明：两个固定 destination 各自恰好一个 named volume，且 app/worker 名称完全一致。若存在 git-worker，其主密钥卷还必须与 app/worker 一致。若安全计数中的外部凭据为零，只有来源和目标两侧都没有 `master.key` 才能跳过 key 检查；若已有 `master.key`，即使凭据为零，也会在隔离 worker 中以非 root 用户执行只读可读性检查，不创建或修改密钥。空数据库和零项目是合法输入，不会跳过其余演练。
 5. 先阅读[生产异地备份](./production-backup.md)与[管理员操作指南](./admin-operation-guide.md)中的备份和恢复边界。
 
 ## 命令
@@ -32,7 +32,7 @@ pnpm recovery:drill:local -- --source-project ai-project-os
 
 ## 隔离资源
 
-演练器为每次运行生成至少 128 位熵的唯一 `drillId` 与 Compose project，并先预检、预留带有 drill 所有权标签和指纹的 PostgreSQL、主密钥和 uploads 命名卷及默认网络。生成的 Compose 服务、默认网络和卷都带有同一 drill 标签；应用与 PostgreSQL 使用唯一随机回环端口配置，端口仅绑定主机 `127.0.0.1`。隔离 worker 使用专用 heartbeat-only 进程，只写入 Worker heartbeat，不导入或认领 automation、action、asset、reconcile 或删除队列。manifest/copy 使用唯一名称及 drill/project/purpose 标签登记 helper，即使超时或收到信号也不依赖 `--rm`，清理时重新证明名称、ID 和标签后才精确 stop/remove。演练器逐个记录创建或重建后的容器 ID，清理前再次核对 project、drill 标签和资源指纹，只删除本次已跟踪且仍归属于本次演练的容器、网络和卷；碰撞、标签漂移或指纹不一致会 fail closed 且不删除可疑资源。不会执行 `docker system prune`、`docker volume prune`、`docker compose down` 或通配删除。
+演练器为每次运行生成至少 128 位熵的唯一 `drillId` 与 Compose project，并先预检、预留带有 drill 所有权标签和指纹的 PostgreSQL、主密钥和 uploads 命名卷及默认网络。生成的 Compose 服务、默认网络和卷都带有同一 drill 标签；应用与 PostgreSQL 使用唯一随机回环端口配置，端口仅绑定主机 `127.0.0.1`。隔离 `worker` 使用专用 heartbeat-only 进程，只写入 Worker heartbeat，不导入或认领 automation、action、asset、reconcile 或删除队列。若 source 是 v0.7 并有 `git-worker`，隔离目标也会用 source 镜像创建同名服务，但覆盖为 heartbeat-only 命令、使用隔离数据库的 runtime 身份和对应健康检查；不会启动 Git 自动化进程、读取 Git 凭据或发起 Git 请求。manifest/copy 使用唯一名称及 drill/project/purpose 标签登记 helper，即使超时或收到信号也不依赖 `--rm`，清理时重新证明名称、ID 和标签后才精确 stop/remove。演练器逐个记录创建或重建后的容器 ID，清理前再次核对 project、drill 标签和资源指纹，只删除本次已跟踪且仍归属于本次演练的容器、网络和卷；碰撞、标签漂移或指纹不一致会 fail closed 且不删除可疑资源。不会执行 `docker system prune`、`docker volume prune`、`docker compose down` 或通配删除。
 
 ## 固定验证项目
 
@@ -43,7 +43,7 @@ pnpm recovery:drill:local -- --source-project ai-project-os
 3. 比较来源与隔离库的安全计数：用户、工作区、项目、外部凭据记录和项目资产记录。只发布计数，不发布 ID、余额或内容。
 4. 复制并核对凭据主密钥卷；若来源安全计数中的外部凭据大于零，`master.key` 必须存在、不是符号链接且没有 group/other 权限；隔离 app/worker 健康后，以非 root 的 worker 用户读取目标主密钥并按固定顺序最多解密 32 条凭据，验证真实凭据可恢复，但不输出明文、密文或凭据 ID。若外部凭据为零，来源与隔离卷都没有 `master.key` 才允许通过；两侧都存在时必须安全且摘要一致，单侧存在或任一存在但权限不安全都会失败。不会读取或输出密钥值。
 5. 复制并核对 uploads 文件清单和摘要；目录项必须是普通文件或目录，不接受符号链接。不会发布文件名或文件内容。
-6. 启动隔离 `app` 与 heartbeat-only `worker`，等待 `/api/health` 同时报告数据库和 Worker 正常；若存在 `master.key`（即使凭据为零），再完成上一项的非 root 解密检查。演练器为 pg_dump、manifest、copy 以及所有 Docker 子进程设置有限超时；SIGINT/SIGTERM 只请求中止并终止当前子进程，随后仍进入 finally，恢复 source、等待健康、清理隔离资源和锁，并发布保留主失败及可选清理失败的证据。
+6. 启动隔离 `app` 与 heartbeat-only `worker`；若 source 存在 `git-worker`，也启动其 heartbeat-only 隔离替身并等待该服务自身健康。等待 `/api/health` 同时报告数据库和普通 Worker 正常；若存在 `master.key`（即使凭据为零），再完成上一项的非 root 解密检查。演练器为 pg_dump、manifest、copy 以及所有 Docker 子进程设置有限超时；SIGINT/SIGTERM 只请求中止并终止当前子进程，随后仍进入 finally，恢复 source 的 app/worker/git-worker 写服务、等待健康、清理隔离资源和锁，并发布保留主失败及可选清理失败的证据。
 
 `validationSha256` 只对固定检查结果、迁移数量、安全计数和卷摘要计算。状态 JSON 只包含固定格式、演练 ID、环境/作用域、时间、持续时间、来源备份标识/摘要、固定检查、迁移数、安全计数、摘要指纹和安全错误码；不接受任意 Runbook URL、主机路径、日志或秘密。失败证据中的 `errorCode` 始终保留主失败原因；如果清理也失败，另以可选的 `cleanupErrorCode` 记录清理错误，不覆盖主失败原因。
 
@@ -55,7 +55,7 @@ pnpm recovery:drill:local -- --source-project ai-project-os
 
 发布文件为状态根下独立的 `recovery-drill.json`，不覆盖 `current.json` 或 `history/` 备份任务记录。应用以只读方式读取并严格校验该文件；文件缺失、过大、畸形、未来时间或符号链接均 fail closed。完成时间超过独立 90 天新鲜度阈值的记录仍可显示为陈旧历史，但不会获得 `ready` 或为最新备份背书。Runbook 链接由应用固定为 `/admin/operations/backups#recovery-drill`，不会从状态文件读取。
 
-演练结束后应确认：本次 project 没有已跟踪容器、网络或三个临时卷；正式 Compose 的三个命名卷仍存在且未被脚本删除；正式 `app`、`worker` 和 `/api/health` 状态未被改变。若清理失败或资源所有权核对失败，保留精确资源名并停止后续操作，不尝试删除未跟踪或标签不匹配资源。
+演练结束后应确认：本次 project 没有已跟踪容器（包括可选的 `git-worker`）、网络或三个临时卷；正式 Compose 的三个命名卷仍存在且未被脚本删除；正式 `app`、`worker`、存在时的 `git-worker` 和 `/api/health` 状态未被改变。若清理失败或资源所有权核对失败，保留精确资源名并停止后续操作，不尝试删除未跟踪或标签不匹配资源。
 
 ## 生产演练
 

@@ -78,9 +78,17 @@ sudo deploy/production/install-production-deploy.sh \
 4. 创建密码锁定的专用系统账号 `ai-project-os-actions`，只为该账号追加受限 Actions 公钥；现有 `deploy` 人工运维账号和公钥保持不变。
 5. 校验并安装 root-only 的 COS/age 备份脚本、每日 systemd timer、备份与部署结果目录；备份配置不完整时安装失败关闭。
 
-### 0.6 发布工具更新边界
+### 0.7 直接发布的首次工具安装
 
-服务器需要从包含 `ai-project-os-install-release-tooling` 的受信源码人工执行一次上述安装器。完成这一次初始化后，受限账号可以通过 `install-release-tooling` 协议刷新 0.6 系列的 root-owned 发布工具，不再需要为每个 0.6.x 候选登录服务器重复运行安装器。
+0.7 不再发布 0.6 工具链桥接版本。当前线上 0.6 网关只接受 0.6 标签，且旧更新器尚未加固部署锁，因此 **Deploy v0.7 with database migration** 不会调用旧更新器。首次生产迁移只接受精确的稳定标签 `v0.7.0`，拒绝 `-dev.N`；该带注释标签必须线性接续线上源标签，取得同一提交的成功主分支和标签 CI，主分支还需完整数据库作业成功。真实外部服务、恢复和现场验收应在打稳定标签之前核对；CI 不能单独证明这些外部条件。
+
+可信主机运维在 root 会话中，从这个精确 0.7 标签和提交取得 `deploy/production/ai-project-os-install-release-tooling`，核对标签为带注释标签、提交与发布记录一致、文件确实属于该提交，再执行 `ai-project-os-install-release-tooling <0.7 标签> <40 位提交> CONFIRM_INSTALL_RELEASE_TOOLING_V1`。该安装器再次验证标签、提交、`package.json` 版本和标签 CI；打开锁前验证 `/run/lock` 为 root:root 1777、锁文件为 root:root 常规文件 0600 且不跟随符号链接。安装器先验证和暂存固定清单、校验 sudoers，最后切换受限网关。操作前必须保存现有工具文件及主机状态，并在隔离主机演练；此处不表示生产操作已执行。
+
+安装成功后，受限账号的 `tooling-v07-status` 经 root-owned 更新器核对安装完成标记、工具清单的 SHA-256 及文件与父目录权限，必须精确返回 `TOOLING_V07_READY`。0.7 工作流先验证这个状态，再由已安装的 0.7 更新器从目标标签刷新工具，随后只调用 `deploy-v07`。若首次工具安装、状态或标签 CI 缺失，工作流在备份、迁移和容器切换之前失败关闭。升级器仍需核对实际运行的 0.6 源版本及其 117 条迁移账本；这是既有数据升级的来源校验，不会产生新的 0.6 发布。
+
+### 0.6 历史发布工具更新边界
+
+以下是既有 0.6 发布机制的历史说明，不用于新的 0.7 发布。当前 0.7 候选更新器和受限网关仅接受 0.7 标签进行工具刷新。
 
 更新器只接受 `v0.6.<patch>` 或 `v0.6.<patch>-dev.<number>` annotated tag、精确 40 位提交和固定确认词。它使用与运行中 Compose checkout 分离的 root-owned 仓库，再次核验固定 GitHub origin、标签提交、`package.json` 版本和该标签提交的成功 CI。通过后只安装代码中列出的 gateway、更新器、迁移/补丁部署器、preserve 部署器、OAuth 配置器、Compose operations override 和 sudoers；候选文件必须是普通非空文件，Shell 与 sudoers 必须先通过语法检查，目标路径不能由远端参数指定。
 

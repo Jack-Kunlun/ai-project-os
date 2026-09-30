@@ -131,6 +131,7 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
     jobIds.push(job.id);
     const audit = await db.providerCallAudit.create({ data: { jobId: job.id, providerConnectionId: provider.id, operation: "autoExtract", modelId: "deepseek-v4-flash", billingMode: "platform", billingUserId: retentionUserId, callKey: `gate:${suffix}:call`, status: "running", reservationId: reservation.id } });
     auditIds.push(audit.id);
+    await db.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.delete({ where: { id: projectId } });
     assert.equal(await db.backgroundJob.count({ where: { id: job.id } }), 0);
     const retainedAudit = await db.providerCallAudit.findUniqueOrThrow({ where: { id: audit.id }, select: { jobId: true } });
@@ -140,6 +141,7 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
   } finally {
     if (auditIds.length > 0) await db.providerCallAudit.deleteMany({ where: { id: { in: auditIds } } });
     if (jobIds.length > 0) await db.backgroundJob.deleteMany({ where: { id: { in: jobIds } } });
+    await db.project.updateMany({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.deleteMany({ where: { id: projectId } });
     // Reservation allocations and their parent grant/ledger facts are
     // append-only audit evidence. The isolated gate runner owns their final

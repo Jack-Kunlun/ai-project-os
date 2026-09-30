@@ -50,6 +50,7 @@ import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
 import { PersonalProviderServiceError } from "@/lib/personal-ai-provider-service";
 import { ProjectAiProviderDelegationServiceError } from "@/lib/project-ai-provider-delegation-service";
 import { ProjectGitRepositoryDelegationServiceError } from "@/lib/project-git-repository-delegation-service";
+import { ProjectGitAutomationGrantError } from "@/lib/project-git-automation-grant-service";
 import { ProjectMcpConnectionDelegationServiceError } from "@/lib/project-mcp-connection-delegation-service";
 import { ProjectMcpToolGrantServiceError } from "@/lib/project-mcp-tool-grant-service";
 import { ProjectMcpActionServiceError } from "@/lib/project-mcp-action-service";
@@ -68,6 +69,7 @@ import { PersonalProjectSearchError } from "@/lib/personal-project-search-servic
 import { PersonalConnectionProbeError } from "@/lib/personal-connection-probe-service";
 import { PersonalKnowledgeSemanticError } from "@/lib/personal-knowledge-semantic-service";
 import { ProjectPersonalDefaultError } from "@/lib/project-personal-default-memory";
+import { McpExportGrantError } from "@/lib/mcp-export-grants";
 
 export type ApiErrorBody = {
   error: {
@@ -90,6 +92,18 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof McpExportGrantError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      MCP_EXPORT_INVALID_INPUT: [400, "MCP 凭证请求无效"],
+      MCP_EXPORT_GRANT_LIMIT: [409, "有效 MCP 凭证已达到上限"],
+      MCP_EXPORT_UNAUTHORIZED: [401, "MCP 凭证无效或已失效"],
+      MCP_EXPORT_APPROVAL_REQUIRED: [409, "本次项目内容读取尚未获得 Owner 确认"],
+      MCP_EXPORT_APPROVAL_STALE: [409, "外发确认已失效，请重新准备并确认"],
+      MCP_EXPORT_APPROVAL_LIMIT: [409, "待确认的 MCP 外发请求已达到上限"],
+    };
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
   if (error instanceof ProjectPersonalDefaultError) {
     const message = error.code === "PROJECT_PERSONAL_DEFAULT_CHANGED"
       ? "个人通用记忆已变化，请重新确认本次项目 AI 请求"
@@ -449,6 +463,11 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       OIDC_ID_TOKEN_INVALID: [401, "OIDC ID Token 验证失败"],
       OIDC_ACCOUNT_NOT_ALLOWED: [403, "该身份尚未被邀请，且不满足自动加入规则"],
       OIDC_ACCOUNT_DISABLED: [403, "账户已停用"],
+      OIDC_LINK_ACCOUNT_NOT_ALLOWED: [403, "请先加入该身份源所属工作区，再绑定登录身份"],
+      OIDC_LINK_SESSION_INVALID: [401, "发起绑定的登录会话已失效，请重新登录后再试"],
+      OIDC_IDENTITY_CONFLICT: [409, "该身份已绑定其他账户，或当前账户已绑定此身份源"],
+      OIDC_LINK_CONCURRENT_CHANGE: [409, "绑定状态发生并发变化，请重新发起绑定"],
+      OIDC_LINK_ATTEMPT_LIMIT: [409, "待完成的 OIDC 绑定请求过多，请稍后再试"],
     };
     const [status, message] = mapping[error.code] ?? [500, "OIDC 操作失败"];
     return { status, body: { error: { code: error.code, message } } };
@@ -537,6 +556,17 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       WEB_SOURCE_DISABLED: [409, "网页来源已停用"],
       WEB_SOURCE_NETWORK_BLOCKED: [403, "网页地址位于未授权的内网或保留网络"],
       WEB_SOURCE_NETWORK_CHANGED: [409, "网页域名解析地址已变化，请在页面重新确认网络"],
+      WEB_SOURCE_REQUEST_BOUNDARY_REJECTED: [409, "网页抓取请求已失效，请重新发起"],
+      WEB_SOURCE_AUTHENTICATED_URL_REJECTED: [422, "认证网页必须使用公网 HTTPS 地址"],
+      WEB_SOURCE_AUTHENTICATED_DISABLED: [403, "认证网页读取仅在非生产环境开放"],
+      WEB_SOURCE_CREDENTIAL_UNAVAILABLE: [503, "网页凭据无法安全读取，本次抓取未发送"],
+      WEB_SOURCE_CREDENTIAL_REFLECTION: [422, "网页响应或错误信息回显了授权令牌，本次内容已阻止暂存"],
+      WEB_SOURCE_AUTHENTICATED_RENAME_REJECTED: [409, "认证网页名称创建后不可修改，避免名称意外包含授权令牌"],
+      WEB_SOURCE_AUTHENTICATION_REVOKED: [409, "网页 Bearer 凭据已失效，请由 Owner 重新设置"],
+      WEB_SOURCE_AUTHENTICATED_REVIEW_REQUIRED: [409, "认证网页由 Owner 手动抓取，Editor 或 Owner 可审核"],
+      WEB_SOURCE_REVIEW_NOT_FOUND: [404, "待审核网页版本不存在"],
+      WEB_SOURCE_REVIEW_STALE: [409, "网页配置或凭据已变化，请重新抓取后审核"],
+      WEB_SOURCE_REVIEW_CONFLICT: [409, "网页审核状态已变化，请刷新后重试"],
       WEB_SOURCE_HOST_UNRESOLVED: [422, "网页域名无法解析"],
       WEB_SOURCE_REDIRECT_REJECTED: [422, "网页发生了不允许的跨域或不安全重定向"],
       WEB_SOURCE_FETCH_FAILED: [502, "网页抓取失败"],
@@ -824,6 +854,22 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_GIT_REPOSITORY_DELEGATION_EXPIRED: [410, "项目 Git 委托已经过期，请重新创建"],
     };
     const [status, message] = mapping[error.code] ?? [500, "项目 Git 委托处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectGitAutomationGrantError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_GIT_AUTOMATION_GRANT_INVALID_INPUT: [400, "项目 Git 自动授权请求无效"],
+      PROJECT_GIT_AUTOMATION_GRANT_NOT_FOUND: [404, "项目 Git 自动授权不存在"],
+      PROJECT_GIT_AUTOMATION_GRANT_FORBIDDEN: [403, "无权操作该项目 Git 自动授权"],
+      PROJECT_GIT_AUTOMATION_GRANT_PROJECT_ARCHIVED: [409, "已归档项目不能创建或确认 Git 自动授权"],
+      PROJECT_GIT_AUTOMATION_GRANT_BASE_UNAVAILABLE: [409, "基础手动 Git 委托已失效或证据已变化"],
+      PROJECT_GIT_AUTOMATION_GRANT_STATE_CONFLICT: [409, "项目 Git 自动授权状态已变化，当前操作不能继续"],
+      PROJECT_GIT_AUTOMATION_GRANT_VERSION_CONFLICT: [409, "项目 Git 自动授权已被其他操作更新，请刷新后重试"],
+      PROJECT_GIT_AUTOMATION_GRANT_CONFLICT: [409, "项目 Git 自动授权正在被其他操作更新，请稍后重试"],
+      PROJECT_GIT_AUTOMATION_GRANT_EXPIRED: [410, "项目 Git 自动授权已经过期"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目 Git 自动授权处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

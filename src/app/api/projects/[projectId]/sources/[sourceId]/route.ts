@@ -8,10 +8,17 @@ import { getDb } from "@/lib/db";
 import { projectIdSchema } from "@/lib/validation";
 import { z } from "zod";
 import { nonLegacyMcpProjectSourceWhere } from "@/lib/legacy-mcp-source-quarantine";
+import { isCurrentProjectSourceCitation } from "@/lib/project-source-citation";
 
 export const dynamic = "force-dynamic";
 
 const sourceIdSchema = z.string().uuid("sourceId must be a valid UUID");
+const contentHashSchema = z.string().regex(/^[0-9a-f]{64}$/iu, "contentHash must be a SHA-256 fingerprint");
+
+function noStore<T extends Response>(response: T): T {
+  response.headers.set("cache-control", "private, no-store");
+  return response;
+}
 
 function isKnownError(error: unknown, code: string): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
@@ -41,27 +48,75 @@ export async function GET(request: Request, context: { params: Promise<{ project
   try {
     const user = await requireApiSession(request);
     const { projectId, sourceId } = await parseParams(context.params);
+    const contentHashes = new URL(request.url).searchParams.getAll("contentHash");
+    if (contentHashes.length > 1) {
+      throw new ApiError(400, "SOURCE_CITATION_INVALID", "来源引用无效");
+    }
+    const parsedContentHash = contentHashes[0] === undefined
+      ? null
+      : contentHashSchema.safeParse(contentHashes[0]);
+    if (parsedContentHash !== null && !parsedContentHash.success) {
+      throw new ApiError(400, "SOURCE_CITATION_INVALID", "来源引用无效");
+    }
+    const expectedContentHash = parsedContentHash?.data ?? null;
     const db = getDb();
-    const source = await withWebAiProjectAccessTransaction(
+    const isCitationRequest = expectedContentHash !== null;
+    const payload = await withWebAiProjectAccessTransaction(
       db,
       { actor: user, projectId, required: "view", allowArchived: true },
-      (tx) => tx.projectSource.findFirst({
-        where: { projectId, id: sourceId, ...nonLegacyMcpProjectSourceWhere },
-        select: {
-          id: true,
-          kind: true,
-          externalRef: true,
-          contentText: true,
-          contentHash: true,
-          capturedAt: true,
-          ingestedAt: true,
-        },
-      }),
+      async (tx) => {
+        // FOR SHARE holds the source version against retirement/content edits
+        // until the citation is checked and its response is assembled.
+        const source = isCitationRequest
+          ? (await tx.$queryRaw<Array<{
+            id: string;
+            kind: string;
+            externalRef: string | null;
+            contentText: string;
+            contentHash: string;
+            capturedAt: Date | null;
+            ingestedAt: Date;
+            retiredAt: Date | null;
+          }>>(Prisma.sql`
+            SELECT "id"::text AS "id", "kind"::text AS "kind", "externalRef",
+                   "contentText", "contentHash", "capturedAt", "ingestedAt", "retiredAt"
+              FROM "ProjectSource"
+             WHERE "projectId" = ${projectId}::uuid
+               AND "id" = ${sourceId}::uuid
+               AND "kind"::text <> 'mcp'
+             FOR SHARE
+          `))[0] ?? null
+          : await tx.projectSource.findFirst({
+            where: { projectId, id: sourceId, ...nonLegacyMcpProjectSourceWhere },
+            select: {
+              id: true, kind: true, externalRef: true, contentText: true,
+              contentHash: true, capturedAt: true, ingestedAt: true, retiredAt: true,
+            },
+          });
+        if (isCitationRequest && (source === null || !isCurrentProjectSourceCitation({
+          expectedContentHash,
+          currentContentHash: source.contentHash,
+          retiredAt: source.retiredAt,
+        }))) {
+          throw new ApiError(409, "SOURCE_CITATION_STALE", "搜索引用的资料已更新、退役或不存在，请重新搜索");
+        }
+        if (!source) throw new ApiError(404, "SOURCE_NOT_FOUND", "Source not found");
+        return {
+          source: {
+            id: source.id,
+            kind: source.kind,
+            externalRef: source.externalRef,
+            contentText: source.contentText,
+            contentHash: source.contentHash,
+            capturedAt: source.capturedAt,
+            ingestedAt: source.ingestedAt,
+          },
+        };
+      },
     );
-    if (!source) throw new ApiError(404, "SOURCE_NOT_FOUND", "Source not found");
-    return NextResponse.json({ source }, { headers: { "cache-control": "no-store" } });
+    return noStore(NextResponse.json(payload));
   } catch (error) {
-    return handleApiError(error);
+    return noStore(handleApiError(error));
   }
 }
 

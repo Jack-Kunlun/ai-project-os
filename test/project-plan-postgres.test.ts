@@ -198,6 +198,7 @@ test("project plan persists governed objectives, work items, dependencies and au
       (error: unknown) => error instanceof ProjectLifecycleError && error.code === "PROJECT_ARCHIVED",
     );
   } finally {
+    await db.project.updateMany({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.deleteMany({ where: { id: projectId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
     await db.appUser.deleteMany({ where: { id: { in: [adminId, editorId, viewerId, outsiderId] } } });

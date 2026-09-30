@@ -682,7 +682,7 @@ async function verifyMigrations(composeArgs: string[], expected: number): Promis
 }
 
 async function verifyImageLabels(composeArgs: string[], version: string): Promise<void> {
-  for (const service of ["principal-bootstrap", "migrate", "reconcile", "app", "worker"]) {
+  for (const service of ["principal-bootstrap", "migrate", "reconcile", "app", "worker", "git-worker"]) {
     const container = await runProcess("docker", [...composeArgs, "ps", "--all", "--quiet", service]);
     const containerId = container.stdout.trim();
     if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
@@ -772,6 +772,7 @@ async function main(): Promise<void> {
   const runtimePassword = `runtime_${randomBytes(24).toString("hex")}`;
   const entitlementWriterPassword = `writer_${randomBytes(24).toString("hex")}`;
   const inventoryReaderPassword = `inventory_${randomBytes(24).toString("hex")}`;
+  const gitAutomationWorkerPassword = `git_automation_${randomBytes(24).toString("hex")}`;
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-local-release-"));
   const envFile = join(temporaryDirectory, "candidate.env");
   const overrideFile = join(temporaryDirectory, "compose.candidate.yaml");
@@ -785,6 +786,7 @@ async function main(): Promise<void> {
     "POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer",
     `POSTGRES_ENTITLEMENT_WRITER_PASSWORD=${entitlementWriterPassword}`,
     `POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=${inventoryReaderPassword}`,
+    `POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD=${gitAutomationWorkerPassword}`,
     `POSTGRES_PORT=${postgresPort}`,
     `APP_PORT=${appPort}`,
     `AI_PROJECT_OS_PGDATA_VOLUME=${identity.volumes.postgres}`,
@@ -808,6 +810,8 @@ async function main(): Promise<void> {
     '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-app:${LOCAL_RELEASE_VERSION}"',
     "  worker:",
     '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-worker:${LOCAL_RELEASE_VERSION}"',
+    "  git-worker:",
+    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-git-worker:${LOCAL_RELEASE_VERSION}"',
     "",
   ].join("\n");
 
@@ -839,7 +843,7 @@ async function main(): Promise<void> {
     console.log(`[local-release] validating isolated candidate ${identity.projectName}`);
     await runProcess("docker", [...composeArgs, "config", "--quiet"]);
     candidateTouched = true;
-    console.log("[local-release] building app, worker, principal bootstrap, migration, and reconcile images");
+    console.log("[local-release] building app, worker, Git worker, principal bootstrap, migration, and reconcile images");
     await runProcess("docker", [...composeArgs, "build"], { inherit: true });
     console.log("[local-release] starting isolated candidate");
     await runProcess("docker", [...composeArgs, "up", "--detach"], { inherit: true });
@@ -854,8 +858,8 @@ async function main(): Promise<void> {
     const beforeWorker = await readWorkerRuntime(composeArgs, runtimePassword, identity.workerName);
     const beforeCanonical = canonicalJson(beforeSnapshot);
     const beforeSnapshotHash = snapshotSha256(beforeSnapshot);
-    console.log("[local-release] restarting database, app, and worker");
-    await runProcess("docker", [...composeArgs, "restart", "postgres", "app", "worker"], { inherit: true });
+    console.log("[local-release] restarting database, app, worker, and Git worker");
+    await runProcess("docker", [...composeArgs, "restart", "postgres", "app", "worker", "git-worker"], { inherit: true });
     await waitForCandidate(composeArgs);
     await verifyMigrations(composeArgs, migrationCount);
     await verifyHealth(appPort, version);

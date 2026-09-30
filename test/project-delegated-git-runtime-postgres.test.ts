@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
+import { accessSync, constants } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { createHash, randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { getDb } from "../src/lib/db";
+import { sealSecret } from "../src/lib/credential-vault";
+import { assertPinnedGitEndpoint } from "../src/lib/git";
+import { encodeGitCredential } from "../src/lib/git/credentials";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import {
   confirmProjectGitRepositoryDelegationOwner,
   confirmProjectGitRepositoryDelegationProject,
   proposeProjectGitRepositoryDelegation,
+  revokeProjectGitRepositoryDelegation,
 } from "../src/lib/project-git-repository-delegation-service";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
@@ -16,6 +27,32 @@ const databaseUrl = process.env.DATABASE_URL;
 const enabled = process.env.PROJECT_DELEGATED_GIT_RUNTIME_POSTGRES_GATE === "1" && typeof databaseUrl === "string" && databaseUrl.length > 0;
 const seededAdminId = "00000000-0000-4000-8000-000000000010";
 const testDatabaseName = "ai_project_os_project_delegated_git_runtime_test";
+
+function findGitBinary(): string {
+  const pathEntries = (process.env.PATH ?? "").split(":");
+  const entry = pathEntries.find((path) => {
+    try {
+      accessSync(join(path, "git"), constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (entry === undefined) throw new Error("GIT_EXECUTABLE_UNAVAILABLE");
+  return join(entry, "git");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
+
+function runGit(binary: string, args: readonly string[], cwd: string): string {
+  return execFileSync(binary, [...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0" },
+  }).trim();
+}
 
 function assertDisposableGateDatabase(): void {
   if (typeof databaseUrl !== "string" || databaseUrl.length === 0) throw new Error("PROJECT_DELEGATED_GIT_RUNTIME_TEST_DATABASE_URL_REQUIRED");
@@ -32,6 +69,14 @@ function assertDisposableGateDatabase(): void {
   }
 }
 
+function deterministicGitUuid(input: string): string {
+  const bytes = Buffer.from(createHash("sha256").update(input, "utf8").digest().subarray(0, 16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 test("manual delegated Git runtime migration installs independent guarded tables", { skip: !enabled }, async () => {
   const client = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
   assertDisposableGateDatabase();
@@ -46,7 +91,10 @@ test("manual delegated Git runtime migration installs independent guarded tables
           'ProjectGitRepositoryManualRunEntry',
           'ProjectGitRepositoryManualPointer',
           'ProjectGitRepositoryManualRunAudit',
-          'ProjectGitRepositoryManualRunReconciliation'
+          'ProjectGitRepositoryManualRunReconciliation',
+          'ProjectGitRepositoryPublicationVersion',
+          'ProjectGitRepositoryPublicationEntry',
+          'ProjectGitRepositoryPublicationHead'
         )
       ORDER BY table_name
     `);
@@ -56,6 +104,9 @@ test("manual delegated Git runtime migration installs independent guarded tables
       "ProjectGitRepositoryManualRunAudit",
       "ProjectGitRepositoryManualRunEntry",
       "ProjectGitRepositoryManualRunReconciliation",
+      "ProjectGitRepositoryPublicationEntry",
+      "ProjectGitRepositoryPublicationHead",
+      "ProjectGitRepositoryPublicationVersion",
     ]);
 
     const indexes = await client.query<{ indexname: string }>(`
@@ -71,13 +122,27 @@ test("manual delegated Git runtime migration installs independent guarded tables
       FROM information_schema.triggers
       WHERE event_object_schema = 'public'
         AND event_object_table = 'ProjectGitRepositoryManualRun'
-        AND trigger_name IN ('ProjectGitRepositoryManualRun_live_guard', 'ProjectGitRepositoryManualRun_shape_guard')
+        AND trigger_name IN (
+          'ProjectGitRepositoryManualRun_live_guard',
+          'ProjectGitRepositoryManualRun_shape_guard',
+          'ProjectGitRepositoryManualRun_unchanged_shape_guard'
+        )
       ORDER BY trigger_name
     `);
     assert.deepEqual(triggers.rows.map((row) => row.tgname), [
       "ProjectGitRepositoryManualRun_live_guard",
       "ProjectGitRepositoryManualRun_shape_guard",
+      "ProjectGitRepositoryManualRun_unchanged_shape_guard",
     ]);
+
+    const unchangedTrigger = await client.query<{ deferrable: boolean; initially_deferred: boolean }>(`
+      SELECT t.tgdeferrable AS deferrable, t.tginitdeferred AS initially_deferred
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      WHERE c.relname = 'ProjectGitRepositoryManualRun'
+        AND t.tgname = 'ProjectGitRepositoryManualRun_unchanged_guard'
+    `);
+    assert.deepEqual(unchangedTrigger.rows, [{ deferrable: true, initially_deferred: true }]);
 
     const transitionTrigger = await client.query<{ deferrable: boolean; initially_deferred: boolean }>(`
       SELECT t.tgdeferrable AS deferrable, t.tginitdeferred AS initially_deferred
@@ -155,8 +220,12 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
   const projectId = randomUUID();
   const connectionId = randomUUID();
   const credentialId = randomUUID();
-  const addressFingerprint = "b".repeat(64);
-  const credentialFingerprint = "a".repeat(64);
+  const previousMasterKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+  const previousPath = process.env.PATH;
+  let temporaryGitRoot: string | null = null;
+  let revocationServer: ReturnType<typeof createServer> | null = null;
+  let sealedGitCredential: ReturnType<typeof sealSecret> | null = null;
+  let addressFingerprint = "b".repeat(64);
   const now = new Date();
   const connectionOwnerActor = { id: connectionOwnerId, role: "user" as const, accountAccessVersion: 1 };
   const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
@@ -240,6 +309,20 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
   };
 
   try {
+    temporaryGitRoot = await mkdtemp(join(tmpdir(), "ai-project-os-git-revocation-gate-"));
+    const masterKey = randomBytes(32);
+    const masterKeyPath = join(temporaryGitRoot, "master.key");
+    await writeFile(masterKeyPath, `${masterKey.toString("base64url")}\n`, { encoding: "utf8", mode: 0o600 });
+    await chmod(masterKeyPath, 0o600);
+    process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
+    sealedGitCredential = sealSecret("git", encodeGitCredential("token", `git_gate_${suffix}`), masterKey);
+    const pinnedLocalEndpoint = await assertPinnedGitEndpoint({
+      baseUrl: "https://127.0.0.1",
+      allowPrivateNetwork: true,
+      expectedFingerprint: null,
+    });
+    addressFingerprint = pinnedLocalEndpoint.fingerprint;
+
     await db.appUser.createMany({
       data: [
         { id: connectionOwnerId, username: `manual_runtime_owner_${suffix}`, role: "user" },
@@ -269,14 +352,15 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     const projectOwnerMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: projectOwnerId }, select: { id: true, createdAt: true } });
     const requesterMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: requesterId }, select: { id: true, createdAt: true } });
     const finalFenceRequesterMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: finalFenceRequesterId }, select: { id: true, createdAt: true } });
-    await db.externalCredential.create({ data: { id: credentialId, kind: "git", ciphertext: Buffer.from([1]), nonce: Buffer.from([2]), authTag: Buffer.from([3]), maskedSuffix: "gate", secretFingerprint: credentialFingerprint } });
+    await db.externalCredential.create({ data: { id: credentialId, kind: "git", ...sealedGitCredential! } });
     await createGitConnectionFixture({
       id: connectionId,
       name: `Manual runtime Git ${suffix}`,
       providerKind: "github",
       transport: "https",
-      baseUrl: "https://github.com",
+      baseUrl: "https://127.0.0.1",
       authKind: "token",
+      allowPrivateNetwork: true,
       status: "verified",
       ownershipState: "confirmed",
       resolvedAddressFingerprint: addressFingerprint,
@@ -352,6 +436,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       startedAt: Date | null | "database-current" | "database-stale",
       requester = defaultRequester,
       dispatch = true,
+      baseline: Readonly<{ runId: string; frozenCommitSha: string; manifestFingerprint: string; publishedAt: Date; publicationVersionId: string; publicationGeneration: number }> | null = null,
     ): Promise<void> => {
       await client.query("BEGIN");
       try {
@@ -363,7 +448,9 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
             "ownerMembershipCreatedAt", "projectConfirmedById", "projectConfirmedProjectMembershipId", "projectConfirmedMembershipCreatedAt",
             "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint", "repositoryPath", "trackedRef",
             "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled", "metadataEnabled",
-            "manualSyncAllowed", "automationAllowed", "requestedByAccountAccessVersion"
+            "manualSyncAllowed", "automationAllowed", "requestedByAccountAccessVersion",
+            "baselineRunId", "baselineFrozenCommitSha", "baselineManifestFingerprint", "baselinePublishedAt",
+            "expectedPublicationVersionId", "expectedPublicationGeneration"
           ) VALUES (
             $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
             COALESCE((SELECT "createdAt" FROM "ProjectMembership" WHERE "id" = $5::uuid), $6::timestamp(3)),
@@ -372,7 +459,8 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
             $14::uuid, $15::uuid,
             COALESCE((SELECT "projectConfirmedMembershipCreatedAt" FROM "ProjectGitRepositoryDelegation" WHERE "id" = $3::uuid), $16::timestamp(3)),
             $17, $18, $19, $20, $21,
-            $22::jsonb, $23::jsonb, $24::"ProjectRepositoryRole", $25, $26, $27, $28, $29, $30
+            $22::jsonb, $23::jsonb, $24::"ProjectRepositoryRole", $25, $26, $27, $28, $29, $30,
+            $31::uuid, $32, $33, $34::timestamptz(3), $35::uuid, $36
           )`,
           [
             runId,
@@ -405,6 +493,12 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
             runEvidence.manualSyncAllowed,
             runEvidence.automationAllowed,
             requester.accountAccessVersion,
+            baseline?.runId ?? null,
+            baseline?.frozenCommitSha ?? null,
+            baseline?.manifestFingerprint ?? null,
+            baseline?.publishedAt ?? null,
+            baseline?.publicationVersionId ?? null,
+            baseline?.publicationGeneration ?? 0,
           ],
         );
         await insertAudit({ runId, action: "requested", statusBefore: null, statusAfter: "queued", dispatchState: "pending", actorId: requester.id, commitSha: null, manifestFingerprint: null, reason: "manual_runtime_gate_requested" });
@@ -656,7 +750,9 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     await client.query("UPDATE \"ProjectGitRepositoryManualRun\" SET \"stage\" = 'publishing' WHERE \"id\" = $1::uuid", [runId]);
     await client.query("SET CONSTRAINTS ALL IMMEDIATE");
     const sourceId = randomUUID();
-    const contentText = "# manual runtime";
+    const commitSha = "e".repeat(40);
+    const normalizedPath = "README.md";
+    const contentText = `Repository: org/manual-runtime\nRevision: ${commitSha}\nPath: ${normalizedPath}\n\n# manual runtime`;
     const contentBytes = Buffer.byteLength(contentText, "utf8");
     const contentHash = createHash("sha256").update(contentText, "utf8").digest("hex");
     await db.projectSource.create({
@@ -666,8 +762,8 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
         kind: "git",
         originScope: "project",
         projectRepositoryLinkId: null,
-        sourceIdentity: randomUUID(),
-        revisionKey: randomUUID(),
+        sourceIdentity: deterministicGitUuid(`git-delegated-source:${delegation.id}:${delegation.version}:${delegation.delegationFingerprint}:${normalizedPath}`),
+        revisionKey: deterministicGitUuid(`git-delegated-revision:${delegation.id}:${delegation.version}:${delegation.delegationFingerprint}:${commitSha}:${normalizedPath}:${contentHash}`),
         externalRef: null,
         contentText,
         contentHash,
@@ -680,8 +776,8 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
         `INSERT INTO "ProjectGitRepositoryManualRunEntry" (
           "id", "projectId", "runId", "delegationId", "delegationVersion", "delegationFingerprint", "projectSourceId",
           "ordinal", "normalizedPath", "blobOid", "contentHash", "contentBytes", "lineCount"
-        ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::uuid, 1, 'MISMATCH.md', 'd', $8, $9, 1)`,
-        [randomUUID(), projectId, runId, delegation.id, delegation.version, delegation.delegationFingerprint, sourceId, "0".repeat(64), contentBytes],
+        ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::uuid, 1, 'MISMATCH.md', $8, $9, $10, $11)`,
+        [randomUUID(), projectId, runId, delegation.id, delegation.version, delegation.delegationFingerprint, sourceId, "d".repeat(40), "0".repeat(64), contentBytes, contentText.split("\n").length],
       );
     } catch (error) {
       sourceHashError = error;
@@ -691,27 +787,281 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       `INSERT INTO "ProjectGitRepositoryManualRunEntry" (
         "id", "projectId", "runId", "delegationId", "delegationVersion", "delegationFingerprint", "projectSourceId",
         "ordinal", "normalizedPath", "blobOid", "contentHash", "contentBytes", "lineCount"
-        ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::uuid, 0, 'README.md', 'd', $8, $9, 1)`,
-      [randomUUID(), projectId, runId, delegation.id, delegation.version, delegation.delegationFingerprint, sourceId, contentHash, contentBytes],
+        ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::uuid, 0, $8, $9, $10, $11, $12)`,
+      [randomUUID(), projectId, runId, delegation.id, delegation.version, delegation.delegationFingerprint, sourceId, normalizedPath, "d".repeat(40), contentHash, contentBytes, contentText.split("\n").length],
     );
-    const commitSha = "e".repeat(40);
     const manifestResult = await client.query<{ manifest: string }>(`SELECT "project_git_manual_runtime_manifest"($1::uuid) AS manifest`, [runId]);
     const manifest = manifestResult.rows[0]!.manifest;
     await client.query("BEGIN");
     try {
       await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
       await client.query(`UPDATE "ProjectGitRepositoryManualRun" SET "status" = 'succeeded', "stage" = 'terminal', "dispatchState" = 'acknowledged', "frozenCommitSha" = $2, "manifestFingerprint" = $3, "fileCount" = 1, "decodedTextBytes" = $4::integer, "result" = jsonb_build_object('fileCount', 1, 'decodedTextBytes', $4::integer), "completedAt" = clock_timestamp() WHERE "id" = $1::uuid`, [runId, commitSha, manifest, contentBytes]);
+      const publicationVersionId = randomUUID();
+      await client.query(
+        `INSERT INTO "ProjectGitRepositoryPublicationVersion" (
+          "id", "projectId", "delegationId", "runKind", "runId", "previousPublicationVersionId", "previousGeneration",
+          "delegationVersion", "delegationFingerprint", "repositoryPath", "trackedRef", "frozenCommitSha",
+          "manifestFingerprint", "fileCount", "decodedTextBytes", "publishedAt"
+        ) SELECT $2::uuid, "projectId", "delegationId", 'manual', "id", NULL, 0,
+                 "delegationVersion", "delegationFingerprint", "repositoryPath", "trackedRef", "frozenCommitSha",
+                 "manifestFingerprint", "fileCount", "decodedTextBytes", "completedAt"
+            FROM "ProjectGitRepositoryManualRun" WHERE "id" = $1::uuid`,
+        [runId, publicationVersionId],
+      );
+      await client.query(
+        `INSERT INTO "ProjectGitRepositoryPublicationEntry" (
+          "projectId", "delegationId", "publicationVersionId", "projectSourceId", "ordinal", "normalizedPath", "blobOid",
+          "contentHash", "contentBytes", "lineCount"
+        ) SELECT "projectId", "delegationId", $2::uuid, "projectSourceId", "ordinal", "normalizedPath", "blobOid",
+                 "contentHash", "contentBytes", "lineCount"
+            FROM "ProjectGitRepositoryManualRunEntry" WHERE "projectId" = $1::uuid AND "runId" = $3::uuid`,
+        [projectId, publicationVersionId, runId],
+      );
       await client.query(
         `INSERT INTO "ProjectGitRepositoryManualPointer" ("projectId", "delegationId", "runId", "delegationVersion", "delegationFingerprint", "frozenCommitSha", "manifestFingerprint", "publishedAt") VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, (SELECT "completedAt" FROM "ProjectGitRepositoryManualRun" WHERE "id" = $3::uuid))`,
         [projectId, delegation.id, runId, delegation.version, delegation.delegationFingerprint, commitSha, manifest],
       );
       await insertAudit({ runId, action: "succeeded", statusBefore: "running", statusAfter: "succeeded", dispatchState: "acknowledged", actorId: connectionOwnerId, commitSha, manifestFingerprint: manifest, reason: "manual_runtime_gate_published" });
+      await client.query(
+        `INSERT INTO "ProjectGitRepositoryPublicationHead" (
+          "projectId", "delegationId", "currentPublicationVersionId", "generation", "publishedAt"
+        ) SELECT $1::uuid, $2::uuid, "id", 1, "publishedAt"
+            FROM "ProjectGitRepositoryPublicationVersion" WHERE "id" = $3::uuid`,
+        [projectId, delegation.id, publicationVersionId],
+      );
       await client.query("SET CONSTRAINTS ALL IMMEDIATE");
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
     }
+    const baselineRow = await client.query<{
+      runId: string;
+      frozenCommitSha: string;
+      manifestFingerprint: string;
+      publishedAt: Date;
+      completedAt: Date;
+      publicationVersionId: string;
+      publicationGeneration: number;
+    }>(
+      `SELECT pointer."runId"::text AS "runId", pointer."frozenCommitSha", pointer."manifestFingerprint", pointer."publishedAt", run."completedAt",
+              head."currentPublicationVersionId"::text AS "publicationVersionId", head."generation" AS "publicationGeneration"
+       FROM "ProjectGitRepositoryManualPointer" pointer
+       JOIN "ProjectGitRepositoryManualRun" run ON run."id" = pointer."runId"
+       JOIN "ProjectGitRepositoryPublicationHead" head ON head."projectId" = pointer."projectId" AND head."delegationId" = pointer."delegationId"
+       JOIN "ProjectGitRepositoryPublicationVersion" version_row ON version_row."id" = head."currentPublicationVersionId" AND version_row."runId" = pointer."runId" AND version_row."runKind" = 'manual'
+       WHERE pointer."projectId" = $1::uuid AND pointer."delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    );
+    assert.equal(baselineRow.rowCount, 1);
+    assert.equal(baselineRow.rows[0]!.publishedAt.getTime(), baselineRow.rows[0]!.completedAt.getTime());
+    const baseline = {
+      runId: baselineRow.rows[0]!.runId,
+      frozenCommitSha: baselineRow.rows[0]!.frozenCommitSha,
+      manifestFingerprint: baselineRow.rows[0]!.manifestFingerprint,
+      publishedAt: baselineRow.rows[0]!.publishedAt,
+      publicationVersionId: baselineRow.rows[0]!.publicationVersionId,
+      publicationGeneration: baselineRow.rows[0]!.publicationGeneration,
+    };
+    const pointerSnapshotBefore = await client.query<{ value: string }>(
+      `SELECT json_build_object(
+         'runId', "runId", 'delegationVersion', "delegationVersion", 'delegationFingerprint', "delegationFingerprint",
+         'frozenCommitSha', "frozenCommitSha", 'manifestFingerprint', "manifestFingerprint", 'publishedAt', "publishedAt"
+       )::text AS value
+       FROM "ProjectGitRepositoryManualPointer"
+       WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    );
+    const sourceSnapshotBefore = await client.query<{ value: string }>(
+      `SELECT COALESCE(json_agg(json_build_object(
+         'id', "id", 'contentHash', "contentHash", 'contentText', "contentText", 'capturedAt', "capturedAt", 'retiredAt', "retiredAt"
+       ) ORDER BY "id")::text, '[]') AS value
+       FROM "ProjectSource"
+       WHERE "projectId" = $1::uuid AND "kind" = 'git' AND "originScope" = 'project'`,
+      [projectId],
+    );
+
+    const unchangedRunId = randomUUID();
+    await createRun(unchangedRunId, randomUUID(), "database-current", defaultRequester, true, baseline);
+    await client.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'validating' WHERE "id" = $1::uuid`, [unchangedRunId]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'publishing' WHERE "id" = $1::uuid`, [unchangedRunId]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+         SET "status" = 'unchanged', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+             "frozenCommitSha" = $2, "manifestFingerprint" = $3, "fileCount" = 0, "decodedTextBytes" = 0,
+             "result" = jsonb_build_object('outcome', 'unchanged'), "completedAt" = clock_timestamp()
+         WHERE "id" = $1::uuid`,
+        [unchangedRunId, baseline.frozenCommitSha, baseline.manifestFingerprint],
+      );
+      await insertAudit({
+        runId: unchangedRunId,
+        action: "unchanged",
+        statusBefore: "running",
+        statusAfter: "unchanged",
+        dispatchState: "acknowledged",
+        actorId: defaultRequester.id,
+        commitSha: baseline.frozenCommitSha,
+        manifestFingerprint: baseline.manifestFingerprint,
+        reason: "manual_sync_remote_head_unchanged",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+    const unchangedRow = await client.query<{ status: string; stage: string; dispatchState: string; fileCount: number; decodedTextBytes: number; entries: string; audits: string }>(
+      `SELECT run."status"::text AS "status", run."stage"::text AS "stage", run."dispatchState"::text AS "dispatchState",
+              run."fileCount", run."decodedTextBytes",
+              (SELECT count(*)::text FROM "ProjectGitRepositoryManualRunEntry" entry WHERE entry."runId" = run."id") AS entries,
+              (SELECT count(*)::text FROM "ProjectGitRepositoryManualRunAudit" audit WHERE audit."runId" = run."id" AND audit."action"::text = 'unchanged') AS audits
+       FROM "ProjectGitRepositoryManualRun" run WHERE run."id" = $1::uuid`,
+      [unchangedRunId],
+    );
+    assert.deepEqual(unchangedRow.rows, [{ status: "unchanged", stage: "terminal", dispatchState: "acknowledged", fileCount: 0, decodedTextBytes: 0, entries: "0", audits: "1" }]);
+    assert.deepEqual(
+      (await client.query<{ value: string }>(
+        `SELECT json_build_object(
+           'runId', "runId", 'delegationVersion', "delegationVersion", 'delegationFingerprint', "delegationFingerprint",
+           'frozenCommitSha', "frozenCommitSha", 'manifestFingerprint', "manifestFingerprint", 'publishedAt', "publishedAt"
+         )::text AS value
+         FROM "ProjectGitRepositoryManualPointer"
+         WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+        [projectId, delegation.id],
+      )).rows,
+      pointerSnapshotBefore.rows,
+    );
+    assert.deepEqual(
+      (await client.query<{ value: string }>(
+        `SELECT COALESCE(json_agg(json_build_object(
+           'id', "id", 'contentHash', "contentHash", 'contentText', "contentText", 'capturedAt', "capturedAt", 'retiredAt', "retiredAt"
+         ) ORDER BY "id")::text, '[]') AS value
+         FROM "ProjectSource"
+         WHERE "projectId" = $1::uuid AND "kind" = 'git' AND "originScope" = 'project'`,
+        [projectId],
+      )).rows,
+      sourceSnapshotBefore.rows,
+    );
+
+    const forgedAuditRunId = randomUUID();
+    await createRun(forgedAuditRunId, randomUUID(), "database-current", defaultRequester, true, baseline);
+    await client.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'validating' WHERE "id" = $1::uuid`, [forgedAuditRunId]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'publishing' WHERE "id" = $1::uuid`, [forgedAuditRunId]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query("BEGIN");
+    let forgedAuditError: unknown;
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+         SET "status" = 'unchanged', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+             "frozenCommitSha" = $2, "manifestFingerprint" = $3, "fileCount" = 0, "decodedTextBytes" = 0,
+             "result" = jsonb_build_object('outcome', 'unchanged'), "completedAt" = clock_timestamp()
+         WHERE "id" = $1::uuid`,
+        [forgedAuditRunId, baseline.frozenCommitSha, baseline.manifestFingerprint],
+      );
+      await insertAudit({
+        runId: forgedAuditRunId,
+        action: "unchanged",
+        statusBefore: "running",
+        statusAfter: "unchanged",
+        dispatchState: "acknowledged",
+        actorId: defaultRequester.id,
+        commitSha: baseline.frozenCommitSha,
+        manifestFingerprint: baseline.manifestFingerprint,
+        reason: "forged_unchanged_audit",
+      });
+    } catch (error) {
+      forgedAuditError = error;
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    assert.match(String(forgedAuditError), /PROJECT_GIT_MANUAL_UNCHANGED_AUDIT_INVALID/u);
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+         SET "status" = 'failed', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+             "failureCode" = 'MANUAL_RUNTIME_FORGED_UNCHANGED_AUDIT_TEST', "completedAt" = clock_timestamp()
+         WHERE "id" = $1::uuid`,
+        [forgedAuditRunId],
+      );
+      await insertAudit({
+        runId: forgedAuditRunId,
+        action: "failed",
+        statusBefore: "running",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: defaultRequester.id,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_runtime_forged_unchanged_audit_cleanup",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+
+    const missingBaselineRunId = randomUUID();
+    await createRun(missingBaselineRunId, randomUUID(), "database-current");
+    await client.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'validating' WHERE "id" = $1::uuid`, [missingBaselineRunId]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'publishing' WHERE "id" = $1::uuid`, [missingBaselineRunId]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    await client.query("BEGIN");
+    let missingBaselineError: unknown;
+    try {
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+         SET "status" = 'unchanged', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+             "frozenCommitSha" = $2, "manifestFingerprint" = $3, "fileCount" = 0, "decodedTextBytes" = 0,
+             "result" = jsonb_build_object('outcome', 'unchanged'), "completedAt" = clock_timestamp()
+         WHERE "id" = $1::uuid`,
+        [missingBaselineRunId, baseline.frozenCommitSha, baseline.manifestFingerprint],
+      );
+    } catch (error) {
+      missingBaselineError = error;
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    assert.match(String(missingBaselineError), /PROJECT_GIT_MANUAL_UNCHANGED_SHAPE_INVALID/u);
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+         SET "status" = 'failed', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+             "failureCode" = 'MANUAL_RUNTIME_MISSING_BASELINE_TEST', "completedAt" = clock_timestamp()
+         WHERE "id" = $1::uuid`,
+        [missingBaselineRunId],
+      );
+      await insertAudit({
+        runId: missingBaselineRunId,
+        action: "failed",
+        statusBefore: "running",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: defaultRequester.id,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_runtime_missing_baseline_cleanup",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+
     const sourceCountBeforeDelete = await client.query<{ count: string }>(`SELECT count(*)::text AS count FROM "ProjectSource" WHERE "projectId" = $1::uuid AND "id" = $2::uuid`, [projectId, sourceId]);
     let sourceDeleteError: unknown;
     try {
@@ -795,9 +1145,16 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     const firstPage = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 1 }, connectionOwnerActor, db);
     assert.equal(firstPage.runs[0]?.id, staleRunId);
     assert.ok(firstPage.nextCursor !== null);
-    const secondPage = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 1, cursor: firstPage.nextCursor! }, connectionOwnerActor, db);
-    assert.equal(secondPage.runs[0]?.id, runId);
-    assert.notEqual(firstPage.runs[0]?.id, secondPage.runs[0]?.id);
+    const pagedRunIds: string[] = [firstPage.runs[0]!.id];
+    let pageCursor: string | null = firstPage.nextCursor;
+    while (pageCursor !== null && !pagedRunIds.includes(runId)) {
+      const page = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 1, cursor: pageCursor }, connectionOwnerActor, db);
+      pagedRunIds.push(...page.runs.map((run) => run.id));
+      pageCursor = page.nextCursor;
+    }
+    assert.equal(pagedRunIds.at(-1), runId);
+    assert.equal(new Set(pagedRunIds).size, pagedRunIds.length);
+    assert.deepEqual(pagedRunIds, ownerHistory.runs.slice(0, pagedRunIds.length).map((run) => run.id));
     const ownerDetail = await getProjectDelegatedGitManualRunDetail(projectId, delegation.id, runId, connectionOwnerActor, db);
     assert.equal(ownerDetail.capabilities.canAcknowledge, true);
     assert.equal(ownerDetail.entries[0]?.projectSourceId, sourceId);
@@ -937,7 +1294,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     } finally {
       await client.query("ROLLBACK");
     }
-    assert.match(String(missingPointerError), /PROJECT_GIT_MANUAL_SUCCESS_POINTER_INVALID/u);
+    assert.match(String(missingPointerError), /PROJECT_GIT_MANUAL_PUBLICATION_HEAD_REQUIRED/u);
     await client.query("BEGIN");
     try {
       await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
@@ -1066,6 +1423,280 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     assert.equal(await db.projectGitRepositoryManualRunEntry.count({ where: { runId: requesterRunId } }), 0);
     assert.equal(await db.projectSource.count({ where: { projectId } }), requesterSourceCountBefore);
 
+    const gitRoot = join(temporaryGitRoot!, "remote-race");
+    const worktree = join(gitRoot, "worktree");
+    const bareRemote = join(gitRoot, "repository.git");
+    const shimDirectory = join(gitRoot, "bin");
+    const tracePath = join(gitRoot, "git-command-trace.log");
+    const revokeHookPath = join(gitRoot, "enable-revoke-hook");
+    await mkdir(shimDirectory, { recursive: true });
+    const realGit = findGitBinary();
+    execFileSync(realGit, ["init", "--bare", "--initial-branch=main", bareRemote], { stdio: "ignore" });
+    execFileSync(realGit, ["init", "--initial-branch=main", worktree], { stdio: "ignore" });
+    runGit(realGit, ["config", "user.name", "Git Revocation Gate"], worktree);
+    runGit(realGit, ["config", "user.email", "git-revocation@example.invalid"], worktree);
+    runGit(realGit, ["remote", "add", "origin", bareRemote], worktree);
+    await writeFile(join(worktree, "README.md"), "This remote must not publish after revocation.\n", "utf8");
+    runGit(realGit, ["add", "README.md"], worktree);
+    runGit(realGit, ["commit", "-m", "revocation-race"], worktree);
+    execFileSync(realGit, ["push", "origin", "main"], { cwd: worktree, stdio: "ignore" });
+
+    let revocationCallbackCount = 0;
+    revocationServer = createServer((request, response) => {
+      if (request.url !== "/revoke") {
+        response.writeHead(404).end();
+        return;
+      }
+      revocationCallbackCount += 1;
+      void revokeProjectGitRepositoryDelegation(projectId, delegation.id, {
+        expectedVersion: delegation.version,
+        reason: "manual runtime revocation after ls-remote",
+      }, projectOwnerActor, db).then((result) => {
+        response.writeHead(result.status === "revoked" ? 204 : 500).end();
+      }).catch(() => response.writeHead(500).end());
+    });
+    await new Promise<void>((resolve, reject) => {
+      revocationServer!.once("error", reject);
+      revocationServer!.listen(0, "127.0.0.1", resolve);
+    });
+    const serverAddress = revocationServer.address();
+    if (serverAddress === null || typeof serverAddress === "string") throw new Error("GIT_REVOCATION_GATE_LISTENER_UNAVAILABLE");
+    const revokeUrl = `http://127.0.0.1:${serverAddress.port}/revoke`;
+    const hookScript = `fetch(${JSON.stringify(revokeUrl)}).then((response) => { if (!response.ok) process.exitCode = 1; }).catch(() => process.exit(1));`;
+    const wrapper = [
+      "#!/bin/bash",
+      "set -euo pipefail",
+      `trace_path=${shellQuote(tracePath)}`,
+      `revoke_hook_path=${shellQuote(revokeHookPath)}`,
+      `real_git=${shellQuote(realGit)}`,
+      `bare_remote=${shellQuote(pathToFileURL(bareRemote).href)}`,
+      'printf "%s\\n" "$*" >> "$trace_path"',
+      'args=("$@")',
+      'if [[ " ${args[*]} " == *" remote add origin "* ]]; then args[$((${#args[@]} - 1))]="$bare_remote"; fi',
+      "unset GIT_ALLOW_PROTOCOL",
+      'if [[ " ${args[*]} " == *" ls-remote "* ]]; then',
+      '  "$real_git" "${args[@]}" 2>> "$trace_path.stderr"',
+      `  if [[ -f "$revoke_hook_path" ]]; then node -e ${shellQuote(hookScript)}; fi`,
+      "  exit $?",
+      "fi",
+      'exec "$real_git" "${args[@]}" 2>> "$trace_path.stderr"',
+      "",
+    ].join("\n");
+    const shimPath = join(shimDirectory, "git");
+    await writeFile(shimPath, wrapper, { encoding: "utf8", mode: 0o700 });
+    await chmod(shimPath, 0o700);
+    process.env.PATH = `${shimDirectory}:${previousPath ?? ""}`;
+
+    const revocationBaseline = await runProjectDelegatedGitManualSync({
+      projectId,
+      delegationId: delegation.id,
+      request: { clientRequestKey: randomUUID() },
+      actor: connectionOwnerActor,
+    }, db);
+    assert.equal(revocationBaseline.status, "succeeded", `baseline failureCode=${revocationBaseline.failureCode ?? "none"}`);
+
+    const firstPublication = await client.query<{
+      versionId: string;
+      runId: string;
+      generation: number;
+      frozenCommitSha: string;
+      manifestFingerprint: string;
+      fileCount: number;
+      runFileCount: number;
+      runManifestEntryCount: number;
+      decodedTextBytes: number;
+      publishedAt: Date;
+      sources: string[];
+    }>(
+      `SELECT version_row."id"::text AS "versionId", version_row."runId"::text AS "runId",
+              head."generation", version_row."frozenCommitSha", version_row."manifestFingerprint",
+              version_row."fileCount", run."fileCount" AS "runFileCount",
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryManualRunEntry" run_entry
+                WHERE run_entry."runId" = version_row."runId") AS "runManifestEntryCount",
+              version_row."decodedTextBytes",
+              version_row."publishedAt",
+              ARRAY(SELECT entry."projectSourceId"::text
+                      FROM "ProjectGitRepositoryPublicationEntry" entry
+                     WHERE entry."publicationVersionId" = version_row."id"
+                     ORDER BY entry."ordinal") AS sources
+         FROM "ProjectGitRepositoryPublicationHead" head
+         JOIN "ProjectGitRepositoryPublicationVersion" version_row
+           ON version_row."id" = head."currentPublicationVersionId"
+         JOIN "ProjectGitRepositoryManualRun" run ON run."id" = version_row."runId"
+        WHERE head."projectId" = $1::uuid AND head."delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    );
+    assert.equal(firstPublication.rowCount, 1);
+    assert.equal(firstPublication.rows[0]!.generation, baseline.publicationGeneration + 1);
+    assert.ok(firstPublication.rows[0]!.fileCount > 0);
+    assert.equal(firstPublication.rows[0]!.runFileCount, firstPublication.rows[0]!.fileCount);
+    assert.equal(firstPublication.rows[0]!.runManifestEntryCount, firstPublication.rows[0]!.fileCount);
+    assert.equal(firstPublication.rows[0]!.sources.length, firstPublication.rows[0]!.runManifestEntryCount);
+
+    await writeFile(join(worktree, "README.md"), "A second manual publication retires the first source.\n", "utf8");
+    runGit(realGit, ["add", "README.md"], worktree);
+    runGit(realGit, ["commit", "-m", "publication-head-advance"], worktree);
+    execFileSync(realGit, ["push", "origin", "main"], { cwd: worktree, stdio: "ignore" });
+    const secondPublicationRun = await runProjectDelegatedGitManualSync({
+      projectId,
+      delegationId: delegation.id,
+      request: { clientRequestKey: randomUUID() },
+      actor: connectionOwnerActor,
+    }, db);
+    assert.equal(secondPublicationRun.status, "succeeded", `second publication failureCode=${secondPublicationRun.failureCode ?? "none"}`);
+    const secondPublication = await client.query<{
+      versionId: string;
+      generation: number;
+      runId: string;
+      previousPublicationVersionId: string | null;
+      previousGeneration: number;
+      publishedAt: Date;
+      priorSourceCount: number;
+      priorSourcesRetiredAtPublication: number;
+      currentSourceCount: number;
+      currentSourcesActive: number;
+      runFileCount: number;
+      runManifestEntryCount: number;
+      automaticVersions: string;
+    }>(
+      `SELECT version_row."id"::text AS "versionId", head."generation", version_row."runId"::text AS "runId",
+              run."fileCount" AS "runFileCount",
+              version_row."previousPublicationVersionId"::text AS "previousPublicationVersionId",
+              version_row."previousGeneration", version_row."publishedAt",
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryManualRunEntry" run_entry
+                WHERE run_entry."runId" = version_row."runId") AS "runManifestEntryCount",
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryPublicationEntry" prior_entry
+                WHERE prior_entry."publicationVersionId" = $3::uuid) AS "priorSourceCount",
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryPublicationEntry" prior_entry
+                 JOIN "ProjectSource" source ON source."projectId" = prior_entry."projectId" AND source."id" = prior_entry."projectSourceId"
+                WHERE prior_entry."publicationVersionId" = $3::uuid
+                  AND source."retiredAt" IS NOT DISTINCT FROM version_row."publishedAt") AS "priorSourcesRetiredAtPublication",
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryPublicationEntry" current_entry
+                WHERE current_entry."publicationVersionId" = version_row."id") AS "currentSourceCount",
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryPublicationEntry" current_entry
+                 JOIN "ProjectSource" source ON source."projectId" = current_entry."projectId" AND source."id" = current_entry."projectSourceId"
+                WHERE current_entry."publicationVersionId" = version_row."id" AND source."retiredAt" IS NULL) AS "currentSourcesActive",
+              (SELECT count(*)::text FROM "ProjectGitRepositoryPublicationVersion" automatic
+                WHERE automatic."projectId" = head."projectId" AND automatic."delegationId" = head."delegationId"
+                  AND automatic."runKind" = 'automatic') AS "automaticVersions"
+         FROM "ProjectGitRepositoryPublicationHead" head
+         JOIN "ProjectGitRepositoryPublicationVersion" version_row
+           ON version_row."id" = head."currentPublicationVersionId"
+         JOIN "ProjectGitRepositoryManualRun" run ON run."id" = version_row."runId"
+        WHERE head."projectId" = $1::uuid AND head."delegationId" = $2::uuid`,
+      [projectId, delegation.id, firstPublication.rows[0]!.versionId],
+    );
+    assert.equal(secondPublication.rowCount, 1);
+    assert.equal(secondPublication.rows[0]!.generation, baseline.publicationGeneration + 2);
+    assert.equal(secondPublication.rows[0]!.runId, secondPublicationRun.id);
+    assert.equal(secondPublication.rows[0]!.previousPublicationVersionId, firstPublication.rows[0]!.versionId);
+    assert.equal(secondPublication.rows[0]!.previousGeneration, firstPublication.rows[0]!.generation);
+    assert.equal(secondPublication.rows[0]!.priorSourceCount, firstPublication.rows[0]!.sources.length);
+    assert.equal(secondPublication.rows[0]!.priorSourcesRetiredAtPublication, firstPublication.rows[0]!.sources.length);
+    assert.equal(secondPublication.rows[0]!.runFileCount, secondPublicationRun.fileCount);
+    assert.equal(secondPublication.rows[0]!.runManifestEntryCount, secondPublicationRun.fileCount);
+    assert.equal(secondPublication.rows[0]!.currentSourceCount, secondPublicationRun.fileCount);
+    assert.equal(secondPublication.rows[0]!.currentSourcesActive, secondPublicationRun.fileCount);
+    assert.equal(secondPublication.rows[0]!.automaticVersions, "0");
+
+    let invalidAutomaticSnapshotError: unknown;
+    try {
+      await client.query(
+        `INSERT INTO "ProjectGitRepositoryPublicationVersion" (
+           "id", "projectId", "delegationId", "runKind", "runId", "previousPublicationVersionId", "previousGeneration",
+           "delegationVersion", "delegationFingerprint", "repositoryPath", "trackedRef", "frozenCommitSha",
+           "manifestFingerprint", "fileCount", "decodedTextBytes", "publishedAt"
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid, $4::"ProjectGitRepositoryPublicationRunKind", $5::uuid, $6::uuid, $15::integer,
+           $7, $8, $9, $10, $11, $12, $13, $14, clock_timestamp()
+         )`,
+        [
+          randomUUID(), projectId, delegation.id, "automatic", randomUUID(), firstPublication.rows[0]!.versionId,
+          delegation.version, delegation.delegationFingerprint, delegation.repositoryPath, delegation.trackedRef,
+          firstPublication.rows[0]!.frozenCommitSha, firstPublication.rows[0]!.manifestFingerprint,
+          firstPublication.rows[0]!.fileCount, firstPublication.rows[0]!.decodedTextBytes,
+          firstPublication.rows[0]!.generation,
+        ],
+      );
+    } catch (error) {
+      invalidAutomaticSnapshotError = error;
+    }
+    assert.match(String(invalidAutomaticSnapshotError), /PROJECT_GIT_AUTOMATION_PUBLICATION_RUN_SNAPSHOT_INVALID/u);
+    const headAfterInvalidAutomaticSnapshot = await client.query<{ generation: number; versionId: string }>(
+      `SELECT "generation", "currentPublicationVersionId"::text AS "versionId"
+         FROM "ProjectGitRepositoryPublicationHead"
+        WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    );
+    assert.deepEqual(headAfterInvalidAutomaticSnapshot.rows, [{
+      generation: secondPublication.rows[0]!.generation,
+      versionId: secondPublication.rows[0]!.versionId,
+    }]);
+
+    await writeFile(join(worktree, "README.md"), "This changed remote must not publish after revocation.\n", "utf8");
+    runGit(realGit, ["add", "README.md"], worktree);
+    runGit(realGit, ["commit", "-m", "revocation-race-changed"], worktree);
+    execFileSync(realGit, ["push", "origin", "main"], { cwd: worktree, stdio: "ignore" });
+    await writeFile(tracePath, "", "utf8");
+    await writeFile(revokeHookPath, "enabled", "utf8");
+    const pointerSnapshotBeforeRevocation = await client.query<{ value: string }>(
+      `SELECT json_build_object(
+         'runId', "runId", 'delegationVersion', "delegationVersion", 'delegationFingerprint', "delegationFingerprint",
+         'frozenCommitSha', "frozenCommitSha", 'manifestFingerprint', "manifestFingerprint", 'publishedAt', "publishedAt"
+       )::text AS value
+       FROM "ProjectGitRepositoryManualPointer"
+       WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    );
+    const sourceSnapshotBeforeRevocation = await client.query<{ value: string }>(
+      `SELECT COALESCE(json_agg(json_build_object(
+         'id', "id", 'contentHash', "contentHash", 'contentText', "contentText", 'capturedAt', "capturedAt", 'retiredAt', "retiredAt"
+       ) ORDER BY "id")::text, '[]') AS value
+       FROM "ProjectSource"
+       WHERE "projectId" = $1::uuid AND "kind" = 'git' AND "originScope" = 'project'`,
+      [projectId],
+    );
+
+    const revocationRaceKey = randomUUID();
+    const revocationRace = await runProjectDelegatedGitManualSync({
+      projectId,
+      delegationId: delegation.id,
+      request: { clientRequestKey: revocationRaceKey },
+      actor: connectionOwnerActor,
+    }, db);
+    process.env.PATH = previousPath;
+    const trace = await readFile(tracePath, "utf8").catch(() => "");
+    assert.equal(revocationRace.status, "unknown", `failureCode=${revocationRace.failureCode ?? "none"}; callbackCount=${revocationCallbackCount}; trace=${trace}`);
+    assert.equal(revocationCallbackCount, 1);
+    const revokedRaceRun = await db.projectGitRepositoryManualRun.findUniqueOrThrow({
+      where: { id: revocationRace.id },
+      select: { status: true, stage: true, dispatchState: true },
+    });
+    assert.deepEqual(revokedRaceRun, { status: "unknown", stage: "terminal", dispatchState: "dispatched" });
+    assert.equal(await db.projectGitRepositoryManualRunEntry.count({ where: { runId: revocationRace.id } }), 0);
+    assert.equal(await db.projectGitRepositoryManualRunAudit.count({ where: { runId: revocationRace.id, action: "unknown" } }), 1);
+    assert.match(trace, / ls-remote /u);
+    assert.doesNotMatch(trace, /\b(?:fetch|ls-tree|cat-file)\b/u);
+    const pointerSnapshotAfterRevocation = await client.query<{ value: string }>(
+      `SELECT json_build_object(
+         'runId', "runId", 'delegationVersion', "delegationVersion", 'delegationFingerprint', "delegationFingerprint",
+         'frozenCommitSha', "frozenCommitSha", 'manifestFingerprint', "manifestFingerprint", 'publishedAt', "publishedAt"
+       )::text AS value
+       FROM "ProjectGitRepositoryManualPointer"
+       WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    );
+    const sourceSnapshotAfterRevocation = await client.query<{ value: string }>(
+      `SELECT COALESCE(json_agg(json_build_object(
+         'id', "id", 'contentHash', "contentHash", 'contentText', "contentText", 'capturedAt', "capturedAt", 'retiredAt', "retiredAt"
+       ) ORDER BY "id")::text, '[]') AS value
+       FROM "ProjectSource"
+       WHERE "projectId" = $1::uuid AND "kind" = 'git' AND "originScope" = 'project'`,
+      [projectId],
+    );
+    assert.deepEqual(pointerSnapshotAfterRevocation.rows, pointerSnapshotBeforeRevocation.rows);
+    assert.deepEqual(sourceSnapshotAfterRevocation.rows, sourceSnapshotBeforeRevocation.rows);
+
     const beforeTerminalArchive = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { updatedAt: true } });
     const archivedAfterTerminal = await updateProjectLifecycle({
       projectId,
@@ -1091,6 +1722,14 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     assert.equal(await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: delegation.id } }), delegationAuditCount);
     assert.ok(await db.projectGitRepositoryManualRunReconciliation.findUnique({ where: { id: storedAcknowledgement.id } }));
   } finally {
+    if (revocationServer?.listening) {
+      await new Promise<void>((resolve) => revocationServer!.close(() => resolve()));
+    }
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+    else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousMasterKeyPath;
+    if (temporaryGitRoot !== null) await rm(temporaryGitRoot, { recursive: true, force: true });
     await client.end();
   }
 });

@@ -119,17 +119,19 @@ test("all project mutation routes reject archived projects except bounded lifecy
   const frozenMcpGrantRoutes = new Set([
     "src/app/api/projects/[projectId]/mcp-tool-grants/[grantId]/route.ts",
   ]);
-  const frozenMcpActionRoutes = new Set([
+  const gatedMcpActionRoutes = new Set([
     "src/app/api/projects/[projectId]/mcp-actions/route.ts",
     "src/app/api/projects/[projectId]/mcp-actions/[actionId]/route.ts",
     "src/app/api/projects/[projectId]/mcp-actions/[actionId]/decision/route.ts",
     "src/app/api/projects/[projectId]/mcp-actions/[actionId]/cancel/route.ts",
     "src/app/api/projects/[projectId]/mcp-actions/[actionId]/dispatch/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/import/route.ts",
   ]);
   const archivedTerminalCleanupRoutes = new Set([
     "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/rejection/route.ts",
     "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/revocation/route.ts",
     "src/app/api/projects/[projectId]/mcp-tool-grants/[grantId]/revocation/route.ts",
+    "src/app/api/projects/[projectId]/git-automation-grants/[grantId]/revocation/route.ts",
   ]);
   const serviceLifecycleGuarded = new Set([
     "src/app/api/projects/[projectId]/items/route.ts",
@@ -137,6 +139,13 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/sources/route.ts",
     "src/app/api/projects/[projectId]/sources/[sourceId]/route.ts",
     "src/app/api/projects/[projectId]/web-sources/route.ts",
+    "src/app/api/projects/[projectId]/web-sources/authenticated/route.ts",
+    "src/app/api/projects/[projectId]/web-sources/[webSourceId]/credential/route.ts",
+    "src/app/api/projects/[projectId]/web-sources/[webSourceId]/fetch/route.ts",
+    "src/app/api/projects/[projectId]/web-sources/[webSourceId]/reviews/[revisionId]/route.ts",
+    "src/app/api/projects/[projectId]/git-automation-grants/route.ts",
+    "src/app/api/projects/[projectId]/git-automation-grants/[grantId]/connection-owner-confirmation/route.ts",
+    "src/app/api/projects/[projectId]/git-automation-grants/[grantId]/project-owner-activation/route.ts",
     "src/app/api/projects/[projectId]/web-sources/[webSourceId]/route.ts",
     "src/app/api/projects/[projectId]/web-sources/[webSourceId]/sync/route.ts",
     "src/app/api/projects/[projectId]/snapshots/route.ts",
@@ -201,16 +210,22 @@ test("all project mutation routes reject archived projects except bounded lifecy
       assert.doesNotMatch(source, /readJsonBody|revokeProjectMcpToolGrant/u, `${path} must not parse or invoke legacy mutation`);
       continue;
     }
-    if (frozenMcpActionRoutes.has(path)) {
-      assert.match(source, /projectMcpActionApiUnavailable/u, `${path} must return the fixed product gate`);
-      assert.doesNotMatch(source, /requireApiSession|readJsonBody|project-mcp-action-service|project-mcp-action-dispatch-service/u, `${path} must not enter the unopened control plane`);
+    if (gatedMcpActionRoutes.has(path)) {
+      assert.match(source, /isProjectMcpActionApiEnabled/u, `${path} must check the explicit feature gate`);
+      assert.match(source, /projectMcpActionApiUnavailable/u, `${path} must fail closed while the gate is off`);
+      assert.match(source, /requireApiSession\(request\)/u, `${path} must authenticate before reading project actions`);
+      if (source.includes("export async function POST")) {
+        assert.match(source, /assertSameOrigin\(request\)/u, `${path} must enforce same-origin writes`);
+      }
       continue;
     }
     if (archivedTerminalCleanupRoutes.has(path)) {
       assert.doesNotMatch(source, /assertProjectActive/u, `${path} must remain an archived terminal cleanup route`);
       assert.match(source, /assertSameOrigin\(request\)/u, `${path} must enforce same-origin writes`);
       assert.match(source, /requireApiSession\(request\)/u, `${path} must authenticate the actor`);
-      if (path.endsWith("/mcp-tool-grants/[grantId]/revocation/route.ts")) {
+      if (path.endsWith("/git-automation-grants/[grantId]/revocation/route.ts")) {
+        assert.match(source, /revokeProjectGitAutomationGrant/u, `${path} must call the terminal Git grant revocation service`);
+      } else if (path.endsWith("/mcp-tool-grants/[grantId]/revocation/route.ts")) {
         assert.match(source, /revokeProjectMcpToolGrantV2/u, `${path} must call the V2 grant revocation service`);
       } else if (path.endsWith("/rejection/route.ts")) {
         assert.match(source, /rejectProjectMcpConnectionDelegation/u, `${path} must call the rejection service`);

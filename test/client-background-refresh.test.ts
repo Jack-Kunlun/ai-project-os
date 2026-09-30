@@ -41,12 +41,13 @@ test("project Git page uses bounded manual delegation while remote writes stay f
   assert.match(source, /manual-sync/u, `${path} must expose the bounded manual read action`);
   assert.match(source, /manualSyncAllowed:\s*true/u);
   assert.match(source, /automationAllowed:\s*false/u);
-  assert.match(source, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
+  assert.match(source, /手动读取与自动读取分别授权；自动读取需双确认/u);
+  assert.match(source, /写入\/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准/u);
   assert.doesNotMatch(source, /api\/settings\/git-connections|api\/projects\/\$\{projectId\}\/git-connections/u);
   assert.doesNotMatch(source, /\/git-(?:push|commit)|\/pull-requests?/u, `${path} must not expose Git write operations`);
 });
 
-test("project MCP page manages the control plane while remote actions stay frozen", () => {
+test("project MCP page gates the read-only action entry without calling tools from the control plane", () => {
   const path = "src/app/projects/[projectId]/tools/project-tools-client.tsx";
   const source = readFileSync(join(root, path), "utf8");
   assert.match(source, /\/personal\/connections\/mcp/u, `${path} must link to personal configuration`);
@@ -54,8 +55,8 @@ test("project MCP page manages the control plane while remote actions stay froze
   assert.match(source, /\/api\/projects\/\$\{projectId\}\/mcp-tool-grants/u);
   assert.match(source, /控制面开放；动作调用冻结/u, `${path} must distinguish control-plane availability from action freeze`);
   assert.match(source, /仅管理连接委托和只读工具授权/u, `${path} must state the current scope`);
-  assert.doesNotMatch(source, /mcp-actions|\/dispatch|result-import/u, `${path} must not enter the frozen action surface`);
-  assert.doesNotMatch(source, /\/tools\/call|mcp-actions|\/dispatch|result-import/u, `${path} must not expose an action call UI`);
+  assert.match(source, /mcpActionsEnabled && <Link href=\{`\/projects\/\$\{projectId\}\/mcp-actions`\}/u, `${path} must gate the action entry`);
+  assert.doesNotMatch(source, /\/tools\/call|\/dispatch|result-import/u, `${path} must not call tools or import results from the control plane`);
 });
 
 test("profile updates its username locally without refreshing the current route", () => {

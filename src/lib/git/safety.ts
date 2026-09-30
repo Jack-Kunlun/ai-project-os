@@ -182,14 +182,31 @@ export function canonicalSshKnownHost(value: unknown): string | null {
 export async function resolveGitEndpoint(input: Readonly<{
   baseUrl: string;
   allowPrivateNetwork: boolean;
+  signal?: AbortSignal;
 }>): Promise<GitEndpointResolution> {
   const url = new URL(input.baseUrl);
   let rows: readonly { address: string }[];
+  if (input.signal?.aborted) throw new Error("GIT_OPERATION_ABORTED");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abort: (() => void) | undefined;
   try {
-    rows = await lookup(url.hostname, { all: true, verbatim: true });
+    rows = await Promise.race([
+      lookup(url.hostname, { all: true, verbatim: true }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("GIT_HOST_UNRESOLVED")), 15_000);
+        abort = () => reject(new Error("GIT_OPERATION_ABORTED"));
+        input.signal?.addEventListener("abort", abort, { once: true });
+        if (input.signal?.aborted) abort();
+      }),
+    ]);
   } catch {
+    if (input.signal?.aborted) throw new Error("GIT_OPERATION_ABORTED");
     return fail("GIT_HOST_UNRESOLVED");
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (abort !== undefined) input.signal?.removeEventListener("abort", abort);
   }
+  if (input.signal?.aborted) throw new Error("GIT_OPERATION_ABORTED");
   const addresses = [...new Set(rows.map((row) => row.address.toLowerCase()))].sort();
   if (addresses.length === 0) return fail("GIT_HOST_UNRESOLVED");
   if (addresses.some(isMetadataAddress)) return fail("GIT_NETWORK_BLOCKED");
@@ -204,6 +221,7 @@ export async function assertPinnedGitEndpoint(input: Readonly<{
   baseUrl: string;
   allowPrivateNetwork: boolean;
   expectedFingerprint: string | null;
+  signal?: AbortSignal;
 }>): Promise<GitEndpointResolution> {
   const resolved = await resolveGitEndpoint(input);
   if (input.expectedFingerprint !== null && resolved.fingerprint !== input.expectedFingerprint) {

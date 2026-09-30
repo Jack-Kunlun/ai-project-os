@@ -2,7 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -14,6 +14,7 @@ import { Client } from "pg";
 import { getDb } from "../src/lib/db";
 import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import {
   confirmProjectGitRepositoryDelegationOwner,
   confirmProjectGitRepositoryDelegationProject,
@@ -24,8 +25,15 @@ import {
   listProjectGitRepositoryDelegations,
   proposeProjectGitRepositoryDelegation,
 } from "../src/lib/project-git-repository-delegation-service";
-import { executeGitConnectionMutation, previewGitConnectionMutation, updateGitConnection } from "../src/lib/git";
-import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
+import {
+  activateProjectGitAutomationGrantProjectOwner,
+  confirmProjectGitAutomationGrantConnectionOwner,
+  getProjectGitAutomationGrant,
+  listConnectionOwnerProjectGitAutomationGrants,
+  proposeProjectGitAutomationGrant,
+  revokeProjectGitAutomationGrant,
+} from "../src/lib/project-git-automation-grant-service";
+import { disableGitConnection, executeGitConnectionMutation, previewGitConnectionMutation, updateGitConnection } from "../src/lib/git";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
 
@@ -36,7 +44,16 @@ const execFile = promisify(execFileCallback);
 const projectGitDelegationMigration = "20260904150000_add_project_git_repository_delegations";
 const projectGitRuntimeMigration = "20260904160000_add_project_git_manual_runtime";
 const projectGitReconciliationMigration = "20260904170000_add_project_git_manual_run_reconciliation";
+const projectGitPublicationHeadMigration = "20260929060000_add_git_shared_publication_head";
 const seededAdminId = "00000000-0000-4000-8000-000000000010";
+
+function deterministicGitUuid(input: string): string {
+  const bytes = Buffer.from(createHash("sha256").update(input, "utf8").digest().subarray(0, 16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function assertDisposableGateDatabase(): void {
   const configuredUrl = process.env.DATABASE_URL;
@@ -569,6 +586,183 @@ test(
     }, projectOwnerActor, db);
     assert.equal(active.status, "active");
 
+    const baseForAutomation = await db.projectGitRepositoryDelegation.findUniqueOrThrow({
+      where: { id: draft.id },
+      select: { expiresAt: true, repositoryPath: true, trackedRef: true, includeRoots: true, softExcludePatterns: true },
+    });
+    await assert.rejects(
+      () => proposeProjectGitAutomationGrant(projectId, {
+        baseDelegationId: draft.id,
+        runIntervalMinutes: 59,
+        expiresAt: baseForAutomation.expiresAt.toISOString(),
+      }, connectionOwnerActor(), db),
+      (error: unknown) => errorText(error).includes("PROJECT_GIT_AUTOMATION_GRANT_INVALID_INPUT"),
+    );
+    await assert.rejects(
+      () => proposeProjectGitAutomationGrant(projectId, {
+        baseDelegationId: draft.id,
+        runIntervalMinutes: 60,
+        expiresAt: new Date(baseForAutomation.expiresAt.getTime() + 1_000).toISOString(),
+      }, connectionOwnerActor(), db),
+      (error: unknown) => errorText(error).includes("PROJECT_GIT_AUTOMATION_GRANT_INVALID_INPUT"),
+    );
+    assert.equal(await db.projectGitRepositoryAutomationGrant.count({ where: { baseDelegationId: draft.id } }), 0);
+
+    const automationDraft = await proposeProjectGitAutomationGrant(projectId, {
+      baseDelegationId: draft.id,
+      runIntervalMinutes: 60,
+      expiresAt: baseForAutomation.expiresAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    assert.equal(automationDraft.status, "draft");
+    assert.deepEqual(automationDraft.scope, {
+      repositoryPath: baseForAutomation.repositoryPath,
+      trackedRef: baseForAutomation.trackedRef,
+      includeRoots: baseForAutomation.includeRoots,
+      softExcludePatterns: baseForAutomation.softExcludePatterns,
+    });
+    assert.equal(automationDraft.schedule.runIntervalMinutes, 60);
+    assert.equal(automationDraft.capabilities.canConfirmConnectionOwner, true);
+    assert.equal(automationDraft.capabilities.canActivateProjectOwner, false);
+    await assert.rejects(
+      () => activateProjectGitAutomationGrantProjectOwner(projectId, automationDraft.id, {
+        expectedVersion: automationDraft.version,
+        acknowledgeExactRepositoryScope: true,
+        acknowledgeReadOnlyDataEgress: true,
+      }, projectOwnerActor, db),
+      (error: unknown) => errorText(error).includes("PROJECT_GIT_AUTOMATION_GRANT_STATE_CONFLICT"),
+    );
+    await assert.rejects(
+      () => db.$executeRaw(Prisma.sql`
+        UPDATE "ProjectGitRepositoryAutomationGrant"
+        SET "version" = "version" + 1,
+            "status" = 'active'
+        WHERE "id" = ${automationDraft.id}::uuid
+      `),
+      /PROJECT_GIT_AUTOMATION_GRANT_STATE_INVALID/u,
+    );
+    await assert.rejects(
+      () => db.$executeRaw(Prisma.sql`
+        UPDATE "ProjectGitRepositoryAutomationGrant"
+        SET "version" = "version" + 1,
+            "repositoryPath" = 'org/widened-scope'
+        WHERE "id" = ${automationDraft.id}::uuid
+      `),
+      /PROJECT_GIT_AUTOMATION_GRANT_IMMUTABLE/u,
+    );
+    const automationOwnerConfirmed = await confirmProjectGitAutomationGrantConnectionOwner(projectId, automationDraft.id, {
+      expectedVersion: automationDraft.version,
+      acknowledgeReadOnlyScheduledAccess: true,
+    }, connectionOwnerActor(), db);
+    assert.equal(automationOwnerConfirmed.status, "ownerConfirmed");
+    assert.ok("capabilities" in automationOwnerConfirmed);
+    assert.equal(automationOwnerConfirmed.capabilities.canActivateProjectOwner, false);
+    const projectOwnerActivationView = await getProjectGitAutomationGrant(projectId, automationDraft.id, projectOwnerActor, db);
+    assert.equal(projectOwnerActivationView.capabilities.canActivateProjectOwner, true);
+    const activeAutomationGrant = await activateProjectGitAutomationGrantProjectOwner(projectId, automationDraft.id, {
+      expectedVersion: automationOwnerConfirmed.version,
+      acknowledgeExactRepositoryScope: true,
+      acknowledgeReadOnlyDataEgress: true,
+    }, projectOwnerActor, db);
+    assert.equal(activeAutomationGrant.status, "active");
+    assert.ok("readiness" in activeAutomationGrant);
+    assert.equal(activeAutomationGrant.readiness.eligible, true);
+    assert.equal(await db.projectGitRepositoryAutomationGrantAudit.count({ where: { grantId: automationDraft.id } }), 3);
+    await assert.rejects(
+      () => db.$executeRaw(Prisma.sql`
+        UPDATE "ProjectGitRepositoryAutomationGrantAudit"
+        SET "reason" = 'forged audit'
+        WHERE "grantId" = ${automationDraft.id}::uuid
+      `),
+      /PROJECT_GIT_AUTOMATION_GRANT_AUDIT_IMMUTABLE/u,
+    );
+    const governedBeforeGrantRevoke = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
+    const blockedByAutomationGrant = await previewGitConnectionMutation(connectionId, {
+      action: "disable",
+      requestKey: `git-delegation-grant-block-${suffix}`,
+      reason: "live automation grant requires explicit revocation before connection disable",
+      expectedUpdatedAt: governedBeforeGrantRevoke.updatedAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    assert.equal(blockedByAutomationGrant.canExecute, false);
+    assert.equal(blockedByAutomationGrant.blockers.includes("live_automation_grant"), true);
+    await assert.rejects(
+      () => disableGitConnection(connectionId, connectionOwnerActor(), db),
+      (error: unknown) => errorText(error).includes("GIT_CONNECTION_IN_USE"),
+    );
+    const revokedAutomationGrant = await revokeProjectGitAutomationGrant(projectId, automationDraft.id, {
+      expectedVersion: activeAutomationGrant.version,
+      reason: "cancel control-plane acceptance gate grant",
+    }, connectionOwnerActor(), db);
+    assert.equal(revokedAutomationGrant.status, "revoked");
+    assert.ok("capabilities" in revokedAutomationGrant);
+    assert.equal(revokedAutomationGrant.capabilities.canRevoke, false);
+    assert.equal(await db.projectGitRepositoryAutomationGrantAudit.count({ where: { grantId: automationDraft.id } }), 4);
+    assert.equal((await getProjectGitAutomationGrant(projectId, automationDraft.id, projectOwnerActor, db)).status, "revoked");
+    assert.equal((await getProjectGitAutomationGrant(projectId, automationDraft.id, viewerActor, db)).terminalReason, null);
+
+    const draftToRevoke = await proposeProjectGitAutomationGrant(projectId, {
+      baseDelegationId: draft.id,
+      runIntervalMinutes: 60,
+      expiresAt: baseForAutomation.expiresAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    assert.equal((await revokeProjectGitAutomationGrant(projectId, draftToRevoke.id, {
+      expectedVersion: draftToRevoke.version,
+      reason: "cancel unconfirmed automatic access",
+    }, connectionOwnerActor(), db)).status, "revoked");
+
+    const ownerConfirmedToRevoke = await proposeProjectGitAutomationGrant(projectId, {
+      baseDelegationId: draft.id,
+      runIntervalMinutes: 60,
+      expiresAt: baseForAutomation.expiresAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    const confirmedToRevoke = await confirmProjectGitAutomationGrantConnectionOwner(projectId, ownerConfirmedToRevoke.id, {
+      expectedVersion: ownerConfirmedToRevoke.version,
+      acknowledgeReadOnlyScheduledAccess: true,
+    }, connectionOwnerActor(), db);
+    assert.equal((await revokeProjectGitAutomationGrant(projectId, ownerConfirmedToRevoke.id, {
+      expectedVersion: confirmedToRevoke.version,
+      reason: "cancel before project owner activation",
+    }, projectOwnerActor, db)).status, "revoked");
+    const afterEarlyGrantRevocations = await previewGitConnectionMutation(connectionId, {
+      action: "disable",
+      requestKey: `git-delegation-grant-released-${suffix}`,
+      reason: "verify all automatic grants are terminal",
+      expectedUpdatedAt: governedBeforeGrantRevoke.updatedAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    assert.equal(afterEarlyGrantRevocations.blockers.includes("live_automation_grant"), false);
+
+    const racingDraft = await proposeProjectGitAutomationGrant(projectId, {
+      baseDelegationId: draft.id,
+      runIntervalMinutes: 60,
+      expiresAt: baseForAutomation.expiresAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    const racingConfirmed = await confirmProjectGitAutomationGrantConnectionOwner(projectId, racingDraft.id, {
+      expectedVersion: racingDraft.version,
+      acknowledgeReadOnlyScheduledAccess: true,
+    }, connectionOwnerActor(), db);
+    const racingResults = await Promise.allSettled([
+      activateProjectGitAutomationGrantProjectOwner(projectId, racingDraft.id, {
+        expectedVersion: racingConfirmed.version,
+        acknowledgeExactRepositoryScope: true,
+        acknowledgeReadOnlyDataEgress: true,
+      }, projectOwnerActor, db),
+      revokeProjectGitAutomationGrant(projectId, racingDraft.id, {
+        expectedVersion: racingConfirmed.version,
+        reason: "race project activation against connection owner withdrawal",
+      }, connectionOwnerActor(), db),
+    ]);
+    assert.equal(racingResults.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(racingResults.filter((result) => result.status === "rejected").length, 1);
+    const racingFinal = await db.projectGitRepositoryAutomationGrant.findUniqueOrThrow({ where: { id: racingDraft.id } });
+    assert.ok(racingFinal.status === "active" || racingFinal.status === "revoked");
+    assert.equal(racingFinal.version, racingConfirmed.version + 1);
+    assert.equal(await db.projectGitRepositoryAutomationGrantAudit.count({ where: { grantId: racingDraft.id } }), 3);
+    if (racingFinal.status === "active") {
+      await revokeProjectGitAutomationGrant(projectId, racingDraft.id, {
+        expectedVersion: racingFinal.version,
+        reason: "clean up concurrent activation gate",
+      }, connectionOwnerActor(), db);
+    }
+
     const connectionBeforeLockOrderCheck = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
     let releaseFence!: () => void;
     let fenceAcquired!: () => void;
@@ -787,6 +981,62 @@ test(
     const parityRejected = await rejectProjectGitRepositoryDelegation(projectId, parityDraft.id, { expectedVersion: parityOwnerConfirmed.version, reason: "capability parity owner epoch drift" }, parityConnectionOwnerActor(), db);
     assert.equal(parityRejected.status, "rejected");
 
+    const archiveCredentialId = randomUUID();
+    const archiveConnectionId = randomUUID();
+    const archiveConnectionFingerprint = "e".repeat(64);
+    await db.externalCredential.create({
+      data: {
+        id: archiveCredentialId,
+        kind: "git",
+        ciphertext: Buffer.from([10]),
+        nonce: Buffer.from([11]),
+        authTag: Buffer.from([12]),
+        maskedSuffix: "archive-gate",
+        secretFingerprint: archiveConnectionFingerprint,
+      },
+    });
+    await createGitConnectionFixture({
+      ...common,
+      id: archiveConnectionId,
+      name: `Archive Git ${suffix}`,
+      createdById: projectOwnerId,
+      ownerUserId: projectOwnerId,
+      credentialId: archiveCredentialId,
+    }, db);
+    const archiveBaseDraft = await proposeProjectGitRepositoryDelegation(projectId, {
+      gitConnectionId: archiveConnectionId,
+      repositoryPath: "org/archive-scope",
+      trackedRef: "main",
+      includeRoots: ["docs"],
+      softExcludePatterns: ["docs/private/**"],
+      role: "library",
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
+    }, projectOwnerActor, db);
+    const archiveBaseOwnerConfirmed = await confirmProjectGitRepositoryDelegationOwner(projectId, archiveBaseDraft.id, {
+      expectedVersion: archiveBaseDraft.version,
+      acknowledgeReadOnlyCredentialUse: true,
+    }, projectOwnerActor, db);
+    const archiveBaseActive = await confirmProjectGitRepositoryDelegationProject(projectId, archiveBaseDraft.id, {
+      expectedVersion: archiveBaseOwnerConfirmed.version,
+      acknowledgeRepositoryScope: true,
+      acknowledgeDataEgress: true,
+    }, projectOwnerActor, db);
+    const archiveAutomationDraft = await proposeProjectGitAutomationGrant(projectId, {
+      baseDelegationId: archiveBaseActive.id,
+      runIntervalMinutes: 60,
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
+    }, projectOwnerActor, db);
+    const archiveAutomationOwnerConfirmed = await confirmProjectGitAutomationGrantConnectionOwner(projectId, archiveAutomationDraft.id, {
+      expectedVersion: archiveAutomationDraft.version,
+      acknowledgeReadOnlyScheduledAccess: true,
+    }, projectOwnerActor, db);
+    const archiveAutomationActive = await activateProjectGitAutomationGrantProjectOwner(projectId, archiveAutomationDraft.id, {
+      expectedVersion: archiveAutomationOwnerConfirmed.version,
+      acknowledgeExactRepositoryScope: true,
+      acknowledgeReadOnlyDataEgress: true,
+    }, projectOwnerActor, db);
+    assert.equal(archiveAutomationActive.status, "active");
+
     const connectionBeforeCredentialRotation = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
     const rotationSecret = `rotated-git-secret-${suffix}`;
     const rotationPreview = await previewGitConnectionMutation(connectionId, {
@@ -915,6 +1165,24 @@ test(
       expectedUpdatedAt: currentProject.updatedAt,
     }, db);
 
+    const grantAfterProjectArchive = await db.projectGitRepositoryAutomationGrant.findUniqueOrThrow({
+      where: { id: archiveAutomationDraft.id },
+      select: { status: true, version: true, terminalReason: true },
+    });
+    assert.equal(grantAfterProjectArchive.status, "invalidated");
+    assert.equal(grantAfterProjectArchive.version, archiveAutomationActive.version + 1);
+    assert.equal(grantAfterProjectArchive.terminalReason, "project_archived");
+    const grantArchiveAudit = await db.projectGitRepositoryAutomationGrantAudit.findFirstOrThrow({
+      where: { grantId: archiveAutomationDraft.id, grantVersion: grantAfterProjectArchive.version },
+      select: { action: true, actorKind: true, actorId: true, reason: true },
+    });
+    assert.deepEqual(grantArchiveAudit, {
+      action: "invalidated",
+      actorKind: "system",
+      actorId: null,
+      reason: "project_archived",
+    });
+
     const ownerSafetyAfterArchive = await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db);
     assert.equal(ownerSafetyAfterArchive.some((item) => item.id === draft.id && item.project.archivedAt !== null && item.capabilities.canRevoke), false);
 
@@ -948,6 +1216,114 @@ test(
     assert.equal(await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: draft.id } }), activeAuditCount);
     assert.equal(await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: forgedDraft.id } }), 2);
 
+    const archivedProjectForDeletion = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { name: true, updatedAt: true } });
+    const deletedWithInvalidatedGrant = await deleteArchivedProject({
+      projectId,
+      actor: projectOwnerActor,
+      confirmationName: archivedProjectForDeletion.name,
+      expectedUpdatedAt: archivedProjectForDeletion.updatedAt,
+    }, db);
+    assert.equal(deletedWithInvalidatedGrant.projectId, projectId);
+    assert.equal(await db.projectGitRepositoryAutomationGrant.count({ where: { id: archiveAutomationDraft.id } }), 0);
+    assert.equal(await db.projectGitRepositoryAutomationGrantAudit.count({ where: { grantId: archiveAutomationDraft.id } }), 4);
+
+  },
+);
+
+test(
+  "Git automation grant connection owner can discover and revoke after project membership loss",
+  { skip: !shouldRun ? "PROJECT_GIT_REPOSITORY_DELEGATION_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    assertDisposableGateDatabase();
+    const db = getDb();
+    const suffix = randomUUID().slice(0, 8);
+    const connectionOwnerId = randomUUID();
+    const projectOwnerId = randomUUID();
+    const projectId = randomUUID();
+    const connectionId = randomUUID();
+    const credentialId = randomUUID();
+    const { workspaceId } = await createPostgresWorkspaceFixture(db);
+    const connectionOwnerActor = { id: connectionOwnerId, role: "user" as const, accountAccessVersion: 1 };
+    const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
+    await db.appUser.createMany({ data: [
+      { id: connectionOwnerId, username: `git_grant_departed_owner_${suffix}`, role: "user" },
+      { id: projectOwnerId, username: `git_grant_project_owner_${suffix}`, role: "user" },
+    ] });
+    await db.project.create({ data: { id: projectId, workspaceId, name: `Grant withdrawal ${suffix}`, slug: `grant-withdrawal-${suffix}` } });
+    await db.$transaction(async (tx) => {
+      await grantWorkspaceMembership(tx, { workspaceId, userId: connectionOwnerId, role: "member", actorId: seededAdminId, reason: "grant_withdrawal_fixture" });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: projectOwnerId, role: "member", actorId: seededAdminId, reason: "grant_withdrawal_fixture" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: connectionOwnerId, role: "editor", actorId: seededAdminId, reason: "grant_withdrawal_fixture" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: projectOwnerId, role: "owner", actorId: seededAdminId, reason: "grant_withdrawal_fixture" });
+    });
+    await db.externalCredential.create({ data: {
+      id: credentialId, kind: "git", ciphertext: Buffer.from([1]), nonce: Buffer.from([2]), authTag: Buffer.from([3]),
+      maskedSuffix: "gate", secretFingerprint: "e".repeat(64),
+    } });
+    await createGitConnectionFixture({
+      id: connectionId, name: `Withdrawal Git ${suffix}`, providerKind: "github", transport: "https",
+      baseUrl: "https://github.com", authKind: "token", status: "verified", ownershipState: "confirmed",
+      resolvedAddressFingerprint: "f".repeat(64), createdById: connectionOwnerId, ownerUserId: connectionOwnerId,
+      credentialId, ownerAccountAccessVersion: 1,
+    }, db);
+    const baseDraft = await proposeProjectGitRepositoryDelegation(projectId, {
+      gitConnectionId: connectionId, repositoryPath: "org/withdrawal", trackedRef: "main", includeRoots: ["."],
+      softExcludePatterns: [], role: "primary", expiresAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString(),
+    }, connectionOwnerActor, db);
+    const baseOwnerConfirmed = await confirmProjectGitRepositoryDelegationOwner(projectId, baseDraft.id, {
+      expectedVersion: baseDraft.version, acknowledgeReadOnlyCredentialUse: true,
+    }, connectionOwnerActor, db);
+    await confirmProjectGitRepositoryDelegationProject(projectId, baseDraft.id, {
+      expectedVersion: baseOwnerConfirmed.version, acknowledgeRepositoryScope: true, acknowledgeDataEgress: true,
+    }, projectOwnerActor, db);
+    const base = await db.projectGitRepositoryDelegation.findUniqueOrThrow({ where: { id: baseDraft.id }, select: { expiresAt: true } });
+    const grantDraft = await proposeProjectGitAutomationGrant(projectId, {
+      baseDelegationId: baseDraft.id, runIntervalMinutes: 60, expiresAt: base.expiresAt.toISOString(),
+    }, connectionOwnerActor, db);
+    const ownerConfirmed = await confirmProjectGitAutomationGrantConnectionOwner(projectId, grantDraft.id, {
+      expectedVersion: grantDraft.version, acknowledgeReadOnlyScheduledAccess: true,
+    }, connectionOwnerActor, db);
+    const active = await activateProjectGitAutomationGrantProjectOwner(projectId, grantDraft.id, {
+      expectedVersion: ownerConfirmed.version, acknowledgeExactRepositoryScope: true, acknowledgeReadOnlyDataEgress: true,
+    }, projectOwnerActor, db);
+    await db.$transaction(async (tx) => {
+      await revokeProjectMembership(tx, projectId, connectionOwnerId, workspaceId, {
+        actorId: projectOwnerId, reason: "grant_withdrawal_owner_left_project",
+      });
+    });
+    const safetyList = await listConnectionOwnerProjectGitAutomationGrants(connectionOwnerActor, db);
+    assert.deepEqual(safetyList.map((grant) => grant.id), [grantDraft.id]);
+    assert.equal(safetyList[0]?.version, active.version);
+    assert.deepEqual(Object.keys(safetyList[0]!).sort(), ["expiresAt", "gitConnectionId", "id", "projectId", "status", "version"]);
+    const revoked = await revokeProjectGitAutomationGrant(projectId, grantDraft.id, {
+      expectedVersion: safetyList[0]!.version, reason: "connection owner withdraws consent after leaving project",
+    }, connectionOwnerActor, db);
+    assert.equal(revoked.status, "revoked");
+    assert.deepEqual(Object.keys(revoked).sort(), ["expiresAt", "gitConnectionId", "id", "projectId", "status", "version"]);
+    assert.equal(await db.projectGitRepositoryAutomationGrantAudit.count({ where: { grantId: grantDraft.id } }), 4);
+    const retainedAudit = await db.projectGitRepositoryAutomationGrantAudit.findFirstOrThrow({
+      where: { grantId: grantDraft.id, action: "revoked" },
+      select: { actorId: true, actorProjectMembershipId: true },
+    });
+    assert.deepEqual(retainedAudit, { actorId: connectionOwnerId, actorProjectMembershipId: null });
+    assert.deepEqual(await listConnectionOwnerProjectGitAutomationGrants(connectionOwnerActor, db), []);
+    const connection = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+    const preview = await previewGitConnectionMutation(connectionId, {
+      action: "disable", requestKey: `git-grant-owner-withdrawal-${suffix}`,
+      reason: "verify automatic grant no longer blocks connection governance",
+      expectedUpdatedAt: connection.updatedAt.toISOString(),
+    }, connectionOwnerActor, db);
+    assert.equal(preview.blockers.includes("live_automation_grant"), false);
+    const currentProject = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { name: true, updatedAt: true } });
+    const archived = await updateProjectLifecycle({
+      projectId, actor: projectOwnerActor, action: "archive", expectedUpdatedAt: currentProject.updatedAt,
+    }, db);
+    const deleted = await deleteArchivedProject({
+      projectId, actor: projectOwnerActor, confirmationName: currentProject.name, expectedUpdatedAt: archived.project.updatedAt,
+    }, db);
+    assert.equal(deleted.projectId, projectId);
+    assert.equal(await db.projectGitRepositoryAutomationGrant.count({ where: { id: grantDraft.id } }), 0);
+    assert.equal(await db.projectGitRepositoryAutomationGrantAudit.count({ where: { grantId: grantDraft.id } }), 4);
   },
 );
 
@@ -1040,6 +1416,481 @@ test(
       await runUpgradeCase(true);
       await runUpgradeCase(false);
     } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+      await admin.end().catch(() => undefined);
+    }
+  },
+);
+
+test(
+  "migration 130 rejects inconsistent history, backfills a valid manual publication, and keeps unchanged runs on the shared head",
+  { skip: !shouldRun ? "PROJECT_GIT_REPOSITORY_DELEGATION_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    assertDisposableGateDatabase();
+    const targetDatabaseUrl = process.env.DATABASE_URL;
+    if (typeof targetDatabaseUrl !== "string" || targetDatabaseUrl.length === 0) {
+      throw new Error("PROJECT_GIT_PUBLICATION_UPGRADE_DATABASE_URL_REQUIRED");
+    }
+    const migrations = await migrationNamesFromDisk();
+    const publicationIndex = migrations.indexOf(projectGitPublicationHeadMigration);
+    if (publicationIndex < 0) {
+      throw new Error("PROJECT_GIT_PUBLICATION_UPGRADE_MIGRATION_ORDER_INVALID");
+    }
+    const configuredTarget = new URL(targetDatabaseUrl);
+    const ownerRole = decodeURIComponent(configuredTarget.username);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(ownerRole)) {
+      throw new Error("PROJECT_GIT_PUBLICATION_UPGRADE_DATABASE_OWNER_INVALID");
+    }
+    const admin = new Client({ connectionString: assertUpgradeAdminUrl(), connectionTimeoutMillis: 5_000 });
+    const tempRoot = await prepareStagedMigrationRoot();
+    const databaseName = upgradeDatabaseName(randomUUID().slice(0, 12));
+    const isolatedUrl = new URL(targetDatabaseUrl);
+    isolatedUrl.pathname = `/${databaseName}`;
+    isolatedUrl.search = "";
+    isolatedUrl.hash = "";
+    const isolatedAdminUrl = new URL(assertUpgradeAdminUrl());
+    isolatedAdminUrl.pathname = `/${databaseName}`;
+    const database = new PrismaClient({ adapter: new PrismaPg({ connectionString: isolatedUrl.toString() }) });
+    const seedClient = new Client({ connectionString: isolatedAdminUrl.toString(), connectionTimeoutMillis: 5_000 });
+    let databaseCreated = false;
+
+    const insertRunAudit = async (input: Readonly<{
+      runId: string;
+      action: string;
+      statusBefore: string | null;
+      statusAfter: string;
+      dispatchState: string;
+      actorId: string | null;
+      commitSha: string | null;
+      manifestFingerprint: string | null;
+      reason: string;
+    }>): Promise<void> => {
+      await seedClient.query(
+        `INSERT INTO "ProjectGitRepositoryManualRunAudit" (
+          "id", "runId", "projectId", "delegationId", "action", "statusBefore", "statusAfter", "dispatchState", "actorId",
+          "requestedById", "requestedByAccountAccessVersion", "requestedByProjectMembershipId", "requestedByMembershipCreatedAt",
+          "connectionOwnerId", "connectionOwnerAccountAccessVersion", "ownerProjectMembershipId", "ownerMembershipCreatedAt",
+          "projectConfirmedById", "projectConfirmedProjectMembershipId", "projectConfirmedMembershipCreatedAt",
+          "reason", "delegationVersion", "delegationFingerprint", "connectionConfigurationVersion", "resolvedAddressFingerprint",
+          "credentialFingerprint", "role", "requiredForProjectSnapshot", "codeEnabled", "metadataEnabled", "manualSyncAllowed",
+          "automationAllowed", "commitSha", "manifestFingerprint", "transitionAt", "createdAt"
+        )
+        SELECT $1::uuid, run."id", run."projectId", run."delegationId", $3::"ProjectGitRepositoryManualRunAuditAction",
+          $4::"ProjectGitRepositoryManualRunStatus", $5::"ProjectGitRepositoryManualRunStatus",
+          $6::"ProjectGitRepositoryManualRunDispatchState", $7::uuid, run."requestedById", run."requestedByAccountAccessVersion",
+          run."requestedByProjectMembershipId", run."requestedByMembershipCreatedAt", run."connectionOwnerId",
+          run."connectionOwnerAccountAccessVersion", run."ownerProjectMembershipId", run."ownerMembershipCreatedAt",
+          run."projectConfirmedById", run."projectConfirmedProjectMembershipId", run."projectConfirmedMembershipCreatedAt",
+          $8, run."delegationVersion", run."delegationFingerprint", run."connectionConfigurationVersion",
+          run."resolvedAddressFingerprint", run."credentialFingerprint", run."role", run."requiredForProjectSnapshot",
+          run."codeEnabled", run."metadataEnabled", run."manualSyncAllowed", run."automationAllowed", $9, $10,
+          COALESCE(run."completedAt", statement_timestamp()), COALESCE(run."completedAt", statement_timestamp())
+        FROM "ProjectGitRepositoryManualRun" run WHERE run."id" = $2::uuid`,
+        [
+          randomUUID(), input.runId, input.action, input.statusBefore, input.statusAfter, input.dispatchState,
+          input.actorId, input.reason, input.commitSha, input.manifestFingerprint,
+        ],
+      );
+    };
+
+    try {
+      await admin.connect();
+      await admin.query(`CREATE DATABASE "${databaseName}" OWNER "${ownerRole}"`);
+      databaseCreated = true;
+      await stageMigrations(tempRoot, migrations.slice(0, publicationIndex));
+      await deployStagedMigrations(tempRoot, isolatedUrl.toString());
+
+      const { workspaceId, ownerId } = await createPostgresWorkspaceFixture(database);
+      const projectId = randomUUID();
+      await database.project.create({
+        data: { id: projectId, workspaceId, name: "G1c publication backfill", slug: `g1c-backfill-${randomUUID().slice(0, 8)}` },
+      });
+      await database.$transaction(async (tx) => grantProjectMembership(tx, {
+        projectId,
+        workspaceId,
+        userId: ownerId,
+        role: "owner",
+        actorId: ownerId,
+        reason: "g1c_publication_backfill_fixture",
+      }));
+      const membership = await database.projectMembership.findFirstOrThrow({
+        where: { projectId, userId: ownerId },
+        select: { id: true, createdAt: true },
+      });
+
+      const connectionId = randomUUID();
+      const credentialId = randomUUID();
+      const delegationId = randomUUID();
+      const delegationFingerprint = "d".repeat(64);
+      const addressFingerprint = "b".repeat(64);
+      const credentialFingerprint = "c".repeat(64);
+      const repositoryPath = "org/publication-backfill";
+      const trackedRef = "main";
+      const commitSha = "f".repeat(40);
+      const runId = randomUUID();
+      const clientRequestKey = randomUUID();
+      const sourceId = randomUUID();
+      const normalizedPath = "README.md";
+      const blobOid = "e".repeat(40);
+      const publishedAt = new Date();
+      const expiresAt = new Date(publishedAt.getTime() + 60 * 60 * 1_000);
+      const sourceText = `Repository: ${repositoryPath}\nRevision: ${commitSha}\nPath: ${normalizedPath}\n\nlegacy publication body\n`;
+      const contentHash = createHash("sha256").update(sourceText, "utf8").digest("hex");
+      const sourceIdentity = deterministicGitUuid(
+        `git-delegated-source:${delegationId}:1:${delegationFingerprint}:${normalizedPath}`,
+      );
+      const revisionKey = deterministicGitUuid(
+        `git-delegated-revision:${delegationId}:1:${delegationFingerprint}:${commitSha}:${normalizedPath}:${contentHash}`,
+      );
+      const contentBytes = Buffer.byteLength(sourceText, "utf8");
+      const lineCount = sourceText.split("\n").length;
+
+      await seedClient.connect();
+      await seedClient.query("BEGIN");
+      try {
+        await seedClient.query("SET LOCAL session_replication_role = replica");
+        await seedClient.query(
+          `INSERT INTO "ExternalCredential" (
+             "id", "kind", "ciphertext", "nonce", "authTag", "maskedSuffix", "secretFingerprint", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, 'git'::"ExternalCredentialKind", decode(repeat('01', 32), 'hex'),
+             decode(repeat('02', 12), 'hex'), decode(repeat('03', 16), 'hex'), 'gate', $2, $3, $3)`,
+          [credentialId, credentialFingerprint, publishedAt],
+        );
+        await seedClient.query(
+          `INSERT INTO "GitConnection" (
+             "id", "name", "providerKind", "transport", "baseUrl", "authKind", "credentialId", "allowPrivateNetwork",
+             "resolvedAddressFingerprint", "status", "configurationVersion", "createdById", "ownerUserId",
+             "ownerAccountAccessVersion", "ownershipState", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, 'G1c backfill Git', 'github'::"GitProviderKind", 'https'::"GitTransport", 'https://127.0.0.1',
+             'token'::"GitAuthKind", $2::uuid, true, $3, 'verified'::"GitConnectionStatus", 1, $4::uuid, $4::uuid,
+             1, 'confirmed'::"ResourceOwnershipState", $5, $5)`,
+          [connectionId, credentialId, addressFingerprint, ownerId, publishedAt],
+        );
+        await seedClient.query(
+          `INSERT INTO "ProjectGitRepositoryDelegation" (
+             "id", "projectId", "gitConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion",
+             "repositoryPath", "trackedRef", "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot",
+             "codeEnabled", "metadataEnabled", "manualSyncAllowed", "automationAllowed", "expiresAt",
+             "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint",
+             "version", "status", "ownerProjectMembershipId", "ownerMembershipCreatedAt", "projectConfirmedProjectMembershipId",
+             "projectConfirmedMembershipCreatedAt", "proposedById", "proposedAt", "ownerConfirmedById", "ownerConfirmedAt",
+             "projectConfirmedById", "projectConfirmedAt", "activatedAt", "createdAt", "updatedAt"
+           ) SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, '["."]'::jsonb, '[]'::jsonb,
+             'primary'::"ProjectRepositoryRole", true, true, true, true, false, $7, 1, $8, $9, $10, 1,
+             'active'::"ProjectGitRepositoryDelegationStatus", membership."id", membership."createdAt",
+             membership."id", membership."createdAt", $4::uuid, $12, $4::uuid, $12, $4::uuid, $12, $12, $12, $12
+           FROM "ProjectMembership" membership WHERE membership."id" = $11::uuid`,
+          [
+            delegationId, projectId, connectionId, ownerId, repositoryPath, trackedRef, expiresAt,
+            addressFingerprint, credentialFingerprint, delegationFingerprint, membership.id, publishedAt,
+          ],
+        );
+        await seedClient.query(
+          `INSERT INTO "ProjectSource" (
+             "id", "projectId", "kind", "originScope", "projectRepositoryLinkId", "sourceIdentity", "revisionKey",
+             "externalRef", "contentText", "contentHash", "capturedAt", "retiredAt"
+           ) VALUES ($1::uuid, $2::uuid, 'git'::"ProjectSourceKind", 'project'::"ContentOriginScope", NULL,
+             $3::uuid, $4::uuid, NULL, $5, $6, $7, NULL)`,
+          [sourceId, projectId, sourceIdentity, revisionKey, sourceText, contentHash, publishedAt],
+        );
+        await seedClient.query(
+          `INSERT INTO "ProjectGitRepositoryManualRun" (
+             "id", "projectId", "delegationId", "requestedById", "requestedByAccountAccessVersion",
+             "requestedByProjectMembershipId", "requestedByMembershipCreatedAt", "clientRequestKey", "status", "stage",
+             "dispatchState", "delegationVersion", "delegationFingerprint", "connectionOwnerId",
+             "connectionOwnerAccountAccessVersion", "ownerProjectMembershipId", "ownerMembershipCreatedAt",
+             "projectConfirmedById", "projectConfirmedProjectMembershipId", "projectConfirmedMembershipCreatedAt",
+             "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint", "repositoryPath",
+             "trackedRef", "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled",
+             "metadataEnabled", "manualSyncAllowed", "automationAllowed", "frozenCommitSha", "manifestFingerprint",
+             "fileCount", "decodedTextBytes", "result", "createdAt", "startedAt", "completedAt"
+           ) VALUES (
+             $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5::uuid, $6::timestamp(3), $7::uuid,
+             'succeeded'::"ProjectGitRepositoryManualRunStatus", 'terminal'::"ProjectGitRepositoryManualRunStage",
+             'acknowledged'::"ProjectGitRepositoryManualRunDispatchState", 1, $8, $4::uuid, 1, $5::uuid, $6::timestamp(3),
+             $4::uuid, $5::uuid, $6::timestamp(3), 1, $9, $10, $11, $12, '["."]'::jsonb, '[]'::jsonb,
+             'primary'::"ProjectRepositoryRole", true, true, true, true, false, $13, repeat('0', 64), 1, $14::integer,
+             jsonb_build_object('fileCount', 1, 'decodedTextBytes', $14::integer), $15, $15, $15
+           )`,
+          [
+            runId, projectId, delegationId, ownerId, membership.id, membership.createdAt, clientRequestKey,
+            delegationFingerprint, addressFingerprint, credentialFingerprint, repositoryPath, trackedRef,
+            commitSha, contentBytes, publishedAt,
+          ],
+        );
+        await seedClient.query(
+          `INSERT INTO "ProjectGitRepositoryManualRunEntry" (
+             "id", "projectId", "runId", "delegationId", "delegationVersion", "delegationFingerprint", "projectSourceId",
+             "ordinal", "normalizedPath", "blobOid", "contentHash", "contentBytes", "lineCount", "createdAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6::uuid, 0, $7, $8, $9, $10, $11, $12)`,
+          [randomUUID(), projectId, runId, delegationId, delegationFingerprint, sourceId, normalizedPath, blobOid, contentHash, contentBytes, lineCount, publishedAt],
+        );
+        const manifestResult = await seedClient.query<{ manifest: string }>(
+          `SELECT "project_git_manual_runtime_manifest"($1::uuid) AS manifest`,
+          [runId],
+        );
+        const manifestFingerprint = manifestResult.rows[0]?.manifest;
+        if (manifestFingerprint === undefined) throw new Error("PROJECT_GIT_PUBLICATION_BACKFILL_FIXTURE_MANIFEST_MISSING");
+        await seedClient.query(
+          `UPDATE "ProjectGitRepositoryManualRun" SET "manifestFingerprint" = $2 WHERE "id" = $1::uuid`,
+          [runId, manifestFingerprint],
+        );
+        await seedClient.query(
+          `INSERT INTO "ProjectGitRepositoryManualPointer" (
+             "projectId", "delegationId", "runId", "delegationVersion", "delegationFingerprint",
+             "frozenCommitSha", "manifestFingerprint", "publishedAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, 1, $4, $5, $6, $7, $7)`,
+          [projectId, delegationId, runId, delegationFingerprint, commitSha, manifestFingerprint, publishedAt],
+        );
+        await seedClient.query(
+          `INSERT INTO "ProjectGitRepositoryManualRunAudit" (
+             "id", "runId", "projectId", "delegationId", "action", "statusBefore", "statusAfter", "dispatchState", "actorId",
+             "requestedById", "requestedByAccountAccessVersion", "requestedByProjectMembershipId", "requestedByMembershipCreatedAt",
+             "connectionOwnerId", "connectionOwnerAccountAccessVersion", "ownerProjectMembershipId", "ownerMembershipCreatedAt",
+             "projectConfirmedById", "projectConfirmedProjectMembershipId", "projectConfirmedMembershipCreatedAt", "reason",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationVersion", "resolvedAddressFingerprint",
+             "credentialFingerprint", "role", "requiredForProjectSnapshot", "codeEnabled", "metadataEnabled", "manualSyncAllowed",
+             "automationAllowed", "commitSha", "manifestFingerprint", "transitionAt", "createdAt"
+           ) SELECT $1::uuid, run."id", run."projectId", run."delegationId", 'succeeded'::"ProjectGitRepositoryManualRunAuditAction",
+             'running'::"ProjectGitRepositoryManualRunStatus", 'succeeded'::"ProjectGitRepositoryManualRunStatus",
+             'acknowledged'::"ProjectGitRepositoryManualRunDispatchState", run."requestedById", run."requestedById",
+             run."requestedByAccountAccessVersion", run."requestedByProjectMembershipId", run."requestedByMembershipCreatedAt",
+             run."connectionOwnerId", run."connectionOwnerAccountAccessVersion", run."ownerProjectMembershipId",
+             run."ownerMembershipCreatedAt", run."projectConfirmedById", run."projectConfirmedProjectMembershipId",
+             run."projectConfirmedMembershipCreatedAt", 'g1c_legacy_pointer_fixture', run."delegationVersion",
+             run."delegationFingerprint", run."connectionConfigurationVersion", run."resolvedAddressFingerprint",
+             run."credentialFingerprint", run."role", run."requiredForProjectSnapshot", run."codeEnabled", run."metadataEnabled",
+             run."manualSyncAllowed", run."automationAllowed", run."frozenCommitSha", run."manifestFingerprint", $2, $2
+           FROM "ProjectGitRepositoryManualRun" run WHERE run."id" = $3::uuid`,
+          [randomUUID(), publishedAt, runId],
+        );
+        await seedClient.query("COMMIT");
+      } catch (error) {
+        await seedClient.query("ROLLBACK");
+        throw error;
+      }
+
+      await stageMigrations(tempRoot, [projectGitPublicationHeadMigration]);
+      await seedClient.query("BEGIN");
+      try {
+        await seedClient.query("SET LOCAL session_replication_role = replica");
+        await seedClient.query(
+          `UPDATE "ProjectGitRepositoryManualPointer" SET "manifestFingerprint" = $2 WHERE "runId" = $1::uuid`,
+          [runId, "a".repeat(64)],
+        );
+        await seedClient.query("COMMIT");
+      } catch (error) {
+        await seedClient.query("ROLLBACK");
+        throw error;
+      }
+      await assert.rejects(
+        () => deployStagedMigrations(tempRoot, isolatedUrl.toString()),
+        /PROJECT_GIT_PUBLICATION_BACKFILL_INCONSISTENT_MANUAL_POINTER/u,
+      );
+      const rejectedMigration = await seedClient.query<{ finished: string; publicationHead: string | null }>(
+        `SELECT count(*) FILTER (WHERE "finished_at" IS NOT NULL)::text AS finished,
+                to_regclass('public."ProjectGitRepositoryPublicationHead"')::text AS "publicationHead"
+           FROM "_prisma_migrations" WHERE "migration_name" = $1`,
+        [projectGitPublicationHeadMigration],
+      );
+      assert.deepEqual(rejectedMigration.rows, [{ finished: "0", publicationHead: null }]);
+      await seedClient.query("BEGIN");
+      try {
+        await seedClient.query("SET LOCAL session_replication_role = replica");
+        await seedClient.query(
+          `UPDATE "ProjectGitRepositoryManualPointer" pointer_row
+              SET "manifestFingerprint" = run_row."manifestFingerprint"
+             FROM "ProjectGitRepositoryManualRun" run_row
+            WHERE pointer_row."runId" = run_row."id" AND pointer_row."runId" = $1::uuid`,
+          [runId],
+        );
+        await seedClient.query("COMMIT");
+      } catch (error) {
+        await seedClient.query("ROLLBACK");
+        throw error;
+      }
+      await execFile(
+        "pnpm",
+        ["exec", "prisma", "migrate", "resolve", "--rolled-back", projectGitPublicationHeadMigration,
+          "--config", join(tempRoot, "prisma.config.ts")],
+        { cwd: repositoryRoot, env: { ...process.env, DATABASE_URL: isolatedUrl.toString() }, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
+      );
+      await deployStagedMigrations(tempRoot, isolatedUrl.toString());
+      const backfilled = await seedClient.query<{
+        currentPublicationVersionId: string;
+        generation: number;
+        versionRunId: string;
+        runKind: string;
+        previousPublicationVersionId: string | null;
+        previousGeneration: number;
+        entryCount: string;
+        manifestFingerprint: string;
+      }>(
+        `SELECT head."currentPublicationVersionId"::text AS "currentPublicationVersionId", head."generation",
+           version_row."runId"::text AS "versionRunId", version_row."runKind"::text AS "runKind",
+           version_row."previousPublicationVersionId"::text AS "previousPublicationVersionId", version_row."previousGeneration",
+           (SELECT count(*)::text FROM "ProjectGitRepositoryPublicationEntry" entry
+             WHERE entry."publicationVersionId" = version_row."id") AS "entryCount",
+           version_row."manifestFingerprint"
+         FROM "ProjectGitRepositoryPublicationHead" head
+         JOIN "ProjectGitRepositoryPublicationVersion" version_row
+           ON version_row."id" = head."currentPublicationVersionId"
+        WHERE head."projectId" = $1::uuid AND head."delegationId" = $2::uuid`,
+        [projectId, delegationId],
+      );
+      assert.deepEqual(backfilled.rows, [{
+        currentPublicationVersionId: backfilled.rows[0]?.currentPublicationVersionId,
+        generation: 1,
+        versionRunId: runId,
+        runKind: "manual",
+        previousPublicationVersionId: null,
+        previousGeneration: 0,
+        entryCount: "1",
+        manifestFingerprint: backfilled.rows[0]?.manifestFingerprint,
+      }]);
+      const publicationVersionId = backfilled.rows[0]?.currentPublicationVersionId;
+      const manifestFingerprint = backfilled.rows[0]?.manifestFingerprint;
+      if (publicationVersionId === undefined || manifestFingerprint === undefined) {
+        throw new Error("PROJECT_GIT_PUBLICATION_BACKFILL_RESULT_MISSING");
+      }
+
+      const unchangedRunId = randomUUID();
+      await seedClient.query("BEGIN");
+      try {
+        await seedClient.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+        await seedClient.query(
+          `INSERT INTO "ProjectGitRepositoryManualRun" (
+             "id", "projectId", "delegationId", "requestedById", "requestedByAccountAccessVersion",
+             "requestedByProjectMembershipId", "requestedByMembershipCreatedAt", "clientRequestKey",
+             "delegationVersion", "delegationFingerprint", "connectionOwnerId", "connectionOwnerAccountAccessVersion",
+             "ownerProjectMembershipId", "ownerMembershipCreatedAt", "projectConfirmedById",
+             "projectConfirmedProjectMembershipId", "projectConfirmedMembershipCreatedAt", "connectionConfigurationVersion",
+             "resolvedAddressFingerprint", "credentialFingerprint", "repositoryPath", "trackedRef", "includeRoots",
+             "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled", "metadataEnabled", "manualSyncAllowed",
+             "automationAllowed", "baselineRunId", "baselineFrozenCommitSha", "baselineManifestFingerprint", "baselinePublishedAt",
+             "expectedPublicationVersionId", "expectedPublicationGeneration"
+           ) SELECT $1::uuid, delegation."projectId", delegation."id", delegation."connectionOwnerId", 1,
+             membership."id", membership."createdAt", $2::uuid, delegation."version", delegation."delegationFingerprint",
+             delegation."connectionOwnerId", 1, delegation."ownerProjectMembershipId", delegation."ownerMembershipCreatedAt",
+             delegation."projectConfirmedById", delegation."projectConfirmedProjectMembershipId",
+             delegation."projectConfirmedMembershipCreatedAt", delegation."connectionConfigurationVersion",
+             delegation."resolvedAddressFingerprint", delegation."credentialFingerprint", delegation."repositoryPath",
+             delegation."trackedRef", delegation."includeRoots", delegation."softExcludePatterns", delegation."role",
+             delegation."requiredForProjectSnapshot", delegation."codeEnabled", delegation."metadataEnabled",
+             delegation."manualSyncAllowed", delegation."automationAllowed", pointer."runId", pointer."frozenCommitSha",
+             pointer."manifestFingerprint", pointer."publishedAt", head."currentPublicationVersionId", head."generation"
+           FROM "ProjectGitRepositoryDelegation" delegation
+           JOIN "ProjectMembership" membership ON membership."id" = delegation."ownerProjectMembershipId"
+           JOIN "ProjectGitRepositoryManualPointer" pointer
+             ON pointer."projectId" = delegation."projectId" AND pointer."delegationId" = delegation."id"
+           JOIN "ProjectGitRepositoryPublicationHead" head
+             ON head."projectId" = delegation."projectId" AND head."delegationId" = delegation."id"
+          WHERE delegation."id" = $3::uuid`,
+          [unchangedRunId, randomUUID(), delegationId],
+        );
+        await insertRunAudit({
+          runId: unchangedRunId,
+          action: "requested",
+          statusBefore: null,
+          statusAfter: "queued",
+          dispatchState: "pending",
+          actorId: ownerId,
+          commitSha: null,
+          manifestFingerprint: null,
+          reason: "g1c_backfill_unchanged_requested",
+        });
+        await seedClient.query("SET CONSTRAINTS ALL IMMEDIATE");
+        await seedClient.query("COMMIT");
+      } catch (error) {
+        await seedClient.query("ROLLBACK");
+        throw error;
+      }
+
+      await seedClient.query("BEGIN");
+      try {
+        await seedClient.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+        await seedClient.query(
+          `UPDATE "ProjectGitRepositoryManualRun"
+              SET "status" = 'running', "stage" = 'admitted', "dispatchState" = 'pending', "startedAt" = clock_timestamp()
+            WHERE "id" = $1::uuid`,
+          [unchangedRunId],
+        );
+        await insertRunAudit({
+          runId: unchangedRunId, action: "admitted", statusBefore: "queued", statusAfter: "running", dispatchState: "pending",
+          actorId: ownerId, commitSha: null, manifestFingerprint: null, reason: "g1c_backfill_unchanged_admitted",
+        });
+        await seedClient.query("SET CONSTRAINTS ALL IMMEDIATE");
+        await seedClient.query("COMMIT");
+      } catch (error) {
+        await seedClient.query("ROLLBACK");
+        throw error;
+      }
+
+      await seedClient.query("BEGIN");
+      try {
+        await seedClient.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+        await seedClient.query(
+          `UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'fetching', "dispatchState" = 'dispatched'
+            WHERE "id" = $1::uuid`,
+          [unchangedRunId],
+        );
+        await insertRunAudit({
+          runId: unchangedRunId, action: "dispatched", statusBefore: "running", statusAfter: "running", dispatchState: "dispatched",
+          actorId: ownerId, commitSha: null, manifestFingerprint: null, reason: "g1c_backfill_unchanged_dispatched",
+        });
+        await seedClient.query("SET CONSTRAINTS ALL IMMEDIATE");
+        await seedClient.query("COMMIT");
+      } catch (error) {
+        await seedClient.query("ROLLBACK");
+        throw error;
+      }
+
+      await seedClient.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'validating' WHERE "id" = $1::uuid`, [unchangedRunId]);
+      await seedClient.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await seedClient.query(`UPDATE "ProjectGitRepositoryManualRun" SET "stage" = 'publishing' WHERE "id" = $1::uuid`, [unchangedRunId]);
+      await seedClient.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await seedClient.query("BEGIN");
+      try {
+        await seedClient.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+        await seedClient.query(
+          `UPDATE "ProjectGitRepositoryManualRun"
+              SET "status" = 'unchanged', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+                  "frozenCommitSha" = $2, "manifestFingerprint" = $3, "fileCount" = 0, "decodedTextBytes" = 0,
+                  "result" = jsonb_build_object('outcome', 'unchanged'), "completedAt" = clock_timestamp()
+            WHERE "id" = $1::uuid`,
+          [unchangedRunId, commitSha, manifestFingerprint],
+        );
+        await insertRunAudit({
+          runId: unchangedRunId,
+          action: "unchanged",
+          statusBefore: "running",
+          statusAfter: "unchanged",
+          dispatchState: "acknowledged",
+          actorId: ownerId,
+          commitSha,
+          manifestFingerprint,
+          reason: "manual_sync_remote_head_unchanged",
+        });
+        await seedClient.query("SET CONSTRAINTS ALL IMMEDIATE");
+        await seedClient.query("COMMIT");
+      } catch (error) {
+        await seedClient.query("ROLLBACK");
+        throw error;
+      }
+
+      const finalHead = await seedClient.query<{ currentPublicationVersionId: string; generation: number; unchangedStatus: string }>(
+        `SELECT head."currentPublicationVersionId"::text AS "currentPublicationVersionId", head."generation",
+           run."status"::text AS "unchangedStatus"
+         FROM "ProjectGitRepositoryPublicationHead" head
+         JOIN "ProjectGitRepositoryManualRun" run ON run."id" = $3::uuid
+        WHERE head."projectId" = $1::uuid AND head."delegationId" = $2::uuid`,
+        [projectId, delegationId, unchangedRunId],
+      );
+      assert.deepEqual(finalHead.rows, [{ currentPublicationVersionId: publicationVersionId, generation: 1, unchangedStatus: "unchanged" }]);
+    } finally {
+      await database.$disconnect().catch(() => undefined);
+      await seedClient.end().catch(() => undefined);
+      if (databaseCreated) await admin.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`).catch(() => undefined);
       await rm(tempRoot, { recursive: true, force: true });
       await admin.end().catch(() => undefined);
     }

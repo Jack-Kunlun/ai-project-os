@@ -14,6 +14,13 @@ const environmentSchema = z.object({
       message: "ENTITLEMENT_DATABASE_URL must be a PostgreSQL connection string",
     })
     .optional(),
+  GIT_AUTOMATION_DATABASE_URL: z
+    .string()
+    .min(1, "GIT_AUTOMATION_DATABASE_URL is required when Git automation ledger operations are used")
+    .refine((value) => value.startsWith("postgresql://") || value.startsWith("postgres://"), {
+      message: "GIT_AUTOMATION_DATABASE_URL must be a PostgreSQL connection string",
+    })
+    .optional(),
 });
 
 export type AppEnvironment = z.infer<typeof environmentSchema>;
@@ -22,6 +29,7 @@ export function getEnvironment(): AppEnvironment {
   const result = environmentSchema.safeParse({
     DATABASE_URL: process.env.DATABASE_URL,
     ENTITLEMENT_DATABASE_URL: process.env.ENTITLEMENT_DATABASE_URL,
+    GIT_AUTOMATION_DATABASE_URL: process.env.GIT_AUTOMATION_DATABASE_URL,
   });
 
   if (!result.success) {

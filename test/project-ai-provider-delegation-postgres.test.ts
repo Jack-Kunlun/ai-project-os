@@ -1682,6 +1682,7 @@ test(
         expectedUpdatedAt: (await db.project.findUniqueOrThrow({ where: { id: projectId } })).updatedAt,
       },
     });
+    await db.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.delete({ where: { id: projectId } });
     assert.equal(await db.projectAiProviderDelegation.count({ where: { projectId } }), 0);
     assert.equal(await db.projectAiEffectiveRouteSelection.count({ where: { projectId } }), 0);

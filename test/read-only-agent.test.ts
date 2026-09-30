@@ -103,6 +103,7 @@ function searchResponse(): ProjectSearchResponse {
         rangeStart: 0,
         rangeEnd: Buffer.byteLength(sourceText, "utf8"),
         contentHash: sha256(sourceText),
+        sourceContentHash: sha256(sourceText),
         excerpt: sourceText,
       },
     }],

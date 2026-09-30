@@ -12,10 +12,23 @@ readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
 # refreshing control-plane files cannot change the running release checkout.
 readonly TOOLING_REPOSITORY_DIR=/srv/ai-project-os/tooling-repository
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly V07_STATE_FILE=/etc/ai-project-os/release-tooling-v07-state
+readonly NGINX_CONFIG_DEST=/etc/nginx/sites-available/ai-project-os.conf
+readonly NGINX_ENABLED_PATH=/etc/nginx/sites-enabled/ai-project-os.conf
+V07_STATUS_FILES=(
+  /usr/local/sbin/ai-project-os-actions-gateway
+  /usr/local/sbin/ai-project-os-install-release-tooling
+  /usr/local/sbin/ai-project-os-v07-deploy
+  /usr/local/sbin/ai-project-os-prepare-git-automation-secret
+  /usr/local/sbin/ai-project-os-backup
+  /etc/nginx/sites-available/ai-project-os.conf
+  /etc/ai-project-os/compose.operations.yaml
+  /etc/sudoers.d/ai-project-os-deploy
+)
 
-# Keep the first bootstrap intentionally limited to the 0.6 release family.
-# A later minor line must update this root-owned policy through a reviewed tag.
-readonly RELEASE_TAG_PATTERN='^v0\.6\.[0-9]+(-dev\.[1-9][0-9]*)?$'
+# New tooling is installed only from the reviewed 0.7.0 release line.
+# The running 0.6 tag is verified separately by the migration deployer.
+readonly RELEASE_TAG_PATTERN='^v0\.7\.0$'
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -23,14 +36,70 @@ fail() {
 }
 
 [[ $EUID -eq 0 ]] || fail RELEASE_TOOLING_ROOT_REQUIRED
+if [[ "$RELEASE_TAG" == --status && -z "$EXPECTED_REVISION" && -z "$CONFIRMATION" ]]; then
+  command -v python3 >/dev/null || fail RELEASE_TOOLING_PYTHON_REQUIRED 69
+  command -v sha256sum >/dev/null || fail RELEASE_TOOLING_CHECKSUM_REQUIRED 69
+  command -v cmp >/dev/null || fail RELEASE_TOOLING_COMPARE_REQUIRED 69
+  command -v tail >/dev/null || fail RELEASE_TOOLING_TAIL_REQUIRED 69
+  python3 - "$V07_STATE_FILE" "${V07_STATUS_FILES[@]}" <<'PY' || fail V07_TOOLING_STATUS_INVALID 70
+import os
+import stat
+import sys
+
+for path in sys.argv[1:]:
+    current = "/"
+    components = [part for part in path.split("/") if part]
+    for index, part in enumerate(components):
+        current = os.path.join(current, part)
+        metadata = os.lstat(current)
+        mode = metadata.st_mode
+        if (metadata.st_uid, metadata.st_gid) != (0, 0) or mode & 0o022:
+            raise SystemExit(1)
+        if index < len(components) - 1 and not stat.S_ISDIR(mode):
+            raise SystemExit(1)
+        if index == len(components) - 1 and not stat.S_ISREG(mode):
+            raise SystemExit(1)
+PY
+  IFS=' ' read -r state_tag state_revision < "$V07_STATE_FILE"
+  [[ "$state_tag" == tag=v0.7.0 && "$state_revision" =~ ^revision=[0-9a-f]{40}$ ]] || fail V07_TOOLING_STATUS_INVALID 70
+  cmp -s <(tail -n +2 "$V07_STATE_FILE") <(sha256sum "${V07_STATUS_FILES[@]}") || fail V07_TOOLING_STATUS_INVALID 70
+  printf 'TOOLING_V07_READY\n'
+  exit 0
+fi
 [[ "$RELEASE_TAG" =~ $RELEASE_TAG_PATTERN ]] || fail RELEASE_TOOLING_TAG_INVALID 64
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail RELEASE_TOOLING_REVISION_INVALID 65
 [[ "$CONFIRMATION" == CONFIRM_INSTALL_RELEASE_TOOLING_V1 ]] || fail RELEASE_TOOLING_CONFIRMATION_INVALID 66
 
-exec 9>"$LOCK_FILE"
+command -v python3 >/dev/null || fail RELEASE_TOOLING_PYTHON_REQUIRED 69
+python3 - "$LOCK_FILE" <<'PY' || fail RELEASE_TOOLING_LOCK_INVALID 70
+import os
+import stat
+import sys
+
+lock_path = sys.argv[1]
+directory = os.lstat(os.path.dirname(lock_path))
+if not stat.S_ISDIR(directory.st_mode) or (directory.st_uid, directory.st_gid) != (0, 0):
+    raise SystemExit(1)
+if stat.S_IMODE(directory.st_mode) != 0o1777:
+    raise SystemExit(1)
+flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+try:
+    descriptor = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+except FileExistsError:
+    descriptor = os.open(lock_path, flags)
+try:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or (metadata.st_uid, metadata.st_gid) != (0, 0):
+        raise SystemExit(1)
+    if stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise SystemExit(1)
+finally:
+    os.close(descriptor)
+PY
+exec 9>>"$LOCK_FILE"
 flock -n 9 || fail RELEASE_TOOLING_DEPLOYMENT_IN_PROGRESS 75
 
-for required_command in bash chown curl dirname flock git grep install mktemp mv python3 rm stat tar visudo; do
+for required_command in bash chown cp curl dirname flock git grep install mktemp mv nginx python3 readlink rm sha256sum stat systemctl tar visudo; do
   command -v "$required_command" >/dev/null || fail RELEASE_TOOLING_COMMAND_MISSING 69
 done
 
@@ -88,11 +157,52 @@ fi
 
 candidate_root=$(mktemp -d /srv/ai-project-os/.release-tooling.XXXXXX)
 STAGED_FILES=()
+IS_V07_RELEASE=false
+NGINX_CONFIG_PROMOTED=false
+NGINX_CONFIG_COMMITTED=false
+NGINX_BACKUP_PATH=""
+NGINX_WAS_ACTIVE=false
+if [[ "$RELEASE_TAG" == v0.7.0 ]]; then
+  IS_V07_RELEASE=true
+fi
+
+rollback_nginx_configuration() {
+  local rollback_failed=false
+  if [[ -n "$NGINX_BACKUP_PATH" && -f "$NGINX_BACKUP_PATH" && ! -L "$NGINX_BACKUP_PATH" ]]; then
+    if mv -f -- "$NGINX_BACKUP_PATH" "$NGINX_CONFIG_DEST"; then
+      NGINX_BACKUP_PATH=""
+    else
+      rollback_failed=true
+    fi
+  else
+    rollback_failed=true
+  fi
+  if [[ "$rollback_failed" == false ]] && ! nginx -t >/dev/null 2>&1; then
+    rollback_failed=true
+  fi
+  if [[ "$rollback_failed" == false && "$NGINX_WAS_ACTIVE" == true ]]; then
+    if systemctl is-active --quiet nginx; then
+      systemctl reload nginx >/dev/null 2>&1 || rollback_failed=true
+    else
+      systemctl start nginx >/dev/null 2>&1 || rollback_failed=true
+    fi
+    systemctl is-active --quiet nginx || rollback_failed=true
+  fi
+  if [[ "$rollback_failed" == true ]]; then
+    printf '%s\n' RELEASE_TOOLING_NGINX_ROLLBACK_FAILED >&2
+    [[ -z "$NGINX_BACKUP_PATH" ]] || printf 'rollback_backup=%s\n' "$NGINX_BACKUP_PATH" >&2
+  fi
+}
 
 # Remove only process-owned temporary paths. Installed destinations are never
 # removed by cleanup, including when a later rename fails.
 cleanup() {
   local staged
+  if [[ "$NGINX_CONFIG_PROMOTED" == true && "$NGINX_CONFIG_COMMITTED" != true ]]; then
+    rollback_nginx_configuration
+  elif [[ -n "$NGINX_BACKUP_PATH" ]]; then
+    rm -f -- "$NGINX_BACKUP_PATH"
+  fi
   rm -rf -- "${candidate_root-}"
   for staged in "${STAGED_FILES[@]}"; do
     [[ -z "$staged" ]] || rm -f -- "$staged"
@@ -102,7 +212,7 @@ trap cleanup EXIT
 
 # Archive only the fixed allowlist. Extracting the whole deployment directory
 # would unnecessarily admit unrelated candidate-controlled paths.
-git -C "$TOOLING_REPOSITORY_DIR" archive --format=tar "$EXPECTED_REVISION" -- \
+ARCHIVE_PATHS=(
   package.json \
   deploy/production/ai-project-os-actions-gateway \
   deploy/production/ai-project-os-install-release-tooling \
@@ -117,12 +227,23 @@ git -C "$TOOLING_REPOSITORY_DIR" archive --format=tar "$EXPECTED_REVISION" -- \
   deploy/production/ai_project_os_backup_artifact.py \
   deploy/production/ai-project-os-restore \
   deploy/production/ai-project-os-configure-github-oauth \
+  deploy/production/nginx/ai-project-os.conf \
   deploy/production/compose.operations.yaml \
   deploy/production/ai-project-os-deploy.sudoers \
   scripts/production-v06-patch-upgrade-preflight.ts \
   scripts/production-v06-next-upgrade-preflight.ts \
   scripts/production-v06-default-memory-upgrade-preflight.ts \
-  scripts/production-app-upgrade-preflight.ts | \
+  scripts/production-app-upgrade-preflight.ts
+)
+if [[ "$IS_V07_RELEASE" == true ]]; then
+  ARCHIVE_PATHS+=(
+    deploy/production/ai-project-os-v07-deploy
+    deploy/production/ai-project-os-prepare-git-automation-secret
+    scripts/production-v07-upgrade-preflight.ts
+  )
+fi
+git -C "$TOOLING_REPOSITORY_DIR" archive --format=tar "$EXPECTED_REVISION" -- \
+  "${ARCHIVE_PATHS[@]}" | \
   tar --extract --file=- --directory "$candidate_root" --no-same-owner --no-same-permissions
 
 package_version=$(python3 -c '
@@ -152,6 +273,10 @@ readonly BACKUP=$CANDIDATE_DIR/ai-project-os-backup
 readonly BACKUP_ARTIFACT_HELPER=$CANDIDATE_DIR/ai_project_os_backup_artifact.py
 readonly RESTORE=$CANDIDATE_DIR/ai-project-os-restore
 readonly OAUTH_CONFIGURATOR=$CANDIDATE_DIR/ai-project-os-configure-github-oauth
+readonly V07_DEPLOYER=$CANDIDATE_DIR/ai-project-os-v07-deploy
+readonly GIT_AUTOMATION_SECRET_PREPARER=$CANDIDATE_DIR/ai-project-os-prepare-git-automation-secret
+readonly NGINX_CONFIG=$CANDIDATE_DIR/nginx/ai-project-os.conf
+readonly V07_PREFLIGHT=$candidate_root/scripts/production-v07-upgrade-preflight.ts
 readonly COMPOSE_OVERRIDE=$CANDIDATE_DIR/compose.operations.yaml
 readonly SUDOERS=$CANDIDATE_DIR/ai-project-os-deploy.sudoers
 
@@ -171,14 +296,25 @@ for candidate in \
   "$BACKUP_ARTIFACT_HELPER" \
   "$RESTORE" \
   "$OAUTH_CONFIGURATOR" \
+  "$NGINX_CONFIG" \
   "$COMPOSE_OVERRIDE" \
   "$SUDOERS"; do
   [[ -f "$candidate" && ! -L "$candidate" && -s "$candidate" ]] || fail RELEASE_TOOLING_CANDIDATE_INVALID 69
 done
 
+if [[ "$IS_V07_RELEASE" == true ]]; then
+  for candidate in "$V07_DEPLOYER" "$GIT_AUTOMATION_SECRET_PREPARER" "$V07_PREFLIGHT"; do
+    [[ -f "$candidate" && ! -L "$candidate" && -s "$candidate" ]] || fail RELEASE_TOOLING_V07_CANDIDATE_INVALID 69
+  done
+fi
+
 for script in "$GATEWAY" "$UPDATER" "$DEPLOYER" "$V06_DEPLOYER" "$V06_PATCH_DEPLOYER" "$V06_NEXT_DEPLOYER" "$V06_DEFAULT_MEMORY_DEPLOYER" "$APP_DEPLOYER" "$PRESERVE_DEPLOYER" "$BACKUP" "$RESTORE" "$OAUTH_CONFIGURATOR"; do
   bash -n "$script" || fail RELEASE_TOOLING_SCRIPT_INVALID 69
 done
+if [[ "$IS_V07_RELEASE" == true ]]; then
+  bash -n "$V07_DEPLOYER" || fail RELEASE_TOOLING_V07_DEPLOYER_INVALID 69
+  bash -n "$GIT_AUTOMATION_SECRET_PREPARER" || fail RELEASE_TOOLING_V07_SECRET_PREPARER_INVALID 69
+fi
 python3 -m py_compile "$BACKUP_ARTIFACT_HELPER" || fail RELEASE_TOOLING_BACKUP_HELPER_INVALID 69
 
 # The refreshed gateway must retain this stable updater entry. Otherwise one
@@ -209,6 +345,40 @@ grep -Fq 'scripts/production-app-upgrade-preflight.ts' "$APP_DEPLOYER" || fail R
 grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
 grep -Fq '/usr/local/sbin/ai-project-os-preserve-deploy' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
 grep -Fq 'configure-github-oauth' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fqx 'limit_req_zone $binary_remote_addr zone=ai_project_os_auth:10m rate=10r/m;' "$NGINX_CONFIG" || \
+  fail RELEASE_TOOLING_NGINX_CONFIG_CONTRACT_INVALID 69
+python3 - "$NGINX_CONFIG" <<'PY' || fail RELEASE_TOOLING_NGINX_CONFIG_CONTRACT_INVALID 69
+import re
+import sys
+
+configuration = open(sys.argv[1], encoding="utf-8").read()
+oauth_zone = "limit_req_zone $binary_remote_addr zone=ai_project_os_oauth_authorize:10m rate=3r/m;"
+locations = re.findall(r"(?ms)^    location = /oauth/authorize \{\n(?P<body>.*?)^    \}", configuration)
+if configuration.count(oauth_zone) != 1 or len(locations) != 1:
+    raise SystemExit(1)
+body = locations[0]
+for directive in (
+    "limit_req zone=ai_project_os_oauth_authorize burst=3 nodelay;",
+    "limit_req_status 429;",
+    "include /etc/nginx/snippets/ai-project-os-proxy.conf;",
+):
+    if body.count(directive) != 1:
+        raise SystemExit(1)
+if "zone=ai_project_os_auth" in body:
+    raise SystemExit(1)
+PY
+if [[ "$IS_V07_RELEASE" == true ]]; then
+  grep -Fq '^deploy-v07\ (v0\.6\.0-dev\.[1-9][0-9]+)\ (v0\.7\.0)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V07_MIGRATION_V1)$' "$GATEWAY" || \
+    fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69
+  grep -Fq 'exec sudo -n /usr/local/sbin/ai-project-os-v07-deploy' "$GATEWAY" || \
+    fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69
+  grep -Fq '"${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[6]}"' "$GATEWAY" || \
+    fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69
+  grep -Fq 'scripts/production-v07-upgrade-preflight.ts' "$V07_DEPLOYER" || \
+    fail RELEASE_TOOLING_V07_DEPLOY_CONTRACT_INVALID 69
+  grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v07-deploy' "$SUDOERS" || \
+    fail RELEASE_TOOLING_V07_SUDOERS_CONTRACT_INVALID 69
+fi
 grep -Fq 'v0.5.0-dev.1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'v0.5.0-dev.4' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
@@ -272,7 +442,7 @@ fi
 
 # Refuse symlinked or non-root destination directories before creating any
 # staged root file. Group/world-writable control directories fail closed.
-for target_directory in /usr/local/sbin /usr/local/libexec/ai-project-os /etc/ai-project-os /etc/sudoers.d; do
+for target_directory in /usr/local/sbin /usr/local/libexec/ai-project-os /etc/ai-project-os /etc/sudoers.d /etc/nginx/sites-available /etc/nginx/sites-enabled; do
   [[ -d "$target_directory" && ! -L "$target_directory" ]] || fail RELEASE_TOOLING_TARGET_DIRECTORY_INVALID 69
   [[ "$(stat -c %U:%G "$target_directory")" == root:root ]] || fail RELEASE_TOOLING_TARGET_DIRECTORY_INVALID 69
   target_permissions=$(stat -c %A "$target_directory")
@@ -286,17 +456,27 @@ for destination in \
   /usr/local/sbin/ai-project-os-v06-patch-deploy \
   /usr/local/sbin/ai-project-os-v06-next-deploy \
   /usr/local/sbin/ai-project-os-v06-default-memory-deploy \
+  /usr/local/sbin/ai-project-os-v07-deploy \
+  /usr/local/sbin/ai-project-os-prepare-git-automation-secret \
   /usr/local/sbin/ai-project-os-app-deploy \
   /usr/local/sbin/ai-project-os-preserve-deploy \
   /usr/local/sbin/ai-project-os-backup \
   /usr/local/libexec/ai-project-os/backup-artifact.py \
   /usr/local/sbin/ai-project-os-restore \
   /usr/local/sbin/ai-project-os-configure-github-oauth \
+  /etc/nginx/sites-available/ai-project-os.conf \
   /etc/ai-project-os/compose.operations.yaml \
   /etc/sudoers.d/ai-project-os-deploy \
   /usr/local/sbin/ai-project-os-actions-gateway; do
   [[ ! -e "$destination" || ( -f "$destination" && ! -L "$destination" ) ]] || fail RELEASE_TOOLING_TARGET_INVALID 69
 done
+
+[[ -f "$NGINX_CONFIG_DEST" && ! -L "$NGINX_CONFIG_DEST" ]] || fail RELEASE_TOOLING_NGINX_TARGET_INVALID 69
+[[ "$(stat -c %U:%G "$NGINX_CONFIG_DEST")" == root:root ]] || fail RELEASE_TOOLING_NGINX_TARGET_INVALID 69
+nginx_config_permissions=$(stat -c %A "$NGINX_CONFIG_DEST")
+[[ "${nginx_config_permissions:5:1}" != w && "${nginx_config_permissions:8:1}" != w ]] || fail RELEASE_TOOLING_NGINX_TARGET_INVALID 69
+[[ -L "$NGINX_ENABLED_PATH" && "$(readlink -- "$NGINX_ENABLED_PATH")" == "$NGINX_CONFIG_DEST" ]] || \
+  fail RELEASE_TOOLING_NGINX_TARGET_INVALID 69
 
 # Stage every file on its destination filesystem before the first rename. This
 # catches validation, permission, and free-space failures while the old toolset
@@ -323,6 +503,11 @@ stage_install "$BACKUP" /usr/local/sbin/ai-project-os-backup 0755 staged_backup
 stage_install "$BACKUP_ARTIFACT_HELPER" /usr/local/libexec/ai-project-os/backup-artifact.py 0755 staged_backup_artifact
 stage_install "$RESTORE" /usr/local/sbin/ai-project-os-restore 0755 staged_restore
 stage_install "$OAUTH_CONFIGURATOR" /usr/local/sbin/ai-project-os-configure-github-oauth 0755 staged_oauth
+stage_install "$NGINX_CONFIG" "$NGINX_CONFIG_DEST" 0644 staged_nginx_config
+if [[ "$IS_V07_RELEASE" == true ]]; then
+  stage_install "$V07_DEPLOYER" /usr/local/sbin/ai-project-os-v07-deploy 0755 staged_v07_deployer
+  stage_install "$GIT_AUTOMATION_SECRET_PREPARER" /usr/local/sbin/ai-project-os-prepare-git-automation-secret 0755 staged_git_automation_secret_preparer
+fi
 stage_install "$COMPOSE_OVERRIDE" /etc/ai-project-os/compose.operations.yaml 0644 staged_compose
 stage_install "$SUDOERS" /etc/sudoers.d/ai-project-os-deploy 0440 staged_sudoers
 stage_install "$GATEWAY" /usr/local/sbin/ai-project-os-actions-gateway 0755 staged_gateway
@@ -339,10 +524,39 @@ mv -f -- "$staged_backup" /usr/local/sbin/ai-project-os-backup
 mv -f -- "$staged_backup_artifact" /usr/local/libexec/ai-project-os/backup-artifact.py
 mv -f -- "$staged_restore" /usr/local/sbin/ai-project-os-restore
 mv -f -- "$staged_oauth" /usr/local/sbin/ai-project-os-configure-github-oauth
+if [[ "$IS_V07_RELEASE" == true ]]; then
+  mv -f -- "$staged_v07_deployer" /usr/local/sbin/ai-project-os-v07-deploy
+  mv -f -- "$staged_git_automation_secret_preparer" /usr/local/sbin/ai-project-os-prepare-git-automation-secret
+fi
 mv -f -- "$staged_compose" /etc/ai-project-os/compose.operations.yaml
 mv -f -- "$staged_sudoers" /etc/sudoers.d/ai-project-os-deploy
 visudo -cf /etc/sudoers.d/ai-project-os-deploy >/dev/null
 mv -f -- "$staged_gateway" /usr/local/sbin/ai-project-os-actions-gateway
-STAGED_FILES=()
+STAGED_FILES=("$staged_nginx_config")
+
+NGINX_BACKUP_PATH=$(mktemp /etc/nginx/sites-available/.ai-project-os.conf.rollback.XXXXXX)
+cp --preserve=mode,ownership -- "$NGINX_CONFIG_DEST" "$NGINX_BACKUP_PATH"
+if systemctl is-active --quiet nginx; then
+  NGINX_WAS_ACTIVE=true
+fi
+NGINX_CONFIG_PROMOTED=true
+mv -f -- "$staged_nginx_config" "$NGINX_CONFIG_DEST"
+nginx -t || fail RELEASE_TOOLING_NGINX_CONFIG_INVALID 69
+if [[ "$NGINX_WAS_ACTIVE" == true ]]; then
+  systemctl reload nginx || fail RELEASE_TOOLING_NGINX_RELOAD_FAILED 69
+  systemctl is-active --quiet nginx || fail RELEASE_TOOLING_NGINX_RELOAD_FAILED 69
+fi
+
+# The marker is created only after all replacements succeed. Its checksums
+# make a partially refreshed or subsequently modified toolchain fail status.
+state_temporary=$(mktemp /etc/ai-project-os/.release-tooling-v07-state.XXXXXX)
+printf 'tag=%s revision=%s\n' "$RELEASE_TAG" "$EXPECTED_REVISION" > "$state_temporary"
+sha256sum "${V07_STATUS_FILES[@]}" >> "$state_temporary"
+chown root:root "$state_temporary"
+chmod 0600 "$state_temporary"
+mv -f -- "$state_temporary" "$V07_STATE_FILE"
+rm -f -- "$NGINX_BACKUP_PATH"
+NGINX_BACKUP_PATH=""
+NGINX_CONFIG_COMMITTED=true
 
 printf 'RELEASE_TOOLING_INSTALL_OK tag=%s revision=%s\n' "$RELEASE_TAG" "$EXPECTED_REVISION"

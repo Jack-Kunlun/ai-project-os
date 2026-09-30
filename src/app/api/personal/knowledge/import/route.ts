@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     }
     let segments;
     try {
-      const parsed = await parseAssetBuffer({ buffer, mimeType, fileName: file.name, archiveLimits: { maxEntries: 200, maxExpandedBytes: 4 * 1024 * 1024, maxSelectedEntryBytes: 2 * 1024 * 1024 }, maxPdfPages: 50 });
+      const parsed = await parseAssetBuffer({ buffer, mimeType, fileName: file.name, archiveLimits: { maxEntries: 200, maxExpandedBytes: 4 * 1024 * 1024, maxSelectedEntryBytes: 2 * 1024 * 1024 }, maxPdfPages: 50, includeOfficeImages: false });
       segments = forceVision === "true" ? parsed.map((segment) => ({ ...segment, requiresVision: true })) : parsed;
     } catch (error) {
       if (error instanceof ProjectAssetParserError || error instanceof ProjectAssetArchiveError) throw new ApiError(422, "PERSONAL_KNOWLEDGE_IMPORT_PARSE_FAILED", "文件内容无法提取");

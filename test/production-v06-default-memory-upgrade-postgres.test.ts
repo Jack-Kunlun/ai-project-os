@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Client } from "pg";
@@ -13,16 +14,16 @@ const shouldRun = process.env.PRODUCTION_V06_DEFAULT_MEMORY_UPGRADE_POSTGRES_GAT
   && typeof databaseUrl === "string" && databaseUrl.length > 0;
 const run = promisify(execFile);
 const SOURCE_LAST_MIGRATION = "20260922050000_harden_personal_knowledge_qa_audit";
+const TARGET_LAST_MIGRATION = "20260924010000_add_personal_knowledge_graph_suggestions";
 
 async function configForCutoff(includeTarget: boolean): Promise<{ root: string; config: string }> {
-  const root = await mkdtemp(path.join(path.dirname(process.cwd()), "ai-project-os-v06-default-memory-"));
+  const root = await mkdtemp(path.join(tmpdir(), "ai-project-os-v06-default-memory-"));
   const migrations = path.join(root, "migrations");
   await run("cp", ["-R", path.join(process.cwd(), "prisma/migrations"), migrations]);
-  if (!includeTarget) {
-    const entries = await readdir(migrations);
-    await Promise.all(entries.filter((name) => name > SOURCE_LAST_MIGRATION)
-      .map((name) => rm(path.join(migrations, name), { recursive: true, force: true })));
-  }
+  const cutoff = includeTarget ? TARGET_LAST_MIGRATION : SOURCE_LAST_MIGRATION;
+  const entries = await readdir(migrations);
+  await Promise.all(entries.filter((name) => name > cutoff)
+    .map((name) => rm(path.join(migrations, name), { recursive: true, force: true })));
   const config = path.join(root, "prisma.config.ts");
   await writeFile(config, `import { defineConfig } from "prisma/config";\nexport default defineConfig({ schema: "${path.join(process.cwd(), "prisma/schema.prisma")}", migrations: { path: "${migrations}" }, datasource: { url: process.env.DATABASE_URL } });\n`);
   return { root, config };

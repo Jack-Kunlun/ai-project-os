@@ -103,6 +103,7 @@ test(
       assert.equal(callbackCalled, false);
       assert.equal(await db.projectDataExportAudit.count({ where: { projectId: fixture.projectId } }), 0);
     } finally {
+      await db.project.updateMany({ where: { id: fixture.projectId }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: fixture.projectId } });
       await db.workspace.deleteMany({ where: { id: fixture.workspaceId } });
       await db.appUser.deleteMany({ where: { id: { in: [fixture.owner.id, fixture.backupOwner.id] } } });
@@ -150,6 +151,7 @@ for (const isolationLevel of [Prisma.TransactionIsolationLevel.RepeatableRead, P
         assert.equal(await db.projectDataExportAudit.count({ where: { projectId: fixture.projectId } }), 0);
       } finally {
         releaseAdmission.resolve();
+        await db.project.updateMany({ where: { id: fixture.projectId }, data: { archivedAt: new Date() } });
         await db.project.deleteMany({ where: { id: fixture.projectId } });
         await db.workspace.deleteMany({ where: { id: fixture.workspaceId } });
         await db.appUser.deleteMany({ where: { id: { in: [fixture.owner.id, fixture.backupOwner.id] } } });
@@ -188,6 +190,7 @@ test(
       assert.equal(await db.projectLifecycleRevision.count({ where: { projectId: fixture.projectId } }), 0);
       assert.equal((await db.project.findUniqueOrThrow({ where: { id: fixture.projectId }, select: { archivedAt: true } })).archivedAt, null);
     } finally {
+      await db.project.updateMany({ where: { id: fixture.projectId }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: fixture.projectId } });
       await db.workspace.deleteMany({ where: { id: fixture.workspaceId } });
       await db.appUser.deleteMany({ where: { id: { in: [fixture.owner.id, fixture.backupOwner.id] } } });

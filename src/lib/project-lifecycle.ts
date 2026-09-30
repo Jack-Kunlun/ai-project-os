@@ -183,6 +183,9 @@ export async function updateProjectLifecycle(
         await tx.$executeRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082915))
         `);
+        await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))
+        `);
         const current = await tx.project.findUnique({
           where: { id: admission.project.id },
           select: { ...lifecycleProjectSelect, archivedAt: true },
@@ -281,6 +284,12 @@ export async function deleteArchivedProject(
           allowArchived: true,
         });
         await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082915))
+        `);
+        await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))
+        `);
+        await tx.$executeRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082916))
         `);
         const project = await tx.project.findUnique({
@@ -344,6 +353,12 @@ export async function deleteArchivedProject(
           allowArchived: true,
         });
         await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082915))
+        `);
+        await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))
+        `);
+        await tx.$executeRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082916))
         `);
         const currentReceipt = await tx.projectDeletionReceipt.findUniqueOrThrow({ where: { id: receipt.id } });
@@ -382,6 +397,12 @@ export async function deleteArchivedProject(
           allowArchived: true,
         });
         await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082915))
+        `);
+        await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))
+        `);
+        await tx.$executeRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082916))
         `);
         const currentReceipt = await tx.projectDeletionReceipt.findUniqueOrThrow({ where: { id: receipt.id } });
@@ -399,11 +420,16 @@ export async function deleteArchivedProject(
         }
         await assertProjectReadyForDeletion(tx, admission.project.id, new Date());
         await assertProjectMcpGrantRetentionReady(tx, admission.project.id);
-        const credentialRows = await Promise.all([
+        const [githubConnections, githubSyncEntries, webSources] = await Promise.all([
           tx.gitHubConnection.findMany({ where: { projectId: admission.project.id, credentialId: { not: null } }, select: { credentialId: true } }),
           tx.projectGitHubSyncEntry.findMany({ where: { projectId: admission.project.id }, select: { credentialId: true } }),
+          tx.webSource.findMany({ where: { projectId: admission.project.id, authCredentialId: { not: null } }, select: { authCredentialId: true } }),
         ]);
-        const credentialIds = [...new Set(credentialRows.flat().flatMap((entry) => entry.credentialId ? [entry.credentialId] : []))];
+        const credentialIds = [...new Set([
+          ...githubConnections.flatMap((entry) => entry.credentialId ? [entry.credentialId] : []),
+          ...githubSyncEntries.flatMap((entry) => entry.credentialId ? [entry.credentialId] : []),
+          ...webSources.flatMap((entry) => entry.authCredentialId ? [entry.authCredentialId] : []),
+        ])];
         await tx.projectAssetUploadReservation.deleteMany({ where: { projectId: admission.project.id } });
         await tx.project.delete({ where: { id: admission.project.id } });
         if (credentialIds.length > 0) {
@@ -417,6 +443,7 @@ export async function deleteArchivedProject(
               oidcProviders: { none: {} },
               oidcLoginAttempts: { none: {} },
               githubSyncEntries: { none: {} },
+              webSource: null,
             },
           });
         }

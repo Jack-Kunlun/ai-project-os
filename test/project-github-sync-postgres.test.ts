@@ -883,6 +883,7 @@ test(
       });
       assert.equal(await db.projectGitHubSyncChange.count({ where: { syncRunId: cascadeRoot.id } }), 0);
 
+      await db.project.update({ where: { id: projectBId }, data: { archivedAt: new Date() } });
       await assert.doesNotReject(() => db.project.delete({ where: { id: projectBId } }));
       assert.equal(await db.projectGitHubSyncRun.count({ where: { projectId: projectBId } }), 0);
       assert.equal(await db.projectGitHubSyncEntry.count({ where: { projectId: projectBId } }), 0);
@@ -892,6 +893,7 @@ test(
       // Project A is the terminal immutability fixture and remains for disposable
       // schema teardown. Project C's historical cancellation fixture is removed
       // with the project below.
+      await db.project.update({ where: { id: projectCId }, data: { archivedAt: new Date() } });
       await assert.doesNotReject(() => db.project.delete({ where: { id: projectCId } }));
     } finally {
       await db.$disconnect();

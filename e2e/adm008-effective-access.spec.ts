@@ -5,12 +5,9 @@ import { grantProjectMembership, grantWorkspaceMembership } from "@/lib/membersh
 import { createPasswordRecord } from "@/lib/auth";
 import { signInR02Admin } from "./support/r02-admin-navigation";
 
-const ADMIN_PASSWORD = "BrowserGate2026Password!";
-
 test("ADM-008 user operations stay within the safe admin boundary and preserve account lifecycle previews", async ({ page }) => {
   test.setTimeout(120_000);
   const db = getDb();
-  const adminId = randomUUID();
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
   const userId = randomUUID();
   const workspaceId = randomUUID();
@@ -23,8 +20,10 @@ test("ADM-008 user operations stay within the safe admin boundary and preserve a
   const ownerUsername = `adm008-owner-${suffix}`;
   let ownerId: string | null = null;
   try {
-    await db.appUser.create({ data: { id: adminId, username: "browser_admin", role: "admin", ...(await createPasswordRecord(ADMIN_PASSWORD)) } });
     await signInR02Admin(page);
+    const sharedAdmin = await db.appUser.findUniqueOrThrow({ where: { username: "browser_admin" }, select: { id: true, role: true } });
+    expect(sharedAdmin.role).toBe("admin");
+    const adminId = sharedAdmin.id;
     const owner = await db.appUser.create({ data: { username: ownerUsername, role: "user", ...(await createPasswordRecord("ADM008Owner2026Password!")) }, select: { id: true } });
     ownerId = owner.id;
     await db.appUser.create({ data: { id: userId, username, role: "user", ...(await createPasswordRecord("ADM008User2026Password!")) } });
@@ -86,13 +85,9 @@ test("ADM-008 user operations stay within the safe admin boundary and preserve a
     }).catch(() => undefined);
     await db.project.delete({ where: { id: projectId } }).catch(() => undefined);
     await db.workspace.delete({ where: { id: workspaceId } }).catch(() => undefined);
-    // Account and membership previews intentionally retain append-only audit
-    // evidence. Temporary identities are demoted and renamed for the shared
-    // browser fixture instead of deleting those references.
-    await db.appUser.update({
-      where: { id: adminId },
-      data: { username: `adm008-cleanup-${suffix}`, role: "user" },
-    }).catch(() => undefined);
+    // The disposable browser database shares this administrator across tests.
+    // Keep it available until the runner drops the database after the suite.
+    // Subject identities retain append-only audit evidence and are renamed.
     if (ownerId !== null) {
       await db.appUser.update({
         where: { id: ownerId },

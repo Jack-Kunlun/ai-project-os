@@ -333,6 +333,7 @@ test(
     } finally {
       fixture.releaseHold();
       await fixture.close();
+      await db.project.updateMany({ where: { id: { in: [projectId, secondProjectId] } }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: { in: [projectId, secondProjectId] } } });
       await db.workspace.deleteMany({ where: { id: workspaceId } });
       await db.appUser.deleteMany({ where: { id: { in: [adminId, ownerId, editorId, viewerId] } } });

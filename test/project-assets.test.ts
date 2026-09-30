@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanvas } from "@napi-rs/canvas";
 import { ProjectAssetArchiveError } from "../src/lib/project-assets/archive";
-import { parseAssetBuffer, renderPdfPageForVision } from "../src/lib/project-assets/parser";
+import { parseAssetBuffer, readOfficeImageForVision, renderPdfPageForVision } from "../src/lib/project-assets/parser";
 import {
   detectAssetFile,
   ProjectAssetStorageError,
@@ -18,13 +18,13 @@ function crc32(buffer: Buffer): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function zip(entries: ReadonlyArray<readonly [string, string]>): Buffer {
+function zip(entries: ReadonlyArray<readonly [string, string | Buffer]>): Buffer {
   const localParts: Buffer[] = [];
   const centralParts: Buffer[] = [];
   let offset = 0;
   for (const [nameValue, content] of entries) {
     const name = Buffer.from(nameValue, "utf8");
-    const data = Buffer.from(content, "utf8");
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
     const checksum = crc32(data);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
@@ -137,6 +137,97 @@ test("deterministic parsers preserve Word, PowerPoint and spreadsheet locators",
   assert.equal(sheets[0]!.sheetName, "计划");
   assert.equal(sheets[0]!.cellRange, "A1:B1");
   assert.match(sheets[0]!.contentText, /B1: 小王/);
+});
+
+test("Office raster images become bounded pending vision segments with exact archive locators", async () => {
+  const canvas = createCanvas(24, 16);
+  const png = Buffer.from(await canvas.encode("png"));
+  const samples = [
+    {
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      fileName: "illustrated.docx",
+      root: "word",
+      entries: [
+        ["word/document.xml", '<w:document><w:body><w:p><w:t>正文</w:t></w:p><a:blip r:embed="rId1"/></w:body></w:document>'],
+        ["word/_rels/document.xml.rels", '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/chart.png"/></Relationships>'],
+      ] as Array<[string, string | Buffer]>,
+    },
+    {
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      fileName: "illustrated.pptx",
+      root: "ppt",
+      entries: [
+        ["ppt/slides/slide1.xml", '<p:sld><a:t>结论</a:t><a:blip r:embed="rId1"/></p:sld>'],
+        ["ppt/slides/_rels/slide1.xml.rels", '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/chart.png"/></Relationships>'],
+      ] as Array<[string, string | Buffer]>,
+    },
+    {
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      fileName: "illustrated.xlsx",
+      root: "xl",
+      entries: [
+        ["xl/worksheets/sheet1.xml", '<worksheet><c r="A1"><v>42</v></c><drawing r:id="rId1"/></worksheet>'],
+        ["xl/worksheets/_rels/sheet1.xml.rels", '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>'],
+        ["xl/drawings/drawing1.xml", '<xdr:wsDr><a:blip r:embed="rId2"/></xdr:wsDr>'],
+        ["xl/drawings/_rels/drawing1.xml.rels", '<Relationships><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/chart.png"/></Relationships>'],
+      ] as Array<[string, string | Buffer]>,
+    },
+  ];
+  for (const sample of samples) {
+    const mediaPath = `${sample.root}/media/chart.png`;
+    const buffer = zip([...sample.entries, [mediaPath, png], [`${sample.root}/media/orphan.png`, png]]);
+    const segments = await parseAssetBuffer({ buffer, mimeType: sample.mimeType, fileName: sample.fileName });
+    const image = segments.find((entry) => entry.locatorKind === "image");
+    assert.ok(image);
+    assert.equal(image.requiresVision, true);
+    assert.equal(image.ordinal, segments.length - 1);
+    assert.equal(image.locatorLabel, `Office 图片 · ${mediaPath}`);
+    assert.equal(segments.filter((entry) => entry.locatorKind === "image").length, 1);
+    const material = await readOfficeImageForVision({ buffer, mimeType: sample.mimeType, locatorLabel: image.locatorLabel });
+    assert.equal(material.mimeType, "image/png");
+    assert.deepEqual(material.image, png);
+    await assert.rejects(
+      () => readOfficeImageForVision({ buffer, mimeType: sample.mimeType, locatorLabel: "Office 图片 · ../other.png" }),
+      /ASSET_DOCUMENT_INVALID/u,
+    );
+  }
+});
+
+test("Office media with a forged extension or too many images fails closed", async () => {
+  const documentXml = '<w:document><w:body><w:p><w:t>正文</w:t></w:p><a:blip r:embed="rId1"/></w:body></w:document>';
+  const imageRelation = '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image.png"/></Relationships>';
+  const input = { mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", fileName: "unsafe.docx" };
+  await assert.rejects(
+    () => parseAssetBuffer({ ...input, buffer: zip([["word/document.xml", documentXml], ["word/_rels/document.xml.rels", imageRelation], ["word/media/image.png", "not a PNG"]]) }),
+    /ASSET_DOCUMENT_INVALID/u,
+  );
+  const canvas = createCanvas(2, 2);
+  const png = Buffer.from(await canvas.encode("png"));
+  const many = Array.from({ length: 21 }, (_, index) => [`word/media/image${index}.png`, png] as const);
+  const manyDocument = `<w:document><w:body>${many.map((_, index) => `<a:blip r:embed="rId${index}"/>`).join("")}</w:body></w:document>`;
+  const manyRelations = `<Relationships>${many.map((_, index) => `<Relationship Id="rId${index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${index}.png"/>`).join("")}</Relationships>`;
+  await assert.rejects(
+    () => parseAssetBuffer({ ...input, buffer: zip([["word/document.xml", manyDocument], ["word/_rels/document.xml.rels", manyRelations], ...many]) }),
+    /ASSET_DOCUMENT_TOO_LARGE/u,
+  );
+});
+
+test("Office image selection ignores unrendered relationships and personal DOCX text import remains local", async () => {
+  const documentXml = '<w:document><w:body><w:p><w:t>保留正文</w:t></w:p><metadata r:id="rId1"/></w:body></w:document>';
+  const relation = '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/secret.png"/></Relationships>';
+  const buffer = zip([["word/document.xml", documentXml], ["word/_rels/document.xml.rels", relation], ["word/media/secret.png", Buffer.alloc(11 * 1024 * 1024)]]);
+  const input = { buffer, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", fileName: "notes.docx" };
+  const projectSegments = await parseAssetBuffer(input);
+  assert.equal(projectSegments.length, 1);
+  assert.match(projectSegments[0]!.contentText, /保留正文/u);
+  const personalSegments = await parseAssetBuffer({ ...input, includeOfficeImages: false });
+  assert.equal(personalSegments.length, 1);
+  assert.equal(personalSegments[0]!.requiresVision, false);
+  const referenced = zip([["word/document.xml", documentXml.replace('<metadata r:id="rId1"/>', '<a:blip r:embed="rId1"/>')], ["word/_rels/document.xml.rels", relation], ["word/media/secret.png", Buffer.alloc(11 * 1024 * 1024)]]);
+  await assert.rejects(
+    () => parseAssetBuffer({ ...input, buffer: referenced }),
+    (error: unknown) => error instanceof ProjectAssetArchiveError && error.code === "ASSET_ARCHIVE_TOO_LARGE",
+  );
 });
 
 test("personal import can cap DOCX expansion below the project parser defaults", async () => {

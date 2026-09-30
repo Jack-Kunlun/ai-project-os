@@ -75,6 +75,7 @@ function searchResponse(
         rangeStart: 0,
         rangeEnd: Buffer.byteLength(value.content, "utf8"),
         contentHash: contentHash(value.content),
+        sourceContentHash: contentHash(value.content),
         excerpt: value.content,
       },
     })),

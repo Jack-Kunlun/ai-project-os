@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { getDb } from "@/lib/db";
+import { deleteArchivedProject, updateProjectLifecycle } from "@/lib/project-lifecycle";
 import { seedBrowserPersonalUser, type BrowserPersonalUser } from "./support/browser-fixtures";
 
 const BROWSER_ADMIN_PASSWORD = "BrowserGate2026Password!";
@@ -120,14 +121,21 @@ async function seedPlatformEmbeddingRoute(adminUsername: string, ownerUsername: 
     },
     select: { id: true },
   });
-  const ownerGrant = await db.platformTokenGrant.findFirst({ where: { userId: owner.id, kind: "signup" }, select: { id: true } });
-  if (ownerGrant === null) throw new Error("BROWSER_CONFIRMATION_OWNER_SIGNUP_GRANT_UNAVAILABLE");
   return { providerId, credentialId, routeId: route.id, grantId: null };
 }
 
-async function cleanupPlatformEmbeddingFixture(projectId: string, fixture: Awaited<ReturnType<typeof seedPlatformEmbeddingRoute>>): Promise<void> {
+async function cleanupPlatformEmbeddingFixture(projectId: string, owner: BrowserPersonalUser, fixture: Awaited<ReturnType<typeof seedPlatformEmbeddingRoute>>): Promise<void> {
   const db = getDb();
-  await db.project.delete({ where: { id: projectId } });
+  const user = await db.appUser.findUniqueOrThrow({ where: { id: owner.id }, select: { accountAccessVersion: true } });
+  const actor = { id: owner.id, role: "user" as const, accountAccessVersion: user.accountAccessVersion };
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { name: true, archivedAt: true, updatedAt: true } });
+  if (project !== null) {
+    if (project.archivedAt === null) {
+      await updateProjectLifecycle({ projectId, actor, action: "archive", expectedUpdatedAt: project.updatedAt }, db);
+    }
+    const archived = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { name: true, updatedAt: true } });
+    await deleteArchivedProject({ projectId, actor, confirmationName: archived.name, expectedUpdatedAt: archived.updatedAt }, db);
+  }
   await db.platformDefaultAiRouteAudit.deleteMany({ where: { routeId: fixture.routeId } });
   await db.platformDefaultAiRoute.delete({ where: { id: fixture.routeId } });
   await db.aiProviderConnection.delete({ where: { id: fixture.providerId } });
@@ -193,6 +201,6 @@ test("memory confirmation prepare and execute are single-flight and stale input 
     expect(challenges).toHaveLength(1);
     expect(challenges[0]).toMatchObject({ consumedAt: null, consumedJobId: null });
   } finally {
-    await cleanupPlatformEmbeddingFixture(projectId, fixture);
+    await cleanupPlatformEmbeddingFixture(projectId, personalUser, fixture);
   }
 });

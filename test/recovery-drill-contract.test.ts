@@ -58,6 +58,7 @@ test("local recovery drill is isolated, real-dump based, and cleans only exact r
   assert.doesNotMatch(restoreCommands, /--no-owner/u);
   assert.doesNotMatch(restoreCommands, /stdin|runWithInput/u);
   assert.match(script, /function waitForOneShotSuccess[\s\S]*status === "exited"[\s\S]*exitCode === "0"/u);
+  assert.match(script, /RECOVERY_DRILL_HEALTH_TIMEOUT_\$\{last\.toUpperCase\(\)\.replaceAll\(\/\[\^A-Z0-9_\]\/gu, "_"\)/u);
   assert.match(script, /oneShotFailureCodes[\s\S]*principal-bootstrap[\s\S]*RECOVERY_DRILL_PRINCIPAL_BOOTSTRAP_ONE_SHOT_FAILED/u);
   assert.match(script, /oneShotFailureCodes[\s\S]*migrate:[\s\S]*RECOVERY_DRILL_MIGRATE_ONE_SHOT_FAILED/u);
   assert.match(script, /oneShotFailureCodes[\s\S]*reconcile:[\s\S]*RECOVERY_DRILL_RECONCILE_ONE_SHOT_FAILED/u);
@@ -84,7 +85,8 @@ test("local recovery drill is isolated, real-dump based, and cleans only exact r
     'await waitForOneShotSuccess(isolatedCompose, isolatedEnvironment, "migrate")',
     'await composeUpAndTrack(isolatedCompose, isolatedEnvironment, projectName, drillId, ["reconcile"]',
     'await waitForOneShotSuccess(isolatedCompose, isolatedEnvironment, "reconcile")',
-    'await composeUpAndTrack(isolatedCompose, isolatedEnvironment, projectName, drillId, ["app", "worker"]',
+    'const targetServices: ComposeService[] = ["app", "worker"',
+    'const targetServiceContainers = await composeUpAndTrack(isolatedCompose, isolatedEnvironment, projectName, drillId, targetServices',
   ];
   const restoreChainPositions = restoreChainMarkers.map((marker) => {
     const position = restoreChain.indexOf(marker);
@@ -125,6 +127,9 @@ test("local recovery drill is isolated, real-dump based, and cleans only exact r
   assert.match(script, /const sourceEnvironment = sourceComposeEnvironment\(process\.env\)/u);
   assert.match(script, /const isolatedEnvironment: NodeJS\.ProcessEnv = \{[\s\S]*\.\.\.dockerEnvironment/u);
   assert.doesNotMatch(script, /const isolatedEnvironment: NodeJS\.ProcessEnv = \{[\s\S]*\.\.\.sourceEnvironment/u);
+  assert.match(script, /"POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD"/u);
+  assert.match(script, /POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD: `drill_git_automation_\$\{randomBytes\(24\)\.toString\("hex"\)\}`/u);
+  assert.match(script, /"POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD", "POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD", "POSTGRES_DB"/u);
   assert.match(script, /const MAX_VOLUME_MANIFEST_ENTRIES/u);
   assert.match(script, /const MAX_VOLUME_MANIFEST_PATH_BYTES/u);
   assert.match(script, /const MAX_VOLUME_MANIFEST_METADATA_BYTES/u);
@@ -169,7 +174,7 @@ test("local recovery drill is isolated, real-dump based, and cleans only exact r
   assert.match(script, /function sha256File[\s\S]*AbortController[\s\S]*createReadStream\(filePath, \{ highWaterMark: 1024 \* 1024, signal: abortController\.signal \}\)[\s\S]*interruptRequested[\s\S]*MAX_DATABASE_DUMP_BYTES[\s\S]*RECOVERY_DRILL_PG_DUMP_HASH_TIMEOUT/u);
   assert.match(script, /cleanupInProgress = true/u);
   assert.match(script, /function sourceVolumeMountName[\s\S]*Mounts[\s\S]*function sourceDataVolumes[\s\S]*SOURCE_SECRETS_DESTINATION[\s\S]*SOURCE_UPLOADS_DESTINATION/u);
-  assert.match(script, /sourceVolumes = await sourceDataVolumes\(sourceServices\.app\.container, sourceServices\.worker\.container/u);
+  assert.match(script, /sourceVolumes = await sourceDataVolumes\([\s\S]*sourceServices\.app\.container,[\s\S]*sourceServices\.worker\.container,[\s\S]*sourceServices\.gitWorker/u);
   assert.doesNotMatch(script, /composeVolumeNames/u);
   assert.doesNotMatch(script, /\[\s*"config"/u);
   assert.match(script, /function requireLocalDockerContext[\s\S]*DOCKER_HOST[\s\S]*context", "inspect[\s\S]*unix:\/\//u);
@@ -178,6 +183,23 @@ test("local recovery drill is isolated, real-dump based, and cleans only exact r
   assert.match(script, /sourcePaused = true;[\s\S]*pauseSource\(sourceWriters/u);
   assert.match(script, /function resumeSource[\s\S]*readSourceWriterPausedState[\s\S]*\["unpause", \.\.\.pausedIds\]/u);
   assert.match(script, /RECOVERY_DRILL_SOURCE_WRITER_OWNERSHIP_INVALID/u);
+  assert.match(script, /type SourceWriter = Readonly<\{ id: string; service: "app" \| "worker" \| "git-worker" \}>/u);
+  assert.match(script, /function sourceComposeServices[\s\S]*"config", "--services"/u);
+  assert.match(script, /if \(!services\.has\("git-worker"\)\)[\s\S]*RECOVERY_DRILL_SOURCE_GIT_WORKER_UNEXPECTED[\s\S]*return null/u);
+  assert.match(script, /if \(containers\.length !== 1\) fail\("RECOVERY_DRILL_SOURCE_GIT_WORKER_CONTAINER_INVALID"\)/u);
+  assert.match(script, /function sourceWriterPreflight[\s\S]*gitWorkerContainer !== null\) writers\.push\(await readWriter\(gitWorkerContainer, "git-worker", true\)\)/u);
+  assert.match(script, /requireHealthy[\s\S]*RECOVERY_DRILL_SOURCE_GIT_WORKER_UNHEALTHY/u);
+  assert.match(script, /function pauseSource[\s\S]*writers\.map\(\(writer\) => writer\.id\)/u);
+  assert.match(script, /function readSourceWriterPausedState[\s\S]*labels\["com\.docker\.compose\.service"\] !== writer\.service/u);
+  assert.match(script, /waitForSourceGitWorkerHealthy\(sourceGitWriter, options\.sourceProject, sourceEnvironment\)/u);
+  assert.match(script, /function waitForSourceGitWorkerHealthy[\s\S]*writer\.id[\s\S]*Status.*healthy/u);
+  assert.match(script, /sourceServices\.gitWorker === null \? \[\] : \[[\s\S]*"  git-worker:"[\s\S]*sourceServices\.gitWorker\.image/u);
+  assert.match(script, /scripts\/recovery-drill-worker\.ts[\s\S]*recovery-drill-git-worker/u);
+  assert.ok(script.includes(String.raw`GIT_AUTOMATION_DATABASE_URL: \"\"`));
+  assert.match(script, /test -z [^\n]*\$\$GIT_AUTOMATION_DATABASE_URL[^\n]*unset GIT_AUTOMATION_DATABASE_URL[^\n]*worker-healthcheck\.ts/u);
+  assert.match(script, /scripts\/worker-healthcheck\.ts/u);
+  assert.match(script, /const targetServices: ComposeService\[\] = \["app", "worker", \.\.\.\(sourceServices\.gitWorker === null \? \[\] : \["git-worker" as const\]\)\]/u);
+  assert.match(script, /composeUpAndTrack\(isolatedCompose, isolatedEnvironment, projectName, drillId, targetServices[\s\S]*targetServiceContainers\.get\("git-worker"\)/u);
   assert.match(script, /command: \[\\"node\\", \\"node_modules\/tsx\/dist\/cli\.mjs\\", \\"scripts\/recovery-drill-worker\.ts\\"\]/u);
   assert.match(script, /createReadStream\(absolute/u);
   assert.doesNotMatch(script, /const entries = \[\]/u);
@@ -214,6 +236,9 @@ test("recovery drill evidence never accepts a host-provided Runbook URL", async 
   assert.match(docs, /外部数据库写入者/u);
   assert.match(docs, /根拥有者/u);
   assert.match(docs, /`errorCode`[\s\S]*`cleanupErrorCode`/u);
+  assert.match(docs, /v0\.6[^\n]*未声明 `git-worker`[\s\S]*v0\.7[^\n]*`git-worker`/u);
+  assert.match(docs, /`git-worker`[^\n]*health 为 healthy[\s\S]*暂停[\s\S]*恢复/u);
+  assert.match(docs, /隔离目标[^\n]*heartbeat-only[^\n]*不会启动 Git 自动化进程、读取 Git 凭据或发起 Git 请求/u);
 });
 
 test("system operations client presents only sanitized API failures", async () => {
@@ -256,6 +281,8 @@ test("recovery drill uses only the heartbeat-only worker in its isolated target"
   assert.match(worker, /recordWorkerHeartbeat/u);
   assert.match(worker, /getWorkerName/u);
   assert.match(worker, /WORKER_HEARTBEAT_INTERVAL_MS/u);
+  assert.match(worker, /GIT_AUTOMATION_DATABASE_URL === ""\) delete process\.env\.GIT_AUTOMATION_DATABASE_URL/u);
+  assert.match(worker, /RECOVERY_DRILL_PRIVILEGED_URL_PRESENT/u);
   assert.doesNotMatch(worker, /automation-worker|runAutomation|runProjectAction|reconcileDatabase|assetParse|deleteProject/iu);
   assert.doesNotMatch(worker, /exec|spawn|fetch|queue/iu);
 });

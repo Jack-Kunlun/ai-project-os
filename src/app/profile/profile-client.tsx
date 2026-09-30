@@ -16,6 +16,7 @@ type Profile = {
   hasLocalPassword: boolean;
   workspaceMemberships: Array<{ role: "owner" | "admin" | "member" | "viewer"; workspace: { id: string; name: string } }>;
   oidcIdentities: Array<{ email: string | null; lastLoginAt: string; provider: { id: string; name: string } }>;
+  oidcLinkableProviders: Array<{ id: string; name: string; workspace: { id: string; name: string } }>;
   githubIdentity: { githubUserId: string; login: string; email: string; displayName: string | null; lastLoginAt: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -48,18 +49,25 @@ const githubStatusMessages: Record<string, { tone: "success" | "error"; text: st
   failed: { tone: "error", text: "GitHub 身份绑定未完成，请重试或联系工作区管理员。" },
 };
 
+const oidcStatusMessages: Record<string, { tone: "success" | "error"; text: string }> = {
+  linked: { tone: "success", text: "企业 OIDC 登录身份已绑定到当前账户。" },
+  failed: { tone: "error", text: "OIDC 身份绑定未完成。请确认仍使用发起绑定的登录会话后重试。" },
+};
+
 export function ProfileClient({
   username: initialUsername,
   isSystemAdmin = false,
   githubLoginAvailable,
   githubAvailability = githubLoginAvailable ? "available" : "notConfigured",
   githubStatus,
+  oidcStatus,
 }: {
   username: string;
   isSystemAdmin?: boolean;
   githubLoginAvailable: boolean;
   githubAvailability?: "notConfigured" | "configurationInvalid" | "bootstrapPending" | "available";
   githubStatus?: string;
+  oidcStatus?: string;
 }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [headerUsername, setHeaderUsername] = useState(initialUsername);
@@ -99,6 +107,7 @@ export function ProfileClient({
 
         {error ? <div role="alert" className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重试</button></div> : null}
         {githubStatus ? <Message {...(githubStatusMessages[githubStatus] ?? githubStatusMessages.failed)} /> : null}
+        {oidcStatus ? <Message {...(oidcStatusMessages[oidcStatus] ?? oidcStatusMessages.failed)} /> : null}
 
         <section className="mt-7 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
           <div className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-7">
@@ -153,6 +162,7 @@ export function ProfileClient({
         </section>
 
         {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.githubIdentity ? <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-white">GitHub · @{profile.githubIdentity.login}<span className="mt-1 block text-xs text-slate-300">{profile.githubIdentity.email}</span></div> : githubLoginAvailable ? <a href="/api/auth/github/start?intent=link&returnTo=%2Fprofile" className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50"><span>GitHub 尚未绑定</span><span className="text-indigo-600">立即绑定 →</span></a> : <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-400">{githubAvailability === "bootstrapPending" ? "平台管理员尚未完成初始化，GitHub 登录暂不可用" : githubAvailability === "configurationInvalid" ? "GitHub 登录配置无效，请联系工作区管理员" : "GitHub 登录尚未配置，请联系工作区管理员"}</div>}{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}
+        {profile && !isSystemAdmin ? <OidcIdentityLinkSection providers={profile.oidcLinkableProviders} /> : null}
 
         <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
           <div className="px-6 py-6 sm:px-7">
@@ -166,6 +176,56 @@ export function ProfileClient({
 
       </div>
     </main>
+  );
+}
+
+function OidcIdentityLinkSection({ providers }: { providers: Profile["oidcLinkableProviders"] }) {
+  const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function beginLink(providerId: string) {
+    setPendingProviderId(providerId);
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/oidc/link/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId }),
+      });
+      if (!response.ok) throw new Error(await readError(response, "无法开始 OIDC 身份绑定"));
+      const result = await response.json() as { authorizationUrl: string };
+      const authorizationUrl = new URL(result.authorizationUrl);
+      if (authorizationUrl.protocol !== "https:" && authorizationUrl.protocol !== "http:") throw new Error("身份源授权地址无效");
+      window.location.assign(authorizationUrl.toString());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法开始 OIDC 身份绑定");
+      setPendingProviderId(null);
+    }
+  }
+
+  return (
+    <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace sign-in</p>
+      <h2 className="mt-2 text-lg font-semibold">绑定企业 OIDC 登录身份</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">仅显示你已确认加入工作区中的启用身份源。绑定需要再次通过该身份源验证；邮箱相同不会自动绑定到账户。</p>
+      {providers.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500">当前没有可绑定的工作区 OIDC 身份源。</p> : (
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {providers.map((provider) => (
+            <button
+              key={provider.id}
+              type="button"
+              disabled={pendingProviderId !== null}
+              onClick={() => void beginLink(provider.id)}
+              className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3 text-left text-sm transition hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50"
+            >
+              <span><span className="block font-semibold text-slate-800">{provider.name}</span><span className="mt-1 block text-xs text-slate-500">{provider.workspace.name}</span></span>
+              <span className="shrink-0 font-semibold text-violet-700">{pendingProviderId === provider.id ? "正在跳转…" : "绑定 →"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {error ? <Message tone="error" text={error} /> : null}
+    </section>
   );
 }
 

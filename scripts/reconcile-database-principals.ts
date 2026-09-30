@@ -2,8 +2,13 @@ import "dotenv/config";
 import { Client } from "pg";
 import {
   DATABASE_PRINCIPAL_RELATIONS,
+  DATABASE_PRINCIPAL_COORDINATION_RELATIONS,
   ENTITLEMENT_PROTECTED_RELATIONS,
+  GIT_AUTOMATION_WORKER_LEDGER_RELATIONS,
+  GIT_AUTOMATION_WORKER_CONTEXT_RELATIONS,
+  GIT_AUTOMATION_WORKER_POLL_COLUMNS,
   RUNTIME_ONLY_CONTROL_PLANE_RELATIONS,
+  WRITER_APPEND_ONLY_RELATIONS,
   runtimeMutableRelations,
   SIGNUP_GRANT_RELATION,
   TOKEN_LEDGER_RELATION,
@@ -12,9 +17,12 @@ import {
   PLATFORM_TOKEN_PREVIEW_FUNCTION,
   DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
   DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX,
 } from "../src/lib/database-principal-catalog";
 import {
   ENTITLEMENT_WRITER_DATABASE_PRINCIPAL,
+  GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL,
   MIGRATOR_DATABASE_PRINCIPAL,
   RUNTIME_DATABASE_PRINCIPAL,
 } from "../src/lib/db";
@@ -22,6 +30,7 @@ import {
 const MIGRATOR_DATABASE_URL_ENV = "MIGRATOR_DATABASE_URL" as const;
 const RUNTIME_DATABASE_URL_ENV = "DATABASE_URL" as const;
 const WRITER_DATABASE_URL_ENV = "ENTITLEMENT_DATABASE_URL" as const;
+const GIT_AUTOMATION_DATABASE_URL_ENV = "GIT_AUTOMATION_DATABASE_URL" as const;
 const ADMIN_DATABASE_URL_ENV = "DATABASE_PRINCIPAL_ADMIN_URL" as const;
 const LEGACY_DATABASE_URL_ENV = "DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL" as const;
 const CLUSTER_ADMIN_DATABASE_PRINCIPAL = "ai_project_os_cluster_admin" as const;
@@ -153,6 +162,14 @@ function invokerFunctionSignature(helper: (typeof DATABASE_PRINCIPAL_INVOKER_FUN
 }
 
 function triggerFunctionSignature(helper: (typeof DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX)[number]): string {
+  return databaseFunctionSignature(helper.name, helper.identityArguments);
+}
+
+function gitAutomationWorkerDefinerFunctionSignature(helper: (typeof DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX)[number]): string {
+  return databaseFunctionSignature(helper.name, helper.identityArguments);
+}
+
+function privateFunctionSignature(helper: (typeof DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX)[number]): string {
   return databaseFunctionSignature(helper.name, helper.identityArguments);
 }
 
@@ -464,10 +481,10 @@ async function assertFinalRoleShape(client: Client, expectedLogin = true, failur
   }>(`
     SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls
       FROM pg_roles
-     WHERE rolname IN ($1, $2, $3)
+     WHERE rolname = ANY($1::text[])
      ORDER BY rolname
-  `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, MIGRATOR_DATABASE_PRINCIPAL]);
-  if (result.rows.length !== 3 || result.rows.some((row) => row.rolcanlogin !== (row.rolname === MIGRATOR_DATABASE_PRINCIPAL ? true : expectedLogin) || row.rolsuper || row.rolcreatedb || row.rolcreaterole || row.rolinherit || row.rolreplication || row.rolbypassrls)) {
+  `, [[...FINAL_DATABASE_PRINCIPALS]]);
+  if (result.rows.length !== FINAL_DATABASE_PRINCIPALS.length || result.rows.some((row) => row.rolcanlogin !== (row.rolname === MIGRATOR_DATABASE_PRINCIPAL ? true : expectedLogin) || row.rolsuper || row.rolcreatedb || row.rolcreaterole || row.rolinherit || row.rolreplication || row.rolbypassrls)) {
     return fail(failureCode);
   }
 }
@@ -489,9 +506,10 @@ async function verifyRoleSession(connectionString: string, expectedUser: string,
   }
 }
 
-async function verifyRuntimeAndWriterSessions(runtimeUrl: URL, writerUrl: URL, failureCode = "DATABASE_PRINCIPAL_ROLE_SESSION_INVALID"): Promise<void> {
+async function verifyRuntimeAndWriterSessions(runtimeUrl: URL, writerUrl: URL, gitAutomationUrl: URL, failureCode = "DATABASE_PRINCIPAL_ROLE_SESSION_INVALID"): Promise<void> {
   await verifyRoleSession(runtimeUrl.toString(), RUNTIME_DATABASE_PRINCIPAL, failureCode);
   await verifyRoleSession(writerUrl.toString(), ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, failureCode);
+  await verifyRoleSession(gitAutomationUrl.toString(), GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL, failureCode);
 }
 
 async function assertNoRoleMembership(client: Client, role: string): Promise<void> {
@@ -525,6 +543,7 @@ const FINAL_DATABASE_PRINCIPALS = Object.freeze([
   MIGRATOR_DATABASE_PRINCIPAL,
   RUNTIME_DATABASE_PRINCIPAL,
   ENTITLEMENT_WRITER_DATABASE_PRINCIPAL,
+  GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL,
 ] as const);
 const CONTROLLED_DATABASE_PRINCIPALS = Object.freeze([
   CLUSTER_ADMIN_DATABASE_PRINCIPAL,
@@ -1398,8 +1417,8 @@ async function grantTablePrivileges(client: Client): Promise<void> {
   const databaseName = database.rows[0]?.datname;
   if (databaseName === undefined) return fail("DATABASE_PRINCIPAL_DATABASE_NOT_FOUND");
   await normalizeDefaultPrivileges(client);
-  await client.query(`REVOKE ALL ON DATABASE ${quoteIdentifier(databaseName)} FROM ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
-  await client.query(`GRANT CONNECT ON DATABASE ${quoteIdentifier(databaseName)} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+  await client.query(`REVOKE ALL ON DATABASE ${quoteIdentifier(databaseName)} FROM ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+  await client.query(`GRANT CONNECT ON DATABASE ${quoteIdentifier(databaseName)} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
   const runtimeMutable = runtimeMutableRelations();
   const relations = await client.query<{ relname: string }>(`
     SELECT c.relname
@@ -1410,14 +1429,32 @@ async function grantTablePrivileges(client: Client): Promise<void> {
   `);
   for (const relation of relations.rows) {
     const quoted = quoteIdentifier(relation.relname);
-    await client.query(`REVOKE ALL ON TABLE public.${quoted} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON TABLE public.${quoted} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
   }
   for (const relation of DATABASE_PRINCIPAL_RELATIONS) {
     const quoted = relationIdentifier(relation);
+    const coordinationRelation = (DATABASE_PRINCIPAL_COORDINATION_RELATIONS as readonly string[]).includes(relation);
+    if (coordinationRelation) {
+      await client.query(`REVOKE ALL PRIVILEGES ("projectId", "sourceIdentity", "lockVersion") ON TABLE public.${quoted} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+      await client.query(`GRANT SELECT, INSERT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+      await client.query(`GRANT UPDATE ("lockVersion") ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+      continue;
+    }
     const governedTokenRelation = ["PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenGrantMutationPreview", "PlatformTokenGrantAudit", "PlatformTokenGrantLegacyNullIssuerSnapshot"].includes(relation);
     const runtimeOnlyControlPlaneRelation = (RUNTIME_ONLY_CONTROL_PLANE_RELATIONS as readonly string[]).includes(relation);
-    await client.query(`GRANT SELECT${governedTokenRelation || runtimeOnlyControlPlaneRelation ? "" : ", INSERT, UPDATE, DELETE"} ON TABLE public.${quoted} TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    const gitAutomationLedgerRelation = (GIT_AUTOMATION_WORKER_LEDGER_RELATIONS as readonly string[]).includes(relation);
+    const writerAppendOnlyRelation = (WRITER_APPEND_ONLY_RELATIONS as readonly string[]).includes(relation);
+    const writerPrivileges = writerAppendOnlyRelation
+      ? "SELECT, INSERT"
+      : gitAutomationLedgerRelation
+        ? null
+        : governedTokenRelation || runtimeOnlyControlPlaneRelation
+        ? "SELECT"
+        : "SELECT, INSERT, UPDATE, DELETE";
+    if (writerPrivileges !== null) await client.query(`GRANT ${writerPrivileges} ON TABLE public.${quoted} TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
     if ((ENTITLEMENT_PROTECTED_RELATIONS as readonly string[]).includes(relation)) {
+      await client.query(`GRANT SELECT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
+    } else if (writerAppendOnlyRelation) {
       await client.query(`GRANT SELECT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
     } else if ([SIGNUP_GRANT_RELATION, TOKEN_LEDGER_RELATION, "PlatformTokenReservation", "PlatformTokenReservationAllocation"].includes(relation)) {
       await client.query(`GRANT SELECT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
@@ -1427,13 +1464,15 @@ async function grantTablePrivileges(client: Client): Promise<void> {
       await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
     }
   }
+  await revokeGitAutomationWorkerContextColumnReads(client);
+  await grantGitAutomationWorkerPollingColumns(client);
   const runtimeFunction = quoteIdentifier(PLATFORM_TOKEN_RUNTIME_FUNCTION);
   const previewFunction = quoteIdentifier(PLATFORM_TOKEN_PREVIEW_FUNCTION);
   const governanceFunction = quoteIdentifier(PLATFORM_TOKEN_GOVERNANCE_FUNCTION);
   await client.query(`ALTER FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB) OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
   await client.query(`ALTER FUNCTION public.${previewFunction}(JSONB) OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
   await client.query(`ALTER FUNCTION public.${governanceFunction}(JSONB) OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
-  await client.query(`REVOKE ALL ON FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB), public.${previewFunction}(JSONB), public.${governanceFunction}(JSONB) FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+  await client.query(`REVOKE ALL ON FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB), public.${previewFunction}(JSONB), public.${governanceFunction}(JSONB) FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
   await client.query(`GRANT EXECUTE ON FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB) TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
   await client.query(`GRANT EXECUTE ON FUNCTION public.${previewFunction}(JSONB), public.${governanceFunction}(JSONB) TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   const seenInvokerSignatures = new Set<string>();
@@ -1441,7 +1480,7 @@ async function grantTablePrivileges(client: Client): Promise<void> {
     const signature = invokerFunctionSignature(helper);
     if (!seenInvokerSignatures.add(signature) || (!helper.runtime && !helper.entitlementWriter)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
     await client.query(`ALTER FUNCTION ${signature} OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
-    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
     const grantees: string[] = [];
     if (helper.runtime) grantees.push(quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL));
     if (helper.entitlementWriter) grantees.push(quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL));
@@ -1452,27 +1491,228 @@ async function grantTablePrivileges(client: Client): Promise<void> {
     const signature = triggerFunctionSignature(trigger);
     if (!seenTriggerSignatures.add(signature) || trigger.runtime || trigger.entitlementWriter) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
     await client.query(`ALTER FUNCTION ${signature} OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
-    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
   }
-  await client.query(`REVOKE ALL ON SCHEMA public FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
-  await client.query(`GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+  const seenPrivateSignatures = new Set<string>();
+  for (const helper of DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX) {
+    const signature = privateFunctionSignature(helper);
+    if (!seenPrivateSignatures.add(signature)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+    await client.query(`ALTER FUNCTION ${signature} OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+  }
+  const seenRuntimeDefinerSignatures = new Set<string>();
+  for (const helper of DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX) {
+    const signature = gitAutomationWorkerDefinerFunctionSignature(helper);
+    if (!seenRuntimeDefinerSignatures.add(signature)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+    await client.query(`ALTER FUNCTION ${signature} OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+    await client.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+  }
+  await client.query(`REVOKE ALL ON SCHEMA public FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+  await client.query(`GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
   const sequences = await client.query<{ relname: string }>("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S'");
   for (const sequence of sequences.rows) {
     const quoted = quoteIdentifier(sequence.relname);
-    await client.query(`REVOKE ALL ON SEQUENCE public.${quoted} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON SEQUENCE public.${quoted} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
     await client.query(`GRANT USAGE, SELECT, UPDATE ON SEQUENCE public.${quoted} TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
     await client.query(`GRANT USAGE, SELECT ON SEQUENCE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
   }
 }
 
+async function grantGitAutomationWorkerPollingColumns(client: Client): Promise<void> {
+  const relations = Object.entries(GIT_AUTOMATION_WORKER_POLL_COLUMNS);
+  for (const [relation, allowedColumns] of relations) {
+    if (!(DATABASE_PRINCIPAL_RELATIONS as readonly string[]).includes(relation)) return fail("DATABASE_PRINCIPAL_RELATION_NOT_CATALOGUED");
+    const quotedRelation = relationIdentifier(relation);
+    const columns = await client.query<{ attname: string }>(`
+      SELECT attribute.attname
+        FROM pg_attribute attribute
+        JOIN pg_class relation_row ON relation_row.oid = attribute.attrelid
+        JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+       WHERE namespace_row.nspname = 'public'
+         AND relation_row.relname = $1
+         AND attribute.attnum > 0
+         AND NOT attribute.attisdropped
+       ORDER BY attribute.attnum
+    `, [relation]);
+    if (columns.rowCount === 0) return fail("DATABASE_PRINCIPAL_RELATION_NOT_CATALOGUED");
+    const allColumns = columns.rows.map((column) => quoteIdentifier(column.attname)).join(", ");
+    const grantColumns = allowedColumns.map((column) => quoteIdentifier(column)).join(", ");
+    await client.query(`REVOKE SELECT (${allColumns}) ON TABLE public.${quotedRelation} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+    await client.query(`GRANT SELECT (${grantColumns}) ON TABLE public.${quotedRelation} TO ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+  }
+}
+
+async function revokeGitAutomationWorkerContextColumnReads(client: Client): Promise<void> {
+  for (const relation of GIT_AUTOMATION_WORKER_CONTEXT_RELATIONS) {
+    if (!(DATABASE_PRINCIPAL_RELATIONS as readonly string[]).includes(relation)) return fail("DATABASE_PRINCIPAL_RELATION_NOT_CATALOGUED");
+    const quotedRelation = relationIdentifier(relation);
+    const columns = await client.query<{ attname: string }>(`
+      SELECT attribute.attname
+        FROM pg_attribute attribute
+        JOIN pg_class relation_row ON relation_row.oid = attribute.attrelid
+        JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+       WHERE namespace_row.nspname = 'public'
+         AND relation_row.relname = $1
+         AND attribute.attnum > 0
+         AND NOT attribute.attisdropped
+       ORDER BY attribute.attnum
+    `, [relation]);
+    if (columns.rowCount === 0) return fail("DATABASE_PRINCIPAL_RELATION_NOT_CATALOGUED");
+    const allColumns = columns.rows.map((column) => quoteIdentifier(column.attname)).join(", ");
+    await client.query(`REVOKE SELECT (${allColumns}) ON TABLE public.${quotedRelation} FROM PUBLIC, ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)}`);
+  }
+}
+
+async function assertGitAutomationWorkerAcl(client: Client): Promise<void> {
+  const workerPollRelations = new Map<string, ReadonlySet<string>>(
+    Object.entries(GIT_AUTOMATION_WORKER_POLL_COLUMNS).map(([relation, columns]) => [relation, new Set<string>(columns)]),
+  );
+  const relations = new Set<string>([
+    ...GIT_AUTOMATION_WORKER_LEDGER_RELATIONS,
+    ...GIT_AUTOMATION_WORKER_CONTEXT_RELATIONS,
+    ...workerPollRelations.keys(),
+  ]);
+  const ledgerRelations = new Set<string>(GIT_AUTOMATION_WORKER_LEDGER_RELATIONS);
+  for (const relation of relations) {
+    const relationAcl = await client.query<{
+      owner: string | null;
+      runtime_select: boolean; runtime_insert: boolean; runtime_update: boolean; runtime_delete: boolean; runtime_truncate: boolean;
+      writer_select: boolean; writer_insert: boolean; writer_update: boolean; writer_delete: boolean; writer_truncate: boolean;
+      worker_select: boolean; worker_insert: boolean; worker_update: boolean; worker_delete: boolean; worker_truncate: boolean;
+      public_select: boolean;
+    }>(`
+      SELECT pg_get_userbyid(relation_row.relowner) AS owner,
+             has_table_privilege($1, relation_row.oid, 'SELECT') AS runtime_select,
+             has_table_privilege($1, relation_row.oid, 'INSERT') AS runtime_insert,
+             has_table_privilege($1, relation_row.oid, 'UPDATE') AS runtime_update,
+             has_table_privilege($1, relation_row.oid, 'DELETE') AS runtime_delete,
+             has_table_privilege($1, relation_row.oid, 'TRUNCATE') AS runtime_truncate,
+             has_table_privilege($2, relation_row.oid, 'SELECT') AS writer_select,
+             has_table_privilege($2, relation_row.oid, 'INSERT') AS writer_insert,
+             has_table_privilege($2, relation_row.oid, 'UPDATE') AS writer_update,
+             has_table_privilege($2, relation_row.oid, 'DELETE') AS writer_delete,
+             has_table_privilege($2, relation_row.oid, 'TRUNCATE') AS writer_truncate,
+             has_table_privilege($3, relation_row.oid, 'SELECT') AS worker_select,
+             has_table_privilege($3, relation_row.oid, 'INSERT') AS worker_insert,
+             has_table_privilege($3, relation_row.oid, 'UPDATE') AS worker_update,
+             has_table_privilege($3, relation_row.oid, 'DELETE') AS worker_delete,
+             has_table_privilege($3, relation_row.oid, 'TRUNCATE') AS worker_truncate,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(relation_row.relacl, acldefault('r', relation_row.relowner))) privilege
+                      WHERE privilege.grantee = 0::oid AND privilege.privilege_type = 'SELECT') AS public_select
+        FROM pg_class relation_row
+        JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+       WHERE namespace_row.nspname = 'public' AND relation_row.relname = $4
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL, relation]);
+    const row = relationAcl.rows[0];
+    if (row === undefined || row.owner !== MIGRATOR_DATABASE_PRINCIPAL
+      || row.worker_select || row.worker_insert || row.worker_update || row.worker_delete || row.worker_truncate
+      || row.public_select) return fail("DATABASE_PRINCIPAL_GIT_AUTOMATION_ACL_INVALID");
+    if (ledgerRelations.has(relation)
+      && (row.runtime_select || row.runtime_insert || row.runtime_update || row.runtime_delete || row.runtime_truncate
+        || row.writer_select || row.writer_insert || row.writer_update || row.writer_delete || row.writer_truncate)) {
+      return fail("DATABASE_PRINCIPAL_GIT_AUTOMATION_ACL_INVALID");
+    }
+
+    const expectedColumns = workerPollRelations.get(relation) ?? new Set<string>();
+    const columnAcl = await client.query<{
+      attname: string;
+      runtime_select: boolean;
+      writer_select: boolean;
+      worker_select: boolean;
+      worker_direct_select: boolean;
+      public_select: boolean;
+    }>(`
+      SELECT attribute.attname,
+             has_column_privilege($1, relation_row.oid, attribute.attname, 'SELECT') AS runtime_select,
+             has_column_privilege($2, relation_row.oid, attribute.attname, 'SELECT') AS writer_select,
+             has_column_privilege($3, relation_row.oid, attribute.attname, 'SELECT') AS worker_select,
+             CASE WHEN attribute.attacl IS NULL THEN FALSE ELSE EXISTS (
+               SELECT 1 FROM aclexplode(attribute.attacl) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $3)
+                  AND privilege.privilege_type = 'SELECT'
+             ) END AS worker_direct_select,
+             CASE WHEN attribute.attacl IS NULL THEN FALSE ELSE EXISTS (
+               SELECT 1 FROM aclexplode(attribute.attacl) privilege
+                WHERE privilege.grantee = 0::oid AND privilege.privilege_type = 'SELECT'
+             ) END AS public_select
+        FROM pg_attribute attribute
+        JOIN pg_class relation_row ON relation_row.oid = attribute.attrelid
+        JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+       WHERE namespace_row.nspname = 'public'
+         AND relation_row.relname = $4
+         AND attribute.attnum > 0
+         AND NOT attribute.attisdropped
+       ORDER BY attribute.attnum
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL, relation]);
+    if (columnAcl.rows.length === 0 || columnAcl.rows.some((column) => {
+      const expected = expectedColumns.has(column.attname);
+      return (ledgerRelations.has(relation) && (column.runtime_select || column.writer_select))
+        || column.worker_select !== expected || column.worker_direct_select !== expected || column.public_select;
+    })) return fail("DATABASE_PRINCIPAL_GIT_AUTOMATION_ACL_INVALID");
+  }
+
+  for (const helper of DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX) {
+    const signature = gitAutomationWorkerDefinerFunctionSignature(helper);
+    const result = await client.query<{
+      owner: string | null; prosecdef: boolean; proconfig: string[] | null;
+      runtime_execute: boolean; writer_execute: boolean; worker_execute: boolean; worker_direct: boolean; public_execute: boolean;
+    }>(`
+      SELECT pg_get_userbyid(function_row.proowner) AS owner,
+             function_row.prosecdef,
+             function_row.proconfig,
+             has_function_privilege($1, function_row.oid, 'EXECUTE') AS runtime_execute,
+             has_function_privilege($2, function_row.oid, 'EXECUTE') AS writer_execute,
+             has_function_privilege($3, function_row.oid, 'EXECUTE') AS worker_execute,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(function_row.proacl, acldefault('f', function_row.proowner))) privilege
+                      WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $3)
+                        AND privilege.privilege_type = 'EXECUTE') AS worker_direct,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(function_row.proacl, acldefault('f', function_row.proowner))) privilege
+                      WHERE privilege.grantee = 0::oid AND privilege.privilege_type = 'EXECUTE') AS public_execute
+        FROM pg_proc function_row WHERE function_row.oid = pg_catalog.to_regprocedure($4)
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL, signature]);
+    const row = result.rows[0];
+    if (row === undefined || row.owner !== MIGRATOR_DATABASE_PRINCIPAL || !row.prosecdef
+      || !row.proconfig?.includes("search_path=pg_catalog") || row.runtime_execute || row.writer_execute
+      || !row.worker_execute || !row.worker_direct || row.public_execute) {
+      return fail("DATABASE_PRINCIPAL_GIT_AUTOMATION_ACL_INVALID");
+    }
+  }
+
+  const forbiddenFunctionSignatures = new Set([
+    ...DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.map(invokerFunctionSignature),
+    ...DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.map(triggerFunctionSignature),
+    ...DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.map(privateFunctionSignature),
+    "public.platform_token_runtime_apply(text,jsonb,jsonb,jsonb)",
+    "public.platform_token_governance_preview(jsonb)",
+    "public.platform_token_governance_apply(jsonb)",
+  ]);
+  for (const signature of forbiddenFunctionSignatures) {
+    const result = await client.query<{ worker_execute: boolean; worker_direct: boolean }>(`
+      SELECT has_function_privilege($1, function_row.oid, 'EXECUTE') AS worker_execute,
+             EXISTS (
+               SELECT 1
+                 FROM aclexplode(COALESCE(function_row.proacl, acldefault('f', function_row.proowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS worker_direct
+        FROM pg_proc function_row
+       WHERE function_row.oid = pg_catalog.to_regprocedure($2)
+    `, [GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL, signature]);
+    const row = result.rows[0];
+    if (row === undefined || row.worker_execute || row.worker_direct) return fail("DATABASE_PRINCIPAL_GIT_AUTOMATION_ACL_INVALID");
+  }
+}
+
 async function verifyAcl(client: Client): Promise<void> {
+  await assertGitAutomationWorkerAcl(client);
   const result = await client.query<{ rolname: string; rolsuper: boolean; rolcreaterole: boolean; rolcreatedb: boolean; rolinherit: boolean; rolreplication: boolean; rolbypassrls: boolean }>(`
     SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolinherit, rolreplication, rolbypassrls
       FROM pg_roles
-     WHERE rolname IN ($1, $2, $3)
+     WHERE rolname = ANY($1::text[])
      ORDER BY rolname
-  `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, MIGRATOR_DATABASE_PRINCIPAL]);
-  if (result.rows.length !== 3 || result.rows.some((row) => row.rolsuper || row.rolcreatedb || row.rolcreaterole || row.rolinherit || row.rolreplication || row.rolbypassrls)) return fail("DATABASE_PRINCIPAL_ROLE_ATTRIBUTES_INVALID");
+  `, [[...FINAL_DATABASE_PRINCIPALS]]);
+  if (result.rows.length !== FINAL_DATABASE_PRINCIPALS.length || result.rows.some((row) => row.rolsuper || row.rolcreatedb || row.rolcreaterole || row.rolinherit || row.rolreplication || row.rolbypassrls)) return fail("DATABASE_PRINCIPAL_ROLE_ATTRIBUTES_INVALID");
   const protectedPolicy = await client.query<{ allowed: boolean; runtime_insert: boolean; writer_insert: boolean }>(`
     SELECT has_table_privilege($1, 'public."PlatformGrantOfferPolicy"', 'SELECT') AS allowed,
            has_table_privilege($1, 'public."PlatformGrantOfferPolicy"', 'INSERT') AS runtime_insert,
@@ -1485,24 +1725,33 @@ async function verifyAcl(client: Client): Promise<void> {
     runtime_database_temp: boolean;
     writer_database_create: boolean;
     writer_database_temp: boolean;
+    git_worker_database_create: boolean;
+    git_worker_database_temp: boolean;
     runtime_schema_create: boolean;
     writer_schema_create: boolean;
+    git_worker_schema_create: boolean;
   }>(`
     SELECT has_database_privilege($1, current_database(), 'CREATE') AS runtime_database_create,
            has_database_privilege($1, current_database(), 'TEMPORARY') AS runtime_database_temp,
            has_database_privilege($2, current_database(), 'CREATE') AS writer_database_create,
            has_database_privilege($2, current_database(), 'TEMPORARY') AS writer_database_temp,
+           has_database_privilege($3, current_database(), 'CREATE') AS git_worker_database_create,
+           has_database_privilege($3, current_database(), 'TEMPORARY') AS git_worker_database_temp,
            has_schema_privilege($1, 'public', 'CREATE') AS runtime_schema_create,
-           has_schema_privilege($2, 'public', 'CREATE') AS writer_schema_create
-  `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL]);
+           has_schema_privilege($2, 'public', 'CREATE') AS writer_schema_create,
+           has_schema_privilege($3, 'public', 'CREATE') AS git_worker_schema_create
+  `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL]);
   const directPrivilegeRow = directPrivileges.rows[0];
   if (directPrivilegeRow === undefined
     || directPrivilegeRow.runtime_database_create
     || directPrivilegeRow.runtime_database_temp
     || directPrivilegeRow.writer_database_create
     || directPrivilegeRow.writer_database_temp
+    || directPrivilegeRow.git_worker_database_create
+    || directPrivilegeRow.git_worker_database_temp
     || directPrivilegeRow.runtime_schema_create
-    || directPrivilegeRow.writer_schema_create) {
+    || directPrivilegeRow.writer_schema_create
+    || directPrivilegeRow.git_worker_schema_create) {
     return fail("DATABASE_PRINCIPAL_ACL_INVALID");
   }
   for (const relation of ENTITLEMENT_PROTECTED_RELATIONS) {
@@ -1525,6 +1774,201 @@ async function verifyAcl(client: Client): Promise<void> {
     `, [RUNTIME_DATABASE_PRINCIPAL, `public.${relationIdentifier(relation)}`, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL]);
     const controlRow = controlPlane.rows[0];
     if (controlRow === undefined || !controlRow.runtime_insert || !controlRow.runtime_update || !controlRow.runtime_delete || controlRow.writer_insert || controlRow.writer_update || controlRow.writer_delete) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
+  }
+  for (const relation of DATABASE_PRINCIPAL_COORDINATION_RELATIONS) {
+    const quoted = relationIdentifier(relation);
+    const coordination = await client.query<{
+      owner: string;
+      runtime_select: boolean;
+      runtime_insert: boolean;
+      runtime_update: boolean;
+      runtime_delete: boolean;
+      writer_select: boolean;
+      writer_insert: boolean;
+      writer_update: boolean;
+      writer_delete: boolean;
+      runtime_lock_version_update: boolean;
+      runtime_project_update: boolean;
+      runtime_identity_update: boolean;
+      writer_lock_version_update: boolean;
+      writer_project_update: boolean;
+      writer_identity_update: boolean;
+      runtime_direct_select: boolean;
+      runtime_direct_insert: boolean;
+      runtime_direct_other: boolean;
+      writer_direct_select: boolean;
+      writer_direct_insert: boolean;
+      writer_direct_other: boolean;
+      public_direct: boolean;
+      invalid_column_acl: boolean;
+    }>(`
+      SELECT pg_get_userbyid(table_row.relowner) AS owner,
+             has_table_privilege($1, $3, 'SELECT') AS runtime_select,
+             has_table_privilege($1, $3, 'INSERT') AS runtime_insert,
+             has_table_privilege($1, $3, 'UPDATE') AS runtime_update,
+             has_table_privilege($1, $3, 'DELETE') AS runtime_delete,
+             has_table_privilege($2, $3, 'SELECT') AS writer_select,
+             has_table_privilege($2, $3, 'INSERT') AS writer_insert,
+             has_table_privilege($2, $3, 'UPDATE') AS writer_update,
+             has_table_privilege($2, $3, 'DELETE') AS writer_delete,
+             has_column_privilege($1, $3, 'lockVersion', 'UPDATE') AS runtime_lock_version_update,
+             has_column_privilege($1, $3, 'projectId', 'UPDATE') AS runtime_project_update,
+             has_column_privilege($1, $3, 'sourceIdentity', 'UPDATE') AS runtime_identity_update,
+             has_column_privilege($2, $3, 'lockVersion', 'UPDATE') AS writer_lock_version_update,
+             has_column_privilege($2, $3, 'projectId', 'UPDATE') AS writer_project_update,
+             has_column_privilege($2, $3, 'sourceIdentity', 'UPDATE') AS writer_identity_update,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'SELECT'
+             ) AS runtime_direct_select,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'INSERT'
+             ) AS runtime_direct_insert,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type NOT IN ('SELECT', 'INSERT')
+             ) AS runtime_direct_other,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'SELECT'
+             ) AS writer_direct_select,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'INSERT'
+             ) AS writer_direct_insert,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type NOT IN ('SELECT', 'INSERT')
+             ) AS writer_direct_other,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = 0::oid
+             ) AS public_direct,
+             EXISTS (
+               SELECT 1 FROM pg_attribute column_row
+               CROSS JOIN LATERAL aclexplode(column_row.attacl) privilege
+                WHERE column_row.attrelid = table_row.oid
+                  AND column_row.attnum > 0
+                  AND NOT column_row.attisdropped
+                  AND privilege.grantee IN (0::oid, (SELECT oid FROM pg_roles WHERE rolname = $1), (SELECT oid FROM pg_roles WHERE rolname = $2))
+                  AND NOT (
+                    column_row.attname = 'lockVersion'
+                    AND privilege.privilege_type = 'UPDATE'
+                    AND privilege.grantee IN ((SELECT oid FROM pg_roles WHERE rolname = $1), (SELECT oid FROM pg_roles WHERE rolname = $2))
+                  )
+             ) AS invalid_column_acl
+        FROM pg_class table_row
+        JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+       WHERE namespace_row.nspname = 'public' AND table_row.relname = $4
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, `public.${quoted}`, relation]);
+    const coordinationRow = coordination.rows[0];
+    if (coordinationRow === undefined
+      || coordinationRow.owner !== MIGRATOR_DATABASE_PRINCIPAL
+      || !coordinationRow.runtime_select || !coordinationRow.runtime_insert || coordinationRow.runtime_update || coordinationRow.runtime_delete
+      || !coordinationRow.writer_select || !coordinationRow.writer_insert || coordinationRow.writer_update || coordinationRow.writer_delete
+      || !coordinationRow.runtime_lock_version_update || coordinationRow.runtime_project_update || coordinationRow.runtime_identity_update
+      || !coordinationRow.writer_lock_version_update || coordinationRow.writer_project_update || coordinationRow.writer_identity_update
+      || !coordinationRow.runtime_direct_select || !coordinationRow.runtime_direct_insert || coordinationRow.runtime_direct_other
+      || !coordinationRow.writer_direct_select || !coordinationRow.writer_direct_insert || coordinationRow.writer_direct_other
+      || coordinationRow.public_direct || coordinationRow.invalid_column_acl) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
+  }
+  for (const relation of WRITER_APPEND_ONLY_RELATIONS) {
+    const quoted = relationIdentifier(relation);
+    const appendOnly = await client.query<{
+      owner: string;
+      runtime_select: boolean;
+      runtime_insert: boolean;
+      runtime_update: boolean;
+      runtime_delete: boolean;
+      runtime_truncate: boolean;
+      runtime_references: boolean;
+      runtime_trigger: boolean;
+      writer_select: boolean;
+      writer_insert: boolean;
+      writer_update: boolean;
+      writer_delete: boolean;
+      writer_truncate: boolean;
+      writer_references: boolean;
+      writer_trigger: boolean;
+      runtime_direct_select: boolean;
+      runtime_direct_other: boolean;
+      writer_direct_select: boolean;
+      writer_direct_insert: boolean;
+      writer_direct_other: boolean;
+      public_direct: boolean;
+      column_acl: boolean;
+    }>(`
+      SELECT pg_get_userbyid(table_row.relowner) AS owner,
+             has_table_privilege($1, $3, 'SELECT') AS runtime_select,
+             has_table_privilege($1, $3, 'INSERT') AS runtime_insert,
+             has_table_privilege($1, $3, 'UPDATE') AS runtime_update,
+             has_table_privilege($1, $3, 'DELETE') AS runtime_delete,
+             has_table_privilege($1, $3, 'TRUNCATE') AS runtime_truncate,
+             has_table_privilege($1, $3, 'REFERENCES') AS runtime_references,
+             has_table_privilege($1, $3, 'TRIGGER') AS runtime_trigger,
+             has_table_privilege($2, $3, 'SELECT') AS writer_select,
+             has_table_privilege($2, $3, 'INSERT') AS writer_insert,
+             has_table_privilege($2, $3, 'UPDATE') AS writer_update,
+             has_table_privilege($2, $3, 'DELETE') AS writer_delete,
+             has_table_privilege($2, $3, 'TRUNCATE') AS writer_truncate,
+             has_table_privilege($2, $3, 'REFERENCES') AS writer_references,
+             has_table_privilege($2, $3, 'TRIGGER') AS writer_trigger,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'SELECT'
+             ) AS runtime_direct_select,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type <> 'SELECT'
+             ) AS runtime_direct_other,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'SELECT'
+             ) AS writer_direct_select,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'INSERT'
+             ) AS writer_direct_insert,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type NOT IN ('SELECT', 'INSERT')
+             ) AS writer_direct_other,
+             EXISTS (
+               SELECT 1 FROM aclexplode(COALESCE(table_row.relacl, acldefault('r', table_row.relowner))) privilege
+                WHERE privilege.grantee = 0::oid
+             ) AS public_direct,
+             EXISTS (
+               SELECT 1 FROM pg_attribute column_row
+               CROSS JOIN LATERAL aclexplode(column_row.attacl) privilege
+                WHERE column_row.attrelid = table_row.oid
+                  AND column_row.attnum > 0
+                  AND NOT column_row.attisdropped
+                  AND privilege.grantee IN (0::oid, (SELECT oid FROM pg_roles WHERE rolname = $1), (SELECT oid FROM pg_roles WHERE rolname = $2))
+             ) AS column_acl
+        FROM pg_class table_row
+        JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+       WHERE namespace_row.nspname = 'public' AND table_row.relname = $4
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, `public.${quoted}`, relation]);
+    const appendOnlyRow = appendOnly.rows[0];
+    if (appendOnlyRow === undefined
+      || appendOnlyRow.owner !== MIGRATOR_DATABASE_PRINCIPAL
+      || !appendOnlyRow.runtime_select || appendOnlyRow.runtime_insert || appendOnlyRow.runtime_update || appendOnlyRow.runtime_delete || appendOnlyRow.runtime_truncate || appendOnlyRow.runtime_references || appendOnlyRow.runtime_trigger
+      || !appendOnlyRow.writer_select || !appendOnlyRow.writer_insert || appendOnlyRow.writer_update || appendOnlyRow.writer_delete || appendOnlyRow.writer_truncate || appendOnlyRow.writer_references || appendOnlyRow.writer_trigger
+      || !appendOnlyRow.runtime_direct_select || appendOnlyRow.runtime_direct_other
+      || !appendOnlyRow.writer_direct_select || !appendOnlyRow.writer_direct_insert || appendOnlyRow.writer_direct_other
+      || appendOnlyRow.public_direct || appendOnlyRow.column_acl) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
   }
   const allocationPrivileges = await client.query<{ runtime_insert: boolean; runtime_update: boolean; runtime_delete: boolean }>(`
     SELECT has_table_privilege($1, 'public."PlatformTokenReservationAllocation"', 'INSERT') AS runtime_insert,
@@ -1632,7 +2076,7 @@ async function verifyAcl(client: Client): Promise<void> {
   }
   if (helperRows.rows.length !== DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length
     || helperRows.rows.some((row) => !expectedHelperOids.has(row.oid))
-    || runtimeHelperCount !== 43
+    || runtimeHelperCount !== 45
     || writerHelperCount !== 8) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
   const triggerNames = [...new Set(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.map((trigger) => trigger.name))];
   const triggerRows = await client.query<{ oid: string; name: string }>(`
@@ -1697,7 +2141,7 @@ async function verifyAcl(client: Client): Promise<void> {
     expectedTriggerOids.add(triggerRow.oid);
     if (triggerRow.identity_arguments !== trigger.identityArguments
       || triggerRow.owner !== MIGRATOR_DATABASE_PRINCIPAL
-      || triggerRow.prosecdef
+      || triggerRow.prosecdef !== trigger.securityDefiner
       || triggerRow.public_execute
       || triggerRow.runtime_execute
       || triggerRow.runtime_direct
@@ -1708,6 +2152,38 @@ async function verifyAcl(client: Client): Promise<void> {
   }
   if (triggerRows.rows.length !== DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length
     || triggerRows.rows.some((row) => !expectedTriggerOids.has(row.oid))) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+  const privateFunctionNames = [...new Set(DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.map((helper) => helper.name))];
+  const privateFunctionRows = await client.query<{ oid: string; name: string }>(`
+    SELECT p.oid::text AS oid, p.proname AS name
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.prokind = 'f' AND p.proname = ANY($1::text[])
+  `, [privateFunctionNames]);
+  const expectedPrivateFunctionOids = new Set<string>();
+  for (const helper of DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX) {
+    const signature = privateFunctionSignature(helper);
+    const result = await client.query<{
+      oid: string; identity_arguments: string; owner: string | null; prosecdef: boolean;
+      runtime_execute: boolean; runtime_direct: boolean; writer_execute: boolean; writer_direct: boolean; public_execute: boolean;
+    }>(`
+      SELECT p.oid::text AS oid,
+             pg_catalog.oidvectortypes(p.proargtypes) AS identity_arguments,
+             pg_get_userbyid(p.proowner) AS owner,
+             p.prosecdef,
+             has_function_privilege($1, $3, 'EXECUTE') AS runtime_execute,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=$1) AND a.privilege_type='EXECUTE') AS runtime_direct,
+             has_function_privilege($2, $3, 'EXECUTE') AS writer_execute,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=$2) AND a.privilege_type='EXECUTE') AS writer_direct,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee=0::oid AND a.privilege_type='EXECUTE') AS public_execute
+        FROM pg_proc p WHERE p.oid=pg_catalog.to_regprocedure($3)
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, signature]);
+    const row = result.rows[0];
+    if (row === undefined || row.owner !== MIGRATOR_DATABASE_PRINCIPAL || row.prosecdef
+      || row.identity_arguments !== helper.identityArguments || row.runtime_execute || row.runtime_direct
+      || row.writer_execute || row.writer_direct || row.public_execute) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+    expectedPrivateFunctionOids.add(row.oid);
+  }
+  if (privateFunctionRows.rows.length !== DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.length
+    || privateFunctionRows.rows.some((row) => !expectedPrivateFunctionOids.has(row.oid))) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
   const publicPrivileges = await client.query<{ database_public: boolean; schema_public: boolean }>(`
     SELECT EXISTS (
              SELECT 1
@@ -1736,11 +2212,12 @@ async function reconcile(): Promise<void> {
   const migratorUrl = requiredUrl(MIGRATOR_DATABASE_URL_ENV);
   const runtimeUrl = requiredUrl(RUNTIME_DATABASE_URL_ENV);
   const writerUrl = requiredUrl(WRITER_DATABASE_URL_ENV);
+  const gitAutomationUrl = requiredUrl(GIT_AUTOMATION_DATABASE_URL_ENV);
   const adminUrl = requiredUrl(ADMIN_DATABASE_URL_ENV);
   const inventoryPassword = requiredSecret(INVENTORY_READER_PASSWORD_ENV);
-  assertSameDatabase([migratorUrl, runtimeUrl, writerUrl, adminUrl]);
-  if (roleUsername(migratorUrl) !== MIGRATOR_DATABASE_PRINCIPAL || roleUsername(runtimeUrl) !== RUNTIME_DATABASE_PRINCIPAL || roleUsername(writerUrl) !== ENTITLEMENT_WRITER_DATABASE_PRINCIPAL) return fail("DATABASE_PRINCIPAL_URL_USER_MISMATCH");
-  if (new Set([roleUsername(migratorUrl), roleUsername(runtimeUrl), roleUsername(writerUrl)]).size !== 3) return fail("DATABASE_PRINCIPAL_URL_USER_MISMATCH");
+  assertSameDatabase([migratorUrl, runtimeUrl, writerUrl, gitAutomationUrl, adminUrl]);
+  if (roleUsername(migratorUrl) !== MIGRATOR_DATABASE_PRINCIPAL || roleUsername(runtimeUrl) !== RUNTIME_DATABASE_PRINCIPAL || roleUsername(writerUrl) !== ENTITLEMENT_WRITER_DATABASE_PRINCIPAL || roleUsername(gitAutomationUrl) !== GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL) return fail("DATABASE_PRINCIPAL_URL_USER_MISMATCH");
+  if (new Set([roleUsername(migratorUrl), roleUsername(runtimeUrl), roleUsername(writerUrl), roleUsername(gitAutomationUrl)]).size !== 4) return fail("DATABASE_PRINCIPAL_URL_USER_MISMATCH");
   if (roleUsername(adminUrl) !== CLUSTER_ADMIN_DATABASE_PRINCIPAL) return fail("DATABASE_PRINCIPAL_ADMIN_URL_USER_MISMATCH");
   const admin = new Client({ connectionString: adminUrl.toString(), connectionTimeoutMillis: 5_000 });
   await admin.connect();
@@ -1758,15 +2235,18 @@ async function reconcile(): Promise<void> {
     await ensureRole(admin, MIGRATOR_DATABASE_PRINCIPAL, rolePassword(migratorUrl), true);
     await ensureRole(admin, RUNTIME_DATABASE_PRINCIPAL, rolePassword(runtimeUrl), false);
     await ensureRole(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, rolePassword(writerUrl), false);
+    await ensureRole(admin, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL, rolePassword(gitAutomationUrl), false);
     await ensureInventoryReader(admin, inventoryPassword);
     await freezeRoleSessions(admin, RUNTIME_DATABASE_PRINCIPAL);
     await freezeRoleSessions(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
+    await freezeRoleSessions(admin, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL);
     await freezeRoleSessions(admin, INVENTORY_READER_DATABASE_PRINCIPAL);
     await resetFinalRoleSettings(admin);
     await assertNoPreparedTransactions(admin);
     await revokeRoleMembershipEdges(admin, MIGRATOR_DATABASE_PRINCIPAL);
     await revokeRoleMembershipEdges(admin, RUNTIME_DATABASE_PRINCIPAL);
     await revokeRoleMembershipEdges(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
+    await revokeRoleMembershipEdges(admin, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL);
     await revokeRoleMembershipEdges(admin, CLUSTER_ADMIN_DATABASE_PRINCIPAL);
     await revokeRoleMembershipEdges(admin, INVENTORY_READER_DATABASE_PRINCIPAL);
     await transferCurrentOwnedObjects(admin, reassignOwnershipPolicy(RUNTIME_DATABASE_PRINCIPAL));
@@ -1781,12 +2261,14 @@ async function reconcile(): Promise<void> {
     await assertNoRoleMembership(admin, MIGRATOR_DATABASE_PRINCIPAL);
     await assertNoRoleMembership(admin, RUNTIME_DATABASE_PRINCIPAL);
     await assertNoRoleMembership(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
+    await assertNoRoleMembership(admin, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL);
     await assertNoRoleMembership(admin, CLUSTER_ADMIN_DATABASE_PRINCIPAL);
     await assertFinalRoleShape(admin, false);
     await verifyAcl(admin);
     await assertAllowedExtensionOwnership(admin, sealedLegacyPolicy);
     await admin.query(`ALTER ROLE ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)} LOGIN`);
     await admin.query(`ALTER ROLE ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)} LOGIN`);
+    await admin.query(`ALTER ROLE ${quoteIdentifier(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL)} LOGIN`);
     await admin.query(`ALTER ROLE ${quoteIdentifier(INVENTORY_READER_DATABASE_PRINCIPAL)} LOGIN`);
     await assertFinalRoleShape(admin, true);
     await assertInventoryReader(admin, true, true);
@@ -1797,7 +2279,7 @@ async function reconcile(): Promise<void> {
   } finally {
     await admin.end();
   }
-  await verifyRuntimeAndWriterSessions(runtimeUrl, writerUrl);
+  await verifyRuntimeAndWriterSessions(runtimeUrl, writerUrl, gitAutomationUrl);
 }
 
 type LegacyBootstrapContext = Readonly<{
@@ -1818,7 +2300,7 @@ async function createClusterAdminFromLegacy(legacyUrl: URL, adminPassword: strin
     await assertOriginReplicationRole(legacy);
     const session = await readSessionPrincipal(legacy);
     if (session.session_user !== session.current_user || !session.is_superuser) return fail("DATABASE_PRINCIPAL_BOOTSTRAP_OWNER_REQUIRED");
-    if ([CLUSTER_ADMIN_DATABASE_PRINCIPAL, INVENTORY_READER_DATABASE_PRINCIPAL, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL].includes(session.session_user as typeof CLUSTER_ADMIN_DATABASE_PRINCIPAL)) {
+    if ([CLUSTER_ADMIN_DATABASE_PRINCIPAL, INVENTORY_READER_DATABASE_PRINCIPAL, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL].includes(session.session_user as typeof CLUSTER_ADMIN_DATABASE_PRINCIPAL)) {
       return fail("DATABASE_PRINCIPAL_BOOTSTRAP_ROLE_RESERVED");
     }
     await legacy.query("BEGIN");
@@ -1884,7 +2366,7 @@ async function discoverPendingLegacy(
     `, [originalRole]);
     const originalRow = original.rows[0];
     if (originalRow !== undefined) {
-      const isRecreatedDataRole = FINAL_DATABASE_PRINCIPALS.includes(originalRole as typeof MIGRATOR_DATABASE_PRINCIPAL)
+      const isRecreatedDataRole = (FINAL_DATABASE_PRINCIPALS as readonly string[]).includes(originalRole)
         && !originalRow.rolsuper && !originalRow.rolcreatedb && !originalRow.rolcreaterole
         && !originalRow.rolinherit && !originalRow.rolreplication && !originalRow.rolbypassrls
         && originalRow.rolcanlogin === (originalRole === MIGRATOR_DATABASE_PRINCIPAL);
@@ -1956,16 +2438,18 @@ async function bootstrapIfNeeded(): Promise<void> {
   const migratorUrl = requiredUrl(MIGRATOR_DATABASE_URL_ENV);
   const runtimeUrl = requiredUrl(RUNTIME_DATABASE_URL_ENV);
   const writerUrl = requiredUrl(WRITER_DATABASE_URL_ENV);
+  const gitAutomationUrl = requiredUrl(GIT_AUTOMATION_DATABASE_URL_ENV);
   const adminUrl = requiredUrl(ADMIN_DATABASE_URL_ENV);
   const legacyUrl = optionalUrl(LEGACY_DATABASE_URL_ENV);
   const inventoryPassword = requiredSecret(INVENTORY_READER_PASSWORD_ENV);
   const adminPassword = rolePassword(adminUrl);
 
-  const coreUrls = [migratorUrl, runtimeUrl, writerUrl, adminUrl] as const;
+  const coreUrls = [migratorUrl, runtimeUrl, writerUrl, gitAutomationUrl, adminUrl] as const;
   assertSameDatabase(coreUrls);
   if (roleUsername(migratorUrl) !== MIGRATOR_DATABASE_PRINCIPAL
     || roleUsername(runtimeUrl) !== RUNTIME_DATABASE_PRINCIPAL
     || roleUsername(writerUrl) !== ENTITLEMENT_WRITER_DATABASE_PRINCIPAL
+    || roleUsername(gitAutomationUrl) !== GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL
     || roleUsername(adminUrl) !== CLUSTER_ADMIN_DATABASE_PRINCIPAL) {
     return fail("DATABASE_PRINCIPAL_URL_USER_MISMATCH");
   }
@@ -2026,15 +2510,18 @@ async function bootstrapIfNeeded(): Promise<void> {
       await ensureRole(admin, MIGRATOR_DATABASE_PRINCIPAL, rolePassword(migratorUrl), true);
       await ensureRole(admin, RUNTIME_DATABASE_PRINCIPAL, rolePassword(runtimeUrl), false);
       await ensureRole(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, rolePassword(writerUrl), false);
+      await ensureRole(admin, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL, rolePassword(gitAutomationUrl), false);
       await ensureInventoryReader(admin, inventoryPassword);
       await freezeRoleSessions(admin, RUNTIME_DATABASE_PRINCIPAL);
       await freezeRoleSessions(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
+      await freezeRoleSessions(admin, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL);
       await freezeRoleSessions(admin, INVENTORY_READER_DATABASE_PRINCIPAL);
       await resetFinalRoleSettings(admin);
       await assertNoPreparedTransactions(admin);
       await revokeRoleMembershipEdges(admin, MIGRATOR_DATABASE_PRINCIPAL);
       await revokeRoleMembershipEdges(admin, RUNTIME_DATABASE_PRINCIPAL);
       await revokeRoleMembershipEdges(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
+      await revokeRoleMembershipEdges(admin, GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL);
       await revokeRoleMembershipEdges(admin, CLUSTER_ADMIN_DATABASE_PRINCIPAL);
       await revokeRoleMembershipEdges(admin, INVENTORY_READER_DATABASE_PRINCIPAL);
       await createRequiredExtensions(admin);
@@ -2144,7 +2631,7 @@ function parseOperation(): "reconcile" | "bootstrap-if-needed" {
 async function main(): Promise<void> {
   const operation = parseOperation() === "bootstrap-if-needed" ? bootstrapIfNeeded() : reconcile();
   await operation;
-  console.log(JSON.stringify({ ok: true, component: "database-principal-reconcile", migrator: MIGRATOR_DATABASE_PRINCIPAL, runtime: RUNTIME_DATABASE_PRINCIPAL, writer: ENTITLEMENT_WRITER_DATABASE_PRINCIPAL }));
+  console.log(JSON.stringify({ ok: true, component: "database-principal-reconcile", migrator: MIGRATOR_DATABASE_PRINCIPAL, runtime: RUNTIME_DATABASE_PRINCIPAL, writer: ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, gitAutomationWorker: GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL }));
 }
 
 void main().catch((error: unknown) => {

@@ -517,6 +517,7 @@ test(
         WHERE "membershipKind" = 'project' AND "membershipId" = $1
       `, [projectMembershipId]);
       assert.equal(projectAuditCount.rows[0]?.count, "1");
+      await client.query(`UPDATE "Project" SET "archivedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`, [projectId]);
       await client.query(`DELETE FROM "Project" WHERE "id" = $1`, [projectId]);
       const projectCascade = await client.query<{ memberships: string; audits: string }>(`
         SELECT

@@ -1,7 +1,7 @@
 FROM node:24.19.0-bookworm-slim AS base
 
 LABEL org.opencontainers.image.title="AI Project OS" \
-      org.opencontainers.image.version="0.6.0-dev.14"
+      org.opencontainers.image.version="0.7.0-dev.1"
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -27,7 +27,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY . .
 RUN pnpm db:generate
-RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm build
+RUN NODE_OPTIONS=--max-old-space-size=6144 pnpm build
 
 FROM base AS migrate
 

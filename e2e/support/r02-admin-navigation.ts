@@ -125,8 +125,16 @@ export async function expectR02NoHorizontalOverflow(page: Page, surface: string)
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
   }));
-  expect(dimensions.documentWidth, `${surface} document must not overflow`).toBeLessThanOrEqual(dimensions.viewportWidth);
-  expect(dimensions.bodyWidth, `${surface} body must not overflow`).toBeLessThanOrEqual(dimensions.viewportWidth);
+  const overflowing = dimensions.documentWidth > dimensions.viewportWidth || dimensions.bodyWidth > dimensions.viewportWidth
+    ? await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("body *")]
+      .map((element) => ({ element, right: element.getBoundingClientRect().right }))
+      .filter(({ right }) => right > window.innerWidth + 1)
+      .sort((left, right) => right.right - left.right)
+      .slice(0, 6)
+      .map(({ element, right }) => ({ tag: element.tagName, className: typeof element.className === "string" ? element.className.slice(0, 120) : "", right: Math.round(right), text: element.textContent?.trim().slice(0, 80) ?? "" })))
+    : [];
+  expect(dimensions.documentWidth, `${surface} document must not overflow: ${JSON.stringify(overflowing)}`).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect(dimensions.bodyWidth, `${surface} body must not overflow: ${JSON.stringify(overflowing)}`).toBeLessThanOrEqual(dimensions.viewportWidth);
 }
 
 export async function expectR02SettledRoute(page: Page, route: R02RouteExpectation, surface: string): Promise<void> {

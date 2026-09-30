@@ -4,8 +4,9 @@ import { getGitHubOAuthAvailability } from "@/lib/github-oauth";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ github?: string }> }) {
+export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ github?: string; oidc?: string }> }) {
   const user = await requirePageSession();
   const githubAvailability = await getGitHubOAuthAvailability();
-  return <ProfileClient username={user.username} isSystemAdmin={user.role === "admin"} githubLoginAvailable={githubAvailability.status === "available"} githubAvailability={githubAvailability.status} githubStatus={(await searchParams).github} />;
+  const params = await searchParams;
+  return <ProfileClient username={user.username} isSystemAdmin={user.role === "admin"} githubLoginAvailable={githubAvailability.status === "available"} githubAvailability={githubAvailability.status} githubStatus={params.github} oidcStatus={params.oidc} />;
 }

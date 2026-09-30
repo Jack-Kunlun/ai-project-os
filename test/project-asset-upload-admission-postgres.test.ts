@@ -53,6 +53,11 @@ async function filesUnder(directory: string): Promise<string[]> {
   return files;
 }
 
+async function deleteArchivedProject(db: ReturnType<typeof getDb>, projectId: string) {
+  await db.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
+  await db.project.delete({ where: { id: projectId } });
+}
+
 test(
   "durable upload admission serializes concurrent requests and counts rejected attempts",
   { skip: !shouldRun ? "PROJECT_ASSET_UPLOAD_POSTGRES_GATE=1 is required" : false },
@@ -92,7 +97,7 @@ test(
       else process.env.AI_PROJECT_OS_UPLOAD_MAX_UPLOADS_PER_MINUTE = previousRate;
       if (previousConcurrent === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_MAX_CONCURRENT;
       else process.env.AI_PROJECT_OS_UPLOAD_MAX_CONCURRENT = previousConcurrent;
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.delete({ where: { id: user.id } });
     }
@@ -147,7 +152,7 @@ test(
       else process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES = previousRequestBytes;
       if (previousProjectBytes === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES;
       else process.env.AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES = previousProjectBytes;
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.delete({ where: { id: user.id } });
       await rm(assetRoot, { recursive: true, force: true });
@@ -188,7 +193,7 @@ test(
       else process.env.AI_PROJECT_OS_UPLOAD_MAX_CONCURRENT = previousUserConcurrent;
       if (previousGlobalConcurrent === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_MAX_GLOBAL_CONCURRENT;
       else process.env.AI_PROJECT_OS_UPLOAD_MAX_GLOBAL_CONCURRENT = previousGlobalConcurrent;
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.deleteMany({ where: { id: { in: users.map((user) => user.id) } } });
     }
@@ -251,7 +256,7 @@ test(
       restore("project", "AI_PROJECT_OS_UPLOAD_MAX_PROJECT_RETAINED_OBJECTS");
       restore("workspace", "AI_PROJECT_OS_UPLOAD_MAX_WORKSPACE_RETAINED_OBJECTS");
       restore("deployment", "AI_PROJECT_OS_UPLOAD_MAX_DEPLOYMENT_RETAINED_OBJECTS");
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.delete({ where: { id: user.id } });
       await rm(assetRoot, { recursive: true, force: true });
@@ -351,7 +356,7 @@ test(
       else process.env.AI_PROJECT_OS_ASSET_DIR = previousRoot;
       if (previousLease === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_PARSE_LEASE_MS;
       else process.env.AI_PROJECT_OS_UPLOAD_PARSE_LEASE_MS = previousLease;
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.delete({ where: { id: user.id } });
       await rm(assetRoot, { recursive: true, force: true });
@@ -398,7 +403,7 @@ test(
     } finally {
       if (previousRoot === undefined) delete process.env.AI_PROJECT_OS_ASSET_DIR;
       else process.env.AI_PROJECT_OS_ASSET_DIR = previousRoot;
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.delete({ where: { id: user.id } });
       await rm(assetRoot, { recursive: true, force: true });
@@ -424,6 +429,7 @@ test(
         storageKey: assetBlobStorageKey(project.id, randomUUID(), randomUUID()),
         sizeBytes: 1,
       }, db);
+      await db.project.update({ where: { id: project.id }, data: { archivedAt: new Date() } });
       await assert.rejects(
         () => db.project.delete({ where: { id: project.id } }),
         (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003",
@@ -431,7 +437,7 @@ test(
       assert.equal(await db.projectAssetUploadReservation.count({ where: { id: reservationId } }), 1);
     } finally {
       await db.projectAssetUploadReservation.deleteMany({ where: { id: reservationId } });
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.delete({ where: { id: user.id } });
     }
@@ -465,7 +471,7 @@ test(
     } finally {
       if (previousRoot === undefined) delete process.env.AI_PROJECT_OS_ASSET_DIR;
       else process.env.AI_PROJECT_OS_ASSET_DIR = previousRoot;
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.delete({ where: { id: user.id } });
       await rm(assetRoot, { recursive: true, force: true });
@@ -493,7 +499,7 @@ test(
       assert.equal(await db.projectAssetUploadAdmission.count({ where: { userId: inactiveUser.id, createdAt: recent } }), 1);
       await releaseUploadAdmission(admissionId, db);
     } finally {
-      await db.project.delete({ where: { id: project.id } });
+      await deleteArchivedProject(db, project.id);
       await db.workspace.delete({ where: { id: workspace.id } });
       await db.appUser.deleteMany({ where: { id: { in: [inactiveUser.id, activeUser.id] } } });
     }

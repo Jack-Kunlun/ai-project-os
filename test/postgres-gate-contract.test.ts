@@ -30,8 +30,39 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
   assert.equal(new Set(POSTGRES_GATES.map((gate) => gate.id)).size, POSTGRES_GATES.length);
   assert.deepEqual(
     POSTGRES_GATES.filter((gate) => gate.seedAdmin === true).map((gate) => gate.id),
-    ["v3", "membership-governance-manifest", "project-ai-provider-delegation", "project-git-repository-delegation", "project-delegated-git-runtime", "personal-runtime-evidence", "personal-web-ai-runtime", "system-failure-inbox", "platform-provider-probe", "notification-subjects"],
+    ["v3", "membership-governance-manifest", "project-ai-provider-delegation", "project-git-repository-delegation", "project-git-automation-run-ledger", "project-git-automation-read-context", "project-git-automation-material", "project-delegated-git-runtime", "personal-runtime-evidence", "personal-web-ai-runtime", "system-failure-inbox", "platform-provider-probe", "notification-subjects"],
   );
+  assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "local-registration"), {
+    id: "local-registration",
+    file: "test/local-registration-postgres.test.ts",
+    database: "ai_project_os_local_registration_test",
+    gateEnv: "LOCAL_REGISTRATION_POSTGRES_GATE",
+    databaseUrlEnv: "LOCAL_REGISTRATION_TEST_DATABASE_URL",
+    setup: "migrate",
+  });
+  assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "authenticated-web-source"), {
+    id: "authenticated-web-source",
+    file: "test/authenticated-web-source-postgres.test.ts",
+    database: "ai_project_os_authenticated_web_source_test",
+    gateEnv: "AUTHENTICATED_WEB_SOURCE_POSTGRES_GATE",
+    setup: "principals",
+  });
+  assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "project-git-automation-run-ledger"), {
+    id: "project-git-automation-run-ledger",
+    file: "test/project-git-automation-run-ledger-postgres.test.ts",
+    database: "ai_project_os_project_git_automation_run_ledger_test",
+    gateEnv: "PROJECT_GIT_AUTOMATION_RUN_LEDGER_POSTGRES_GATE",
+    seedAdmin: true,
+    setup: "principals",
+  });
+  assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "project-git-automation-material"), {
+    id: "project-git-automation-material",
+    file: "test/project-git-automation-material-postgres.test.ts",
+    database: "ai_project_os_project_git_automation_material_test",
+    gateEnv: "PROJECT_GIT_AUTOMATION_MATERIAL_POSTGRES_GATE",
+    seedAdmin: true,
+    setup: "principals",
+  });
 });
 
 test("PostgreSQL gate admin URL is restricted to the fixed disposable loopback target", () => {
@@ -79,4 +110,7 @@ test("PostgreSQL gate runner binds every database client to the disposable gate 
   const runner = await readFile("scripts/run-postgres-gates.ts", "utf8");
   assert.match(runner, /DATABASE_URL: databaseUrl,/u);
   assert.match(runner, /ENTITLEMENT_DATABASE_URL: databaseUrl,/u);
+  assert.match(runner, /const DATABASE_PRINCIPAL_GATE_TEMPORARY_ROLES = Object\.freeze\(\[[\s\S]*?"ai_project_os_cluster_admin"[\s\S]*?"ai_project_os_entitlement_inventory_reader"[\s\S]*?\]\s+as const\)/u);
+  assert.match(runner, /if \(gate\.id === "database-principals"\)\s*\{\s*await dropDatabasePrincipalGateTemporaryRoles\(admin\)/u);
+  assert.match(runner, /async function dropDatabasePrincipalGateTemporaryRoles\(admin: Client\)[\s\S]*?DROP OWNED BY \$\{quoteIdentifier\(role\)\}[\s\S]*?DROP ROLE \$\{quoteIdentifier\(role\)\}/u);
 });

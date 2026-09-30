@@ -19,10 +19,12 @@ import {
   GitServiceError,
   isDefinitelyPreDispatchGitSyncFailure,
   readGitRepositoryFilesForDelegation,
+  type GitDelegationBaseline,
   type GitConnectionWithSecret,
   type GitScannedFile,
 } from "@/lib/git";
 import { getDb } from "@/lib/db";
+import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 import { lockActorAccess, withWebAiProjectAccessTransaction, type ProjectAccessAdmission } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 
@@ -57,6 +59,12 @@ export class ProjectDelegatedGitRuntimeError extends Error {
   constructor(readonly code: ProjectDelegatedGitRuntimeErrorCode) {
     super(code);
     this.name = "ProjectDelegatedGitRuntimeError";
+  }
+}
+
+class PublicationHeadCasConflict extends Error {
+  constructor() {
+    super("PROJECT_GIT_PUBLICATION_HEAD_CAS_CONFLICT");
   }
 }
 
@@ -159,6 +167,12 @@ const runSelect = {
   automationAllowed: true,
   frozenCommitSha: true,
   manifestFingerprint: true,
+  baselineRunId: true,
+  baselineFrozenCommitSha: true,
+  baselineManifestFingerprint: true,
+  baselinePublishedAt: true,
+  expectedPublicationVersionId: true,
+  expectedPublicationGeneration: true,
   fileCount: true,
   decodedTextBytes: true,
   createdAt: true,
@@ -167,6 +181,195 @@ const runSelect = {
 } satisfies Prisma.ProjectGitRepositoryManualRunSelect;
 
 type RunRow = Prisma.ProjectGitRepositoryManualRunGetPayload<{ select: typeof runSelect }>;
+
+type PublicationCursor = Readonly<{
+  publicationVersionId: string | null;
+  generation: number;
+}>;
+
+type ManualPointerBaseline = GitDelegationBaseline & Readonly<{
+  publicationVersionId: string;
+  publicationGeneration: number;
+  runKind: "manual" | "automatic";
+  trackedRef: string;
+}>;
+
+type PublicationState = Readonly<{
+  cursor: PublicationCursor;
+  baseline: ManualPointerBaseline | null;
+}>;
+
+// PostgreSQL CHAR(64) right-pads SHA-1 OIDs stored in frozen-run columns.
+function storedGitOid(value: string): string {
+  return value.trimEnd();
+}
+
+function sameManualPointerIdentity(
+  left: Pick<ManualPointerBaseline, "runId" | "frozenCommitSha" | "manifestFingerprint" | "publishedAt" | "publicationVersionId" | "publicationGeneration" | "runKind"> | null,
+  right: Pick<ManualPointerBaseline, "runId" | "frozenCommitSha" | "manifestFingerprint" | "publishedAt" | "publicationVersionId" | "publicationGeneration" | "runKind"> | null,
+): boolean {
+  return left === null || right === null
+    ? left === right
+    : left.runId === right.runId
+      && left.publicationVersionId === right.publicationVersionId
+      && left.publicationGeneration === right.publicationGeneration
+      && left.runKind === right.runKind
+      && storedGitOid(left.frozenCommitSha) === storedGitOid(right.frozenCommitSha)
+      && left.manifestFingerprint === right.manifestFingerprint
+      && left.publishedAt.getTime() === right.publishedAt.getTime();
+}
+
+function samePublicationCursor(left: PublicationCursor, right: PublicationCursor): boolean {
+  return left.generation === right.generation && left.publicationVersionId === right.publicationVersionId;
+}
+
+function samePersistedBaselineIdentity(
+  baseline: ManualPointerBaseline | null,
+  persisted: Pick<ManualPointerBaseline, "runId" | "frozenCommitSha" | "manifestFingerprint" | "publishedAt"> | null,
+): boolean {
+  return baseline === null || persisted === null
+    ? baseline === persisted
+    : baseline.runId === persisted.runId
+      && storedGitOid(baseline.frozenCommitSha) === storedGitOid(persisted.frozenCommitSha)
+      && baseline.manifestFingerprint === persisted.manifestFingerprint
+      && baseline.publishedAt.getTime() === persisted.publishedAt.getTime();
+}
+
+function sameManualPointerBaseline(left: ManualPointerBaseline | null, right: ManualPointerBaseline | null): boolean {
+  return sameManualPointerIdentity(left, right)
+    && (left === null || right === null || (
+      left.repositoryPath === right.repositoryPath
+      && left.trackedRef === right.trackedRef
+      && left.files.length === right.files.length
+      && left.files.every((file, index) => {
+        const other = right.files[index];
+        return other !== undefined
+          && file.path === other.path
+          && storedGitOid(file.blobOid) === storedGitOid(other.blobOid)
+          && file.contentHash === other.contentHash
+          && file.contentBytes === other.contentBytes
+          && file.lineCount === other.lineCount;
+      })
+    ));
+}
+
+async function loadPublicationState(
+  db: DelegationDb,
+  input: Readonly<{ projectId: string; delegationId: string; delegationVersion: number; delegationFingerprint: string; repositoryPath: string; trackedRef: string }>,
+): Promise<PublicationState> {
+  const head = await db.projectGitRepositoryPublicationHead.findUnique({
+    where: { projectId_delegationId: { projectId: input.projectId, delegationId: input.delegationId } },
+    select: { currentPublicationVersionId: true, generation: true, publishedAt: true },
+  });
+  if (head === null) return Object.freeze({ cursor: Object.freeze({ publicationVersionId: null, generation: 0 }), baseline: null });
+  const invalidHead = (): never => fail("PROJECT_GIT_MANUAL_CONFLICT");
+  if (head.generation < 1 || !/^[0-9a-f-]{36}$/u.test(head.currentPublicationVersionId)) return invalidHead();
+  const publicationVersion = await db.projectGitRepositoryPublicationVersion.findUnique({
+    where: { id: head.currentPublicationVersionId },
+    select: {
+      id: true,
+      projectId: true,
+      delegationId: true,
+      runKind: true,
+      runId: true,
+      previousPublicationVersionId: true,
+      previousGeneration: true,
+      delegationVersion: true,
+      delegationFingerprint: true,
+      repositoryPath: true,
+      trackedRef: true,
+      frozenCommitSha: true,
+      manifestFingerprint: true,
+      fileCount: true,
+      decodedTextBytes: true,
+      publishedAt: true,
+    },
+  });
+  if (publicationVersion === null
+    || publicationVersion.projectId !== input.projectId
+    || publicationVersion.delegationId !== input.delegationId
+    || publicationVersion.id !== head.currentPublicationVersionId
+    || publicationVersion.publishedAt.getTime() !== head.publishedAt.getTime()
+    || publicationVersion.previousGeneration !== head.generation - 1
+    || (publicationVersion.previousGeneration === 0) !== (publicationVersion.previousPublicationVersionId === null)
+    || !/^[0-9a-f]{64}$/u.test(publicationVersion.delegationFingerprint)
+    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(storedGitOid(publicationVersion.frozenCommitSha))
+    || !/^[0-9a-f]{64}$/u.test(publicationVersion.manifestFingerprint)
+    || publicationVersion.fileCount <= 0
+    || publicationVersion.decodedTextBytes < 0) return invalidHead();
+
+  const entries = await db.projectGitRepositoryPublicationEntry.findMany({
+    where: { projectId: input.projectId, delegationId: input.delegationId, publicationVersionId: publicationVersion.id },
+    orderBy: { ordinal: "asc" },
+    select: { projectSourceId: true, ordinal: true, normalizedPath: true, blobOid: true, contentHash: true, contentBytes: true, lineCount: true },
+  });
+  if (entries.length !== publicationVersion.fileCount
+    || entries.some((entry, ordinal) => entry.ordinal !== ordinal)
+    || entries.reduce((total, entry) => total + entry.contentBytes, 0) !== publicationVersion.decodedTextBytes
+    || new Set(entries.map((entry) => entry.normalizedPath)).size !== entries.length
+    || entries.some((entry) => !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(storedGitOid(entry.blobOid)))) return invalidHead();
+  const sources = await db.projectSource.findMany({
+    where: { projectId: input.projectId, id: { in: entries.map((entry) => entry.projectSourceId) }, kind: "git", originScope: "project", projectRepositoryLinkId: null, retiredAt: null },
+    select: { id: true, sourceIdentity: true, revisionKey: true, contentHash: true, contentText: true },
+  });
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+  const frozenCommitSha = storedGitOid(publicationVersion.frozenCommitSha);
+  if (sourceById.size !== entries.length || entries.some((entry) => {
+    const source = sourceById.get(entry.projectSourceId);
+    if (source === undefined) return true;
+    const contentText = source.contentText;
+    const contentHash = hashSourceContent(contentText);
+    const lineCount = contentText.length === 0 ? 0 : contentText.split("\n").length;
+    const expectedPrefix = `Repository: ${publicationVersion.repositoryPath}\nRevision: ${frozenCommitSha}\nPath: ${entry.normalizedPath}\n\n`;
+    const expectedSourceIdentity = deterministicUuid(`git-delegated-source:${input.delegationId}:${publicationVersion.delegationVersion}:${publicationVersion.delegationFingerprint}:${entry.normalizedPath}`);
+    const expectedRevisionKey = deterministicUuid(`git-delegated-revision:${input.delegationId}:${publicationVersion.delegationVersion}:${publicationVersion.delegationFingerprint}:${frozenCommitSha}:${entry.normalizedPath}:${entry.contentHash}`);
+    return source.contentHash !== entry.contentHash
+      || contentHash !== entry.contentHash
+      || contentText.length > MAX_SOURCE_CONTENT_LENGTH
+      || Buffer.byteLength(contentText, "utf8") !== entry.contentBytes
+      || lineCount !== entry.lineCount
+      || source.sourceIdentity !== expectedSourceIdentity
+      || source.revisionKey !== expectedRevisionKey
+      || !contentText.startsWith(expectedPrefix);
+  })) return invalidHead();
+  const manifestRows = await db.$queryRaw<Array<{ manifest: string | null }>>`
+    SELECT "project_git_repository_publication_manifest"(${publicationVersion.id}::uuid) AS manifest
+  `;
+  if (manifestRows[0]?.manifest !== publicationVersion.manifestFingerprint) return invalidHead();
+  const cursor = Object.freeze({ publicationVersionId: publicationVersion.id, generation: head.generation });
+  if (publicationVersion.delegationVersion !== input.delegationVersion
+    || publicationVersion.delegationFingerprint !== input.delegationFingerprint
+    || publicationVersion.repositoryPath !== input.repositoryPath
+    || publicationVersion.trackedRef !== input.trackedRef) {
+    return Object.freeze({ cursor, baseline: null });
+  }
+  const files = entries.map((entry) => {
+    const source = sourceById.get(entry.projectSourceId)!;
+    return Object.freeze({
+      path: entry.normalizedPath,
+      blobOid: storedGitOid(entry.blobOid),
+      contentText: source.contentText,
+      contentHash: entry.contentHash,
+      contentBytes: entry.contentBytes,
+      lineCount: entry.lineCount,
+    });
+  });
+  return Object.freeze({
+    cursor,
+    baseline: Object.freeze({
+      runId: publicationVersion.runId,
+      frozenCommitSha,
+      manifestFingerprint: publicationVersion.manifestFingerprint,
+      publishedAt: publicationVersion.publishedAt,
+      repositoryPath: publicationVersion.repositoryPath,
+      files: Object.freeze(files),
+      publicationVersionId: publicationVersion.id,
+      publicationGeneration: head.generation,
+      runKind: publicationVersion.runKind,
+      trackedRef: publicationVersion.trackedRef,
+    }),
+  });
+}
 
 function publicRun(row: RunRow) {
   return Object.freeze({
@@ -327,6 +530,8 @@ type AdmissionSnapshot = Readonly<{
   automationAllowed: boolean;
   connection: AdmissionConnection;
   pinnedResolution: Readonly<{ addresses: readonly string[]; fingerprint: string }>;
+  publicationCursor: PublicationCursor;
+  baselinePointer: ManualPointerBaseline | null;
 }>;
 
 function assertStoredScope(snapshot: Readonly<{
@@ -607,6 +812,14 @@ async function loadAdmissionSnapshot(
     if (error instanceof GitSafetyError && error.code === "GIT_NETWORK_CHANGED") return fail("PROJECT_GIT_MANUAL_NETWORK_CHANGED");
     throw error;
   }
+  const publicationState = await loadPublicationState(db, {
+    projectId,
+    delegationId,
+    delegationVersion: delegation.version,
+    delegationFingerprint: delegation.delegationFingerprint,
+    repositoryPath: scope.repositoryPath,
+    trackedRef: scope.trackedRef,
+  });
   return Object.freeze({
     projectId,
     workspaceId: project.workspaceId,
@@ -639,6 +852,8 @@ async function loadAdmissionSnapshot(
     automationAllowed: delegation.automationAllowed,
     connection,
     pinnedResolution,
+    publicationCursor: publicationState.cursor,
+    baselinePointer: publicationState.baseline,
   });
 }
 
@@ -1091,6 +1306,16 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
           || projectOwner === null || projectOwner.disabledAt !== null) {
           return fail("PROJECT_GIT_MANUAL_INELIGIBLE");
         }
+        const currentPublication = await loadPublicationState(tx, {
+          projectId: snapshot.projectId,
+          delegationId: snapshot.delegationId,
+          delegationVersion: snapshot.delegationVersion,
+          delegationFingerprint: snapshot.delegationFingerprint,
+          repositoryPath: snapshot.repositoryPath,
+          trackedRef: snapshot.trackedRef,
+        });
+        if (!samePublicationCursor(snapshot.publicationCursor, currentPublication.cursor)
+          || !sameManualPointerBaseline(snapshot.baselinePointer, currentPublication.baseline)) return fail("PROJECT_GIT_MANUAL_CONFLICT");
         if (liveRunId !== undefined) {
           const staleRun = await tx.projectGitRepositoryManualRun.findUnique({ where: { id: liveRunId }, select: runSelect });
           if (staleRun === null || staleRun.status !== "running") return fail("PROJECT_GIT_MANUAL_CONFLICT");
@@ -1139,6 +1364,12 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
             metadataEnabled: snapshot.metadataEnabled,
             manualSyncAllowed: true,
             automationAllowed: snapshot.automationAllowed,
+            baselineRunId: snapshot.baselinePointer?.runId ?? null,
+            baselineFrozenCommitSha: snapshot.baselinePointer?.frozenCommitSha ?? null,
+            baselineManifestFingerprint: snapshot.baselinePointer?.manifestFingerprint ?? null,
+            baselinePublishedAt: snapshot.baselinePointer?.publishedAt ?? null,
+            expectedPublicationVersionId: snapshot.publicationCursor.publicationVersionId,
+            expectedPublicationGeneration: snapshot.publicationCursor.generation,
           },
           select: runSelect,
         });
@@ -1373,7 +1604,7 @@ async function markGitDispatchBoundary(
           select: runSelect,
         });
         await setAuditContext(tx);
-        await appendAudit(tx, dispatched, "dispatched", "running", null, "manual_sync_dispatch_boundary_committed");
+        await appendAudit(tx, dispatched, "dispatched", "running", snapshot.requestedById, "manual_sync_dispatch_boundary_committed");
         return Object.freeze({ outcome: "accepted", run: dispatched });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
@@ -1382,6 +1613,212 @@ async function markGitDispatchBoundary(
     }
   }
   throw new Error("PROJECT_GIT_MANUAL_FINAL_FENCE_UNREACHABLE");
+}
+
+/**
+ * Re-read the dispatch admission without changing run state. The one-time
+ * marker remains owned by markGitDispatchBoundary; this fence is repeated
+ * before credential decryption and each remote Git request.
+ */
+async function isGitDispatchAdmissionCurrent(
+  runId: string,
+  snapshot: AdmissionSnapshot,
+  db: PrismaClient,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        await lockActorWorkspaceProject(tx, {
+          projectId: snapshot.projectId,
+          workspaceId: snapshot.workspaceId,
+          actorIds: [snapshot.requestedById, snapshot.connectionOwnerId, snapshot.projectConfirmedById],
+        });
+        await lockDelegationEvidence(tx, snapshot);
+
+        const current = await tx.projectGitRepositoryManualRun.findUnique({
+          where: { id: runId },
+          select: { ...runSelect, includeRoots: true, softExcludePatterns: true },
+        });
+        if (current === null
+          || current.status !== "running"
+          || current.stage !== "fetching"
+          || current.dispatchState !== "dispatched"
+          || current.projectId !== snapshot.projectId
+          || current.delegationId !== snapshot.delegationId
+          || current.requestedById !== snapshot.requestedById
+          || current.requestedByAccountAccessVersion !== snapshot.requestedByAccountAccessVersion
+          || current.requestedByProjectMembershipId !== snapshot.requestedByProjectMembershipId
+          || current.requestedByMembershipCreatedAt.getTime() !== snapshot.requestedByMembershipCreatedAt.getTime()
+          || current.delegationVersion !== snapshot.delegationVersion
+          || current.delegationFingerprint !== snapshot.delegationFingerprint
+          || current.connectionOwnerId !== snapshot.connectionOwnerId
+          || current.connectionOwnerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+          || current.ownerProjectMembershipId !== snapshot.ownerProjectMembershipId
+          || current.ownerMembershipCreatedAt.getTime() !== snapshot.ownerMembershipCreatedAt.getTime()
+          || current.projectConfirmedById !== snapshot.projectConfirmedById
+          || current.projectConfirmedProjectMembershipId !== snapshot.projectConfirmedProjectMembershipId
+          || current.projectConfirmedMembershipCreatedAt.getTime() !== snapshot.projectConfirmedMembershipCreatedAt.getTime()
+          || current.connectionConfigurationVersion !== snapshot.connectionConfigurationVersion
+          || current.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint
+          || current.credentialFingerprint !== snapshot.credentialFingerprint
+          || current.repositoryPath !== snapshot.repositoryPath
+          || current.trackedRef !== snapshot.trackedRef
+          || !jsonEqual(current.includeRoots, snapshot.includeRoots)
+          || !jsonEqual(current.softExcludePatterns, snapshot.softExcludePatterns)
+          || current.role !== snapshot.role
+          || current.requiredForProjectSnapshot !== snapshot.requiredForProjectSnapshot
+          || current.codeEnabled !== snapshot.codeEnabled
+          || current.metadataEnabled !== snapshot.metadataEnabled
+          || current.manualSyncAllowed !== snapshot.manualSyncAllowed
+          || current.automationAllowed !== snapshot.automationAllowed
+          || current.baselineRunId !== (snapshot.baselinePointer?.runId ?? null)
+          || (current.baselineFrozenCommitSha === null ? null : storedGitOid(current.baselineFrozenCommitSha)) !== (snapshot.baselinePointer?.frozenCommitSha ?? null)
+          || current.baselineManifestFingerprint !== (snapshot.baselinePointer?.manifestFingerprint ?? null)
+          || (current.baselinePublishedAt?.getTime() ?? null) !== (snapshot.baselinePointer?.publishedAt.getTime() ?? null)
+          || current.expectedPublicationVersionId !== snapshot.publicationCursor.publicationVersionId
+          || current.expectedPublicationGeneration !== snapshot.publicationCursor.generation) return false;
+
+        const publicationState = await loadPublicationState(tx, {
+          projectId: snapshot.projectId,
+          delegationId: snapshot.delegationId,
+          delegationVersion: snapshot.delegationVersion,
+          delegationFingerprint: snapshot.delegationFingerprint,
+          repositoryPath: snapshot.repositoryPath,
+          trackedRef: snapshot.trackedRef,
+        });
+        if (!samePublicationCursor(snapshot.publicationCursor, publicationState.cursor)
+          || !sameManualPointerBaseline(snapshot.baselinePointer, publicationState.baseline)) return false;
+
+        const project = await tx.project.findUnique({
+          where: { id: snapshot.projectId },
+          select: { workspaceId: true, archivedAt: true },
+        });
+        const [requester, connectionOwner, projectConfirmer] = await Promise.all([
+          tx.appUser.findUnique({ where: { id: snapshot.requestedById }, select: { disabledAt: true, accountAccessVersion: true } }),
+          tx.appUser.findUnique({ where: { id: snapshot.connectionOwnerId }, select: { disabledAt: true, accountAccessVersion: true } }),
+          tx.appUser.findUnique({ where: { id: snapshot.projectConfirmedById }, select: { disabledAt: true } }),
+        ]);
+        const [requesterMembership, ownerMembership, projectOwnerMembership] = await Promise.all([
+          tx.projectMembership.findFirst({
+            where: {
+              id: snapshot.requestedByProjectMembershipId,
+              projectId: snapshot.projectId,
+              userId: snapshot.requestedById,
+              role: { in: ["owner", "editor"] },
+              accessState: "confirmed",
+            },
+            select: { createdAt: true },
+          }),
+          tx.projectMembership.findFirst({
+            where: {
+              id: snapshot.ownerProjectMembershipId,
+              projectId: snapshot.projectId,
+              userId: snapshot.connectionOwnerId,
+              role: { in: ["owner", "editor"] },
+              accessState: "confirmed",
+            },
+            select: { createdAt: true },
+          }),
+          tx.projectMembership.findFirst({
+            where: {
+              id: snapshot.projectConfirmedProjectMembershipId,
+              projectId: snapshot.projectId,
+              userId: snapshot.projectConfirmedById,
+              role: "owner",
+              accessState: "confirmed",
+            },
+            select: { createdAt: true },
+          }),
+        ]);
+        if (project === null || project.workspaceId !== snapshot.workspaceId || project.archivedAt !== null
+          || requester === null || requester.disabledAt !== null || requester.accountAccessVersion !== snapshot.requestedByAccountAccessVersion
+          || connectionOwner === null || connectionOwner.disabledAt !== null || connectionOwner.accountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+          || projectConfirmer === null || projectConfirmer.disabledAt !== null
+          || requesterMembership === null || requesterMembership.createdAt.getTime() !== snapshot.requestedByMembershipCreatedAt.getTime()
+          || ownerMembership === null || ownerMembership.createdAt.getTime() !== snapshot.ownerMembershipCreatedAt.getTime()
+          || projectOwnerMembership === null || projectOwnerMembership.createdAt.getTime() !== snapshot.projectConfirmedMembershipCreatedAt.getTime()) return false;
+
+        const delegation = await tx.projectGitRepositoryDelegation.findFirst({
+          where: { id: snapshot.delegationId, projectId: snapshot.projectId },
+          select: {
+            gitConnectionId: true,
+            status: true,
+            version: true,
+            delegationFingerprint: true,
+            connectionOwnerId: true,
+            connectionOwnerAccountAccessVersion: true,
+            ownerProjectMembershipId: true,
+            ownerMembershipCreatedAt: true,
+            projectConfirmedById: true,
+            projectConfirmedProjectMembershipId: true,
+            projectConfirmedMembershipCreatedAt: true,
+            connectionConfigurationVersion: true,
+            resolvedAddressFingerprint: true,
+            credentialFingerprint: true,
+            role: true,
+            requiredForProjectSnapshot: true,
+            codeEnabled: true,
+            metadataEnabled: true,
+            manualSyncAllowed: true,
+            automationAllowed: true,
+            expiresAt: true,
+          },
+        });
+        const connection = await tx.gitConnection.findFirst({
+          where: { id: snapshot.connection.id },
+          select: {
+            id: true,
+            credentialId: true,
+            ownerUserId: true,
+            ownerAccountAccessVersion: true,
+            ownershipState: true,
+            status: true,
+            configurationVersion: true,
+            resolvedAddressFingerprint: true,
+            credential: { select: { kind: true, secretFingerprint: true } },
+          },
+        });
+        const now = await databaseNow(tx);
+        return delegation !== null
+          && delegation.gitConnectionId === snapshot.connection.id
+          && delegation.status === "active"
+          && delegation.expiresAt.getTime() > now.getTime()
+          && delegation.version === snapshot.delegationVersion
+          && delegation.delegationFingerprint === snapshot.delegationFingerprint
+          && delegation.connectionOwnerId === snapshot.connectionOwnerId
+          && delegation.connectionOwnerAccountAccessVersion === snapshot.connectionOwnerAccountAccessVersion
+          && delegation.ownerProjectMembershipId === snapshot.ownerProjectMembershipId
+          && delegation.ownerMembershipCreatedAt.getTime() === snapshot.ownerMembershipCreatedAt.getTime()
+          && delegation.projectConfirmedById === snapshot.projectConfirmedById
+          && delegation.projectConfirmedProjectMembershipId === snapshot.projectConfirmedProjectMembershipId
+          && delegation.projectConfirmedMembershipCreatedAt?.getTime() === snapshot.projectConfirmedMembershipCreatedAt.getTime()
+          && delegation.connectionConfigurationVersion === snapshot.connectionConfigurationVersion
+          && delegation.resolvedAddressFingerprint === snapshot.resolvedAddressFingerprint
+          && delegation.credentialFingerprint === snapshot.credentialFingerprint
+          && delegation.role === snapshot.role
+          && delegation.requiredForProjectSnapshot === snapshot.requiredForProjectSnapshot
+          && delegation.codeEnabled === snapshot.codeEnabled
+          && delegation.metadataEnabled === snapshot.metadataEnabled
+          && delegation.manualSyncAllowed === snapshot.manualSyncAllowed
+          && delegation.automationAllowed === snapshot.automationAllowed
+          && connection !== null
+          && connection.id === snapshot.connection.id
+          && connection.credentialId === snapshot.connection.credentialId
+          && connection.ownerUserId === snapshot.connectionOwnerId
+          && connection.ownerAccountAccessVersion === snapshot.connectionOwnerAccountAccessVersion
+          && connection.ownershipState === "confirmed"
+          && connection.status === "verified"
+          && connection.configurationVersion === snapshot.connectionConfigurationVersion
+          && connection.resolvedAddressFingerprint === snapshot.resolvedAddressFingerprint
+          && connection.credential?.kind === "git"
+          && connection.credential.secretFingerprint === snapshot.credentialFingerprint;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < 2) continue;
+      return false;
+    }
+  }
+  return false;
 }
 
 async function loadFreshConnection(snapshot: AdmissionSnapshot, db: PrismaClient): Promise<GitConnectionWithSecret> {
@@ -1439,7 +1876,12 @@ async function publishResult(
   runId: string,
   snapshot: AdmissionSnapshot,
   connection: GitConnectionWithSecret,
-  result: Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>,
+  result: Readonly<{
+    outcome: "changed" | "unchanged";
+    commitSha: string;
+    addressFingerprint: string;
+    files?: readonly GitScannedFile[];
+  }>,
   db: PrismaClient,
 ): Promise<RunRow | null> {
   if (result.addressFingerprint !== snapshot.resolvedAddressFingerprint) return null;
@@ -1483,16 +1925,91 @@ async function publishResult(
         || projectOwner === null || projectOwner.disabledAt !== null) return null;
       if (connection.id !== currentConnection.id) return null;
 
+      if (current.expectedPublicationVersionId !== snapshot.publicationCursor.publicationVersionId
+        || current.expectedPublicationGeneration !== snapshot.publicationCursor.generation) return null;
+      const publicationState = await loadPublicationState(tx, {
+        projectId: snapshot.projectId,
+        delegationId: snapshot.delegationId,
+        delegationVersion: snapshot.delegationVersion,
+        delegationFingerprint: snapshot.delegationFingerprint,
+        repositoryPath: snapshot.repositoryPath,
+        trackedRef: snapshot.trackedRef,
+      });
+      if (!samePublicationCursor(snapshot.publicationCursor, publicationState.cursor)
+        || !sameManualPointerBaseline(snapshot.baselinePointer, publicationState.baseline)) return null;
+
       await tx.projectGitRepositoryManualRun.update({ where: { id: runId }, data: { stage: "validating" } });
       await tx.projectGitRepositoryManualRun.update({ where: { id: runId }, data: { stage: "publishing" } });
       const publishedAt = await databaseNow(tx);
-      const pointer = await tx.projectGitRepositoryManualPointer.findUnique({ where: { projectId_delegationId: { projectId: snapshot.projectId, delegationId: snapshot.delegationId } }, select: { runId: true } });
-      if (pointer !== null && pointer.runId !== runId) {
-        const oldEntries = await tx.projectGitRepositoryManualRunEntry.findMany({ where: { projectId: snapshot.projectId, runId: pointer.runId }, select: { projectSourceId: true } });
-        if (oldEntries.length > 0) await tx.projectSource.updateMany({ where: { projectId: snapshot.projectId, id: { in: oldEntries.map((entry) => entry.projectSourceId) }, retiredAt: null }, data: { retiredAt: publishedAt } });
+      if (result.outcome === "unchanged") {
+        const baseline = snapshot.baselinePointer;
+        const persistedBaseline: Pick<ManualPointerBaseline, "runId" | "frozenCommitSha" | "manifestFingerprint" | "publishedAt"> | null = current.baselineRunId !== null
+          && current.baselineFrozenCommitSha !== null
+          && current.baselineManifestFingerprint !== null
+          && current.baselinePublishedAt !== null
+          ? {
+              runId: current.baselineRunId,
+              frozenCommitSha: storedGitOid(current.baselineFrozenCommitSha),
+              manifestFingerprint: current.baselineManifestFingerprint,
+              publishedAt: current.baselinePublishedAt,
+            }
+          : null;
+        if (baseline === null
+          || result.commitSha !== baseline.frozenCommitSha
+          || !samePersistedBaselineIdentity(baseline, persistedBaseline)) return null;
+        const completed = await tx.projectGitRepositoryManualRun.update({
+          where: { id: runId },
+          data: {
+            status: "unchanged",
+            stage: "terminal",
+            dispatchState: "acknowledged",
+            frozenCommitSha: result.commitSha,
+            manifestFingerprint: baseline.manifestFingerprint,
+            fileCount: 0,
+            decodedTextBytes: 0,
+            completedAt: publishedAt,
+            result: { outcome: "unchanged" },
+          },
+          select: runSelect,
+        });
+        await setAuditContext(tx);
+        await appendAudit(tx, completed, "unchanged", "running", snapshot.requestedById, "manual_sync_remote_head_unchanged");
+        return completed;
       }
-      for (let ordinal = 0; ordinal < result.files.length; ordinal += 1) {
-        const file = result.files[ordinal]!;
+      const files = result.files;
+      if (files === undefined || files.length === 0) return null;
+      const baseline = snapshot.baselinePointer;
+      const persistedBaseline: Pick<ManualPointerBaseline, "runId" | "frozenCommitSha" | "manifestFingerprint" | "publishedAt"> | null = current.baselineRunId !== null
+        && current.baselineFrozenCommitSha !== null
+        && current.baselineManifestFingerprint !== null
+        && current.baselinePublishedAt !== null
+        ? {
+            runId: current.baselineRunId,
+            frozenCommitSha: storedGitOid(current.baselineFrozenCommitSha),
+            manifestFingerprint: current.baselineManifestFingerprint,
+            publishedAt: current.baselinePublishedAt,
+          }
+        : null;
+      if (!samePersistedBaselineIdentity(baseline, persistedBaseline)) return null;
+      if (snapshot.publicationCursor.publicationVersionId !== null) {
+        const oldEntries = await tx.projectGitRepositoryPublicationEntry.findMany({
+          where: {
+            projectId: snapshot.projectId,
+            delegationId: snapshot.delegationId,
+            publicationVersionId: snapshot.publicationCursor.publicationVersionId,
+          },
+          select: { projectSourceId: true },
+        });
+        if (oldEntries.length === 0) throw new PublicationHeadCasConflict();
+        const retired = await tx.projectSource.updateMany({
+          where: { projectId: snapshot.projectId, id: { in: oldEntries.map((entry) => entry.projectSourceId) }, retiredAt: null },
+          data: { retiredAt: publishedAt },
+        });
+        if (retired.count !== oldEntries.length) throw new PublicationHeadCasConflict();
+      }
+      const publicationEntries: Array<Readonly<{ projectSourceId: string; ordinal: number; normalizedPath: string; blobOid: string; contentHash: string; contentBytes: number; lineCount: number }>> = [];
+      for (let ordinal = 0; ordinal < files.length; ordinal += 1) {
+        const file = files[ordinal]!;
         const sourceIdentity = deterministicUuid(`git-delegated-source:${snapshot.delegationId}:${snapshot.delegationVersion}:${snapshot.delegationFingerprint}:${file.path}`);
         const revisionKey = deterministicUuid(`git-delegated-revision:${snapshot.delegationId}:${snapshot.delegationVersion}:${snapshot.delegationFingerprint}:${result.commitSha}:${file.path}:${file.contentHash}`);
         const existing = await tx.projectSource.findUnique({ where: { projectId_sourceIdentity_revisionKey: { projectId: snapshot.projectId, sourceIdentity, revisionKey } }, select: { id: true } });
@@ -1500,13 +2017,46 @@ async function publishResult(
           ? await tx.projectSource.create({ data: { projectId: snapshot.projectId, kind: "git", originScope: "project", projectRepositoryLinkId: null, sourceIdentity, revisionKey, externalRef: null, contentText: file.contentText, contentHash: file.contentHash, capturedAt: publishedAt }, select: { id: true } })
           : await tx.projectSource.update({ where: { projectId_id: { projectId: snapshot.projectId, id: existing.id } }, data: { retiredAt: null }, select: { id: true } });
         await tx.projectGitRepositoryManualRunEntry.create({ data: { projectId: snapshot.projectId, runId, delegationId: snapshot.delegationId, delegationVersion: snapshot.delegationVersion, delegationFingerprint: snapshot.delegationFingerprint, projectSourceId: source.id, ordinal, normalizedPath: file.path, blobOid: file.blobOid, contentHash: file.contentHash, contentBytes: file.contentBytes, lineCount: file.lineCount } });
+        publicationEntries.push({ projectSourceId: source.id, ordinal, normalizedPath: file.path, blobOid: file.blobOid, contentHash: file.contentHash, contentBytes: file.contentBytes, lineCount: file.lineCount });
       }
       const manifest = await canonicalManifest(tx, runId);
       const completed = await tx.projectGitRepositoryManualRun.update({
         where: { id: runId },
-        data: { status: "succeeded", stage: "terminal", dispatchState: "acknowledged", frozenCommitSha: result.commitSha, manifestFingerprint: manifest, fileCount: result.files.length, decodedTextBytes: result.files.reduce((sum, file) => sum + file.contentBytes, 0), completedAt: publishedAt, result: { fileCount: result.files.length, decodedTextBytes: result.files.reduce((sum, file) => sum + file.contentBytes, 0) } },
+        data: { status: "succeeded", stage: "terminal", dispatchState: "acknowledged", frozenCommitSha: result.commitSha, manifestFingerprint: manifest, fileCount: files.length, decodedTextBytes: files.reduce((sum, file) => sum + file.contentBytes, 0), completedAt: publishedAt, result: { fileCount: files.length, decodedTextBytes: files.reduce((sum, file) => sum + file.contentBytes, 0) } },
         select: runSelect,
       });
+      const publicationVersion = await tx.projectGitRepositoryPublicationVersion.create({
+        data: {
+          projectId: snapshot.projectId,
+          delegationId: snapshot.delegationId,
+          runKind: "manual",
+          runId,
+          previousPublicationVersionId: snapshot.publicationCursor.publicationVersionId,
+          previousGeneration: snapshot.publicationCursor.generation,
+          delegationVersion: snapshot.delegationVersion,
+          delegationFingerprint: snapshot.delegationFingerprint,
+          repositoryPath: snapshot.repositoryPath,
+          trackedRef: snapshot.trackedRef,
+          frozenCommitSha: result.commitSha,
+          manifestFingerprint: manifest,
+          fileCount: files.length,
+          decodedTextBytes: files.reduce((sum, file) => sum + file.contentBytes, 0),
+          publishedAt,
+        },
+        select: { id: true },
+      });
+      await tx.projectGitRepositoryPublicationEntry.createMany({
+        data: publicationEntries.map((entry) => ({
+          projectId: snapshot.projectId,
+          delegationId: snapshot.delegationId,
+          publicationVersionId: publicationVersion.id,
+          ...entry,
+        })),
+      });
+      const publicationManifestRows = await tx.$queryRaw<Array<{ manifest: string | null }>>`
+        SELECT "project_git_repository_publication_manifest"(${publicationVersion.id}::uuid) AS manifest
+      `;
+      if (publicationManifestRows[0]?.manifest !== manifest) throw new PublicationHeadCasConflict();
       await tx.projectGitRepositoryManualPointer.upsert({
         where: { projectId_delegationId: { projectId: snapshot.projectId, delegationId: snapshot.delegationId } },
         create: { projectId: snapshot.projectId, delegationId: snapshot.delegationId, runId, delegationVersion: snapshot.delegationVersion, delegationFingerprint: snapshot.delegationFingerprint, frozenCommitSha: result.commitSha, manifestFingerprint: manifest, publishedAt },
@@ -1514,10 +2064,41 @@ async function publishResult(
       });
       await setAuditContext(tx);
       await appendAudit(tx, completed, "succeeded", "running", snapshot.requestedById, "manual_sync_published");
+      if ((snapshot.publicationCursor.generation === 0) !== (snapshot.publicationCursor.publicationVersionId === null)) {
+        throw new PublicationHeadCasConflict();
+      }
+      const headRows = snapshot.publicationCursor.generation === 0
+        ? await tx.$queryRaw<Array<{ generation: number }>>`
+            INSERT INTO "ProjectGitRepositoryPublicationHead" (
+              "projectId", "delegationId", "currentPublicationVersionId", "generation", "publishedAt"
+            ) VALUES (
+              ${snapshot.projectId}::uuid,
+              ${snapshot.delegationId}::uuid,
+              ${publicationVersion.id}::uuid,
+              1,
+              ${publishedAt}
+            )
+            ON CONFLICT ("projectId", "delegationId") DO NOTHING
+            RETURNING "generation"
+          `
+        : await tx.$queryRaw<Array<{ generation: number }>>`
+            UPDATE "ProjectGitRepositoryPublicationHead"
+               SET "currentPublicationVersionId" = ${publicationVersion.id}::uuid,
+                   "generation" = "generation" + 1,
+                   "publishedAt" = ${publishedAt}
+             WHERE "projectId" = ${snapshot.projectId}::uuid
+               AND "delegationId" = ${snapshot.delegationId}::uuid
+               AND "generation" = ${snapshot.publicationCursor.generation}
+               AND "currentPublicationVersionId" = ${snapshot.publicationCursor.publicationVersionId}::uuid
+            RETURNING "generation"
+          `;
+      if (headRows.length !== 1 || headRows[0]?.generation !== snapshot.publicationCursor.generation + 1) {
+        throw new PublicationHeadCasConflict();
+      }
       return completed;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
-    if (isSerializationConflict(error)) return null;
+    if (isSerializationConflict(error) || error instanceof PublicationHeadCasConflict) return null;
     throw error;
   }
 }
@@ -1561,7 +2142,12 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
   let dispatched = false;
   let finalFenceTerminal: RunRow | null = null;
   let finalFenceUnavailable = false;
-  let result: Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>;
+  let result: Readonly<{
+    outcome: "changed" | "unchanged";
+    commitSha: string;
+    addressFingerprint: string;
+    files?: readonly GitScannedFile[];
+  }>;
   try {
     const connection = await loadFreshConnection(snapshot, db);
     result = await readGitRepositoryFilesForDelegation({
@@ -1572,6 +2158,8 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
       softExcludePatterns: snapshot.softExcludePatterns,
       db,
       pinnedResolution: snapshot.pinnedResolution,
+      unchangedIfCommitSha: snapshot.baselinePointer?.frozenCommitSha,
+      incrementalBaseline: snapshot.baselinePointer,
       onDispatchBoundary: async () => {
         let boundary: GitDispatchBoundaryResult;
         try {
@@ -1584,6 +2172,8 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
         dispatched = boundary.outcome === "accepted";
         return boundary.outcome === "accepted";
       },
+      onBeforeCredentialRead: () => isGitDispatchAdmissionCurrent(admitted.id, snapshot, db),
+      onBeforeExternalRequest: () => isGitDispatchAdmissionCurrent(admitted.id, snapshot, db),
     });
   } catch (error) {
     if (finalFenceTerminal !== null) return publicRun(finalFenceTerminal);

@@ -34,9 +34,53 @@ type RunSummary = Readonly<{ id: string; projectId: string; delegationId: string
 type RunDetail = Readonly<{ run: RunSummary; acknowledgement: Readonly<{ acknowledgedAt: string }> | null; entries: readonly Readonly<{ ordinal: number; normalizedPath: string; contentBytes: number; lineCount: number; projectSourceId: string }>[]; capabilities: Readonly<{ canAcknowledge: boolean }> }>;
 type ListPayload = Readonly<{ capabilities: Readonly<{ canPropose: boolean }>; connections: readonly ConnectionOption[]; delegations: readonly Delegation[] }>;
 type RunListPayload = Readonly<{ runs: readonly RunSummary[]; nextCursor: string | null; capabilities: Readonly<{ canView: boolean; canAcknowledge: boolean }> }>;
+type AutomationGrant = Readonly<{
+  id: string;
+  project: Readonly<{ id: string; name: string; archivedAt: string | null }>;
+  connection: Readonly<{ id: string; name: string; providerKind: string }>;
+  baseDelegationId: string;
+  scope: Readonly<{ repositoryPath: string; trackedRef: string; includeRoots: readonly unknown[]; softExcludePatterns: readonly unknown[] }>;
+  schedule: Readonly<{ runIntervalMinutes: number; expiresAt: string }>;
+  materialReads: Readonly<{ issues: boolean; pullRequests: boolean; releases: boolean }>;
+  status: string;
+  version: number;
+  proposedAt: string;
+  ownerConfirmedAt: string | null;
+  activatedAt: string | null;
+  terminalReason: string | null;
+  readiness: Readonly<{ eligible: boolean; reason: string | null; status: string | null; version: number | null }>;
+  capabilities: Readonly<{ canConfirmConnectionOwner: boolean; canActivateProjectOwner: boolean; canRevoke: boolean }>;
+}>;
+type AutomationGrantPayload = Readonly<{ grants: readonly AutomationGrant[] }>;
+/** The API intentionally returns only these six fields to an owner who lost project access. */
+type OwnerSafetyReceipt = Readonly<{ id: string; projectId: string; gitConnectionId: string; status: string; version: number; expiresAt: string }>;
 
 const statusLabels: Record<string, string> = { draft: "待连接所有者确认", ownerConfirmed: "待项目 Owner 确认", active: "已启用手动读取", rejected: "已拒绝", revoked: "已撤销", expired: "已过期" };
-const runStatusLabels: Record<string, string> = { queued: "排队中", running: "读取中", succeeded: "已发布", failed: "失败", unknown: "结果未知" };
+const automationStatusLabels: Record<string, string> = {
+  draft: "等待连接所有者确认",
+  ownerConfirmed: "等待项目 Owner 确认",
+  active: "已启用；按计划只读",
+  rejected: "提案已拒绝",
+  revoked: "授权已撤销",
+  expired: "授权已过期",
+  invalidated: "授权已失效",
+};
+const readinessReasonLabels: Record<string, string> = {
+  NOT_FOUND: "授权记录不可用",
+  NOT_ACTIVE: "双方确认尚未完成",
+  EXPIRED: "授权已超过有效期",
+  PROJECT_ARCHIVED: "项目已归档",
+  BASE_DELEGATION_DRIFT: "基础手动授权版本或范围已变化",
+  CONNECTION_DRIFT: "Git 连接所有权、配置或凭据状态已变化",
+  OWNER_MEMBERSHIP_DRIFT: "提案人或连接所有者的成员资格已变化",
+  PROJECT_OWNER_MEMBERSHIP_DRIFT: "项目 Owner 的成员资格已变化",
+};
+const terminalReasonLabels: Record<string, string> = {
+  base_delegation_ended: "基础手动授权已终止",
+  git_connection_changed: "Git 连接设置或所有权已变化",
+  project_archived: "项目已归档",
+};
+const runStatusLabels: Record<string, string> = { queued: "排队中", running: "读取中", succeeded: "已发布", unchanged: "无变化", failed: "失败", unknown: "结果未知" };
 const roleLabels: Record<string, string> = { primary: "主仓库", application: "应用代码", infrastructure: "基础设施", library: "公共库", documentation: "文档", other: "其他" };
 
 function formatTime(value: string | null): string {
@@ -47,12 +91,23 @@ function formatTime(value: string | null): string {
 
 function formatScope(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
+function materialReadLabel(value: AutomationGrant["materialReads"]): string {
+  const selected = [
+    value.issues ? "GitHub Issues" : null,
+    value.pullRequests ? "Pull Requests" : null,
+    value.releases ? "Releases" : null,
+  ].filter((item): item is string => item !== null);
+  return selected.length === 0 ? "仅代码" : `代码与 ${selected.join("、")}`;
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, cache: "no-store" });
   const body = await response.json().catch(() => null) as { error?: { message?: string } } | T | null;
   if (!response.ok) {
     const message = typeof body === "object" && body !== null && "error" in body && body.error?.message ? body.error.message : "请求失败，请刷新后重试";
-    throw new Error(message);
+    const requestError = new Error(message) as Error & { status: number };
+    requestError.status = response.status;
+    throw requestError;
   }
   return body as T;
 }
@@ -71,6 +126,9 @@ function localDateTimeValue(value: Date): string {
 
 export function ProjectRepositoriesClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
   const [payload, setPayload] = useState<ListPayload | null>(null);
+  const [automationGrants, setAutomationGrants] = useState<readonly AutomationGrant[]>([]);
+  const [ownerSafetyReceipts, setOwnerSafetyReceipts] = useState<readonly OwnerSafetyReceipt[]>([]);
+  const [ownerSafetyMode, setOwnerSafetyMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -79,10 +137,41 @@ export function ProjectRepositoriesClient({ username, projectId, isSystemAdmin }
 
   const load = useCallback(async () => {
     setLoading(true);
+    setPayload(null);
+    setAutomationGrants([]);
+    setOwnerSafetyReceipts([]);
+    setOwnerSafetyMode(false);
     try {
-      const next = await requestJson<ListPayload>(`/api/projects/${projectId}/git-repository-delegations`);
-      setPayload(next); setLoadError(null);
-    } catch (error) { setLoadError(error instanceof Error ? error.message : "项目 Git 委托加载失败"); }
+      const [next, automation] = await Promise.all([
+        requestJson<ListPayload>(`/api/projects/${projectId}/git-repository-delegations`),
+        requestJson<AutomationGrantPayload>(`/api/projects/${projectId}/git-automation-grants`),
+      ]);
+      setPayload(next);
+      setAutomationGrants(automation.grants);
+      setLoadError(null);
+    } catch (error) {
+      setPayload(null);
+      setAutomationGrants([]);
+      setMessage(null);
+      const projectError = error instanceof Error ? error.message : "项目 Git 委托加载失败";
+      const status = typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : null;
+      if (status === null || ![401, 403, 404].includes(status)) {
+        setOwnerSafetyReceipts([]);
+        setOwnerSafetyMode(false);
+        setLoadError(projectError);
+        return;
+      }
+      try {
+        const receiptResult = await requestJson<{ grants: readonly OwnerSafetyReceipt[] }>("/api/me/git-automation-grants");
+        setOwnerSafetyReceipts(receiptResult.grants.filter((receipt) => receipt.projectId === projectId));
+        setOwnerSafetyMode(true);
+        setLoadError(null);
+      } catch {
+        setOwnerSafetyReceipts([]);
+        setOwnerSafetyMode(false);
+        setLoadError(projectError);
+      }
+    }
     finally { setLoading(false); }
   }, [projectId]);
 
@@ -120,6 +209,8 @@ export function ProjectRepositoriesClient({ username, projectId, isSystemAdmin }
       delete manualRequestKeys.current[delegation.id];
       setMessage(result.status === "succeeded"
         ? "手动读取成功，资料已发布到项目。"
+        : result.status === "unchanged"
+          ? "分支没有新提交，已发布资料保持不变。"
         : result.status === "unknown"
           ? "手动读取结果未知；外部读取可能已发出，系统不会自动重试。"
           : result.status === "failed"
@@ -130,7 +221,107 @@ export function ProjectRepositoriesClient({ username, projectId, isSystemAdmin }
     catch (error) { setMessage(error instanceof Error ? error.message : "手动读取未完成；可以安全重试，当前请求会复用本次意图。请勿重复开启新的读取。"); }
   }
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="repositories" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10"><div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-9"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div className="max-w-3xl"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Repository access</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">项目 Git 委托</h1><p className="mt-4 text-sm leading-7 text-slate-300">个人 Git 连接仍只属于你自己。完成连接所有者与项目 Owner 两次确认后，项目成员可以按已冻结范围发起一次性手动只读读取。</p></div><div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300 lg:max-w-xs"><p className="font-semibold text-white">边界说明</p><p className="mt-2 text-xs leading-5">自动化、写入/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准。</p></div></div></section><p className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-950">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p>{message ? <p role="status" className="mt-5 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}{loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline">重试</button></div> : null}{loading ? <LoadingState /> : payload === null ? null : <div className="mt-7 grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,.78fr)_minmax(0,1.22fr)]"><ProposalPanel projectId={projectId} enabled={payload.capabilities.canPropose} connections={payload.connections} onCreated={() => { setMessage("委托草稿已创建，请完成连接所有者确认。"); void load(); }} /><section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Delegations</p><h2 className="mt-2 text-2xl font-semibold">项目委托</h2><p className="mt-1 text-sm leading-6 text-slate-500">只展示安全摘要；连接地址、用户名、凭据与网络证据不会出现在项目页。</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{payload.delegations.length} 条</span></div>{payload.delegations.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">还没有项目 Git 委托</p><p className="mt-2 text-xs leading-5 text-slate-500">从左侧选择一条已验证的个人 Git 连接，提交仓库范围后再进行双确认。</p></div> : <div className="mt-6 space-y-4">{payload.delegations.map((delegation) => <DelegationCard key={delegation.id} projectId={projectId} delegation={delegation} onOwnerConfirm={() => void confirmOwner(delegation)} onProjectConfirm={() => void confirmProject(delegation)} onTerminal={(action) => void terminal(delegation, action)} onManualSync={() => manualSync(delegation)} />)}</div>}</section></div>}</div></main>;
+  async function revokeSafetyReceipt(receipt: OwnerSafetyReceipt) {
+    const result = await confirm({ eyebrow: "个人连接授权回执", title: "撤销这条项目 Git 授权？", description: "项目详情因当前成员权限不可用。撤销会立即终止这条授权记录；本操作不会读取仓库。请填写撤销原因。", confirmLabel: "确认撤销", cancelLabel: "返回", tone: "danger", inputLabel: "原因", inputPlaceholder: "例如：不再允许此授权", inputOptional: false, maxLength: 500 });
+    if (!result.confirmed) return;
+    try {
+      await requestJson(`/api/projects/${encodeURIComponent(receipt.projectId)}/git-automation-grants/${encodeURIComponent(receipt.id)}/revocation`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: receipt.version, reason: result.value.trim() }) });
+      await load();
+      setMessage("授权撤销已提交。");
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : "授权撤销失败，请刷新后重试";
+      await load();
+      setMessage(failure);
+    }
+  }
+
+  if (loading) return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10"><LoadingState /></div></main>;
+  if (ownerSafetyMode) return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-3xl px-5 py-7 sm:px-8 lg:px-10"><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal Git authorization</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">个人连接授权回执</h1><p className="mt-4 text-sm leading-7 text-slate-300">当前账户无法读取此项目详情。此页面只显示个人连接授权的状态回执，不包含项目名称、仓库、分支或目录信息。</p></section>{message ? <p role="status" className="mt-5 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}<OwnerSafetyReceiptList receipts={ownerSafetyReceipts.filter((receipt) => receipt.projectId === projectId)} onRevoke={(receipt) => void revokeSafetyReceipt(receipt)} /></div></main>;
+  if (payload === null) return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-3xl px-5 py-7 sm:px-8 lg:px-10"><section className="rounded-3xl border border-rose-100 bg-white p-6"><h1 className="text-xl font-semibold text-slate-900">项目 Git 信息暂不可用</h1><p role="alert" className="mt-3 text-sm leading-6 text-rose-700">{loadError ?? "请求未完成，请重试。"}</p><button type="button" onClick={() => void load()} className="mt-4 min-h-10 font-semibold text-indigo-700 underline">重试</button></section></div></main>;
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="repositories" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10"><div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-9"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div className="max-w-3xl"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Repository access</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">项目 Git 委托</h1><p className="mt-4 text-sm leading-7 text-slate-300">个人 Git 连接仍只属于你自己。完成连接所有者与项目 Owner 两次确认后，项目成员可以按已冻结范围发起一次性手动只读读取。</p></div><div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300 lg:max-w-xs"><p className="font-semibold text-white">边界说明</p><p className="mt-2 text-xs leading-5">手动读取与自动读取分别授权；自动读取需双确认。写入/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准。</p></div></div></section><p className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-950">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p>{message ? <p role="status" className="mt-5 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}{loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline">重试</button></div> : null}{loading ? <LoadingState /> : payload === null ? null : <><div className="mt-7 grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,.78fr)_minmax(0,1.22fr)]"><ProposalPanel projectId={projectId} enabled={payload.capabilities.canPropose} connections={payload.connections} onCreated={() => { setMessage("委托草稿已创建，请完成连接所有者确认。"); void load(); }} /><section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Delegations</p><h2 className="mt-2 text-2xl font-semibold">项目委托</h2><p className="mt-1 text-sm leading-6 text-slate-500">只展示安全摘要；连接地址、用户名、凭据与网络证据不会出现在项目页。</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{payload.delegations.length} 条</span></div>{payload.delegations.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">还没有项目 Git 委托</p><p className="mt-2 text-xs leading-5 text-slate-500">从左侧选择一条已验证的个人 Git 连接，提交仓库范围后再进行双确认。</p></div> : <div className="mt-6 space-y-4">{payload.delegations.map((delegation) => <DelegationCard key={delegation.id} projectId={projectId} delegation={delegation} onOwnerConfirm={() => void confirmOwner(delegation)} onProjectConfirm={() => void confirmProject(delegation)} onTerminal={(action) => void terminal(delegation, action)} onManualSync={() => manualSync(delegation)} />)}</div>}</section></div><AutomationGrantPanel projectId={projectId} canPropose={payload.capabilities.canPropose} delegations={payload.delegations} grants={automationGrants} onRefresh={load} onMessage={setMessage} /></>}</div></main>;
+}
+
+function AutomationGrantPanel({ projectId, canPropose, delegations, grants, onRefresh, onMessage }: { projectId: string; canPropose: boolean; delegations: readonly Delegation[]; grants: readonly AutomationGrant[]; onRefresh: () => Promise<void>; onMessage: (message: string | null) => void }) {
+  const [baseDelegationId, setBaseDelegationId] = useState("");
+  const [runIntervalMinutes, setRunIntervalMinutes] = useState(60);
+  const [materialReads, setMaterialReads] = useState({ issues: false, pullRequests: false, releases: false });
+  const [currentTime, setCurrentTime] = useState<number | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useAppConfirmDialog();
+  useEffect(() => {
+    const updateTime = () => setCurrentTime(Date.now());
+    updateTime();
+    const timer = window.setInterval(updateTime, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const liveBaseIds = new Set(grants.filter((grant) => ["draft", "ownerConfirmed", "active"].includes(grant.status)).map((grant) => grant.baseDelegationId));
+  const eligibleDelegations = delegations.filter((delegation) => delegation.status === "active"
+    && delegation.scope.manualSyncAllowed
+    && !delegation.scope.automationAllowed
+    && currentTime !== null
+    && new Date(delegation.expiresAt).getTime() > currentTime
+    && !liveBaseIds.has(delegation.id));
+  const selectedBase = eligibleDelegations.find((delegation) => delegation.id === baseDelegationId) ?? eligibleDelegations[0] ?? null;
+
+  async function propose(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canPropose || selectedBase === null || !Number.isInteger(runIntervalMinutes) || runIntervalMinutes < 60 || runIntervalMinutes > 43_200) return;
+    setPending(true); setError(null); onMessage(null);
+    try {
+      await requestJson<AutomationGrant>(`/api/projects/${projectId}/git-automation-grants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ baseDelegationId: selectedBase.id, runIntervalMinutes, issuesEnabled: materialReads.issues, pullRequestsEnabled: materialReads.pullRequests, releasesEnabled: materialReads.releases, expiresAt: selectedBase.expiresAt }) });
+      await onRefresh();
+      onMessage("授权提案已创建，等待连接所有者单独确认。");
+    } catch (submitError) {
+      const failure = submitError instanceof Error ? submitError.message : "授权提案创建失败，请刷新后重试";
+      setError(failure);
+      onMessage(failure);
+    } finally { setPending(false); }
+  }
+
+  async function mutate(grant: AutomationGrant, action: "connection-owner-confirmation" | "project-owner-activation" | "revocation", body: Record<string, unknown>, success: string) {
+    setPending(true); setError(null); onMessage(null);
+    try {
+      await requestJson<AutomationGrant>(`/api/projects/${projectId}/git-automation-grants/${grant.id}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      await onRefresh();
+      onMessage(success);
+    } catch (submitError) {
+      const failure = submitError instanceof Error ? submitError.message : "授权操作失败，请刷新后重试";
+      setError(failure);
+      await onRefresh();
+      onMessage(failure);
+    } finally { setPending(false); }
+  }
+
+  async function confirmConnectionOwner(grant: AutomationGrant) {
+    const result = await confirm({ eyebrow: "连接所有者确认", title: "确认授权准备记录？", description: `这是自动只读授权的单独确认。项目 Owner 激活后，系统可按拟议间隔读取已冻结范围；本次确认本身不会访问 Git。资料种类：${materialReadLabel(grant.materialReads)}。拟议间隔为 ${grant.schedule.runIntervalMinutes} 分钟，授权截止 ${formatTime(grant.schedule.expiresAt)}。`, confirmLabel: "确认授权准备", cancelLabel: "返回" });
+    if (result.confirmed) await mutate(grant, "connection-owner-confirmation", { expectedVersion: grant.version, acknowledgeReadOnlyScheduledAccess: true, acknowledgeIssueRead: grant.materialReads.issues, acknowledgePullRequestRead: grant.materialReads.pullRequests, acknowledgeReleaseRead: grant.materialReads.releases }, "连接所有者确认已记录，等待项目 Owner 单独激活。");
+  }
+
+  async function activateProjectOwner(grant: AutomationGrant) {
+    const includeRoots = formatScope(grant.scope.includeRoots);
+    const softExcludePatterns = formatScope(grant.scope.softExcludePatterns);
+    const result = await confirm({ eyebrow: "项目 Owner 确认", title: "确认这条仓库范围授权？", description: `请复核完整范围：\n仓库：${grant.scope.repositoryPath}\n分支：${grant.scope.trackedRef}\n包含目录：${includeRoots.join("、") || "未设置"}\n软排除：${softExcludePatterns.join("、") || "未设置"}\n资料种类：${materialReadLabel(grant.materialReads)}\n\n项目 Owner 确认后授权生效，系统可按计划只读访问并将结果纳入项目资料。`, confirmLabel: "确认授权范围", cancelLabel: "返回" });
+    if (result.confirmed) await mutate(grant, "project-owner-activation", { expectedVersion: grant.version, acknowledgeExactRepositoryScope: true, acknowledgeReadOnlyDataEgress: true, acknowledgeIssueRead: grant.materialReads.issues, acknowledgePullRequestRead: grant.materialReads.pullRequests, acknowledgeReleaseRead: grant.materialReads.releases }, "项目 Owner 确认已记录。自动读取授权已启用，后续运行以记录为准。");
+  }
+
+  async function revoke(grant: AutomationGrant) {
+    const result = await confirm({ eyebrow: "撤销 Git 授权", title: "撤销这条授权记录？", description: "撤销会阻止后续计划读取；已经发出的外部读取可能无法撤回。请填写撤销原因。", confirmLabel: "确认撤销", cancelLabel: "返回", tone: "danger", inputLabel: "原因", inputPlaceholder: "例如：仓库范围需要重新确认", inputOptional: false, maxLength: 500 });
+    if (result.confirmed) await mutate(grant, "revocation", { expectedVersion: grant.version, reason: result.value.trim() }, "授权记录已撤销。");
+  }
+
+  return <section className="rounded-3xl border border-indigo-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="automation-grants-heading">{dialog}<div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Git read automation</p><h2 id="automation-grants-heading" className="mt-2 text-2xl font-semibold">自动读取授权</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">连接所有者和项目 Owner 双确认后，系统才会按间隔读取冻结的只读范围。授权失效或撤销后，后续计划读取停止；运行结果以记录为准。</p></div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{grants.length} 条授权记录</span></div><p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">自动读取仅使用本次确认的仓库、分支和目录范围，不会写入或提交到 Git。</p>{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}<div className="mt-5 grid gap-5 lg:grid-cols-[minmax(260px,.7fr)_minmax(0,1.3fr)]"><form onSubmit={(event) => void propose(event)} className="h-fit rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 className="text-sm font-semibold text-slate-900">提交授权提案</h3><p className="mt-1 text-xs leading-5 text-slate-500">仅基于有效的手动只读委托。授权有效期不超过该委托。</p>{!canPropose ? <p className="mt-4 rounded-xl bg-white px-3 py-3 text-xs leading-5 text-slate-600">当前账户没有项目 Editor/Owner 提案权限。</p> : eligibleDelegations.length === 0 ? <p className="mt-4 rounded-xl bg-white px-3 py-3 text-xs leading-5 text-slate-600">{currentTime === null ? "正在核对基础委托有效期…" : "暂无可用的手动只读委托，或已有授权记录仍处于有效状态。"}</p> : <><label className="mt-4 block text-xs font-semibold text-slate-700">基础手动委托<select className={fieldClass} value={selectedBase?.id ?? ""} onChange={(event) => setBaseDelegationId(event.target.value)}>{eligibleDelegations.map((delegation) => <option key={delegation.id} value={delegation.id}>{delegation.scope.repositoryPath} · {delegation.scope.trackedRef}</option>)}</select></label><label className="mt-3 block text-xs font-semibold text-slate-700">拟议运行间隔（分钟）<input className={fieldClass} type="number" min={60} max={43_200} step={1} value={runIntervalMinutes} onChange={(event) => setRunIntervalMinutes(Number(event.target.value))} /></label><fieldset className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-3"><legend className="px-1 text-xs font-semibold text-slate-700">逐项选择要读取的 GitHub 资料</legend>{([["issues", "Issues"], ["pullRequests", "Pull Requests"], ["releases", "Releases"]] as const).map(([key, label]) => <label key={key} className="mt-2 flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" checked={materialReads[key]} onChange={(event) => setMaterialReads((current) => ({ ...current, [key]: event.target.checked }))} className="mt-0.5 h-4 w-4" /><span>{label}</span></label>)}<p className="mt-2 text-xs leading-4 text-slate-500">未选择的资料种类不会被请求。连接所有者与项目 Owner 会分别确认这些选择。</p></fieldset>{selectedBase ? <p className="mt-3 rounded-xl bg-white px-3 py-2 text-xs leading-5 text-slate-600">拟议授权截止：{formatTime(selectedBase.expiresAt)}，不晚于基础委托。</p> : null}<button type="submit" disabled={pending || selectedBase === null || runIntervalMinutes < 60 || runIntervalMinutes > 43_200} className="mt-4 min-h-11 w-full rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "处理中…" : "提交授权提案"}</button></>}</form><div className="space-y-3">{grants.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-500">还没有 Git 自动读取授权记录。</div> : grants.map((grant) => <AutomationGrantCard key={grant.id} grant={grant} pending={pending} onConfirmConnectionOwner={() => void confirmConnectionOwner(grant)} onActivateProjectOwner={() => void activateProjectOwner(grant)} onRevoke={() => void revoke(grant)} />)}</div></div></section>;
+}
+
+function AutomationGrantCard({ grant, pending, onConfirmConnectionOwner, onActivateProjectOwner, onRevoke }: { grant: AutomationGrant; pending: boolean; onConfirmConnectionOwner: () => void; onActivateProjectOwner: () => void; onRevoke: () => void }) {
+  const closed = ["rejected", "revoked", "expired", "invalidated"].includes(grant.status);
+  const includeRoots = formatScope(grant.scope.includeRoots);
+  const softExcludePatterns = formatScope(grant.scope.softExcludePatterns);
+  return <article className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-sm font-semibold text-slate-900">{grant.connection.name} · {grant.scope.repositoryPath}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${grant.status === "active" ? "bg-indigo-50 text-indigo-700 ring-indigo-200" : closed ? "bg-slate-100 text-slate-600 ring-slate-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>{automationStatusLabels[grant.status] ?? grant.status}</span></div><p className="mt-2 text-xs text-slate-500">{grant.connection.providerKind} · {grant.scope.trackedRef}</p></div><div className="text-right text-xs text-slate-400"><p>授权截止 {formatTime(grant.schedule.expiresAt)}</p><p className="mt-1">版本 {grant.version}</p></div></div><div className="mt-3 space-y-1 rounded-xl bg-white px-3 py-2 text-xs leading-5 text-slate-600"><p>包含目录：{includeRoots.join("、") || "未设置"}</p><p>软排除：{softExcludePatterns.join("、") || "未设置"}</p><p>授权资料：{materialReadLabel(grant.materialReads)}</p></div><dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400">拟议间隔</dt><dd className="mt-1 font-medium">{grant.schedule.runIntervalMinutes} 分钟</dd></div><div><dt className="text-slate-400">授权状态</dt><dd className="mt-1 font-medium">{grant.status === "active" ? "已启用；按计划只读" : grant.ownerConfirmedAt ? "连接所有者已确认" : "等待连接所有者确认"}</dd></div><div><dt className="text-slate-400">范围检查</dt><dd className="mt-1 font-medium">{grant.readiness.eligible ? "当前授权范围可用" : readinessReasonLabels[grant.readiness.reason ?? ""] ?? "需要重新核对授权状态"}</dd></div></dl>{grant.terminalReason ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">失效原因：{terminalReasonLabels[grant.terminalReason] ?? grant.terminalReason}</p> : null}{!grant.readiness.eligible && grant.readiness.reason ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">授权检查：{readinessReasonLabels[grant.readiness.reason] ?? grant.readiness.reason}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{grant.capabilities.canConfirmConnectionOwner ? <button type="button" disabled={pending} onClick={onConfirmConnectionOwner} className={buttonClass}>连接所有者确认</button> : null}{grant.capabilities.canActivateProjectOwner ? <button type="button" disabled={pending} onClick={onActivateProjectOwner} className={buttonClass}>项目 Owner 激活</button> : null}{grant.capabilities.canRevoke ? <button type="button" disabled={pending} onClick={onRevoke} className={quietDangerClass}>撤销授权</button> : null}</div></article>;
+}
+
+function OwnerSafetyReceiptList({ receipts, onRevoke }: { receipts: readonly OwnerSafetyReceipt[]; onRevoke: (receipt: OwnerSafetyReceipt) => void }) {
+  return <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" aria-label="个人 Git 授权安全回执"><h2 className="text-lg font-semibold text-slate-900">连接所有者可管理的授权</h2><p className="mt-1 text-xs leading-5 text-slate-500">以下是最小安全回执。项目及仓库详情不会在此显示。</p>{receipts.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">当前没有可管理的授权回执。</p> : <div className="mt-4 space-y-3">{receipts.map((receipt) => <article key={receipt.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4"><div><p className="text-sm font-semibold text-slate-800">项目 Git 授权（详情隐藏）</p><p className="mt-1 text-xs text-slate-500">{automationStatusLabels[receipt.status] ?? receipt.status} · 截止 {formatTime(receipt.expiresAt)} · 版本 {receipt.version}</p></div><button type="button" onClick={() => onRevoke(receipt)} className={quietDangerClass}>撤销授权</button></article>)}</div>}</section>;
 }
 
 function ProposalPanel({ projectId, enabled, connections, onCreated }: { projectId: string; enabled: boolean; connections: readonly ConnectionOption[]; onCreated: () => void }) {
@@ -183,7 +374,7 @@ function RunHistory({ projectId, runs, nextCursor, loading, error, detail, canAc
 }
 
 function RunDetailPanel({ projectId, detail }: { projectId: string; detail: RunDetail }) {
-  return <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><h5 className="text-xs font-semibold text-slate-900">运行详情</h5><span className="text-[12px] text-slate-500">{detail.entries.length} 条资料</span></div>{detail.run.status === "succeeded" && detail.entries.length > 0 ? <ul className="mt-3 space-y-2">{detail.entries.map((entry) => <li key={entry.ordinal} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-[12px]"><span className="min-w-0 break-all text-slate-700">{entry.normalizedPath}</span><Link href={`/projects/${projectId}/materials/sources/${entry.projectSourceId}`} className="shrink-0 font-semibold text-indigo-700 underline">打开资料</Link></li>)}</ul> : <p className="mt-3 text-[12px] leading-5 text-slate-600">当前运行没有可展示的成功资料条目。</p>}{detail.acknowledgement ? <p className="mt-3 text-[12px] text-slate-500">人工核对于 {formatTime(detail.acknowledgement.acknowledgedAt)} 完成；运行状态仍保持未知。</p> : null}</div>;
+  return <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><h5 className="text-xs font-semibold text-slate-900">运行详情</h5><span className="text-[12px] text-slate-500">{detail.entries.length} 条资料</span></div>{detail.run.status === "unchanged" ? <p className="mt-3 text-[12px] leading-5 text-slate-600">远程分支与当前已发布版本相同；本次未读取文件，已发布资料保持不变。</p> : detail.run.status === "succeeded" && detail.entries.length > 0 ? <ul className="mt-3 space-y-2">{detail.entries.map((entry) => <li key={entry.ordinal} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-[12px]"><span className="min-w-0 break-all text-slate-700">{entry.normalizedPath}</span><Link href={`/projects/${projectId}/materials/sources/${entry.projectSourceId}`} className="shrink-0 font-semibold text-indigo-700 underline">打开资料</Link></li>)}</ul> : <p className="mt-3 text-[12px] leading-5 text-slate-600">当前运行没有可展示的成功资料条目。</p>}{detail.acknowledgement ? <p className="mt-3 text-[12px] text-slate-500">人工核对于 {formatTime(detail.acknowledgement.acknowledgedAt)} 完成；运行状态仍保持未知。</p> : null}</div>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block min-w-0 text-xs font-semibold text-slate-700">{label}{children}</label>; }

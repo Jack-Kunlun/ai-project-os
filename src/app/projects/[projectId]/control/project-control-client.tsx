@@ -111,7 +111,7 @@ function FrozenRepositorySection({ projectId }: { projectId: string }) {
     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">GitHub connector</p>
     <h2 className="mt-2 text-2xl font-semibold text-slate-950">旧项目仓库自动化已冻结</h2>
     <p className="mt-3 max-w-3xl text-sm leading-6 text-amber-900">
-      旧项目级 PAT 连接、自动同步和历史 GitHub 外发仍冻结，当前页面不会接收或发送 PAT，也不会启动仓库同步。一次性手动只读读取请前往<Link href={`/projects/${projectId}/repositories`} className="font-semibold underline">项目 Git 委托</Link>；自动化、写入/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准。
+      旧项目级 PAT 连接和历史 GitHub 外发仍冻结，当前页面不会接收或发送 PAT，也不会启动旧同步。手动只读读取和单独的自动读取授权请前往<Link href={`/projects/${projectId}/repositories`} className="font-semibold underline">项目 Git 委托</Link>；自动读取须经连接所有者和项目 Owner 双确认。写入/提交和旧 PAT 路径保持关闭；运行结果以项目记录为准。
     </p>
   </section>;
 }

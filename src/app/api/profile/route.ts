@@ -14,6 +14,7 @@ import {
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
+import { listLinkableOidcProviders } from "@/lib/oidc";
 import { toSystemRole } from "@/lib/system-role";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
         throw new ApiError(503, "PROFILE_SNAPSHOT_UNAVAILABLE", "个人信息暂时无法读取");
       }
       const sessionUser = await requireApiSessionReadOnly(request, tx, current);
-      const [user, activeSessionCount, latestSession] = await Promise.all([
+      const [user, activeSessionCount, latestSession, oidcLinkableProviders] = await Promise.all([
         tx.appUser.findUnique({
           where: { id: sessionUser.id },
           select: {
@@ -60,6 +61,7 @@ export async function GET(request: Request) {
           orderBy: { lastSeenAt: "desc" },
           select: { lastSeenAt: true, expiresAt: true },
         }),
+        listLinkableOidcProviders(sessionUser, tx),
       ]);
       if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
       const { passwordHash, githubIdentity, role, ...safeUser } = user;
@@ -68,6 +70,7 @@ export async function GET(request: Request) {
         role: toSystemRole(role),
         githubIdentity: githubIdentity ? { ...githubIdentity, githubUserId: githubIdentity.githubUserId.toString() } : null,
         hasLocalPassword: passwordHash !== null,
+        oidcLinkableProviders,
         activeSessionCount,
         lastSeenAt: latestSession?.lastSeenAt ?? null,
         sessionExpiresAt: latestSession?.expiresAt ?? null,

@@ -354,14 +354,38 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page).toHaveURL(/\/admin$/u);
   await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
 
+  const browser = page.context().browser();
+  if (browser === null) throw new Error("BROWSER_SMOKE_BROWSER_UNAVAILABLE");
+  const registrationContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  try {
+    const registrationPage = await registrationContext.newPage();
+    const registrationUsername = `browser_signup_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    await registrationPage.goto("/login");
+    await registrationPage.getByRole("link", { name: "创建账号" }).click();
+    await expect(registrationPage.getByRole("heading", { name: "创建账号", exact: true })).toBeVisible();
+    await expect(registrationPage.getByRole("link", { name: "返回登录" })).toBeVisible();
+    await registrationPage.getByLabel("用户名", { exact: true }).fill(registrationUsername);
+    await registrationPage.getByLabel("密码", { exact: true }).fill("BrowserSignup2026Password!");
+    await registrationPage.getByLabel("确认密码", { exact: true }).fill("BrowserSignup2026Password!");
+    await registrationPage.getByRole("button", { name: "创建账号", exact: true }).click();
+    await expect(registrationPage).toHaveURL(/\/dashboard$/u);
+    await expect(registrationPage.getByRole("heading", { name: `欢迎回来，${registrationUsername}`, exact: true })).toBeVisible();
+    const registered = await getEntitlementDb().appUser.findUniqueOrThrow({ where: { username: registrationUsername } });
+    expect(registered.role).toBe("user");
+    expect(registered.email).toBeNull();
+    expect(registered.emailVerifiedAt).toBeNull();
+    expect(await getEntitlementDb().workspaceMembership.count({ where: { userId: registered.id, role: "owner", accessState: "confirmed" } })).toBe(1);
+    expect(await getEntitlementDb().accountEntitlementActivation.count({ where: { userId: registered.id } })).toBe(0);
+  } finally {
+    await registrationContext.close();
+  }
+
   await seedBrowserPersonalOwner(ownerUsername, ownerPassword);
   await expect(page).toHaveURL(/\/admin$/u);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/admin$/u);
   await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
 
-  const browser = page.context().browser();
-  if (browser === null) throw new Error("BROWSER_SMOKE_BROWSER_UNAVAILABLE");
   const adminContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
   const adminPage = await adminContext.newPage();
   await adminPage.goto("/login");
@@ -426,6 +450,9 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByRole("tooltip")).toContainText(latestSevenDayDate!);
   await sevenDayGrid.press("ArrowUp");
   await expect(page.getByRole("tooltip")).not.toContainText(latestSevenDayDate!);
+  await Promise.all(["近 7 天", "近 30 天"].map((name) => page.getByRole("button", { name, exact: true }).evaluate(async (button) => {
+    await Promise.all(button.getAnimations().map((animation) => animation.finished));
+  })));
   await expectNoAccessibilityViolations(page, "credits heatmap");
 
   await page.goto("/personal/connections/git");
@@ -463,6 +490,16 @@ test("first-run administrator and personal workspace Owner stay separate across 
   const projectHref = await projectCard.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
   expect(projectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   const projectId = projectHref!.split("/")[2]!;
+  await page.goto(`${projectHref!}/repositories`);
+  await expect(page.getByRole("heading", { name: "项目 Git 委托", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "自动读取授权", exact: true })).toBeVisible();
+  await expect(page.getByText("还没有 Git 自动读取授权记录。", { exact: true })).toBeVisible();
+  await expect(page.getByText("还没有可用的个人 Git 连接。")).toBeVisible();
+  const projectRepositoryViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const repositoryDimensions = await readOverflowMeasurement(page);
+  expect(repositoryDimensions.documentWidth, `Git authorization page must fit 390px: ${JSON.stringify(repositoryDimensions)}`).toBeLessThanOrEqual(repositoryDimensions.viewportWidth);
+  if (projectRepositoryViewport !== null) await page.setViewportSize(projectRepositoryViewport);
   await page.goto(`${projectHref!}/materials`);
   await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(page, `${projectHref!}/materials`, "原始资料来源库", "project materials");
@@ -691,8 +728,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.getByRole("link", { name: /我的 Git 连接/u }).click();
   await expect(page).toHaveURL(/\/personal\/connections\/git$/u);
   await expect(page.getByRole("heading", { name: "我的 Git 连接", exact: true })).toBeVisible();
-  await expect(page.getByText(/项目页已支持一次性手动只读委托/u)).toBeVisible();
-  await expect(page.getByText(/自动化、写入\/提交和旧 PAT 路径保持关闭/u)).toBeVisible();
+  await expect(page.getByText(/项目页支持一次性手动只读委托和单独的自动读取双确认授权/u)).toBeVisible();
+  await expect(page.getByText(/授权生效后才会按计划只读/u)).toBeVisible();
   await expectNoAccessibilityViolations(page, "personal Git connections");
 
   await page.goto("/personal/connections/mcp");
@@ -700,7 +737,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   const mcpBoundary = page.locator("section").filter({ hasText: "当前使用边界" });
   await expect(mcpBoundary).toHaveCount(1);
   await expect(mcpBoundary.getByText(/项目委托控制面已开放/u)).toBeVisible();
-  await expect(mcpBoundary.getByText(/远端动作、自动化和调用审批仍未开放/u)).toBeVisible();
+  await expect(mcpBoundary.getByText(/只读动作在受控环境逐次审批，生产开放仍需验收；自动化保持关闭/u)).toBeVisible();
   await expect(mcpBoundary.getByText(/新建连接会先执行受限 DNS\/地址安全解析，再完成 initialize 和 tools\/list 只读测试/u)).toBeVisible();
   await expect(page.getByRole("button", { name: "保存连接", exact: true })).toHaveCount(0);
   await expectNoAccessibilityViolations(page, "personal MCP connections");

@@ -32,6 +32,12 @@ async function wait(milliseconds: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // The isolated Git Worker sets this to an empty value to discard its source
+  // credential. Remove the empty key before the shared environment validator.
+  if (process.env.GIT_AUTOMATION_DATABASE_URL !== undefined && process.env.GIT_AUTOMATION_DATABASE_URL !== "") {
+    throw new Error("RECOVERY_DRILL_PRIVILEGED_URL_PRESENT");
+  }
+  if (process.env.GIT_AUTOMATION_DATABASE_URL === "") delete process.env.GIT_AUTOMATION_DATABASE_URL;
   const db = getDb();
   const workerName = getWorkerName();
   const workerId = `${workerName}:${randomUUID()}`;

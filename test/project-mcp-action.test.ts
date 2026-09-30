@@ -2,22 +2,27 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { mapApiError } from "../src/lib/api-errors";
-import { projectMcpActionApiUnavailable } from "../src/lib/project-mcp-action-api-gate";
+import { isProjectMcpActionApiEnabled, projectMcpActionApiUnavailable } from "../src/lib/project-mcp-action-api-gate";
 import { ProjectMcpActionServiceError } from "../src/lib/project-mcp-action-service";
 
-test("project MCP action service stays isolated while every public route fails closed", async () => {
-  const [collection, detail, decision, cancel, service, migration] = await Promise.all([
+test("project MCP action routes require the explicit deployment gate", async () => {
+  const [collection, detail, decision, cancel, service, migration, compose, environmentExample] = await Promise.all([
     readFile("src/app/api/projects/[projectId]/mcp-actions/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/mcp-actions/[actionId]/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/mcp-actions/[actionId]/decision/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/mcp-actions/[actionId]/cancel/route.ts", "utf8"),
     readFile("src/lib/project-mcp-action-service.ts", "utf8"),
     readFile("prisma/migrations/20260904210000_add_project_mcp_action_approval_control_plane/migration.sql", "utf8"),
+    readFile("compose.yaml", "utf8"),
+    readFile(".env.example", "utf8"),
   ]);
   for (const route of [collection, detail, decision, cancel]) {
     assert.match(route, /projectMcpActionApiUnavailable/u);
-    assert.doesNotMatch(route, /project-mcp-action-service|requireApiSession|readJsonBody|assertSameOrigin/u);
+    assert.match(route, /isProjectMcpActionApiEnabled/u);
+    assert.match(route, /requireApiSession/u);
   }
+  assert.match(compose, /AI_PROJECT_OS_MCP_ACTIONS_ENABLED: "\$\{AI_PROJECT_OS_MCP_ACTIONS_ENABLED:-false\}"/u);
+  assert.match(environmentExample, /^AI_PROJECT_OS_MCP_ACTIONS_ENABLED=false$/mu);
   const unavailable = projectMcpActionApiUnavailable();
   assert.equal(unavailable.status, 404);
   assert.equal(unavailable.headers.get("cache-control"), "no-store");
@@ -67,19 +72,62 @@ test("project MCP action errors have stable API mappings", () => {
   assert.equal(mapped.body.error.code, "PROJECT_MCP_ACTION_STALE");
 });
 
-test("all six public MCP action handlers return the same fixed unavailable response", async () => {
-  const [collection, detail, decision, cancel, dispatch, projectTools] = await Promise.all([
+test("all public MCP action routes fail closed when the deployment gate is off", async () => {
+  const [collection, detail, decision, cancel, dispatch, resultImport] = await Promise.all([
     import("../src/app/api/projects/[projectId]/mcp-actions/route"),
     import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/route"),
     import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/decision/route"),
     import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/cancel/route"),
     import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/dispatch/route"),
-    readFile("src/app/projects/[projectId]/tools/project-tools-client.tsx", "utf8"),
+    import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/import/route"),
   ]);
-  for (const response of [collection.GET(), collection.POST(), detail.GET(), decision.POST(), cancel.POST(), dispatch.POST()]) {
-    assert.equal(response.status, 404);
-    assert.equal(response.headers.get("cache-control"), "no-store");
-    assert.equal((await response.json() as { error: { code: string } }).error.code, "PROJECT_MCP_ACTION_API_UNAVAILABLE");
+  const prior = process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+  delete process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+  try {
+    const request = new Request("http://localhost/api/projects/00000000-0000-0000-0000-000000000001/mcp-actions", { method: "POST" });
+    const projectContext = { params: Promise.resolve({ projectId: "00000000-0000-0000-0000-000000000001" }) };
+    const actionContext = { params: Promise.resolve({ projectId: "00000000-0000-0000-0000-000000000001", actionId: "00000000-0000-0000-0000-000000000002" }) };
+    for (const response of await Promise.all([
+      collection.GET(request, projectContext), collection.POST(request, projectContext),
+      detail.GET(request, actionContext), decision.POST(request, actionContext),
+      cancel.POST(request, actionContext), dispatch.POST(request, actionContext), resultImport.POST(request, actionContext),
+    ])) {
+      assert.equal(response.status, 404);
+      assert.match(response.headers.get("cache-control") ?? "", /no-store/u);
+      assert.equal((await response.json() as { error: { code: string } }).error.code, "PROJECT_MCP_ACTION_API_UNAVAILABLE");
+    }
+  } finally {
+    if (prior === undefined) delete process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+    else process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = prior;
   }
-  assert.doesNotMatch(projectTools, /mcp-actions/u);
+});
+
+test("production explicitly enables the project MCP action API gate", async () => {
+  const { GET } = await import("../src/app/api/projects/[projectId]/mcp-actions/route");
+  const mutableEnv = process.env as Record<string, string | undefined>;
+  const prior = {
+    nodeEnv: mutableEnv.NODE_ENV,
+    actionGate: mutableEnv.AI_PROJECT_OS_MCP_ACTIONS_ENABLED,
+    databaseUrl: mutableEnv.DATABASE_URL,
+  };
+  mutableEnv.NODE_ENV = "production";
+  mutableEnv.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = "true";
+  mutableEnv.DATABASE_URL = "postgresql://ai_project_os_runtime:test-only@127.0.0.1:5432/ai_project_os";
+  try {
+    assert.equal(isProjectMcpActionApiEnabled(), true);
+    const response = await GET(
+      new Request("https://ai-project-os.com/api/projects/00000000-0000-0000-0000-000000000001/mcp-actions"),
+      { params: Promise.resolve({ projectId: "00000000-0000-0000-0000-000000000001" }) },
+    );
+    assert.equal(response.status, 401, "the request passed the feature gate and reached authentication");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal((await response.json() as { error: { code: string } }).error.code, "AUTH_REQUIRED");
+  } finally {
+    if (prior.nodeEnv === undefined) delete mutableEnv.NODE_ENV;
+    else mutableEnv.NODE_ENV = prior.nodeEnv;
+    if (prior.actionGate === undefined) delete mutableEnv.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+    else mutableEnv.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = prior.actionGate;
+    if (prior.databaseUrl === undefined) delete mutableEnv.DATABASE_URL;
+    else mutableEnv.DATABASE_URL = prior.databaseUrl;
+  }
 });

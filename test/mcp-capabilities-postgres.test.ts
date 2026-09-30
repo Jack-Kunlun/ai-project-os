@@ -279,6 +279,7 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
     );
   } finally {
+    await db.project.updateMany({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.deleteMany({ where: { id: projectId } });
     if (connectionId !== null) await cleanupMcpConnection(connectionId, admin, suffix, db);
     if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });

@@ -49,6 +49,7 @@ export type ProjectSearchCitation = Readonly<{
   rangeStart: number;
   rangeEnd: number;
   contentHash: string;
+  sourceContentHash: string;
   excerpt: string;
 }>;
 
@@ -104,6 +105,7 @@ type SearchDocumentRow = {
   rangeEnd: number;
   contentText: string;
   contentHash: string;
+  sourceContentHash: string;
   contentBytes: number;
   ordinal: number;
 };
@@ -218,6 +220,7 @@ function validateDocumentRows(
       typeof row.contentText !== "string" ||
       row.contentText.length === 0 ||
       !FINGERPRINT_PATTERN.test(row.contentHash) ||
+      !FINGERPRINT_PATTERN.test(row.sourceContentHash) ||
       row.contentHash !== hashSourceContent(row.contentText) ||
       row.contentBytes !== Buffer.byteLength(row.contentText, "utf8") ||
       !Number.isSafeInteger(row.rangeStart) ||
@@ -246,6 +249,7 @@ function validateDocumentRows(
       rangeStart: row.rangeStart,
       rangeEnd: row.rangeEnd,
       contentHash: row.contentHash,
+      sourceContentHash: row.sourceContentHash,
       excerpt: row.contentText,
     }));
   }
@@ -255,7 +259,11 @@ function validateDocumentRows(
   });
 }
 
-export function createProjectSearchService(options: { db: PrismaClient }): {
+export function createProjectSearchService(options: {
+  db: PrismaClient | Prisma.TransactionClient;
+  /** The caller owns the interactive transaction and its isolation level. */
+  transactionClient?: boolean;
+}): {
   search(input: Readonly<{
     projectId: string;
     query: string;
@@ -266,7 +274,9 @@ export function createProjectSearchService(options: { db: PrismaClient }): {
   if (
     typeof options !== "object" ||
     options === null ||
-    typeof options.db?.$transaction !== "function"
+    (options.transactionClient === true
+      ? typeof options.db?.$queryRaw !== "function"
+      : typeof (options.db as PrismaClient)?.$transaction !== "function")
   ) {
     return fail("PROJECT_SEARCH_INVALID_INPUT");
   }
@@ -293,7 +303,7 @@ export function createProjectSearchService(options: { db: PrismaClient }): {
         throw error;
       }
 
-      return options.db.$transaction(async (tx) => {
+      const run = async (tx: Prisma.TransactionClient): Promise<ProjectSearchResponse> => {
         const pointers = await tx.$queryRaw<SnapshotPointerRow[]>(Prisma.sql`
           SELECT
             pointer."ragSnapshotId"::text AS "ragSnapshotId",
@@ -399,6 +409,7 @@ export function createProjectSearchService(options: { db: PrismaClient }): {
             chunk."rangeEnd",
             chunk."contentText",
             chunk."contentHash",
+            source."contentHash" AS "sourceContentHash",
             chunk."contentBytes",
             input_entry."ordinal"
           FROM "ProjectCorpusIndexInput" AS membership
@@ -515,7 +526,10 @@ export function createProjectSearchService(options: { db: PrismaClient }): {
             });
           })),
         });
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      };
+      return options.transactionClient === true
+        ? run(options.db as Prisma.TransactionClient)
+        : (options.db as PrismaClient).$transaction(run, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     },
   });
 }

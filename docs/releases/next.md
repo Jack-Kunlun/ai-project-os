@@ -14,7 +14,7 @@
 
 ## 0.7.x 开发候选
 
-当前代码包含注册入口、个人 Git 自动同步及 GitHub Issue/PR/Release 导入、受控远端 MCP 动作、对外只读 MCP、跨项目检索、Office 图片审核、静态 Bearer 网页抓取与 OIDC 显式绑定的开发实现。隔离 PostgreSQL 门禁、OID10、生产模式浏览器套件、覆盖率、Compose 候选和三写入者恢复演练已取得通过证据；Compose 验收使用未提交工作树，结果标为不可发布。JavaScript/站点登录网页仍只有隔离浏览器原型，尚未接入产品。真实外部服务、两个 MCP 客户端、OIDC IdP、生产工具引导、停写备份升级与公网验收仍是发布门禁。不能将此工作树视为已发布的 0.7.x。
+当前代码包含注册入口、个人 Git 自动同步及 GitHub Issue/PR/Release 导入、受控远端 MCP 动作、对外只读 MCP、跨项目检索、Office 图片审核、静态 Bearer 网页抓取与 OIDC 显式绑定的开发实现。隔离 PostgreSQL 门禁、OID10、生产模式浏览器套件、覆盖率、已提交候选的 Compose 门禁和三写入者恢复演练已取得通过证据；Compose 结果为 `releaseEligible=true`，仍需远端完整 CI 和稳定标签证明。JavaScript/站点登录网页仍只有隔离浏览器原型，尚未接入产品。真实外部服务、两个 MCP 客户端、OIDC IdP、生产工具引导、停写备份升级与公网验收仍是发布门禁。不能将此工作树视为已发布的 0.7.x。
 
 ## v0.6.0-dev.14 受控发布候选
 

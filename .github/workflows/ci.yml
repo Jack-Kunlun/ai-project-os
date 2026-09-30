@@ -68,7 +68,7 @@ jobs:
       - name: Run static checks
         run: |
           pnpm lint
-          pnpm typecheck
+          NODE_OPTIONS=--max-old-space-size=6144 pnpm typecheck
 
       - name: Run default test suite with coverage thresholds
         if: ${{ needs.scope.outputs.coverage == 'true' }}

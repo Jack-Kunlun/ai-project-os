@@ -138,7 +138,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run production browser and accessibility gates
-        run: pnpm test:browser-e2e
+        run: NODE_OPTIONS=--max-old-space-size=6144 pnpm test:browser-e2e
 
       - name: Enforce production client performance budgets
         run: pnpm performance:check

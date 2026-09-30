@@ -116,7 +116,9 @@ async function assertPrincipalGateRolesAvailable(admin: Client): Promise<void> {
     "SELECT rolname FROM pg_roles WHERE rolname = ANY($1::text[]) ORDER BY rolname",
     [PRINCIPAL_GATE_ROLES.map(({ name }) => name)],
   );
-  if (existing.rows.length > 0) throw new Error("POSTGRES_GATE_PRINCIPAL_ROLE_COLLISION");
+  if (existing.rows.length > 0) {
+    throw new Error(`POSTGRES_GATE_PRINCIPAL_ROLE_COLLISION roles=${existing.rows.map((row) => row.rolname).join(",")}`);
+  }
 }
 
 async function createPrincipalGateEnvironment(admin: Client, adminUrl: URL, database: string): Promise<NodeJS.ProcessEnv> {

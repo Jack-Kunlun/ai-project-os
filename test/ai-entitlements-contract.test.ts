@@ -23,6 +23,10 @@ import {
 import { stableAiCallKey } from "../src/lib/web-ai-governance";
 import { getProviderDefinition } from "../src/lib/ai-providers";
 
+function activeGrantExpiry(): Date {
+  return new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+}
+
 test("platform token estimates are conservative UTF-8 byte upper bounds", () => {
   const input = { text: "中文内容" };
   const estimate = estimatePlatformTokens(input, 128);
@@ -317,7 +321,7 @@ function entitlementError(code: string) {
 test("reservation settles known usage, refunds the difference, and is idempotent", async () => {
   const fake = new FakeEntitlementDb();
   const userId = randomUUID();
-  const grant = fake.addGrant(userId, 250, new Date("2026-10-01T00:00:00.000Z"));
+  const grant = fake.addGrant(userId, 250, activeGrantExpiry());
   const callKey = stableAiCallKey("job-reserve", "autoExtract", "source");
   const reserved = await reservePlatformTokens({ userId, callKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 100 }, fake as never);
   await assert.rejects(
@@ -341,7 +345,7 @@ test("reservation settles known usage, refunds the difference, and is idempotent
 test("reservation idempotency rejects raw, charged, and complete route snapshot drift", async () => {
   const fake = new FakeEntitlementDb();
   const userId = randomUUID();
-  fake.addGrant(userId, 10_000, new Date("2026-10-01T00:00:00.000Z"));
+  fake.addGrant(userId, 10_000, activeGrantExpiry());
   const callKey = stableAiCallKey("job-reservation-fence", "autoExtract", "source");
   const routeSnapshot = {
     source: "platform_default" as const,
@@ -399,7 +403,7 @@ test("reservation idempotency rejects raw, charged, and complete route snapshot 
 test("pre-dispatch release restores the reservation and unknown usage is held", async () => {
   const fake = new FakeEntitlementDb();
   const userId = randomUUID();
-  const grant = fake.addGrant(userId, 300, new Date("2026-10-01T00:00:00.000Z"));
+  const grant = fake.addGrant(userId, 300, activeGrantExpiry());
   const releasedKey = stableAiCallKey("job-release", "autoExtract", "source");
   await reservePlatformTokens({ userId, callKey: releasedKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 80 }, fake as never);
   const released = await releasePlatformTokenReservation({ userId, callKey: releasedKey }, fake as never);
@@ -422,7 +426,7 @@ test("pre-dispatch release restores the reservation and unknown usage is held", 
 test("expired reservations release only when no provider-touch evidence exists", async () => {
   const fake = new FakeEntitlementDb();
   const userId = randomUUID();
-  const grant = fake.addGrant(userId, 500, new Date("2026-10-01T00:00:00.000Z"));
+  const grant = fake.addGrant(userId, 500, activeGrantExpiry());
   const startedAt = new Date("2026-09-02T00:00:00.000Z");
   const releaseKey = stableAiCallKey("job-expired-release", "autoExtract", "source");
   await reservePlatformTokens({ userId, jobId: randomUUID(), callKey: releaseKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 100, now: startedAt }, fake as never);
@@ -446,7 +450,7 @@ test("expired reservations release only when no provider-touch evidence exists",
 test("dispatch fence serializes expired recovery before a provider call", async () => {
   const fake = new FakeEntitlementDb();
   const userId = randomUUID();
-  const grant = fake.addGrant(userId, 500, new Date("2026-10-01T00:00:00.000Z"));
+  const grant = fake.addGrant(userId, 500, activeGrantExpiry());
   const startedAt = new Date("2026-09-02T00:00:00.000Z");
   const preDispatchKey = stableAiCallKey("job-fence-pre", "autoExtract", "source");
   await reservePlatformTokens({ userId, jobId: "job-fence-pre", callKey: preDispatchKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 100, now: startedAt }, fake as never);
@@ -473,7 +477,7 @@ test("dispatch fence serializes expired recovery before a provider call", async 
 test("insufficient or expired grants fail before creating a reservation", async () => {
   const fake = new FakeEntitlementDb();
   const userId = randomUUID();
-  fake.addGrant(userId, 20, new Date("2026-10-01T00:00:00.000Z"));
+  fake.addGrant(userId, 20, activeGrantExpiry());
   await assert.rejects(
     () => reservePlatformTokens({ userId, callKey: stableAiCallKey("job-low", "autoExtract", "source"), operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 21 }, fake as never),
     entitlementError("AI_PLATFORM_TOKEN_EXHAUSTED"),
@@ -559,7 +563,7 @@ test("personal BYOK is unreachable while platform admins follow platform entitle
   );
   fake.jobs.length = 0;
 
-  fake.addGrant(adminId, 128, new Date("2026-10-01T00:00:00.000Z"));
+  fake.addGrant(adminId, 128, activeGrantExpiry());
   const adminWithGrant = await assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: adminId, route: platformRoute, db: fake as never });
   assert.deepEqual(adminWithGrant, { billingMode: "platform", billingUserId: adminId, reservationRequired: true });
   const adminReservation = await reservePlatformTokens({ userId: adminId, callKey: stableAiCallKey("admin-with-grant", "autoExtract", "source"), operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 64 }, fake as never);

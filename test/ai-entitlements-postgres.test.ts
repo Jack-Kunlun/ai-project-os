@@ -118,7 +118,8 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
     assert.deepEqual(await recoverExpiredPlatformTokenReservations({ userId: ownerId, now: new Date(entitlementNow.getTime() + 3 * 60 * 60 * 1_000) }, db), { inspected: 0, released: 0, held: 0 });
 
     await db.project.create({ data: { id: projectId, name: `Entitlement project ${suffix}`, slug: `entitlement-project-${suffix}`, workspaceId } });
-    const grantPreview = await previewPlatformTokenGrantMutation({ action: "grant", userId: retentionUserId, amount: 100, expiresAt: new Date("2026-10-01T00:00:00.000Z").toISOString(), requestKey: `grant-retention-${suffix}`, reason: "retention gate fixture" }, adminActor, db);
+    const retentionGrantExpiry = new Date(entitlementNow.getTime() + 30 * 24 * 60 * 60 * 1_000);
+    const grantPreview = await previewPlatformTokenGrantMutation({ action: "grant", userId: retentionUserId, amount: 100, expiresAt: retentionGrantExpiry.toISOString(), requestKey: `grant-retention-${suffix}`, reason: "retention gate fixture" }, adminActor, db);
     const governedGrant = await executePlatformTokenGrantMutation(governanceExecuteInput(grantPreview, retentionUsername), adminActor, db);
     const retentionJobId = randomUUID();
     const retained = await reservePlatformTokens({ userId: retentionUserId, jobId: retentionJobId, callKey: `gate:${suffix}:retention`, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 10, now: entitlementNow }, db);

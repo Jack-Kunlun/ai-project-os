@@ -152,10 +152,10 @@ async function createActiveGrant(db: PrismaClient, admin: Client): Promise<Reado
         delegation."delegationFingerprint", delegation."repositoryPath", delegation."trackedRef",
         delegation."includeRoots", delegation."softExcludePatterns", 60, delegation."expiresAt",
         repeat('f', 64), 3, 'active'::"ProjectGitRepositoryAutomationGrantStatus",
-        delegation."connectionOwnerId", owner_membership."id", owner_membership."createdAt", $4::timestamp(3) - interval '1 minute',
-        delegation."connectionOwnerId", owner_membership."id", owner_membership."createdAt", $4::timestamp(3) - interval '30 seconds',
-        $3::uuid, project_owner_membership."id", project_owner_membership."createdAt", $4::timestamp(3),
-        $4::timestamp(3) - interval '1 minute', $4::timestamp(3)
+        delegation."connectionOwnerId", owner_membership."id", owner_membership."createdAt", ($4::timestamptz AT TIME ZONE 'UTC')::timestamp(3) - interval '1 minute',
+        delegation."connectionOwnerId", owner_membership."id", owner_membership."createdAt", ($4::timestamptz AT TIME ZONE 'UTC')::timestamp(3) - interval '30 seconds',
+        $3::uuid, project_owner_membership."id", project_owner_membership."createdAt", ($4::timestamptz AT TIME ZONE 'UTC')::timestamp(3),
+        ($4::timestamptz AT TIME ZONE 'UTC')::timestamp(3) - interval '1 minute', ($4::timestamptz AT TIME ZONE 'UTC')::timestamp(3)
       FROM public."ProjectGitRepositoryDelegation" delegation
       JOIN public."ProjectMembership" owner_membership
         ON owner_membership."projectId" = delegation."projectId"
@@ -406,6 +406,16 @@ test("131 to 132 preserves historical automation and shared publication state, t
     assert.equal(sessionRole.rows[0]?.is_superuser, true, "the disposable gate role must be able to seed pre-migration history safely");
 
     const liveGrant = await createActiveGrant(db, admin);
+    const preClaimEligibility = await admin.query<{ reason: string | null; due_at: Date; database_now: Date }>(`
+      SELECT public."project_git_automation_grant_eligibility"(grant_row."id", grant_row."projectId", (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)) AS reason,
+             grant_row."activatedAt" + grant_row."runIntervalMinutes" * interval '1 minute' AS due_at,
+             (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS database_now
+        FROM public."ProjectGitRepositoryAutomationGrant" grant_row WHERE grant_row."id" = $1::uuid
+    `, [liveGrant.grantId]);
+    assert.equal(preClaimEligibility.rowCount, 1);
+    assert.equal(preClaimEligibility.rows[0]?.reason, null, "historical active grant is eligible before claiming");
+    assert.ok(preClaimEligibility.rows[0]!.due_at <= preClaimEligibility.rows[0]!.database_now,
+      `historical active grant is due before claiming: due=${preClaimEligibility.rows[0]!.due_at.toISOString()} now=${preClaimEligibility.rows[0]!.database_now.toISOString()}`);
     const preUpgradeClaim = await claimRun(admin, liveGrant.grantId, "upgrade-preserved-pending");
     assert.equal(preUpgradeClaim.grantId, liveGrant.grantId);
 

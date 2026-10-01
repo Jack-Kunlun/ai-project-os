@@ -26,7 +26,7 @@ test("v07 deployer retains the release identity and irreversible migration bound
   assert.match(deployer, /require_release_ci_evidence "\$resolved_source_revision" "\$SOURCE_TAG"/u);
   assert.match(deployer, /require_release_ci_evidence "\$EXPECTED_REVISION" "\$RELEASE_TAG"/u);
   assert.match(deployer, /local expected_count=117/u);
-  assert.match(deployer, /expected_count=133/u);
+  assert.match(deployer, /expected_count=135/u);
   assert.match(deployer, /for feature_flag in LOCAL_REGISTRATION_ENABLED AI_PROJECT_OS_MCP_ACTIONS_ENABLED AI_PROJECT_OS_MCP_EXPORT_ENABLED AI_PROJECT_OS_MCP_EXPORT_OAUTH_ENABLED/u);
   assert.match(deployer, /DEPLOY_MCP_EXPORT_OAUTH_REQUIRES_EXPORT/u);
   assert.match(deployer, /validate_exact_env_value AI_PROJECT_OS_MCP_EXPORT_PUBLIC_ORIGIN https:\/\/ai-project-os\.com/u);

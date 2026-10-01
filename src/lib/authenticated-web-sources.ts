@@ -32,7 +32,7 @@ type AuthenticatedSourceSnapshot = Readonly<{
   allowPrivateNetwork: boolean;
   status: "active" | "disabled" | "error";
   disabledAt: Date | null;
-  authenticationMode: "none" | "bearer";
+  authenticationMode: "none" | "bearer" | "rendered" | "siteForm";
   authCredentialId: string | null;
   authCredentialFingerprint: string | null;
   authCredentialUrlFingerprint: string | null;

@@ -2,6 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { createSecureMasterKeyFixture } from "./secure-master-key-fixture";
 import test from "node:test";
 import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
 import { getDb } from "../src/lib/db";
@@ -62,7 +63,8 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const projectId = randomUUID();
-    const masterKeyPath = `/tmp/ai-project-os-v2-1-intelligence-${process.pid}.key`;
+    const keyFixture = await createSecureMasterKeyFixture();
+    const masterKeyPath = keyFixture.path;
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     let crossProjectId: string | null = null;
@@ -506,6 +508,7 @@ test(
       // disposable gate runner drops this database after the test, so row
       // deletion here would violate the audit contract.
       await unlink(masterKeyPath).catch(() => undefined);
+      await keyFixture.cleanup();
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
     }

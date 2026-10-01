@@ -3,13 +3,14 @@ import { createServer as createHttpServer, type IncomingHttpHeaders, type Incomi
 import { request as httpsRequest, createServer as createHttpsServer } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Socket } from "node:net";
 import type { Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
 import {
   assertWebBrowserExactOrigin,
   isPublicWebBrowserAddress,
+  normalizeWebBrowserTarget,
   WebBrowserProxyError,
   type WebBrowserProxyErrorCode,
 } from "./web-browser-policy";
@@ -23,7 +24,7 @@ const MAX_PROXY_TUNNELS_DEFAULT = 32;
 const MAX_RESOLVED_ADDRESSES = 32;
 const PROXY_HEADER_BYTES = 16 * 1024;
 
-type ResolvedAddress = Readonly<{ address: string; family: 4 | 6 }>;
+type ResolvedAddress = Readonly<{ address: string; family: 4 | 6; fingerprint: string }>;
 
 type Resolver = (hostname: string) => Promise<readonly Readonly<{ address: string; family: number }>[]>;
 
@@ -48,11 +49,15 @@ export type WebBrowserEgressProxyOptions = Readonly<{
   requestTimeoutMs?: number;
   jobTimeoutMs?: number;
   maxTunnels?: number;
+  formPostUrl?: string;
+  maxFormPostBytes?: number;
+  expectedNetworkFingerprint?: string;
 }>;
 
 export type WebBrowserEgressProxy = Readonly<{
   server: HttpServer;
   address: Readonly<{ host: string; port: number }>;
+  networkFingerprint(): string | null;
   close(): Promise<void>;
 }>;
 
@@ -103,6 +108,7 @@ function createPinnedLookup(address: ResolvedAddress): LookupFunction {
 
 async function resolvePublicEndpoint(
   hostname: string,
+  port: string,
   resolver: Resolver,
   allowPrivateAddresses: boolean,
 ): Promise<ResolvedAddress> {
@@ -136,7 +142,10 @@ async function resolvePublicEndpoint(
 
   const first = normalized[0]!;
   if (first.family !== 4 && first.family !== 6) return throwProxyError("WEB_BROWSER_DNS_REJECTED");
-  return Object.freeze({ address: first.address, family: first.family });
+  const fingerprint = createHash("sha256")
+    .update(`${normalizedHost}:${port}:${normalized.map((row) => `${row.family}:${row.address}`).join(",")}`, "utf8")
+    .digest("hex");
+  return Object.freeze({ address: first.address, family: first.family, fingerprint });
 }
 
 function authenticate(headers: IncomingHttpHeaders, username: string, password: string): boolean {
@@ -242,6 +251,21 @@ function createProxyServer(
   ) return throwProxyError("WEB_BROWSER_INVALID_TARGET");
   const expectedOrigin = expected.origin;
   const expectedHost = expected.host.toLowerCase();
+  let formPostUrl: string | null = null;
+  if (options.formPostUrl !== undefined) {
+    const normalized = normalizeWebBrowserTarget(options.formPostUrl);
+    if (normalized.origin !== expectedOrigin || new URL(normalized.url).search !== "") {
+      return throwProxyError("WEB_BROWSER_INVALID_TARGET");
+    }
+    formPostUrl = normalized.url;
+  }
+  const maxFormPostBytes = options.maxFormPostBytes ?? 8192;
+  if (!Number.isSafeInteger(maxFormPostBytes) || maxFormPostBytes < 1 || maxFormPostBytes > 8192 || (formPostUrl === null && options.maxFormPostBytes !== undefined)) {
+    return throwProxyError("WEB_BROWSER_INVALID_TARGET");
+  }
+  if (options.expectedNetworkFingerprint !== undefined && !/^[0-9a-f]{64}$/u.test(options.expectedNetworkFingerprint)) {
+    return throwProxyError("WEB_BROWSER_INVALID_TARGET");
+  }
   const username = options.username;
   const password = options.password;
   if (username.length < 8 || password.length < 24 || username.includes(":") || /[\r\n]/u.test(username + password)) {
@@ -270,6 +294,8 @@ function createProxyServer(
   let requestCount = 0;
   let responseBytes = 0;
   let activeTunnels = 0;
+  let formPostCount = 0;
+  let networkFingerprint: string | null = null;
 
   const proxy = createHttpServer({ maxHeaderSize: PROXY_HEADER_BYTES }, (_request, response) => {
     response.writeHead(405, { connection: "close" });
@@ -295,7 +321,12 @@ function createProxyServer(
       let pinned: ResolvedAddress;
       try {
         target = parseProxyAuthority(request.url ?? "", expectedOrigin);
-        pinned = await resolvePublicEndpoint(target.hostname, resolveHostname, allowPrivateAddresses);
+        pinned = await resolvePublicEndpoint(target.hostname, target.port || "443", resolveHostname, allowPrivateAddresses);
+        if (options.expectedNetworkFingerprint !== undefined && pinned.fingerprint !== options.expectedNetworkFingerprint) {
+          return throwProxyError("WEB_BROWSER_DNS_REJECTED");
+        }
+        if (networkFingerprint !== null && networkFingerprint !== pinned.fingerprint) return throwProxyError("WEB_BROWSER_DNS_REJECTED");
+        networkFingerprint = pinned.fingerprint;
       } catch (error) {
         const code = error instanceof WebBrowserProxyError ? error.code : "WEB_BROWSER_TARGET_REJECTED";
         writeConnectError(socket, errorStatus(code), "Forbidden");
@@ -368,16 +399,12 @@ function createProxyServer(
     }
     requestCount += 1;
 
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      reject("WEB_BROWSER_METHOD_REJECTED");
-      return;
-    }
     if (isUpgradeRequest(request.headers) || requestHeader(request.headers, "authorization") !== undefined) {
       reject("WEB_BROWSER_METHOD_REJECTED");
       return;
     }
     const requestBodyLength = bodyLength(request.headers);
-    if (requestBodyLength === null || requestBodyLength > 0) {
+    if (requestBodyLength === null) {
       reject("WEB_BROWSER_METHOD_REJECTED");
       return;
     }
@@ -400,9 +427,30 @@ function createProxyServer(
       return;
     }
 
+    const isFormPost = request.method === "POST";
+    if (isFormPost) {
+      if (
+        formPostUrl === null || target.toString() !== formPostUrl || formPostCount !== 0 ||
+        requestBodyLength < 1 || requestBodyLength > maxFormPostBytes ||
+        !/^application\/x-www-form-urlencoded(?:\s*;\s*charset=utf-8)?$/iu.test(requestHeader(request.headers, "content-type") ?? "") ||
+        requestHeader(request.headers, "expect") !== undefined ||
+        requestHeader(request.headers, "content-encoding") !== undefined
+      ) {
+        reject("WEB_BROWSER_METHOD_REJECTED");
+        return;
+      }
+      formPostCount += 1;
+    } else if ((request.method !== "GET" && request.method !== "HEAD") || requestBodyLength !== 0) {
+      reject("WEB_BROWSER_METHOD_REJECTED");
+      return;
+    }
+
     const upstream = httpsRequest(target, {
       method: request.method,
-      headers: requestHeadersForOrigin(request.headers, expectedHost),
+      headers: {
+        ...requestHeadersForOrigin(request.headers, expectedHost),
+        ...(isFormPost ? { "content-length": String(requestBodyLength) } : {}),
+      },
       agent: false,
       lookup: createPinnedLookup(pinned),
       servername: isIP(normalizeHost(target.hostname)) === 0 ? normalizeHost(target.hostname) : undefined,
@@ -462,12 +510,14 @@ function createProxyServer(
       const code = error instanceof WebBrowserProxyError ? error.code : "WEB_BROWSER_UPSTREAM_FAILED";
       reject(code);
     });
-    upstream.end();
+    if (isFormPost) request.pipe(upstream);
+    else upstream.end();
   }
 
   return {
     server: proxy,
     address: { host: options.host ?? "0.0.0.0", port: options.port ?? 3128 },
+    networkFingerprint: () => networkFingerprint,
     async close() {
       for (const request of requests) request.destroy();
       for (const socket of rawTunnels) socket.destroy();

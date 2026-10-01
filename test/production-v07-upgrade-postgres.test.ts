@@ -12,9 +12,9 @@ import { runV07UpgradePreflight } from "../scripts/production-v07-upgrade-prefli
 const runFile = promisify(execFileCallback);
 const migrationRoot = resolve(process.cwd(), "prisma/migrations");
 const sourceLastMigration = "20260924010000_add_personal_knowledge_graph_suggestions";
-const targetLastMigration = "20260930020000_add_project_git_material_import";
+const targetLastMigration = "20261001010000_add_browser_web_source_modes";
 const sourceMigrationCount = 117;
-const targetMigrationCount = 133;
+const targetMigrationCount = 135;
 const configuredUrl = process.env.PRODUCTION_V07_UPGRADE_TEST_DATABASE_URL;
 const shouldRun = process.env.PRODUCTION_V07_UPGRADE_POSTGRES_GATE === "1"
   && typeof configuredUrl === "string" && configuredUrl.length > 0;
@@ -155,7 +155,7 @@ test("v0.7 preflight rejects invalid phase and tag before connecting", async () 
   await expectPreflightCode("pre-stop", "v0.7.0-dev.0", "", "V07_UPGRADE_PREFLIGHT_TARGET_TAG_INVALID");
 });
 
-test("v0.7.0-dev.1 preflight validates the 117 to 133 migration transition and stopped writers", {
+test("v0.7.0-dev.1 preflight validates the 117 to 135 migration transition and stopped writers", {
   skip: !shouldRun ? "disposable PostgreSQL v0.7 upgrade gate is required" : false,
 }, async () => {
   const databaseUrl = validateDisposableDatabaseUrl(configuredUrl as string);

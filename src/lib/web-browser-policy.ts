@@ -10,6 +10,8 @@ export const WEB_BROWSER_PROXY_ERROR_CODES = [
   "WEB_BROWSER_RESOURCE_LIMIT",
   "WEB_BROWSER_UPSTREAM_FAILED",
   "WEB_BROWSER_RENDER_FAILED",
+  "WEB_BROWSER_LOGIN_FAILED",
+  "WEB_BROWSER_CREDENTIAL_REFLECTION",
   "WEB_BROWSER_ISOLATION_UNAVAILABLE",
 ] as const;
 
@@ -27,6 +29,92 @@ export type WebBrowserTarget = Readonly<{
   origin: string;
   hostname: string;
 }>;
+
+export type WebBrowserSiteForm = Readonly<{
+  loginUrl: string;
+  submitUrl: string;
+  usernameSelector: string;
+  passwordSelector: string;
+  submitSelector: string;
+  successSelector: string;
+  username: string;
+  password: string;
+}>;
+
+function boundedSelector(value: unknown, kind: "input" | "submit" | "success"): string {
+  const identifier = "[A-Za-z][A-Za-z0-9_-]{0,127}";
+  const field = new RegExp(`^input\\[(?:name|id)="${identifier}"\\]$`, "u");
+  const button = new RegExp(`^(?:button|input)\\[(?:name|id)="${identifier}"\\]$`, "u");
+  const id = new RegExp(`^#${identifier}$`, "u");
+  const valid = typeof value === "string" && value.length <= 160 && (
+    kind === "input" ? field.test(value) || id.test(value)
+      : kind === "submit" ? button.test(value) || id.test(value) || value === 'button[type="submit"]' || value === 'input[type="submit"]'
+        : id.test(value)
+  );
+  if (!valid) {
+    throw new WebBrowserProxyError("WEB_BROWSER_INVALID_TARGET");
+  }
+  return value as string;
+}
+
+function boundedSecret(value: unknown, maximum: number): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new WebBrowserProxyError("WEB_BROWSER_INVALID_TARGET");
+  }
+  return value;
+}
+
+function containsEncodedSecret(value: string, secret: string): boolean {
+  let candidate = value;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (candidate.includes(secret)) return true;
+    if (!candidate.includes("%")) return false;
+    try {
+      const decoded = decodeURIComponent(candidate);
+      if (decoded === candidate) return false;
+      candidate = decoded;
+    } catch {
+      throw new WebBrowserProxyError("WEB_BROWSER_INVALID_TARGET");
+    }
+  }
+  return candidate.includes(secret) || /%[0-9a-f]{2}/iu.test(candidate);
+}
+
+export function assertWebBrowserCredentialAbsent(values: readonly string[], siteForm: WebBrowserSiteForm): void {
+  if (values.some((value) => containsEncodedSecret(value, siteForm.username) || containsEncodedSecret(value, siteForm.password))) {
+    throw new WebBrowserProxyError("WEB_BROWSER_CREDENTIAL_REFLECTION");
+  }
+}
+
+export function normalizeWebBrowserSiteForm(value: unknown, targetUrl: string): WebBrowserSiteForm {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new WebBrowserProxyError("WEB_BROWSER_INVALID_TARGET");
+  const row = value as Record<string, unknown>;
+  const keys = ["loginUrl", "submitUrl", "usernameSelector", "passwordSelector", "submitSelector", "successSelector", "username", "password"];
+  if (Object.keys(row).length !== keys.length || Object.keys(row).some((key) => !keys.includes(key))) {
+    throw new WebBrowserProxyError("WEB_BROWSER_INVALID_TARGET");
+  }
+  const target = normalizeWebBrowserTarget(targetUrl);
+  const login = normalizeWebBrowserTarget(row.loginUrl);
+  const submit = normalizeWebBrowserTarget(row.submitUrl);
+  if (login.origin !== target.origin || submit.origin !== target.origin || new URL(submit.url).search !== "") {
+    throw new WebBrowserProxyError("WEB_BROWSER_TARGET_REJECTED");
+  }
+  const siteForm = Object.freeze({
+    loginUrl: login.url,
+    submitUrl: submit.url,
+    usernameSelector: boundedSelector(row.usernameSelector, "input"),
+    passwordSelector: boundedSelector(row.passwordSelector, "input"),
+    submitSelector: boundedSelector(row.submitSelector, "submit"),
+    successSelector: boundedSelector(row.successSelector, "success"),
+    username: boundedSecret(row.username, 512),
+    password: boundedSecret(row.password, 4096),
+  });
+  if (siteForm.usernameSelector === siteForm.passwordSelector) {
+    throw new WebBrowserProxyError("WEB_BROWSER_INVALID_TARGET");
+  }
+  assertWebBrowserCredentialAbsent([target.url, siteForm.loginUrl, siteForm.submitUrl], siteForm);
+  return siteForm;
+}
 
 export function normalizeWebBrowserTarget(value: unknown): WebBrowserTarget {
   if (typeof value !== "string" || value.length < 8 || value.length > 2048 || value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value)) {

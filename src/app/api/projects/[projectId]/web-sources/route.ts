@@ -4,6 +4,7 @@ import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
 import { createProjectWebSource, listProjectWebSources } from "@/lib/web-sources";
+import { webBrowserBrokerConfiguration } from "@/lib/web-browser-broker-client";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -23,12 +24,15 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const user = await requireApiSession(request);
     const url = new URL(request.url);
     const query = listSchema.parse(Object.fromEntries(url.searchParams));
-    return NextResponse.json(await listProjectWebSources(await projectId(context.params), {
+    const listed = await listProjectWebSources(await projectId(context.params), {
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
       status: query.status === "all" ? undefined : query.status,
-    }, user));
+    }, user);
+    let browserEnabled = false;
+    try { webBrowserBrokerConfiguration(); browserEnabled = true; } catch { /* Feature stays hidden until configured. */ }
+    return NextResponse.json({ ...listed, browserEnabled });
   } catch (error) {
     return handleApiError(error);
   }

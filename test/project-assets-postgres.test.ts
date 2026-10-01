@@ -2,6 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { rm, unlink } from "node:fs/promises";
+import { createSecureMasterKeyFixture } from "./secure-master-key-fixture";
 import test from "node:test";
 import { createCanvas } from "@napi-rs/canvas";
 import { invokeVisionCompletion } from "../src/lib/ai-providers";
@@ -102,7 +103,8 @@ test(
     const suffix = randomUUID().slice(0, 8);
     const projectId = randomUUID();
     const assetRoot = `/tmp/ai-project-os-assets-${process.pid}-${suffix}`;
-    const masterKeyPath = `/tmp/ai-project-os-assets-${process.pid}-${suffix}.key`;
+    const keyFixture = await createSecureMasterKeyFixture();
+    const masterKeyPath = keyFixture.path;
     const previousAssetRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
@@ -358,6 +360,7 @@ test(
       // contract and can leave dangling evidence behind.
       await rm(assetRoot, { recursive: true, force: true });
       await unlink(masterKeyPath).catch(() => undefined);
+      await keyFixture.cleanup();
       if (previousAssetRoot === undefined) delete process.env.AI_PROJECT_OS_ASSET_DIR;
       else process.env.AI_PROJECT_OS_ASSET_DIR = previousAssetRoot;
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

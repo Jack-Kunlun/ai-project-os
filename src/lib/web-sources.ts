@@ -39,6 +39,7 @@ export type WebSourceErrorCode =
   | "WEB_SOURCE_REVIEW_NOT_FOUND"
   | "WEB_SOURCE_REVIEW_STALE"
   | "WEB_SOURCE_REVIEW_CONFLICT"
+  | "WEB_SOURCE_REVIEW_PUBLICATION_DISABLED"
   | "WEB_SOURCE_HTTP_STATUS"
   | "WEB_SOURCE_TOO_LARGE"
   | "WEB_SOURCE_TYPE_UNSUPPORTED"
@@ -100,7 +101,8 @@ function projectWebSourceDto(source: ProjectWebSourceRow) {
   return Object.freeze({
     ...safeSource,
     authenticationMode,
-    bearerConfigured: authCredentialId !== null,
+    bearerConfigured: authenticationMode === "bearer" && authCredentialId !== null,
+    browserCredentialConfigured: authenticationMode === "siteForm" && authCredentialId !== null,
     pendingReview: pending === null ? null : Object.freeze(pending),
   });
 }
@@ -237,12 +239,15 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
   headers?: Readonly<Record<string, string>>;
   body?: string;
   maximumResponseBytes?: number;
+  requestTimeoutMs?: number;
   onRequestBodyWriteStart?: () => SecurePinnedRequestDispatch | Promise<SecurePinnedRequestDispatch>;
 }> = {}): Promise<RawResponse> {
   const maximumResponseBytes = options.maximumResponseBytes ?? MAX_RESPONSE_BYTES;
   if (!Number.isInteger(maximumResponseBytes) || maximumResponseBytes < 1 || maximumResponseBytes > MAX_RESPONSE_BYTES) {
     return fail("WEB_SOURCE_INVALID_INPUT");
   }
+  const timeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 100_000) return fail("WEB_SOURCE_INVALID_INPUT");
   // Run the caller's irreversible-dispatch callback only after DNS/SSRF and
   // fingerprint checks have completed, but before constructing the request.
   // A slow or rejected callback must not leave an AbortSignal/request alive
@@ -268,7 +273,7 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
       // A pooled socket may have been opened under a stale DNS answer. Every
       // pinned hop must establish a fresh connection to its checked endpoint.
       agent: false,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     }, (response) => {
       const chunks: Buffer[] = [];
       let size = 0;
@@ -306,6 +311,7 @@ export async function securePinnedHttpRequest(input: Readonly<{
   headers?: Readonly<Record<string, string>>;
   body?: string;
   maximumResponseBytes?: number;
+  requestTimeoutMs?: number;
   onRequestBodyWriteStart?: () => SecurePinnedRequestDispatch | Promise<SecurePinnedRequestDispatch>;
 }>): Promise<Readonly<{
   status: number;
@@ -325,6 +331,7 @@ export async function securePinnedHttpRequest(input: Readonly<{
     headers: input.headers,
     body: input.body,
     maximumResponseBytes: input.maximumResponseBytes,
+    requestTimeoutMs: input.requestTimeoutMs,
     onRequestBodyWriteStart: input.onRequestBodyWriteStart,
   });
   return Object.freeze({ ...response, finalUrl: canonical, fingerprint: endpoint.fingerprint });
@@ -477,6 +484,7 @@ export async function listProjectWebSources(
     const search = input.search?.trim();
     const where: Prisma.WebSourceWhereInput = {
       projectId,
+      ...(admission.permission === "owner" ? {} : { authenticationMode: { not: "siteForm" } }),
       ...(input.status === undefined ? {} : { status: input.status }),
       ...(search ? { OR: [
         { name: { contains: search, mode: "insensitive" } },
@@ -538,6 +546,7 @@ export async function updateProjectWebSource(
   actor: WebAiActor,
   db: PrismaClient = getDb(),
   resolveNetwork: typeof resolveSecureEndpointFingerprint = resolveSecureEndpointFingerprint,
+  cancelBrowserJobs?: typeof import("./web-browser-broker-client").cancelWebBrowserBrokerJobs,
 ) {
   const projectId = uuid(projectIdInput);
   const webSourceId = uuid(webSourceIdInput);
@@ -547,26 +556,41 @@ export async function updateProjectWebSource(
     select: { id: true, name: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, authenticationMode: true, configurationVersion: true },
   }));
   if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
+  if (parsed.trustCurrentNetwork === true && current.authenticationMode !== "none" && current.authenticationMode !== "bearer") {
+    return fail("WEB_SOURCE_INVALID_INPUT");
+  }
   const fingerprint = parsed.trustCurrentNetwork === true
     ? (await resolveNetwork({ url: current.url, allowPrivateNetwork: current.allowPrivateNetwork })).fingerprint
     : undefined;
-  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+  return withWebAiProjectAccessTransaction(db, {
+    actor, projectId, required: "owner",
+    ...(current.authenticationMode === "rendered" || current.authenticationMode === "siteForm"
+      ? { transactionTimeoutMs: 120_000, transactionMaxWaitMs: 120_000 } : {}),
+  }, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${webSourceId}`}, 29082026))`;
     const lockedCurrent = await tx.webSource.findFirst({
       where: { id: webSourceId, projectId },
-      select: { id: true, name: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, authenticationMode: true, configurationVersion: true },
+      select: { id: true, name: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, authenticationMode: true, authCredentialId: true, configurationVersion: true },
     });
     if (lockedCurrent === null) return fail("WEB_SOURCE_NOT_FOUND");
-    if (lockedCurrent.authenticationMode === "bearer" && parsed.name !== undefined && parsed.name !== lockedCurrent.name) {
+    if (lockedCurrent.authenticationMode !== "none" && parsed.name !== undefined && parsed.name !== lockedCurrent.name) {
       return fail("WEB_SOURCE_AUTHENTICATED_RENAME_REJECTED");
+    }
+    if (parsed.enabled === true && lockedCurrent.authenticationMode === "siteForm" && lockedCurrent.authCredentialId === null) {
+      return fail("WEB_SOURCE_AUTHENTICATION_REVOKED");
     }
     // A trust-current-network update must not overwrite a newer network
     // decision made while DNS resolution was in flight.
     if (parsed.trustCurrentNetwork === true && lockedCurrent.resolvedAddressFingerprint !== current.resolvedAddressFingerprint) {
       return fail("WEB_SOURCE_NETWORK_CHANGED");
     }
-    const authenticatedConfigurationChanged = lockedCurrent.authenticationMode === "bearer"
+    const authenticatedConfigurationChanged = lockedCurrent.authenticationMode !== "none"
       && (parsed.enabled !== undefined || parsed.trustCurrentNetwork === true);
+    if (authenticatedConfigurationChanged && (lockedCurrent.authenticationMode === "rendered" || lockedCurrent.authenticationMode === "siteForm")) {
+      const { cancelRecentBrowserJobs } = await import("./browser-web-sources");
+      const { cancelWebBrowserBrokerJobs } = await import("./web-browser-broker-client");
+      await cancelRecentBrowserJobs(tx, projectId, webSourceId, cancelBrowserJobs ?? cancelWebBrowserBrokerJobs);
+    }
     const changedAt = new Date();
     if (authenticatedConfigurationChanged) {
       await tx.webSourceRevision.updateMany({
@@ -606,7 +630,7 @@ export async function syncProjectWebSource(
     });
     if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
     if (current.status === "disabled") return fail("WEB_SOURCE_DISABLED");
-    if (current.authenticationMode === "bearer") return fail("WEB_SOURCE_AUTHENTICATED_REVIEW_REQUIRED");
+    if (current.authenticationMode !== "none") return fail("WEB_SOURCE_AUTHENTICATED_REVIEW_REQUIRED");
     const revision = await tx.webSourceRevision.create({ data: { projectId, webSourceId }, select: { id: true } });
     return Object.freeze({ ...current, revisionId: revision.id });
   });

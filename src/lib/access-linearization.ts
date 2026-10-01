@@ -331,11 +331,11 @@ export async function admitWebAiProjectAccess(
 }
 
 /**
- * Run a database-only operation behind the canonical actor -> workspace ->
- * project access fence.  The callback receives a transaction client and must
- * not perform network, credential, blob, or other external I/O.  A caller
- * that is already inside a transaction can reuse the same helper; the access
- * locks are still acquired and no nested transaction is created.
+ * Run an operation behind the canonical actor -> workspace -> project access
+ * fence. Callbacks should remain database-only. Browser-source invalidation
+ * is a narrow exception: it awaits a bounded broker cancellation ACK while
+ * holding the source fence and rolls back if cancellation is uncertain.
+ * A caller already inside a transaction reuses it without nesting.
  */
 export async function withWebAiProjectAccessTransaction<T>(
   db: AccessLinearizationClient,
@@ -346,6 +346,8 @@ export async function withWebAiProjectAccessTransaction<T>(
     allowArchived?: boolean;
     additionalActorIds?: readonly unknown[];
     isolationLevel?: Prisma.TransactionIsolationLevel;
+    transactionTimeoutMs?: number;
+    transactionMaxWaitMs?: number;
   }>,
   callback: (tx: Prisma.TransactionClient, admission: ProjectAccessAdmission) => Promise<T>,
 ): Promise<T> {
@@ -361,5 +363,7 @@ export async function withWebAiProjectAccessTransaction<T>(
   }
   return (db as PrismaClient).$transaction(run, {
     isolationLevel: input.isolationLevel ?? Prisma.TransactionIsolationLevel.ReadCommitted,
+    ...(input.transactionTimeoutMs === undefined ? {} : { timeout: input.transactionTimeoutMs }),
+    ...(input.transactionMaxWaitMs === undefined ? {} : { maxWait: input.transactionMaxWaitMs }),
   });
 }

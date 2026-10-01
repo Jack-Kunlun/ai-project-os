@@ -11,6 +11,8 @@ import test from "node:test";
 import {
   isPublicWebBrowserAddress,
   normalizeWebBrowserTarget,
+  normalizeWebBrowserSiteForm,
+  assertWebBrowserCredentialAbsent,
 } from "../src/lib/web-browser-policy";
 import {
   createWebBrowserEgressProxyForTest,
@@ -37,6 +39,7 @@ type Fixture = Readonly<{
   resolvedHosts: string[];
   serviceWorkerRequests: () => number;
   upstreamUpgradeRequests: () => number;
+  formPostRequests: () => number;
 }>;
 
 type TestProxyOverrides = Readonly<{
@@ -44,6 +47,9 @@ type TestProxyOverrides = Readonly<{
   maxTotalBytes?: number;
   allowPrivateAddresses?: boolean;
   resolveHostname?: (hostname: string) => Promise<readonly Readonly<{ address: string; family: number }>[] >;
+  allowFormPost?: boolean;
+  maxFormPostBytes?: number;
+  expectedNetworkFingerprint?: string;
 }>;
 
 function sendPage(_request: IncomingMessage, response: ServerResponse): void {
@@ -56,8 +62,9 @@ function sendPage(_request: IncomingMessage, response: ServerResponse): void {
 async function startFixture(proxyOptions: TestProxyOverrides = {}): Promise<Fixture> {
   let workerRequests = 0;
   let upgradeRequests = 0;
+  let formPostRequests = 0;
   const resolvedHosts: string[] = [];
-  const upstream = createHttpsServer({ cert: CERTIFICATE, key: PRIVATE_KEY }, (request, response) => {
+  const upstream = createHttpsServer({ cert: CERTIFICATE, key: PRIVATE_KEY }, async (request, response) => {
     switch (request.url) {
       case "/js": sendPage(request, response); return;
       case "/render-attacks":
@@ -98,6 +105,26 @@ async function startFixture(proxyOptions: TestProxyOverrides = {}): Promise<Fixt
         response.writeHead(200, { "content-type": "application/javascript" });
         response.end("self.addEventListener('fetch', () => {});");
         return;
+      case "/login":
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end('<!doctype html><form action="/login/submit" method="post"><input name="username"><input name="password" type="password"><button type="submit">Sign in</button></form>');
+        return;
+      case "/login/submit":
+        if (request.method !== "POST") {
+          response.writeHead(405); response.end(); return;
+        }
+        formPostRequests += 1;
+        for await (const chunk of request) { void chunk; }
+        response.writeHead(302, { location: "/private", "set-cookie": "session=test-session; Path=/; Secure; HttpOnly; SameSite=Strict" });
+        response.end();
+        return;
+      case "/private":
+        if (!request.headers.cookie?.includes("session=test-session")) {
+          response.writeHead(401); response.end(); return;
+        }
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end('<!doctype html><main id="signed-in">Private content<script>document.querySelector("main").append(" rendered by JavaScript")</script></main>');
+        return;
       default:
         response.writeHead(404, { "content-length": "0" });
         response.end();
@@ -125,6 +152,8 @@ async function startFixture(proxyOptions: TestProxyOverrides = {}): Promise<Fixt
     requestTimeoutMs: 1500,
     jobTimeoutMs: 10000,
     maxTunnels: 8,
+    ...(proxyOptions.expectedNetworkFingerprint === undefined ? {} : { expectedNetworkFingerprint: proxyOptions.expectedNetworkFingerprint }),
+    ...(proxyOptions.allowFormPost ? { formPostUrl: `${origin}/login/submit`, maxFormPostBytes: proxyOptions.maxFormPostBytes ?? 8192 } : {}),
   }, {
     allowPrivateAddresses: proxyOptions.allowPrivateAddresses ?? true,
     resolveHostname: async (hostname) => {
@@ -145,6 +174,7 @@ async function startFixture(proxyOptions: TestProxyOverrides = {}): Promise<Fixt
     resolvedHosts,
     serviceWorkerRequests: () => workerRequests,
     upstreamUpgradeRequests: () => upgradeRequests,
+    formPostRequests: () => formPostRequests,
   });
 }
 
@@ -300,6 +330,40 @@ test("web browser public address policy rejects reserved, private, mapped, and m
   }
 });
 
+test("a changed DNS address set is rejected before any login POST or origin request", async () => {
+  await withFixture(async (fixture) => {
+    const response = await requestThroughProxy(fixture, { path: "/login" });
+    assert.equal(response.status, 403);
+    assert.equal(fixture.formPostRequests(), 0);
+    assert.equal(fixture.proxy.networkFingerprint(), null);
+  }, { allowFormPost: true, expectedNetworkFingerprint: "f".repeat(64) });
+});
+
+test("site form configuration binds every page and one POST endpoint to the exact target origin", () => {
+  const target = "https://browser-source.example/private";
+  const valid = {
+    loginUrl: "https://browser-source.example/login",
+    submitUrl: "https://browser-source.example/login/submit",
+    usernameSelector: 'input[name="username"]',
+    passwordSelector: 'input[name="password"]',
+    submitSelector: 'button[type="submit"]',
+    successSelector: "#signed-in",
+    username: "owner@example.net",
+    password: "safely-secret-123",
+  };
+  assert.equal(normalizeWebBrowserSiteForm(valid, target).submitUrl, valid.submitUrl);
+  for (const invalid of [
+    { ...valid, loginUrl: "https://other.example/login" },
+    { ...valid, submitUrl: "https://browser-source.example/login/submit?token=x" },
+    { ...valid, submitUrl: "https://browser-source.example/login/safely-secret-123" },
+    { ...valid, passwordSelector: "input\npassword" },
+    { ...valid, usernameSelector: "input:has-text('account')" },
+    { ...valid, unexpectedDockerOption: "--privileged" },
+  ]) assert.throws(() => normalizeWebBrowserSiteForm(invalid, target));
+  assert.throws(() => assertWebBrowserCredentialAbsent(["Private owner@example.net"], normalizeWebBrowserSiteForm(valid, target)), { code: "WEB_BROWSER_CREDENTIAL_REFLECTION" });
+  assert.throws(() => assertWebBrowserCredentialAbsent(["safely-secret-123"], normalizeWebBrowserSiteForm(valid, target)), { code: "WEB_BROWSER_CREDENTIAL_REFLECTION" });
+});
+
 test("web browser proxy accepts only a canonical credential-free HTTPS origin", () => {
   const base = {
     username: PROXY_USERNAME,
@@ -361,6 +425,20 @@ test("web browser proxy pins only public DNS answers and rejects a mixed public/
   });
 });
 
+test("web browser proxy records the DNS set and rejects a change within one job", async () => {
+  let lookupCount = 0;
+  await withFixture(async (fixture) => {
+    assert.equal(fixture.proxy.networkFingerprint(), null);
+    assert.equal((await requestThroughProxy(fixture)).status, 200);
+    const fingerprint = fixture.proxy.networkFingerprint();
+    assert.match(fingerprint ?? "", /^[a-f0-9]{64}$/u);
+    assert.equal((await requestThroughProxy(fixture)).status, 403);
+    assert.equal(fixture.proxy.networkFingerprint(), fingerprint);
+  }, {
+    resolveHostname: async () => [{ address: ++lookupCount === 1 ? "127.0.0.1" : "127.0.0.2", family: 4 }],
+  });
+});
+
 test("web browser proxy rejects write methods, WebSocket upgrades, cross-origin redirects, downloads, and oversized bodies", async () => {
   await withFixture(async (fixture) => {
     assert.equal((await requestThroughProxy(fixture, { method: "POST", path: "/js", headers: { "content-length": "0" } })).status, 405);
@@ -376,6 +454,50 @@ test("web browser proxy rejects write methods, WebSocket upgrades, cross-origin 
     assert.equal((await requestThroughProxy(fixture, { path: "/download" })).status, 413);
     assert.equal((await requestThroughProxy(fixture, { path: "/large" })).status, 413);
   }, { maxRequestBytes: 128 });
+});
+
+test("site form proxy accepts one bounded same-origin form POST and rejects every other write", async () => {
+  await withFixture(async (fixture) => {
+    const formHeaders = { "content-type": "application/x-www-form-urlencoded", "content-length": "9" };
+    assert.equal((await requestThroughProxy(fixture, { method: "POST", path: "/login/other", headers: formHeaders })).status, 405);
+    assert.equal((await requestThroughProxy(fixture, { method: "POST", path: "/login/submit", headers: { ...formHeaders, "content-type": "application/json" } })).status, 405);
+    assert.equal((await requestThroughProxy(fixture, { method: "POST", path: "/login/submit", headers: { ...formHeaders, "content-length": "65" } })).status, 405);
+    const accepted = await requestThroughProxy(fixture, { method: "POST", path: "/login/submit", headers: formHeaders });
+    assert.equal(accepted.status, 302);
+    assert.equal(fixture.formPostRequests(), 1);
+    assert.equal((await requestThroughProxy(fixture, { method: "POST", path: "/login/submit", headers: formHeaders })).status, 405);
+    assert.equal((await requestThroughProxy(fixture, { method: "PUT", path: "/login/submit", headers: formHeaders })).status, 405);
+    assert.equal(fixture.formPostRequests(), 1);
+  }, { allowFormPost: true, maxFormPostBytes: 16 });
+});
+
+test("site form login keeps its cookie inside one browser context and renders the protected page", { skip: !browserAvailable }, async () => {
+  await withFixture(async (fixture) => {
+    const browser = await chromium.launch({
+      headless: true,
+      proxy: { server: `http://127.0.0.1:${fixture.proxyPort}`, username: PROXY_USERNAME, password: PROXY_PASSWORD },
+      args: [`--ignore-certificate-errors-spki-list=${certificatePin}`, "--proxy-bypass-list=<-loopback>", "--host-resolver-rules=MAP * ~NOTFOUND,EXCLUDE 127.0.0.1"],
+    });
+    try {
+      const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: "block" });
+      const page = await context.newPage();
+      await page.goto(`${fixture.origin}/login`);
+      await page.locator('input[name="username"]').fill("owner@example.net");
+      await page.locator('input[name="password"]').fill("safely-secret-123");
+      await page.locator('button[type="submit"]').click();
+      const protectedResponse = await page.goto(`${fixture.origin}/private`);
+      assert.equal(protectedResponse?.status(), 200, `form POST count=${fixture.formPostRequests()} cookie count=${(await context.cookies()).length}`);
+      assert.match(await page.locator("#signed-in").innerText(), /rendered by JavaScript/u);
+      assert.equal(fixture.formPostRequests(), 1);
+      await context.close();
+      const fresh = await browser.newContext({ acceptDownloads: false, serviceWorkers: "block" });
+      const freshPage = await fresh.newPage();
+      assert.equal((await freshPage.goto(`${fixture.origin}/private`))?.status(), 401);
+      await fresh.close();
+    } finally {
+      await browser.close();
+    }
+  }, { allowFormPost: true });
 });
 
 test("web browser proxy permits a same-origin redirect and forwards only the pinned origin request", async () => {

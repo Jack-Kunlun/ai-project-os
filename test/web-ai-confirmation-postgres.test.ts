@@ -2,6 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { createSecureMasterKeyFixture } from "./secure-master-key-fixture";
 import test from "node:test";
 import { Client, type QueryResult, type QueryResultRow } from "pg";
 import type { AiOperation, PrismaClient } from "@prisma/client";
@@ -860,7 +861,8 @@ test(
     const workspaceId = randomUUID();
     const projectId = randomUUID();
     const clientKey = `prepare-${suffix}-client-key`;
-    const masterKeyPath = `/tmp/ai-project-os-web-ai-confirmation-${process.pid}.key`;
+    const keyFixture = await createSecureMasterKeyFixture();
+    const masterKeyPath = keyFixture.path;
     const previousMasterKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
     await unlink(masterKeyPath).catch(() => undefined);
@@ -915,6 +917,7 @@ test(
       if (previousMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousMasterKeyPath;
       await unlink(masterKeyPath).catch(() => undefined);
+      await keyFixture.cleanup();
     }
   },
 );

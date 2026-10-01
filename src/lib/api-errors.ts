@@ -32,6 +32,7 @@ import { GitRunnerError, GitSafetyError, GitServiceError } from "@/lib/git";
 import { AutomationError } from "@/lib/automation";
 import { MemoryQualityError } from "@/lib/memory-quality";
 import { WebSourceError } from "@/lib/web-sources";
+import { WebBrowserProxyError } from "@/lib/web-browser-policy";
 import { AccessControlError } from "@/lib/access-control";
 import { WebAiAccessError } from "@/lib/web-ai-access";
 import { WorkspaceError } from "@/lib/workspaces";
@@ -547,6 +548,13 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     return { status, body: { error: { code: error.code, message } } };
   }
 
+  if (error instanceof WebBrowserProxyError) {
+    const invalidInput = error.code === "WEB_BROWSER_INVALID_TARGET" || error.code === "WEB_BROWSER_TARGET_REJECTED";
+    return {
+      status: invalidInput ? 422 : 502,
+      body: { error: { code: error.code, message: invalidInput ? "浏览器网页地址或登录表单配置无效" : "隔离浏览器抓取失败" } },
+    };
+  }
   if (error instanceof WebSourceError) {
     const mapping: Record<string, readonly [number, string]> = {
       WEB_SOURCE_INVALID_INPUT: [400, "网页来源配置无效；公网地址必须使用 HTTPS"],
@@ -558,15 +566,16 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       WEB_SOURCE_NETWORK_CHANGED: [409, "网页域名解析地址已变化，请在页面重新确认网络"],
       WEB_SOURCE_REQUEST_BOUNDARY_REJECTED: [409, "网页抓取请求已失效，请重新发起"],
       WEB_SOURCE_AUTHENTICATED_URL_REJECTED: [422, "认证网页必须使用公网 HTTPS 地址"],
-      WEB_SOURCE_AUTHENTICATED_DISABLED: [403, "认证网页读取仅在非生产环境开放"],
+      WEB_SOURCE_AUTHENTICATED_DISABLED: [403, "此类网页读取尚未在当前环境开放"],
       WEB_SOURCE_CREDENTIAL_UNAVAILABLE: [503, "网页凭据无法安全读取，本次抓取未发送"],
-      WEB_SOURCE_CREDENTIAL_REFLECTION: [422, "网页响应或错误信息回显了授权令牌，本次内容已阻止暂存"],
+      WEB_SOURCE_CREDENTIAL_REFLECTION: [422, "网页响应回显了凭据，本次内容已阻止暂存"],
       WEB_SOURCE_AUTHENTICATED_RENAME_REJECTED: [409, "认证网页名称创建后不可修改，避免名称意外包含授权令牌"],
-      WEB_SOURCE_AUTHENTICATION_REVOKED: [409, "网页 Bearer 凭据已失效，请由 Owner 重新设置"],
-      WEB_SOURCE_AUTHENTICATED_REVIEW_REQUIRED: [409, "认证网页由 Owner 手动抓取，Editor 或 Owner 可审核"],
+      WEB_SOURCE_AUTHENTICATION_REVOKED: [409, "网页凭据已失效，请由 Owner 重新设置"],
+      WEB_SOURCE_AUTHENTICATED_REVIEW_REQUIRED: [409, "此网页由 Owner 手动抓取，Editor 或 Owner 可审核"],
       WEB_SOURCE_REVIEW_NOT_FOUND: [404, "待审核网页版本不存在"],
       WEB_SOURCE_REVIEW_STALE: [409, "网页配置或凭据已变化，请重新抓取后审核"],
       WEB_SOURCE_REVIEW_CONFLICT: [409, "网页审核状态已变化，请刷新后重试"],
+      WEB_SOURCE_REVIEW_PUBLICATION_DISABLED: [403, "站点登录内容仅供 Owner 私有预览，不能发布到项目资料"],
       WEB_SOURCE_HOST_UNRESOLVED: [422, "网页域名无法解析"],
       WEB_SOURCE_REDIRECT_REJECTED: [422, "网页发生了不允许的跨域或不安全重定向"],
       WEB_SOURCE_FETCH_FAILED: [502, "网页抓取失败"],

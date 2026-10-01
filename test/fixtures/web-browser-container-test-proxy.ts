@@ -15,7 +15,8 @@ async function main(): Promise<void> {
   const job = parsed as Record<string, unknown>;
   if (
     typeof job.origin !== "string" || typeof job.proxyUsername !== "string" ||
-    typeof job.proxyPassword !== "string" || typeof job.certificateSpki !== "string"
+    typeof job.proxyPassword !== "string" || typeof job.formPostUrl !== "string" ||
+    Object.keys(job).some((key) => !["origin", "proxyUsername", "proxyPassword", "formPostUrl"].includes(key))
   ) throw new Error("invalid-test-config");
   const expectedHostname = new URL(job.origin).hostname.toLowerCase();
   const [certificate, privateKey] = await Promise.all([
@@ -36,6 +37,8 @@ async function main(): Promise<void> {
     requestTimeoutMs: 8_000,
     jobTimeoutMs: 30_000,
     maxTunnels: 32,
+    formPostUrl: job.formPostUrl,
+    maxFormPostBytes: 8192,
   }, {
     // This test-only container maps the one expected fixture hostname to the
     // local source container on a private internal network. The production

@@ -32,6 +32,8 @@ enum WebSourceRevisionStatus {
 enum WebSourceAuthenticationMode {
   none
   bearer
+  rendered
+  siteForm @map("site_form")
 }
 
 enum WebSourceRevisionReviewStatus {
@@ -383,6 +385,7 @@ enum ExternalCredentialKind {
   git
   mcp
   webSource       @map("web_source")
+  webSourceForm   @map("web_source_form")
   oidcClient      @map("oidc_client")
   oidcFlow        @map("oidc_flow")
   githubOauthFlow @map("github_oauth_flow")
@@ -8603,6 +8606,14 @@ model WebSource {
   authCredentialId             String?                     @unique @db.Uuid
   authCredentialFingerprint    String?                     @db.Char(64)
   authCredentialUrlFingerprint String?                     @db.Char(64)
+  siteFormLoginUrl             String?                     @db.VarChar(2048)
+  siteFormSubmitUrl            String?                     @db.VarChar(2048)
+  siteFormUsernameSelector     String?                     @db.VarChar(160)
+  siteFormPasswordSelector     String?                     @db.VarChar(160)
+  siteFormSubmitSelector      String?                     @db.VarChar(160)
+  siteFormSuccessSelector     String?                     @db.VarChar(160)
+  manualConfigurationFingerprint String?                   @db.Char(64)
+  browserExecutionProfileFingerprint String?                @db.Char(64)
   configurationVersion         Int                         @default(1)
   resolvedAddressFingerprint   String?                     @db.Char(64)
   status                       WebSourceStatus             @default(active)
@@ -8635,6 +8646,8 @@ model WebSourceRevision {
   credentialFingerprint    String?                       @db.Char(64)
   configuredUrlFingerprint String?                       @db.Char(64)
   networkFingerprint       String?                       @db.Char(64)
+  manualConfigurationFingerprint String?                 @db.Char(64)
+  browserExecutionProfileFingerprint String?              @db.Char(64)
   finalUrl                 String?                       @db.VarChar(2048)
   httpStatus               Int?
   contentType              String?                       @db.VarChar(255)
@@ -8667,9 +8680,11 @@ model WebSourceReviewAudit {
   reviewerId               String                  @db.Uuid
   decision                 WebSourceReviewDecision
   configurationVersion     Int
-  credentialFingerprint    String                  @db.Char(64)
+  credentialFingerprint    String?                 @db.Char(64)
   configuredUrlFingerprint String                  @db.Char(64)
   networkFingerprint       String                  @db.Char(64)
+  manualConfigurationFingerprint String?           @db.Char(64)
+  browserExecutionProfileFingerprint String?        @db.Char(64)
   contentHash              String                  @db.Char(64)
   createdAt                DateTime                @default(now())
   project                  Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)

@@ -94,7 +94,7 @@ async function readRenderResult(directory: string): Promise<Readonly<{ url: stri
   return { url: candidate.url, text: candidate.text };
 }
 
-test("isolated browser container renders a local JS page and is removed after one job", { skip: !TEST_ENABLED }, async () => {
+test("isolated browser logs in with one same-origin form, renders JS, and is removed", { skip: !TEST_ENABLED }, async () => {
   assert.equal(await imageReady(), true, "build the labeled prototype image on a Linux Docker 28+ engine first");
   const userId = typeof process.getuid === "function" ? process.getuid() : undefined;
   const groupId = typeof process.getgid === "function" ? process.getgid() : undefined;
@@ -116,6 +116,7 @@ test("isolated browser container renders a local JS page and is removed after on
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "aipos-browser-it-"));
   const outputDirectory = join(temporaryDirectory, "output");
   const configPath = join(temporaryDirectory, "job.json");
+  const proxyConfigPath = join(temporaryDirectory, "proxy-job.json");
   const proxyScriptPath = join(process.cwd(), "test/fixtures/web-browser-container-test-proxy.ts");
   await chmod(temporaryDirectory, 0o700);
   await mkdir(outputDirectory, { mode: 0o700 });
@@ -127,6 +128,19 @@ test("isolated browser container renders a local JS page and is removed after on
     proxyUsername,
     proxyPassword,
     certificateSpki,
+    siteForm: {
+      loginUrl: `${origin}/login`,
+      submitUrl: `${origin}/login/submit`,
+      usernameSelector: 'input[name="username"]',
+      passwordSelector: 'input[name="password"]',
+      submitSelector: 'button[type="submit"]',
+      successSelector: "#signed-in",
+      username: "fixture-user",
+      password: "fixture-password",
+    },
+  }), { mode: 0o600, flag: "wx" });
+  await writeFile(proxyConfigPath, JSON.stringify({
+    origin, proxyUsername, proxyPassword, formPostUrl: `${origin}/login/submit`,
   }), { mode: 0o600, flag: "wx" });
 
   let browserNetworkCreated = false;
@@ -164,7 +178,7 @@ test("isolated browser container renders a local JS page and is removed after on
       "--user", `${userId}:${groupId}`, "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
       "--pids-limit", "48", "--memory", "192m", "--memory-swap", "192m", "--cpus", "1", "--ulimit", "nofile=256:256",
       "--tmpfs", `/tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777,uid=${userId},gid=${groupId}`,
-      "--mount", `type=bind,src=${configPath},dst=/run/web-browser/job.json,readonly`,
+      "--mount", `type=bind,src=${proxyConfigPath},dst=/run/web-browser/job.json,readonly`,
       "--mount", `type=bind,src=${TEST_CERTIFICATE_PATH},dst=/run/web-browser/test-cert.pem,readonly`,
       "--mount", `type=bind,src=${TEST_PRIVATE_KEY_PATH},dst=/run/web-browser/test-key.pem,readonly`,
       "--mount", `type=bind,src=${proxyScriptPath},dst=/app/test/fixtures/web-browser-container-test-proxy.ts,readonly`,
@@ -218,6 +232,8 @@ test("isolated browser container renders a local JS page and is removed after on
     assert.equal(result.url, observedUrl);
     assert.match(result.text, /Rendered by JavaScript/u);
     const requests = await readFile(join(outputDirectory, "source-requests.txt"), "utf8");
+    assert.match(requests, /^GET \/login$/mu);
+    assert.match(requests, /^POST \/login\/submit$/mu);
     assert.match(requests, /^GET \/js$/mu);
   } finally {
     if (browserCreated) await removeContainer(browserContainer);

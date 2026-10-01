@@ -77,7 +77,7 @@ jobs:
           [[ "$(git ls-tree -d --name-only "$source_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')" == 117 ]] || {
             echo "V07_SOURCE_MIGRATION_COUNT_INVALID" >&2; exit 66;
           }
-          [[ "$(git ls-tree -d --name-only "$target_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')" == 133 ]] || {
+          [[ "$(git ls-tree -d --name-only "$target_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')" == 135 ]] || {
             echo "V07_TARGET_MIGRATION_COUNT_INVALID" >&2; exit 66;
           }
 

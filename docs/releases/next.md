@@ -6,7 +6,7 @@
 
 最近完成的受控升级：`v0.6.0-dev.10`→`v0.6.0-dev.11`（116→117 条迁移，停写异地备份与现场验收通过）
 
-最近确认的生产运行基线：`v0.6.0-dev.14`（2026-09-30 已由公网 `/api/health` 确认）
+最近确认的生产运行基线：`v0.6.0-dev.14`（2026-10-01 已由公网 `/api/health` 确认）
 
 首个正式公开版本：计划 `1.0.0`
 
@@ -14,7 +14,7 @@
 
 ## 0.7.x 开发候选
 
-当前代码包含注册入口、个人 Git 自动同步及 GitHub Issue/PR/Release 导入、受控远端 MCP 动作、对外只读 MCP、跨项目检索、Office 图片审核、静态 Bearer 网页抓取与 OIDC 显式绑定的开发实现。隔离 PostgreSQL 门禁、OID10、生产模式浏览器套件、覆盖率、已提交候选的 Compose 门禁和三写入者恢复演练已取得通过证据；Compose 结果为 `releaseEligible=true`，仍需远端完整 CI 和稳定标签证明。JavaScript/站点登录网页仍只有隔离浏览器原型，尚未接入产品。真实外部服务、两个 MCP 客户端、OIDC IdP、生产工具引导、停写备份升级与公网验收仍是发布门禁。不能将此工作树视为已发布的 0.7.x。
+当前代码包含注册入口、个人 Git 自动同步及 GitHub Issue/PR/Release 导入、受控远端 MCP 动作、对外只读 MCP、跨项目检索、Office 图片审核、静态 Bearer 网页抓取与 OIDC 显式绑定的开发实现。候选分支提交 `319226c946ff81016b1db656584c8d290ee4b5dd` 的[完整 CI](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/36768766616)已通过覆盖率、88 个 PostgreSQL 门禁、OID10、生产模式浏览器 8/8、性能和隔离 Compose 候选；Compose 结果为 `releaseEligible=true`。三写入者恢复演练也已在隔离环境通过。主分支与稳定标签 CI 尚未取得。JavaScript/站点登录网页仍只有隔离浏览器原型，尚未接入产品。真实外部服务、两个 MCP 客户端、OIDC IdP、生产工具引导、停写备份升级与公网验收仍是发布门禁。不能将此工作树视为已发布的 0.7.x。
 
 ## v0.6.0-dev.14 受控发布候选
 

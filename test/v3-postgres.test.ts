@@ -2,6 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { createSecureMasterKeyFixture } from "./secure-master-key-fixture";
 import { createServer } from "node:http";
 import test from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
@@ -51,7 +52,8 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   const revokedLinkUserId = randomUUID();
   const unmemberedLinkUserId = randomUUID();
   const roleWorkspaceId = randomUUID();
-  const masterKeyPath = `/tmp/ai-project-os-v3-${process.pid}-${suffix}.key`;
+  const keyFixture = await createSecureMasterKeyFixture();
+  const masterKeyPath = keyFixture.path;
   const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
   process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
   await unlink(masterKeyPath).catch(() => undefined);
@@ -492,6 +494,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
         server.close(() => resolve());
       });
       await unlink(masterKeyPath).catch(() => undefined);
+      await keyFixture.cleanup();
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
     }

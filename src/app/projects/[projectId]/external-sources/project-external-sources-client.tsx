@@ -5,6 +5,7 @@ import { useCallback, useDeferredValue, useEffect, useState, type FormEvent } fr
 import { AppHeader } from "@/components/app-header";
 import { ListPagination } from "@/components/list-pagination";
 import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
+import { BrowserWebSourceCard, BrowserWebSourceForm, type BrowserWebSourceSummary } from "./browser-web-source-client";
 
 type WebSource = {
   id: string;
@@ -19,6 +20,11 @@ type WebSource = {
   pendingReview: null | { id: string; title: string; contentHash: string; contentBytes: number; fetchedAt: string; finalUrl: string };
   pointer: null | { publishedAt: string; revision: { id: string; finalUrl: string | null; title: string | null; contentBytes: number; contentHash: string | null; fetchedAt: string } };
 };
+type ListedSource = WebSource | BrowserWebSourceSummary;
+
+function isBrowserSource(source: ListedSource): source is BrowserWebSourceSummary {
+  return source.authenticationMode === "rendered" || source.authenticationMode === "siteForm";
+}
 
 type WebSourceReview = { id: string; title: string; finalUrl: string; contentHash: string; contentBytes: number; contentText: string; fetchedAt: string };
 
@@ -34,7 +40,7 @@ function formatDate(value: string | null) {
 }
 
 export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
-  const [sources, setSources] = useState<WebSource[]>([]);
+  const [sources, setSources] = useState<ListedSource[]>([]);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -44,6 +50,7 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
   const [error, setError] = useState<string | null>(null);
   const [canManageCredentials, setCanManageCredentials] = useState(false);
   const [canReview, setCanReview] = useState(false);
+  const [browserEnabled, setBrowserEnabled] = useState(false);
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
@@ -57,15 +64,17 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
       const response = await fetch(`/api/projects/${projectId}/web-sources?${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error(await responseError(response, "外部资料加载失败"));
       const payload = await response.json() as {
-        sources: WebSource[];
+        sources: ListedSource[];
         pagination: { page: number; pageSize: number; total: number; totalPages: number };
         canManageCredentials: boolean;
         canReview: boolean;
+        browserEnabled: boolean;
       };
       setSources(payload.sources);
       setPagination(payload.pagination);
       setCanManageCredentials(payload.canManageCredentials);
       setCanReview(payload.canReview);
+      setBrowserEnabled(payload.browserEnabled);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "外部资料加载失败");
@@ -101,6 +110,7 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
             {canManageCredentials ? <>
               <WebSourceForm projectId={projectId} onCreated={() => { setPage(1); void reload({ showLoading: true }); }} />
               <AuthenticatedWebSourceForm projectId={projectId} onCreated={() => { setPage(1); void reload({ showLoading: true }); }} />
+              {browserEnabled ? <BrowserWebSourceForm projectId={projectId} onCreated={() => { setPage(1); void reload({ showLoading: true }); }} /> : null}
             </> : null}
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Local folders</p>
@@ -135,9 +145,11 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
             <div className="space-y-4">
               {!loading && sources.length === 0 ? (
                 <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">
-                  {search.trim() || status !== "all" ? "没有匹配的网页资料。" : "还没有网页来源。添加后会立即抓取一次并发布为可追溯资料。"}
+                  {search.trim() || status !== "all" ? "没有匹配的网页资料。" : "还没有网页来源。公开静态网页添加后会抓取；认证及浏览器来源需手动抓取和审核。"}
                 </div>
-              ) : sources.map((source) => <WebSourceCard key={source.id} projectId={projectId} source={source} canManageCredentials={canManageCredentials} canReview={canReview} onReload={reload} />)}
+              ) : sources.map((source) => isBrowserSource(source)
+                ? <BrowserWebSourceCard key={source.id} projectId={projectId} source={source} canManage={canManageCredentials} canReview={canReview} onReload={reload} />
+                : <WebSourceCard key={source.id} projectId={projectId} source={source} canManageCredentials={canManageCredentials} canReview={canReview} onReload={reload} />)}
             </div>
             <ListPagination {...pagination} disabled={loading} onPageChange={setPage} />
           </section>

@@ -15,6 +15,17 @@ import {
   revokeAuthenticatedProjectWebSourceCredential,
   rotateAuthenticatedProjectWebSourceCredential,
 } from "../src/lib/authenticated-web-sources";
+import {
+  createBrowserProjectWebSource,
+  decideBrowserWebSourceReview,
+  fetchBrowserProjectWebSource,
+  getBrowserWebSourceReview,
+  refreshBrowserWebSourceProfile,
+  revokeBrowserWebSourceCredential,
+  rotateBrowserWebSourceCredential,
+} from "../src/lib/browser-web-sources";
+import { callWebBrowserBroker } from "../src/lib/web-browser-broker-client";
+import { WebBrowserProxyError } from "../src/lib/web-browser-policy";
 import { getDb, getEntitlementDb } from "../src/lib/db";
 import { grantProjectMembership } from "../src/lib/membership-governance";
 import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
@@ -37,6 +48,37 @@ function postgresErrorCode(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "code" in error
     ? String((error as { code?: unknown }).code)
     : undefined;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function browserConfigurationFingerprint(input: Readonly<{
+  mode: "rendered" | "siteForm";
+  targetUrl: string;
+  loginUrl?: string | null;
+  submitUrl?: string | null;
+  usernameSelector?: string | null;
+  passwordSelector?: string | null;
+  submitSelector?: string | null;
+  successSelector?: string | null;
+}>): string {
+  return sha256(JSON.stringify([
+    "s1b-config-v1",
+    input.mode,
+    input.targetUrl,
+    input.loginUrl ?? null,
+    input.submitUrl ?? null,
+    input.usernameSelector ?? null,
+    input.passwordSelector ?? null,
+    input.submitSelector ?? null,
+    input.successSelector ?? null,
+  ]));
+}
+
+function browserProfileFingerprint(imageDigest: string): string {
+  return sha256(JSON.stringify(["s1b-profile-v1", imageDigest]));
 }
 
 async function expectPermissionDenied(action: () => Promise<unknown>): Promise<void> {
@@ -172,6 +214,374 @@ test(
 
       const runtimeDatabaseUrl = process.env.DATABASE_URL;
       assert.ok(runtimeDatabaseUrl);
+
+      const renderedUrl = `https://docs.example.test/s1b-rendered-${suffix}`;
+      const imageDigest = `sha256:${"a".repeat(64)}`;
+      const renderedProfileFingerprint = browserProfileFingerprint(imageDigest);
+      const renderedManualFingerprint = browserConfigurationFingerprint({ mode: "rendered", targetUrl: renderedUrl });
+      const renderedSource = await db.webSource.create({
+        data: {
+          projectId,
+          name: "Rendered browser source contract",
+          url: renderedUrl,
+          authenticationMode: "rendered",
+          authCredentialUrlFingerprint: sha256(renderedUrl),
+          resolvedAddressFingerprint: NETWORK_FINGERPRINT,
+          manualConfigurationFingerprint: renderedManualFingerprint,
+          browserExecutionProfileFingerprint: renderedProfileFingerprint,
+          createdById: ownerId,
+        },
+        select: { id: true, configurationVersion: true },
+      });
+      await assert.rejects(
+        () => db.webSource.update({ where: { id: renderedSource.id }, data: { url: `https://changed.example.test/${suffix}` } }),
+        (error: unknown) => error instanceof Error && error.message.includes("authenticated web source identity is immutable"),
+      );
+
+      await assert.rejects(
+        () => db.webSource.create({
+          data: {
+            projectId,
+            name: "Rendered source without manual config",
+            url: `https://docs.example.test/s1b-incomplete-${suffix}`,
+            authenticationMode: "rendered",
+            authCredentialUrlFingerprint: sha256(`https://docs.example.test/s1b-incomplete-${suffix}`),
+            browserExecutionProfileFingerprint: renderedProfileFingerprint,
+            createdById: ownerId,
+          },
+        }),
+        (error: unknown) => error instanceof Error && /(WebSource_authentication_binding_check|authenticated web source credential binding is invalid)/u.test(error.message),
+      );
+      const malformedAuthorityUrl = "https://?missing-host=true";
+      await assert.rejects(
+        () => db.webSource.create({
+          data: {
+            projectId,
+            name: "Rendered source with empty URL authority",
+            url: malformedAuthorityUrl,
+            authenticationMode: "rendered",
+            authCredentialUrlFingerprint: sha256(malformedAuthorityUrl),
+            manualConfigurationFingerprint: browserConfigurationFingerprint({ mode: "rendered", targetUrl: malformedAuthorityUrl }),
+            browserExecutionProfileFingerprint: renderedProfileFingerprint,
+            createdById: ownerId,
+          },
+        }),
+        (error: unknown) => error instanceof Error && /WebSource_authentication_binding_check/u.test(error.message),
+      );
+      const credentialedAuthorityUrl = `https://user@docs.example.test/s1b-userinfo-${suffix}`;
+      await assert.rejects(
+        () => db.webSource.create({
+          data: {
+            projectId,
+            name: "Rendered source with userinfo in URL authority",
+            url: credentialedAuthorityUrl,
+            authenticationMode: "rendered",
+            authCredentialUrlFingerprint: sha256(credentialedAuthorityUrl),
+            manualConfigurationFingerprint: browserConfigurationFingerprint({ mode: "rendered", targetUrl: credentialedAuthorityUrl }),
+            browserExecutionProfileFingerprint: renderedProfileFingerprint,
+            createdById: ownerId,
+          },
+        }),
+        (error: unknown) => error instanceof Error && /WebSource_authentication_binding_check/u.test(error.message),
+      );
+      await assert.rejects(
+        () => db.webSource.create({
+          data: {
+            projectId,
+            name: "Rendered source with app-host DNS",
+            url: `https://docs.example.test/s1b-dns-${suffix}`,
+            authenticationMode: "rendered",
+            authCredentialUrlFingerprint: sha256(`https://docs.example.test/s1b-dns-${suffix}`),
+            resolvedAddressFingerprint: null,
+            manualConfigurationFingerprint: renderedManualFingerprint,
+            browserExecutionProfileFingerprint: renderedProfileFingerprint,
+            createdById: ownerId,
+          },
+        }),
+        (error: unknown) => error instanceof Error && /WebSource_authentication_binding_check/u.test(error.message),
+      );
+
+      const formTargetUrl = `https://docs.example.test/s1b-site-form-${suffix}`;
+      const formLoginUrl = `https://docs.example.test/login-${suffix}`;
+      const formSubmitUrl = `https://docs.example.test/login-${suffix}/submit`;
+      const formSelectors = {
+        siteFormUsernameSelector: 'input[name="username"]',
+        siteFormPasswordSelector: 'input[name="password"]',
+        siteFormSubmitSelector: 'button[type="submit"]',
+        siteFormSuccessSelector: "#signed-in",
+      };
+      const formManualFingerprint = browserConfigurationFingerprint({
+        mode: "siteForm",
+        targetUrl: formTargetUrl,
+        loginUrl: formLoginUrl,
+        submitUrl: formSubmitUrl,
+        usernameSelector: formSelectors.siteFormUsernameSelector,
+        passwordSelector: formSelectors.siteFormPasswordSelector,
+        submitSelector: formSelectors.siteFormSubmitSelector,
+        successSelector: formSelectors.siteFormSuccessSelector,
+      });
+      const formCredentialFingerprint = sha256(`form-credential-${suffix}`);
+      const formCredentialId = randomUUID();
+      await db.externalCredential.create({
+        data: {
+          id: formCredentialId,
+          kind: "webSourceForm",
+          ciphertext: Buffer.from("encrypted-test-form-credential"),
+          nonce: Buffer.alloc(12, 1),
+          authTag: Buffer.alloc(16, 2),
+          maskedSuffix: "••••••••",
+          secretFingerprint: formCredentialFingerprint,
+        },
+      });
+      const siteFormSource = await db.webSource.create({
+        data: {
+          projectId,
+          name: "Site form browser source contract",
+          url: formTargetUrl,
+          authenticationMode: "siteForm",
+          authCredentialId: formCredentialId,
+          authCredentialFingerprint: formCredentialFingerprint,
+          authCredentialUrlFingerprint: sha256(formTargetUrl),
+          resolvedAddressFingerprint: NETWORK_FINGERPRINT,
+          siteFormLoginUrl: formLoginUrl,
+          siteFormSubmitUrl: formSubmitUrl,
+          ...formSelectors,
+          manualConfigurationFingerprint: formManualFingerprint,
+          browserExecutionProfileFingerprint: renderedProfileFingerprint,
+          createdById: ownerId,
+        },
+        select: { id: true },
+      });
+      const revokedSiteFormSource = await db.webSource.update({
+        where: { id: siteFormSource.id },
+        data: {
+          status: "disabled",
+          disabledAt: new Date(),
+          authCredentialId: null,
+          authCredentialFingerprint: null,
+          authCredentialUrlFingerprint: null,
+          configurationVersion: { increment: 1 },
+        },
+        select: {
+          status: true,
+          disabledAt: true,
+          authCredentialId: true,
+          authCredentialFingerprint: true,
+          authCredentialUrlFingerprint: true,
+          siteFormLoginUrl: true,
+          siteFormSubmitUrl: true,
+          manualConfigurationFingerprint: true,
+          browserExecutionProfileFingerprint: true,
+        },
+      });
+      assert.equal(revokedSiteFormSource.status, "disabled");
+      assert.ok(revokedSiteFormSource.disabledAt instanceof Date);
+      assert.equal(revokedSiteFormSource.authCredentialId, null);
+      assert.equal(revokedSiteFormSource.authCredentialFingerprint, null);
+      assert.equal(revokedSiteFormSource.authCredentialUrlFingerprint, null);
+      assert.equal(revokedSiteFormSource.siteFormLoginUrl, formLoginUrl);
+      assert.equal(revokedSiteFormSource.siteFormSubmitUrl, formSubmitUrl);
+      assert.equal(revokedSiteFormSource.manualConfigurationFingerprint, formManualFingerprint);
+      assert.equal(revokedSiteFormSource.browserExecutionProfileFingerprint, renderedProfileFingerprint);
+      await db.externalCredential.delete({ where: { id: formCredentialId } });
+      await assert.rejects(
+        () => db.webSource.update({
+          where: { id: siteFormSource.id },
+          data: { status: "active", disabledAt: null },
+        }),
+        (error: unknown) => error instanceof Error && /(WebSource_authentication_binding_check|authenticated web source credential binding is invalid)/u.test(error.message),
+      );
+
+      const renderedRevisionId = randomUUID();
+      const renderedContent = "staged rendered browser content";
+      const renderedContentHash = sha256(renderedContent);
+      await db.webSourceRevision.create({
+        data: {
+          id: renderedRevisionId,
+          projectId,
+          webSourceId: renderedSource.id,
+          configurationVersion: renderedSource.configurationVersion,
+          configuredUrlFingerprint: sha256(renderedUrl),
+          credentialFingerprint: null,
+          networkFingerprint: NETWORK_FINGERPRINT,
+          manualConfigurationFingerprint: renderedManualFingerprint,
+          browserExecutionProfileFingerprint: renderedProfileFingerprint,
+        },
+      });
+      await db.webSourceRevision.update({
+        where: { id: renderedRevisionId },
+        data: {
+          status: "staging",
+          reviewStatus: "pending",
+          finalUrl: renderedUrl,
+          httpStatus: 200,
+          contentType: "text/html; charset=utf-8",
+          title: "Rendered browser fixture",
+          contentHash: renderedContentHash,
+          contentBytes: Buffer.byteLength(renderedContent, "utf8"),
+          contentText: renderedContent,
+          networkFingerprint: NETWORK_FINGERPRINT,
+          completedAt: new Date(),
+        },
+      });
+
+      await assert.rejects(
+        () => db.$transaction(async (tx) => {
+          const projectSource = await tx.projectSource.create({
+            data: {
+              projectId,
+              kind: "web",
+              sourceIdentity: renderedSource.id,
+              revisionKey: renderedRevisionId,
+              externalRef: renderedUrl,
+              contentText: renderedContent,
+              contentHash: renderedContentHash,
+              capturedAt: new Date(),
+            },
+            select: { id: true },
+          });
+          await tx.webSourceRevision.update({
+            where: { id: renderedRevisionId },
+            data: { status: "complete", reviewStatus: "accepted", projectSourceId: projectSource.id, contentText: null, completedAt: new Date() },
+          });
+          await tx.webSourcePointer.create({
+            data: { projectId, webSourceId: renderedSource.id, webSourceRevisionId: renderedRevisionId },
+          });
+        }),
+        (error: unknown) => error instanceof Error &&
+          (error.message.includes("authenticated web source pointer requires a matching accepted review audit") ||
+            error.message.includes("authenticated web source revisions must start in staging")),
+      );
+
+      const directBrowserSourceId = randomUUID();
+      const directBrowserContent = "runtime-inserted rendered ProjectSource without review";
+      const directBrowserRuntime = new Client({ connectionString: runtimeDatabaseUrl, connectionTimeoutMillis: 5_000 });
+      await directBrowserRuntime.connect();
+      try {
+        await directBrowserRuntime.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        await insertRuntimeProjectSource(directBrowserRuntime, {
+          id: directBrowserSourceId,
+          projectId,
+          sourceIdentity: renderedSource.id,
+          contentText: directBrowserContent,
+          contentHash: sha256(directBrowserContent),
+        });
+        await assert.rejects(
+          () => directBrowserRuntime.query("COMMIT"),
+          (error: unknown) => postgresErrorCode(error) === "23514"
+            && error instanceof Error
+            && error.message.includes("active authenticated project source requires a current accepted review chain"),
+        );
+        await directBrowserRuntime.query("ROLLBACK");
+      } finally {
+        await directBrowserRuntime.end();
+      }
+
+      const staleProfileRevisionId = randomUUID();
+      await db.webSourceRevision.create({
+        data: {
+          id: staleProfileRevisionId,
+          projectId,
+          webSourceId: renderedSource.id,
+          configurationVersion: renderedSource.configurationVersion,
+          configuredUrlFingerprint: sha256(renderedUrl),
+          networkFingerprint: NETWORK_FINGERPRINT,
+          manualConfigurationFingerprint: renderedManualFingerprint,
+          browserExecutionProfileFingerprint: renderedProfileFingerprint,
+        },
+      });
+      const nextProfileFingerprint = browserProfileFingerprint(`sha256:${"b".repeat(64)}`);
+      await db.webSource.update({
+        where: { id: renderedSource.id },
+        data: { configurationVersion: { increment: 1 }, browserExecutionProfileFingerprint: nextProfileFingerprint },
+      });
+      await assert.rejects(
+        () => db.webSourceRevision.update({
+          where: { id: staleProfileRevisionId },
+          data: {
+            status: "staging",
+            reviewStatus: "pending",
+            finalUrl: renderedUrl,
+            httpStatus: 200,
+            contentType: "text/html; charset=utf-8",
+            title: "Stale browser profile fixture",
+            contentHash: sha256("stale profile content"),
+            contentBytes: Buffer.byteLength("stale profile content", "utf8"),
+            contentText: "stale profile content",
+            networkFingerprint: NETWORK_FINGERPRINT,
+            completedAt: new Date(),
+          },
+        }),
+        (error: unknown) => error instanceof Error && error.message.includes("authenticated web source revision configuration snapshot is stale"),
+      );
+
+      const otherProjectId = randomUUID();
+      await db.project.create({
+        data: { id: otherProjectId, workspaceId, name: `Cross project ${suffix}`, slug: `cross-project-${suffix}` },
+      });
+      await db.$transaction(async (tx) => {
+        await grantProjectMembership(tx, { projectId: otherProjectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "browser_source_cross_project_fixture" });
+      });
+      const crossProjectRuntime = new Client({ connectionString: runtimeDatabaseUrl, connectionTimeoutMillis: 5_000 });
+      await crossProjectRuntime.connect();
+      try {
+        await assert.rejects(
+          () => crossProjectRuntime.query(
+            'INSERT INTO public."WebSourcePointer" ("projectId", "webSourceId", "webSourceRevisionId") VALUES ($1, $2, $3)',
+            [otherProjectId, renderedSource.id, renderedRevisionId],
+          ),
+          (error: unknown) => postgresErrorCode(error) === "23503" ||
+            (postgresErrorCode(error) === "23514" && error instanceof Error && error.message.includes("web source pointer references a missing source")),
+        );
+      } finally {
+        await crossProjectRuntime.end();
+      }
+
+      const wrongKindCredentialId = randomUUID();
+      const wrongKindCredentialFingerprint = sha256(`wrong-kind-${suffix}`);
+      await db.externalCredential.create({
+        data: {
+          id: wrongKindCredentialId,
+          kind: "webSource",
+          ciphertext: Buffer.from("encrypted-wrong-kind-form-credential"),
+          nonce: Buffer.alloc(12, 3),
+          authTag: Buffer.alloc(16, 4),
+          maskedSuffix: "••••••••",
+          secretFingerprint: wrongKindCredentialFingerprint,
+        },
+      });
+      const wrongKindTargetUrl = `https://docs.example.test/s1b-wrong-credential-kind-${suffix}`;
+      await assert.rejects(
+        () => db.webSource.create({
+          data: {
+            projectId,
+            name: "Site form with the wrong credential kind",
+            url: wrongKindTargetUrl,
+            authenticationMode: "siteForm",
+            authCredentialId: wrongKindCredentialId,
+            authCredentialFingerprint: wrongKindCredentialFingerprint,
+            authCredentialUrlFingerprint: sha256(wrongKindTargetUrl),
+            siteFormLoginUrl: formLoginUrl,
+            siteFormSubmitUrl: formSubmitUrl,
+            ...formSelectors,
+            manualConfigurationFingerprint: browserConfigurationFingerprint({
+              mode: "siteForm",
+              targetUrl: wrongKindTargetUrl,
+              loginUrl: formLoginUrl,
+              submitUrl: formSubmitUrl,
+              usernameSelector: formSelectors.siteFormUsernameSelector,
+              passwordSelector: formSelectors.siteFormPasswordSelector,
+              submitSelector: formSelectors.siteFormSubmitSelector,
+              successSelector: formSelectors.siteFormSuccessSelector,
+            }),
+            browserExecutionProfileFingerprint: renderedProfileFingerprint,
+            createdById: ownerId,
+          },
+        }),
+        (error: unknown) => error instanceof Error && error.message.includes("authenticated web source credential binding is invalid"),
+      );
+      await db.externalCredential.delete({ where: { id: wrongKindCredentialId } });
+
       const serializableGitSourceId = randomUUID();
       const serializableGitContent = "legitimate serializable Git source fixture";
       const serializableGitHash = createHash("sha256").update(serializableGitContent, "utf8").digest("hex");
@@ -256,7 +666,7 @@ test(
           () => directRuntime.query("COMMIT"),
           (error: unknown) => postgresErrorCode(error) === "23514"
             && error instanceof Error
-            && error.message.includes("active bearer project source requires a current accepted review chain"),
+            && error.message.includes("active authenticated project source requires a current accepted review chain"),
         );
         await directRuntime.query("ROLLBACK");
       } finally {
@@ -465,7 +875,7 @@ test(
           () => gitFirstBearerClient.query("COMMIT"),
           (error: unknown) => postgresErrorCode(error) === "23514"
             && error instanceof Error
-            && error.message.includes("active bearer project source requires a current accepted review chain"),
+            && error.message.includes("active authenticated project source requires a current accepted review chain"),
         );
       } finally {
         await Promise.all([
@@ -649,7 +1059,7 @@ test(
           () => directSourceRuntime.query("COMMIT"),
           (error: unknown) => postgresErrorCode(error) === "23514"
             && error instanceof Error
-            && error.message.includes("active bearer project source requires a current accepted review chain"),
+            && error.message.includes("active authenticated project source requires a current accepted review chain"),
         );
         await directSourceRuntime.query("ROLLBACK");
       } finally {
@@ -676,7 +1086,7 @@ test(
           () => directManualRuntime.query("COMMIT"),
           (error: unknown) => postgresErrorCode(error) === "23514"
             && error instanceof Error
-            && error.message.includes("active bearer project source requires a current accepted review chain"),
+            && error.message.includes("active authenticated project source requires a current accepted review chain"),
         );
         await directManualRuntime.query("ROLLBACK");
       } finally {
@@ -747,7 +1157,9 @@ test(
             update: { webSourceRevisionId: forgedRevisionId, publishedAt },
           });
         }),
-        (error: unknown) => error instanceof Error && error.message.includes("authenticated web source pointer requires a matching accepted review audit"),
+        (error: unknown) => error instanceof Error &&
+          (error.message.includes("authenticated web source pointer requires a matching accepted review audit") ||
+            error.message.includes("authenticated web source revisions must start in staging")),
       );
       assert.equal(await db.webSourceRevision.findUnique({ where: { id: forgedRevisionId }, select: { id: true } }), null, "the failed pointer write must roll back its unaudited revision");
       assert.equal(await db.webSourceReviewAudit.count({ where: { webSourceRevisionId: forgedRevisionId } }), 0);
@@ -1016,7 +1428,7 @@ test(
           () => rawRetirementRuntime.query("COMMIT"),
           (error: unknown) => postgresErrorCode(error) === "23514"
             && error instanceof Error
-            && error.message.includes("active bearer project source requires a current accepted review chain"),
+            && error.message.includes("active authenticated project source requires a current accepted review chain"),
         );
         await rawRetirementRuntime.query("ROLLBACK");
       } finally {
@@ -1198,6 +1610,9 @@ test(
       const deletionCredentialId = (await db.webSource.findUniqueOrThrow({ where: { id: deletionSource.id }, select: { authCredentialId: true } })).authCredentialId;
       assert.ok(deletionCredentialId);
       assert.ok(await db.externalCredential.findUnique({ where: { id: deletionCredentialId! }, select: { id: true } }));
+      const beforeOtherProjectArchive = await db.project.findUniqueOrThrow({ where: { id: otherProjectId }, select: { name: true, updatedAt: true } });
+      const archivedOtherProject = await updateProjectLifecycle({ projectId: otherProjectId, actor: owner, action: "archive", expectedUpdatedAt: beforeOtherProjectArchive.updatedAt }, db);
+      await deleteArchivedProject({ projectId: otherProjectId, actor: owner, confirmationName: archivedOtherProject.project.name, expectedUpdatedAt: archivedOtherProject.project.updatedAt }, db);
       const beforeArchive = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { name: true, updatedAt: true } });
       const archived = await updateProjectLifecycle({ projectId, actor: owner, action: "archive", expectedUpdatedAt: beforeArchive.updatedAt }, db);
       const deleted = await deleteArchivedProject({ projectId, actor: owner, confirmationName: archived.project.name, expectedUpdatedAt: archived.project.updatedAt }, db);
@@ -1208,6 +1623,247 @@ test(
     } finally {
       if (previousMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousMasterKeyPath;
+      await rm(keyDirectory, { recursive: true, force: true });
+      await db.$disconnect();
+      await writerDb.$disconnect();
+    }
+  },
+);
+
+test(
+  "browser web source publishes reviewed JavaScript and keeps site-form content in Owner-only preview",
+  { skip: !shouldRun ? "AUTHENTICATED_WEB_SOURCE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const db = getDb();
+    const writerDb = getEntitlementDb();
+    const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-browser-source-"));
+    const previous = Object.fromEntries([
+      "AI_PROJECT_OS_MASTER_KEY_FILE",
+      "AI_PROJECT_OS_WEB_BROWSER_ENABLED",
+      "AI_PROJECT_OS_WEB_BROWSER_BROKER_URL",
+      "AI_PROJECT_OS_WEB_BROWSER_BROKER_KEY_FILE",
+      "AI_PROJECT_OS_WEB_BROWSER_IMAGE_DIGEST",
+      "AI_PROJECT_OS_WEB_BROWSER_BROKER_ALLOW_PRIVATE",
+    ].map((key) => [key, process.env[key]]));
+    const digest = `registry.example.test/team/browser@sha256:${"a".repeat(64)}`;
+    const networkFingerprint = sha256("browser source public DNS set");
+    const resolveBrowserNetwork = async (input: Readonly<{ url: string; allowPrivateNetwork: boolean }>) => {
+      assert.equal(input.allowPrivateNetwork, false);
+      return { url: input.url, fingerprint: networkFingerprint };
+    };
+    process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
+    process.env.AI_PROJECT_OS_WEB_BROWSER_ENABLED = "1";
+    process.env.AI_PROJECT_OS_WEB_BROWSER_BROKER_URL = "https://browser-broker.example.test/v1/render";
+    process.env.AI_PROJECT_OS_WEB_BROWSER_BROKER_KEY_FILE = join(keyDirectory, "broker.key");
+    process.env.AI_PROJECT_OS_WEB_BROWSER_IMAGE_DIGEST = digest;
+    process.env.AI_PROJECT_OS_WEB_BROWSER_BROKER_ALLOW_PRIVATE = "0";
+
+    try {
+      const { workspaceId, ownerId } = await createPostgresWorkspaceFixture(db);
+      const suffix = randomUUID().slice(0, 8);
+      const projectId = randomUUID();
+      const editorId = randomUUID();
+      const viewerId = randomUUID();
+      const owner: Actor = { id: ownerId, role: "user", accountAccessVersion: 1 };
+      const editor: Actor = { id: editorId, role: "user", accountAccessVersion: 1 };
+      const viewer: Actor = { id: viewerId, role: "user", accountAccessVersion: 1 };
+      await db.appUser.create({ data: { id: editorId, username: `browser_web_editor_${suffix}`, role: "user" } });
+      await db.appUser.create({ data: { id: viewerId, username: `browser_web_viewer_${suffix}`, role: "user" } });
+      await db.project.create({ data: { id: projectId, workspaceId, name: `Browser web ${suffix}`, slug: `browser-web-${suffix}` } });
+      await db.$transaction(async (tx) => {
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "browser_source_service_owner" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: ownerId, reason: "browser_source_service_editor" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: ownerId, reason: "browser_source_service_viewer" });
+      });
+
+      const dispatchedForms: Array<{ username: string; password: string }> = [];
+      const broker: typeof callWebBrowserBroker = async (configuration, onDispatch) => {
+        assert.equal(configuration.imageDigest, digest);
+        const request = await onDispatch();
+        assert.equal(request.projectId, projectId);
+        if (request.siteForm) dispatchedForms.push({ username: request.siteForm.username, password: request.siteForm.password });
+        return {
+          jobId: request.jobId,
+          url: request.url,
+          text: request.siteForm ? "Private page after form login" : "JavaScript rendered page",
+          networkFingerprint,
+          imageDigest: digest,
+        };
+      };
+      const renderedUrl = `https://docs.example.test/rendered-${suffix}`;
+      await assert.rejects(
+        () => createBrowserProjectWebSource(projectId, { name: "Editor cannot create", url: renderedUrl, mode: "rendered" }, editor, db, resolveBrowserNetwork),
+        WebAiAccessError,
+      );
+      const rendered = await createBrowserProjectWebSource(projectId, { name: "Rendered page", url: renderedUrl, mode: "rendered" }, owner, db, resolveBrowserNetwork);
+      const renderedPending = await fetchBrowserProjectWebSource(projectId, rendered.id, owner, db, broker);
+      assert.equal(renderedPending.status, "pendingReview");
+      const renderedReview = await getBrowserWebSourceReview(projectId, rendered.id, renderedPending.id, editor, db);
+      assert.equal(renderedReview.contentText, "JavaScript rendered page");
+      await decideBrowserWebSourceReview(projectId, rendered.id, renderedPending.id, { decision: "accepted" }, editor, writerDb);
+      const renderedPointer = await db.webSourcePointer.findUnique({ where: { projectId_webSourceId: { projectId, webSourceId: rendered.id } } });
+      assert.ok(renderedPointer);
+      const renderedDispatched = deferred();
+      const releaseRendered = deferred();
+      let renderedJobId: string | null = null;
+      const activeRenderedFetch = fetchBrowserProjectWebSource(projectId, rendered.id, owner, db, async (configuration, onDispatch) => {
+        const request = await onDispatch();
+        renderedJobId = request.jobId;
+        renderedDispatched.resolve();
+        await releaseRendered.promise;
+        return { jobId: request.jobId, url: request.url, text: "Late rendered page", networkFingerprint, imageDigest: configuration.imageDigest };
+      }).then(() => undefined, () => undefined);
+      await renderedDispatched.promise;
+      await assert.rejects(
+        () => updateProjectWebSource(projectId, rendered.id, { enabled: false }, owner, db, resolveBrowserNetwork, async () => { throw new Error("broker unavailable"); }),
+        /broker unavailable/u,
+      );
+      assert.equal((await db.webSource.findUniqueOrThrow({ where: { id: rendered.id } })).status, "active");
+      const disabledRendered = await updateProjectWebSource(projectId, rendered.id, { enabled: false }, owner, db, resolveBrowserNetwork, async (_configuration, jobIds) => {
+        assert(renderedJobId !== null && jobIds.includes(renderedJobId));
+        releaseRendered.resolve();
+      });
+      assert.equal(disabledRendered.status, "disabled");
+      await activeRenderedFetch;
+
+      const profileSource = await createBrowserProjectWebSource(projectId, {
+        name: "Profile page", url: `https://docs.example.test/profile-${suffix}`, mode: "rendered",
+      }, owner, db, resolveBrowserNetwork);
+      const profileDispatched = deferred();
+      const releaseProfile = deferred();
+      let profileJobId: string | null = null;
+      const activeProfileFetch = fetchBrowserProjectWebSource(projectId, profileSource.id, owner, db, async (configuration, onDispatch) => {
+        const request = await onDispatch();
+        profileJobId = request.jobId;
+        profileDispatched.resolve();
+        await releaseProfile.promise;
+        return { jobId: request.jobId, url: request.url, text: "Late profile page", networkFingerprint, imageDigest: configuration.imageDigest };
+      }).then(() => undefined, () => undefined);
+      await profileDispatched.promise;
+      const refreshed = await refreshBrowserWebSourceProfile(projectId, profileSource.id, owner, db,
+        async ({ url }) => ({ url, fingerprint: "d".repeat(64) }),
+        async (_configuration, jobIds) => {
+          assert(profileJobId !== null && jobIds.includes(profileJobId));
+          releaseProfile.resolve();
+        });
+      assert.equal(refreshed.changed, true);
+      await activeProfileFetch;
+
+      const targetUrl = `https://docs.example.test/form-${suffix}`;
+      const siteForm = {
+        loginUrl: "https://docs.example.test/login",
+        submitUrl: "https://docs.example.test/login/submit",
+        usernameSelector: 'input[name="username"]',
+        passwordSelector: 'input[name="password"]',
+        submitSelector: 'button[type="submit"]',
+        successSelector: "#signed-in",
+        username: "fixture-user",
+        password: "fixture-password",
+      };
+      const signed = await createBrowserProjectWebSource(projectId, { name: "Private page", url: targetUrl, mode: "siteForm", siteForm }, owner, db, resolveBrowserNetwork);
+      assert.deepEqual(await syncAllProjectWebSources(projectId, owner, db), []);
+      const signedPending = await fetchBrowserProjectWebSource(projectId, signed.id, owner, db, broker);
+      assert.deepEqual(dispatchedForms.at(-1), { username: siteForm.username, password: siteForm.password });
+      const privateSearch = { page: 1, pageSize: 10, search: "Private page" };
+      assert.deepEqual((await listProjectWebSources(projectId, privateSearch, owner, db)).sources.map((source) => source.id), [signed.id]);
+      assert.equal((await listProjectWebSources(projectId, privateSearch, editor, db)).pagination.total, 0);
+      assert.equal((await listProjectWebSources(projectId, privateSearch, viewer, db)).pagination.total, 0);
+      await assert.rejects(() => getBrowserWebSourceReview(projectId, signed.id, signedPending.id, editor, db), WebAiAccessError);
+      await assert.rejects(() => getBrowserWebSourceReview(projectId, signed.id, signedPending.id, viewer, db), WebAiAccessError);
+      await assert.rejects(() => decideBrowserWebSourceReview(projectId, signed.id, signedPending.id, { decision: "accepted" }, editor, writerDb), WebAiAccessError);
+      assert.equal((await getBrowserWebSourceReview(projectId, signed.id, signedPending.id, owner, db)).contentText, "Private page after form login");
+      await assert.rejects(
+        () => decideBrowserWebSourceReview(projectId, signed.id, signedPending.id, { decision: "accepted" }, owner, writerDb),
+        (error: unknown) => error instanceof WebSourceError && error.code === "WEB_SOURCE_REVIEW_PUBLICATION_DISABLED",
+      );
+      assert.equal(await db.webSourcePointer.count({ where: { projectId, webSourceId: signed.id } }), 0);
+      assert.equal(await db.projectSource.count({ where: { projectId, sourceIdentity: signed.id } }), 0);
+      assert.equal(await db.webSourceReviewAudit.count({ where: { projectId, webSourceId: signed.id } }), 0);
+      await assert.rejects(() => db.webSourceRevision.update({ where: { id: signedPending.id }, data: {
+        status: "complete", reviewStatus: "accepted", projectSourceId: randomUUID(), contentText: null, completedAt: new Date(),
+      } }), /site-form browser content is owner-preview only/u);
+      await assert.rejects(() => db.webSourcePointer.create({ data: {
+        projectId, webSourceId: signed.id, webSourceRevisionId: signedPending.id, publishedAt: new Date(),
+      } }), /site-form browser content cannot have a publication pointer/u);
+      const encodedCredential = Buffer.from(siteForm.password).toString("base64");
+      await assert.rejects(() => db.projectSource.create({ data: {
+        projectId, kind: "web", sourceIdentity: signed.id, revisionKey: randomUUID(), externalRef: targetUrl,
+        contentText: encodedCredential, contentHash: sha256(encodedCredential), capturedAt: new Date(),
+      } }), /site-form browser content cannot enter project sources/u);
+      await assert.rejects(
+        () => rotateBrowserWebSourceCredential(projectId, signed.id, { username: "docs", password: "rotated-password" }, owner, db),
+        (error: unknown) => error instanceof WebBrowserProxyError && error.code === "WEB_BROWSER_CREDENTIAL_REFLECTION",
+      );
+      assert.equal((await db.webSourceRevision.findUniqueOrThrow({ where: { id: signedPending.id } })).reviewStatus, "pending");
+      process.env.AI_PROJECT_OS_WEB_BROWSER_ENABLED = "0";
+      await rotateBrowserWebSourceCredential(projectId, signed.id, { username: "rotated-user", password: "rotated-password" }, owner, db, async () => undefined);
+      process.env.AI_PROJECT_OS_WEB_BROWSER_ENABLED = "1";
+      const invalidatedPreview = await db.webSourceRevision.findUniqueOrThrow({ where: { id: signedPending.id } });
+      assert.equal(invalidatedPreview.status, "failed");
+      assert.equal(invalidatedPreview.contentText, null);
+      const signedAgain = await fetchBrowserProjectWebSource(projectId, signed.id, owner, db, broker);
+      assert.equal(dispatchedForms.at(-1)?.username, "rotated-user");
+      await decideBrowserWebSourceReview(projectId, signed.id, signedAgain.id, { decision: "rejected" }, owner, writerDb);
+      assert.equal((await db.webSourceRevision.findUniqueOrThrow({ where: { id: signedAgain.id } })).contentText, null);
+      await assert.rejects(() => revokeBrowserWebSourceCredential(projectId, signed.id, editor, db), WebAiAccessError);
+      let orphanJobId: string | null = null;
+      await assert.rejects(
+        () => fetchBrowserProjectWebSource(projectId, signed.id, owner, db, async (_configuration, onDispatch) => {
+          orphanJobId = (await onDispatch()).jobId;
+          throw new Error("application lost broker response");
+        }),
+        (error: unknown) => error instanceof WebSourceError && error.code === "WEB_SOURCE_FETCH_FAILED",
+      );
+      const dispatched = deferred();
+      const releaseDispatch = deferred();
+      let dispatchedJobId: string | null = null;
+      const racingFetch = fetchBrowserProjectWebSource(projectId, signed.id, owner, db, async (configuration, onDispatch) => {
+        const request = await onDispatch();
+        dispatchedJobId = request.jobId;
+        dispatched.resolve();
+        await releaseDispatch.promise;
+        return { jobId: request.jobId, url: request.url, text: "Private page after form login", networkFingerprint, imageDigest: configuration.imageDigest };
+      }).then(() => undefined, () => undefined);
+      await dispatched.promise;
+      process.env.AI_PROJECT_OS_WEB_BROWSER_ENABLED = "0";
+      let cancelAcknowledged = false;
+      const cancelBroker = async (_configuration: unknown, jobIds: readonly string[]) => {
+        assert(dispatchedJobId !== null);
+        assert(jobIds.includes(dispatchedJobId));
+        assert(orphanJobId !== null && jobIds.includes(orphanJobId), "failed local revision must still be cancelled");
+        releaseDispatch.resolve();
+        cancelAcknowledged = true;
+      };
+      await assert.rejects(
+        () => revokeBrowserWebSourceCredential(projectId, signed.id, owner, db, async () => { throw new Error("broker unavailable"); }),
+        /broker unavailable/u,
+      );
+      const unchanged = await db.webSource.findUniqueOrThrow({ where: { id: signed.id }, select: { status: true, authCredentialId: true } });
+      assert.equal(unchanged.status, "active");
+      assert.ok(unchanged.authCredentialId);
+      await assert.rejects(
+        () => fetchBrowserProjectWebSource(projectId, signed.id, owner, db, broker),
+        (error: unknown) => error instanceof WebSourceError && error.code === "WEB_SOURCE_AUTHENTICATED_DISABLED",
+      );
+      await revokeBrowserWebSourceCredential(projectId, signed.id, owner, db, cancelBroker);
+      assert.equal(cancelAcknowledged, true, "credential revoke requires broker cancel ACK");
+      await racingFetch;
+      const revoked = await db.webSource.findUniqueOrThrow({ where: { id: signed.id }, select: { status: true, disabledAt: true, authCredentialId: true } });
+      assert.equal(revoked.status, "disabled");
+      assert.ok(revoked.disabledAt);
+      assert.equal(revoked.authCredentialId, null);
+      assert.equal(await db.webSourcePointer.count({ where: { projectId, webSourceId: signed.id } }), 0);
+      assert.equal(await db.projectSource.count({ where: { projectId, sourceIdentity: signed.id, retiredAt: null } }), 0);
+      process.env.AI_PROJECT_OS_WEB_BROWSER_ENABLED = "1";
+      process.env.AI_PROJECT_OS_WEB_BROWSER_BROKER_URL = "https://browser-broker.example.test/v1/render";
+      await assert.rejects(() => fetchBrowserProjectWebSource(projectId, signed.id, owner, db, broker), (error: unknown) => {
+        return error instanceof WebSourceError && error.code === "WEB_SOURCE_DISABLED";
+      });
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       await rm(keyDirectory, { recursive: true, force: true });
       await db.$disconnect();
       await writerDb.$disconnect();

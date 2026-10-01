@@ -404,7 +404,7 @@ run_upgrade_preflight() {
   local phase=$1
   local preflight_output
   local expected_count=117
-  [[ "$phase" != post-migration ]] || expected_count=133
+  [[ "$phase" != post-migration ]] || expected_count=135
 
   preflight_output=$(compose run --rm --no-deps production-upgrade-preflight \
     node node_modules/tsx/dist/cli.mjs scripts/production-v07-upgrade-preflight.ts "$phase" "$RELEASE_TAG")

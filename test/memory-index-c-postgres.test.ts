@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { unlink } from "node:fs/promises";
+import { createSecureMasterKeyFixture } from "./secure-master-key-fixture";
 import { promisify } from "node:util";
 import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -283,7 +284,8 @@ test(
     const url = validateDisposableUrl(configuredUrl);
     const raw = new Client({ connectionString: url, connectionTimeoutMillis: 5_000 });
     const previousDatabaseUrl = process.env.DATABASE_URL;
-    const masterKeyPath = `/tmp/ai-project-os-memory-index-c-${process.pid}.key`;
+    const keyFixture = await createSecureMasterKeyFixture();
+    const masterKeyPath = keyFixture.path;
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     const userId = randomUUID();
@@ -943,6 +945,7 @@ test(
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
       await unlink(masterKeyPath).catch(() => undefined);
+      await keyFixture.cleanup();
     }
   },
 );

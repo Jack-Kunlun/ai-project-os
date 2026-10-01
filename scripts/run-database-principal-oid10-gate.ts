@@ -15,7 +15,7 @@ const RUNTIME_ROLE = "ai_project_os_runtime";
 const WRITER_ROLE = "ai_project_os_entitlement_writer";
 const GIT_AUTOMATION_WORKER_ROLE = "ai_project_os_git_automation_worker";
 const REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plpgsql"] as const);
-const EXPECTED_MIGRATION_COUNT = 133;
+const EXPECTED_MIGRATION_COUNT = 135;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1_000;
 const READY_TIMEOUT_MS = 2 * 60 * 1_000;
 

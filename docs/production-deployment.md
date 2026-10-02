@@ -1,6 +1,6 @@
 # GitHub Actions 生产部署
 
-状态：`CONTROLLED_PRERELEASE`。`v0.6.0-dev.11` 的 `.10`→`.11`、116→117 迁移通过 **Deploy v0.6 default-memory migration** 完成，并验证停写异地备份、117 条迁移账本和公网 app/worker 健康。`.7`→`.8` 的 **Deploy production** 只保留历史精确路径，后续无迁移版本使用 **Deploy application**。实际生产版本以公网 `/api/health` 为准；这些版本仍是预发布，不是稳定版或 GitHub Latest。
+本文保留 0.6 受控预发布的生产记录，并说明 0.7 首次升级路径。`v0.6.0-dev.11` 的 `.10`→`.11`、116→117 迁移通过 **Deploy v0.6 default-memory migration** 完成，并验证停写异地备份、117 条迁移账本和公网 app/worker 健康。`.7`→`.8` 的 **Deploy production** 只保留历史精确路径，后续无迁移版本使用 **Deploy application**。实际生产版本以公网 `/api/health` 为准；上述 0.6 版本仍是预发布，不是稳定版或 GitHub Latest。
 
 AI Project OS 从 GitHub Actions 的受控部署工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
@@ -80,7 +80,7 @@ sudo deploy/production/install-production-deploy.sh \
 
 ### 0.7 直接发布的首次工具安装
 
-0.7 不再发布 0.6 工具链桥接版本。当前线上 0.6 网关只接受 0.6 标签，且旧更新器尚未加固部署锁，因此 **Deploy v0.7 with database migration** 不会调用旧更新器。首次生产迁移只接受精确的稳定标签 `v0.7.0`，拒绝 `-dev.N`；该带注释标签必须线性接续线上源标签，取得同一提交的成功主分支和标签 CI，主分支还需完整数据库作业成功。真实外部服务、恢复和现场验收应在打稳定标签之前核对；CI 不能单独证明这些外部条件。
+0.7 不再发布 0.6 工具链桥接版本。当前线上 0.6 网关只接受 0.6 标签，且旧更新器尚未加固部署锁，因此 **Deploy v0.7 with database migration** 不会调用旧更新器。首次生产迁移只接受精确的稳定标签 `v0.7.0`，拒绝 `-dev.N`；该带注释标签必须线性接续线上源标签，取得同一提交的成功主分支和标签 CI，主分支还需完整数据库作业成功。本次 0.7 发布明确豁免专用 Linux broker 主机、授权真实站点、真实外部服务和两个 MCP 客户端的现场验收，详见[版本说明](releases/v0.7.0.md)；未验收能力在生产中保持关闭。恢复与真实生产升级仍须现场验证，CI 不能单独证明这些条件。
 
 可信主机运维在 root 会话中，从这个精确 0.7 标签和提交取得 `deploy/production/ai-project-os-install-release-tooling`，核对标签为带注释标签、提交与发布记录一致、文件确实属于该提交，再执行 `ai-project-os-install-release-tooling <0.7 标签> <40 位提交> CONFIRM_INSTALL_RELEASE_TOOLING_V1`。该安装器再次验证标签、提交、`package.json` 版本和标签 CI；打开锁前验证 `/run/lock` 为 root:root 1777、锁文件为 root:root 常规文件 0600 且不跟随符号链接。安装器先验证和暂存固定清单、校验 sudoers，最后切换受限网关。操作前必须保存现有工具文件及主机状态，并在隔离主机演练；此处不表示生产操作已执行。
 

@@ -19,7 +19,7 @@ test("v07 deployer retains the release identity and irreversible migration bound
   assert.equal(syntax.status, 0, syntax.stderr);
   assert.match(deployer, /\[\[ \$EUID -ne 0 \]\]/u);
   assert.match(deployer, /SOURCE_TAG" =~ \^v0\\\.6\\\.0-dev/u);
-  assert.match(deployer, /"\$RELEASE_TAG" != v0\.7\.0/u);
+  assert.match(deployer, /"\$RELEASE_TAG" != v0\.7\.1/u);
   assert.match(deployer, /CONFIRM_V07_MIGRATION_V1/u);
   assert.match(deployer, /cat-file -t "refs\/tags\/\$SOURCE_TAG"/u);
   assert.match(deployer, /merge-base --is-ancestor/u);
@@ -103,7 +103,7 @@ test("v07 production entry uses a dedicated exact command and migration workflow
   assert.match(workflow, /install-release-tooling \$V07_TARGET_TAG \$V07_TARGET_SHA/u);
   assert.match(workflow, /deploy-v07 \$V07_SOURCE_TAG \$V07_TARGET_TAG \$V07_SOURCE_SHA \$V07_TARGET_SHA CONFIRM_V07_MIGRATION_V1/u);
   assert.match(workflow, /V07_FULL_DATABASE_CI_REQUIRED/u);
-  assert.match(workflow, /\[\[ "\$target_tag" == v0\.7\.0 \]\]/u);
+  assert.match(workflow, /\[\[ "\$target_tag" == v0\.7\.1 \]\]/u);
   assert.doesNotMatch(workflow, /target_tag" =~ \^v0/u);
   assert.doesNotMatch(workflow, /deploy-app \$V07_SOURCE_TAG/u);
 });
@@ -116,7 +116,7 @@ test("v07 forced-command gateway rejects nearby tags and shell suffixes", () => 
   assert.notEqual(ready.status, 0);
   assert.notEqual(ready.stdout.trim(), "TOOLING_V07_READY");
   const source = "v0.6.0-dev.14";
-  const target = "v0.7.0";
+  const target = "v0.7.1";
   const sourceSha = "a".repeat(40);
   const targetSha = "b".repeat(40);
   const command = `deploy-v07 ${source} ${target} ${sourceSha} ${targetSha} CONFIRM_V07_MIGRATION_V1`;
@@ -124,7 +124,9 @@ test("v07 forced-command gateway rejects nearby tags and shell suffixes", () => 
     "tooling-bridge-status",
     `install-release-tooling v0.6.0-dev.15 ${targetSha} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
     `install-release-tooling v0.7.0-dev.1 ${targetSha} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
+    `install-release-tooling v0.7.0 ${targetSha} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
     command.replace(target, "v0.7.0-dev.1"),
+    command.replace(target, "v0.7.0"),
     command.replace(target, "v0.7.1-dev.1"),
     command.replace(source, "v0.6.0-dev.9"),
     command.replace(targetSha, `${targetSha};id`),

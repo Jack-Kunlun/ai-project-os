@@ -80,9 +80,9 @@ sudo deploy/production/install-production-deploy.sh \
 
 ### 0.7 直接发布的首次工具安装
 
-0.7 不再发布 0.6 工具链桥接版本。当前线上 0.6 网关只接受 0.6 标签，且旧更新器尚未加固部署锁，因此 **Deploy v0.7 with database migration** 不会调用旧更新器。首次生产迁移只接受精确的稳定标签 `v0.7.0`，拒绝 `-dev.N`；该带注释标签必须线性接续线上源标签，取得同一提交的成功主分支和标签 CI，主分支还需完整数据库作业成功。本次 0.7 发布明确豁免专用 Linux broker 主机、授权真实站点、真实外部服务和两个 MCP 客户端的现场验收，详见[版本说明](releases/v0.7.0.md)；未验收能力在生产中保持关闭。恢复与真实生产升级仍须现场验证，CI 不能单独证明这些条件。
+0.7 不再发布 0.6 工具链桥接版本。当前线上 0.6 网关只接受 0.6 标签，且旧更新器尚未加固部署锁，因此 **Deploy v0.7 with database migration** 不会调用旧更新器。首次生产迁移只接受精确的稳定补丁标签 `v0.7.1`，拒绝 `v0.7.0` 和 `-dev.N`；已发布的 `v0.7.0` 安装器因网关捕获组契约检查错误，在替换系统工具前失败关闭。目标带注释标签必须线性接续线上源标签，取得同一提交的成功主分支和标签 CI，主分支还需完整数据库作业成功。本次 0.7 发布明确豁免专用 Linux broker 主机、授权真实站点、真实外部服务和两个 MCP 客户端的现场验收，详见[补丁版本说明](releases/v0.7.1.md)；未验收能力在生产中保持关闭。恢复与真实生产升级仍须现场验证，CI 不能单独证明这些条件。
 
-可信主机运维在 root 会话中，从这个精确 0.7 标签和提交取得 `deploy/production/ai-project-os-install-release-tooling`，核对标签为带注释标签、提交与发布记录一致、文件确实属于该提交，再执行 `ai-project-os-install-release-tooling <0.7 标签> <40 位提交> CONFIRM_INSTALL_RELEASE_TOOLING_V1`。该安装器再次验证标签、提交、`package.json` 版本和标签 CI；打开锁前验证 `/run/lock` 为 root:root 1777、锁文件为 root:root 常规文件 0600 且不跟随符号链接。安装器先验证和暂存固定清单、校验 sudoers，最后切换受限网关。操作前必须保存现有工具文件及主机状态，并在隔离主机演练；此处不表示生产操作已执行。
+可信主机运维在 root 会话中，从精确 `v0.7.1` 标签和提交取得 `deploy/production/ai-project-os-install-release-tooling`，核对标签为带注释标签、提交与发布记录一致、文件确实属于该提交，再执行 `ai-project-os-install-release-tooling v0.7.1 <40 位提交> CONFIRM_INSTALL_RELEASE_TOOLING_V1`。该安装器再次验证标签、提交、`package.json` 版本和标签 CI；打开锁前验证 `/run/lock` 为 root:root 1777、锁文件为 root:root 常规文件 0600 且不跟随符号链接。安装器先验证和暂存固定清单、校验 sudoers，最后切换受限网关。操作前必须保存现有工具文件及主机状态，并在隔离主机演练；此处不表示生产操作已执行。
 
 安装成功后，受限账号的 `tooling-v07-status` 经 root-owned 更新器核对安装完成标记、工具清单的 SHA-256 及文件与父目录权限，必须精确返回 `TOOLING_V07_READY`。0.7 工作流先验证这个状态，再由已安装的 0.7 更新器从目标标签刷新工具，随后只调用 `deploy-v07`。若首次工具安装、状态或标签 CI 缺失，工作流在备份、迁移和容器切换之前失败关闭。升级器仍需核对实际运行的 0.6 源版本及其 117 条迁移账本；这是既有数据升级的来源校验，不会产生新的 0.6 发布。
 

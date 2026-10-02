@@ -32,7 +32,7 @@ async function readContractFiles() {
 test("forced-command gateway exposes only the exact release-tooling grammar", async () => {
   const { gateway } = await readContractFiles();
 
-  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.7\\.0)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
+  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.7\\.1)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
   assert.match(gateway, /tooling-v07-status/u);
   assert.match(gateway, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
   assert.match(gateway, /exec sudo -n \/usr\/local\/sbin\/ai-project-os-install-release-tooling/u);
@@ -58,7 +58,7 @@ test("root updater verifies tag identity, package version, CI, and a separate ch
   const { updater } = await readContractFiles();
 
   assert.match(updater, /\[\[ \$EUID -eq 0 \]\]/u);
-  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.7\\.0$'"));
+  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.7\\.1$'"));
   assert.ok(updater.includes('[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]'));
   assert.match(updater, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
   assert.match(updater, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);
@@ -80,6 +80,15 @@ test("root updater verifies tag identity, package version, CI, and a separate ch
   assert.doesNotMatch(updater, /package\.json deploy\/production \|/u);
   assert.doesNotMatch(updater, /\/srv\/ai-project-os\/repository/u);
   assert.doesNotMatch(updater, /install-production-deploy\.sh/u);
+});
+
+test("v07 installer gateway checks match the actual packaged gateway", async () => {
+  const { updater, gateway } = await readContractFiles();
+  const checks = [...updater.matchAll(/grep -Fq '([^']+)' "\$GATEWAY" \|\| \\\n\s+fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69/gu)];
+  assert.equal(checks.length, 3);
+  for (const [, fragment] of checks) {
+    assert.ok(gateway.includes(fragment), `gateway lacks installer-required fragment: ${fragment}`);
+  }
 });
 
 test("backup retains the historical tag literal required by the deployed updater", async () => {

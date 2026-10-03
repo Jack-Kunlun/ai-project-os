@@ -32,7 +32,7 @@ async function readContractFiles() {
 test("forced-command gateway exposes only the exact release-tooling grammar", async () => {
   const { gateway } = await readContractFiles();
 
-  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.7\\.1)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
+  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.7\\.2)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
   assert.match(gateway, /tooling-v07-status/u);
   assert.match(gateway, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
   assert.match(gateway, /exec sudo -n \/usr\/local\/sbin\/ai-project-os-install-release-tooling/u);
@@ -54,11 +54,27 @@ test("forced-command gateway exposes only the exact release-tooling grammar", as
   }
 });
 
+test("deployed v0.7.1 gateway cannot bootstrap the v0.7.2 release", () => {
+  const oldGateway = spawnSync("git", ["show", "refs/tags/v0.7.1:deploy/production/ai-project-os-actions-gateway"], { encoding: "utf8" });
+  assert.equal(oldGateway.status, 0, oldGateway.stderr);
+  const denied = spawnSync("bash", ["-s"], {
+    encoding: "utf8",
+    input: oldGateway.stdout,
+    env: {
+      ...process.env,
+      SSH_ORIGINAL_COMMAND: `install-release-tooling v0.7.2 ${"a".repeat(40)} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
+    },
+  });
+  assert.equal(denied.status, 64);
+  assert.match(denied.stderr, /AI_PROJECT_OS_DEPLOY_COMMAND_DENIED/u);
+});
+
 test("root updater verifies tag identity, package version, CI, and a separate checkout", async () => {
   const { updater } = await readContractFiles();
 
   assert.match(updater, /\[\[ \$EUID -eq 0 \]\]/u);
-  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.7\\.1$'"));
+  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.7\\.2$'"));
+  assert.match(updater, /printf 'TOOLING_V07_READY\\n%s %s\\n' "\$state_tag" "\$state_revision"/u);
   assert.ok(updater.includes('[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]'));
   assert.match(updater, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
   assert.match(updater, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);

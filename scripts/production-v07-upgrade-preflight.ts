@@ -10,7 +10,7 @@ const TARGET_MIGRATION_COUNT = 135;
 const SOURCE_LAST_MIGRATION = "20260924010000_add_personal_knowledge_graph_suggestions";
 const TARGET_LAST_MIGRATION = "20261001010000_add_browser_web_source_modes";
 const ALLOWED_PHASES = new Set(["pre-stop", "post-stop", "post-migration"]);
-const TARGET_TAG_PATTERN = /^v0\.7\.1(?:-dev\.[1-9][0-9]*)?$/u;
+const TARGET_TAG_PATTERN = /^v0\.7\.2(?:-dev\.[1-9][0-9]*)?$/u;
 const GIT_AUTOMATION_WORKER = "ai_project_os_git_automation_worker";
 
 interface MigrationRow {

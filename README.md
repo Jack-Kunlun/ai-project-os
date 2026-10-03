@@ -4,7 +4,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-源码版本标识为 `0.7.1`。版本标签、GitHub Release 和生产部署是独立状态，实际线上版本以公网 `/api/health` 为准。0.7 功能及已知限制见 [补丁版本说明](docs/releases/v0.7.1.md)，开发和验收记录见 [开发与验收计划](docs/releases/v0.7.0-plan.md)。
+源码版本标识为 `0.7.2`。版本标签、GitHub Release 和生产部署是独立状态，实际线上版本以公网 `/api/health` 为准。0.7 功能及已知限制见 [补丁版本说明](docs/releases/v0.7.2.md)，开发和验收记录见 [开发与验收计划](docs/releases/v0.7.0-plan.md)。
 
 `v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
 
@@ -290,4 +290,4 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 ## 历史材料
 
-V1 CLI 手册和历史运行合同继续保留用于兼容与审计。0.7 源码、标签、GitHub Release 与生产部署须分别核对；发布与部署条件见 [补丁版本说明](docs/releases/v0.7.1.md) 和 [生产部署](docs/production-deployment.md)。
+V1 CLI 手册和历史运行合同继续保留用于兼容与审计。0.7 源码、标签、GitHub Release 与生产部署须分别核对；发布与部署条件见 [补丁版本说明](docs/releases/v0.7.2.md) 和 [生产部署](docs/production-deployment.md)。

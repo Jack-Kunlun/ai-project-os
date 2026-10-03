@@ -26,9 +26,9 @@ V07_STATUS_FILES=(
   /etc/sudoers.d/ai-project-os-deploy
 )
 
-# New tooling is installed only from the reviewed 0.7.1 patch release.
+# New tooling is installed only from the reviewed 0.7.2 patch release.
 # The running 0.6 tag is verified separately by the migration deployer.
-readonly RELEASE_TAG_PATTERN='^v0\.7\.1$'
+readonly RELEASE_TAG_PATTERN='^v0\.7\.2$'
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -61,9 +61,9 @@ for path in sys.argv[1:]:
             raise SystemExit(1)
 PY
   IFS=' ' read -r state_tag state_revision < "$V07_STATE_FILE"
-  [[ "$state_tag" == tag=v0.7.1 && "$state_revision" =~ ^revision=[0-9a-f]{40}$ ]] || fail V07_TOOLING_STATUS_INVALID 70
+  [[ "$state_tag" == tag=v0.7.2 && "$state_revision" =~ ^revision=[0-9a-f]{40}$ ]] || fail V07_TOOLING_STATUS_INVALID 70
   cmp -s <(tail -n +2 "$V07_STATE_FILE") <(sha256sum "${V07_STATUS_FILES[@]}") || fail V07_TOOLING_STATUS_INVALID 70
-  printf 'TOOLING_V07_READY\n'
+  printf 'TOOLING_V07_READY\n%s %s\n' "$state_tag" "$state_revision"
   exit 0
 fi
 [[ "$RELEASE_TAG" =~ $RELEASE_TAG_PATTERN ]] || fail RELEASE_TOOLING_TAG_INVALID 64
@@ -162,7 +162,7 @@ NGINX_CONFIG_PROMOTED=false
 NGINX_CONFIG_COMMITTED=false
 NGINX_BACKUP_PATH=""
 NGINX_WAS_ACTIVE=false
-if [[ "$RELEASE_TAG" == v0.7.1 ]]; then
+if [[ "$RELEASE_TAG" == v0.7.2 ]]; then
   IS_V07_RELEASE=true
 fi
 
@@ -368,7 +368,7 @@ if "zone=ai_project_os_auth" in body:
     raise SystemExit(1)
 PY
 if [[ "$IS_V07_RELEASE" == true ]]; then
-  grep -Fq '^deploy-v07\ (v0\.6\.0-dev\.[1-9][0-9]+)\ (v0\.7\.1)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V07_MIGRATION_V1)$' "$GATEWAY" || \
+  grep -Fq '^deploy-v07\ (v0\.6\.0-dev\.[1-9][0-9]+)\ (v0\.7\.2)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V07_MIGRATION_V1)$' "$GATEWAY" || \
     fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69
   grep -Fq 'exec sudo -n /usr/local/sbin/ai-project-os-v07-deploy' "$GATEWAY" || \
     fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69
@@ -383,6 +383,11 @@ grep -Fq 'v0.5.0-dev.1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CO
 grep -Fq 'v0.5.0-dev.4' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'v0.6.0-dev.6' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+grep -Fq '"$TARGET_TAG" == v0.7.2' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.7\.2' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+grep -Fq '"$RELEASE_TAG" == v0.7.2' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.7\.2' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.7\.2' "$BACKUP_ARTIFACT_HELPER" || fail RELEASE_TOOLING_BACKUP_ARTIFACT_CONTRACT_INVALID 69
 if ! python3 - "$BACKUP_ARTIFACT_HELPER" <<'PY'
 import ast
 import re

@@ -50,7 +50,7 @@ test("release version must agree across package, application, and OCI metadata",
     readFile("src/lib/version.ts", "utf8"),
     readFile("Dockerfile", "utf8"),
   ]);
-  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.7.1");
+  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.7.2");
   assert.throws(
     () => readCoherentVersion(packageJson, 'export const APP_VERSION = "9.9.9";', dockerfile),
     /LOCAL_RELEASE_VERSION_MISMATCH/u,

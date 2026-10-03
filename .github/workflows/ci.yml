@@ -14,7 +14,6 @@ concurrency:
 
 jobs:
   scope:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -32,7 +31,13 @@ jobs:
         env:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           CI_HEAD_SHA: ${{ github.sha }}
-        run: node scripts/ci-change-scope.mjs
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            printf 'database=true\ncoverage=true\n' >> "$GITHUB_OUTPUT"
+          else
+            node scripts/ci-change-scope.mjs
+          fi
 
   source:
     needs: scope
@@ -159,7 +164,7 @@ jobs:
 
   verify:
     needs: [scope, source, database]
-    if: ${{ always() && !startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ always() }}
     name: Verify internal delivery gates
     runs-on: ubuntu-24.04
     timeout-minutes: 5

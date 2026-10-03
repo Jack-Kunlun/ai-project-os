@@ -68,14 +68,31 @@ test("gateway rejects malformed application release commands", async () => {
   }
 });
 
-test("tag CI attests main while presentation-only changes avoid PostgreSQL", async () => {
+test("tag CI attests main and runs full source and database gates", async () => {
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const scope = workflow.split("\n  scope:\n")[1]?.split("\n  source:\n")[0];
+  assert.ok(scope);
+  const tagScopeScript = scope.split("        run: |\n")[1]?.split("\n").map((line) => line.replace(/^          /u, "")).join("\n");
+  assert.ok(tagScopeScript);
+  const directory = await mkdtemp(path.join(tmpdir(), "ai-project-os-tag-ci-"));
+  try {
+    const output = path.join(directory, "scope-output");
+    const result = spawnSync("bash", ["-c", tagScopeScript], {
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_REF: "refs/tags/v0.7.3", GITHUB_OUTPUT: output },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(await readFile(output, "utf8"), "database=true\ncoverage=true\n");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
   assert.match(workflow, /tag-attestation:/u);
   assert.match(workflow, /\.head_branch == "main"/u);
   assert.match(workflow, /refs\/tags\/\$RELEASE_TAG\^\{\}/u);
   assert.match(workflow, /database:\n    needs: scope\n    if: \$\{\{ needs\.scope\.outputs\.database == 'true' \}\}/u);
   assert.doesNotMatch(workflow.split("  source:\n")[1]?.split("  database:\n")[0], /services:/u);
   assert.match(workflow, /verify:\n    needs: \[scope, source, database\]/u);
+  assert.match(workflow, /verify:\n    needs: \[scope, source, database\]\n    if: \$\{\{ always\(\) \}\}/u);
   assert.match(workflow, /test "\$DATABASE_RESULT" = success/u);
 });
 

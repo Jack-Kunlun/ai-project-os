@@ -16,20 +16,20 @@ const backupPath = path.join(root, "deploy/production/ai-project-os-backup");
 const restorePath = path.join(root, "deploy/production/ai-project-os-restore");
 const backupArtifactPath = path.join(root, "deploy/production/ai_project_os_backup_artifact.py");
 
-test("v0.7.2 backup target and artifact are accepted across cutover and recovery gates", async () => {
+test("v0.7.3 backup target and artifact are accepted across cutover and recovery gates", async () => {
   const [backup, restore, installer] = await Promise.all([
     readFile(backupPath, "utf8"),
     readFile(restorePath, "utf8"),
     readFile(installerPath, "utf8"),
   ]);
-  const backupName = "20261003T040000Z-pre-deploy-to-v0.7.2.Abc123";
-  const oldBackupName = backupName.replace("v0.7.2", "v0.7.1");
+  const backupName = "20261003T040000Z-pre-deploy-to-v0.7.3.Abc123";
+  const oldBackupName = backupName.replace("v0.7.3", "v0.7.1");
   const checks = [
-    [backup.split("\n").find((line) => line.includes("BACKUP_TARGET_TAG_INVALID")), "TARGET_TAG", "v0.7.2", "v0.7.1"],
+    [backup.split("\n").find((line) => line.includes("BACKUP_TARGET_TAG_INVALID")), "TARGET_TAG", "v0.7.3", "v0.7.1"],
     [backup.split("\n").find((line) => line.includes('[[ -z "$PUBLIC_BACKUP_NAME"')), "PUBLIC_BACKUP_NAME", backupName, oldBackupName],
-    ...backup.split("\n").filter((line) => line.includes('[[ "$name" =~') && line.includes("pre-deploy-to-v0\\.7\\.2"))
+    ...backup.split("\n").filter((line) => line.includes('[[ "$name" =~') && line.includes("pre-deploy-to-v0\\.7\\.3"))
       .map((line) => [line, "name", backupName, oldBackupName]),
-    [restore.split("\n").find((line) => line.includes("RESTORE_TAG_INVALID")), "RELEASE_TAG", "v0.7.2", "v0.7.1"],
+    [restore.split("\n").find((line) => line.includes("RESTORE_TAG_INVALID")), "RELEASE_TAG", "v0.7.3", "v0.7.1"],
   ] as const;
   assert.equal(checks.length, 5);
   for (const [line, variable, accepted, rejected] of checks) {
@@ -64,7 +64,7 @@ test("v0.7.2 backup target and artifact are accepted across cutover and recovery
   const releaseValidationEnd = restore.indexOf("\n}\n", releaseValidationStart);
   assert.ok(releaseValidationStart > 0 && releaseValidationEnd > releaseValidationStart);
   const releaseValidation = restore.slice(releaseValidationStart, releaseValidationEnd + 2);
-  for (const [manifestVersion, expectedStatus] of [["0.6.0-dev.14", 0], ["0.7.2", 68]] as const) {
+  for (const [manifestVersion, expectedStatus] of [["0.6.0-dev.14", 0], ["0.7.3", 68]] as const) {
     const recovery = spawnSync("bash", ["-c", [
       "fail() { printf '%s\\n' \"$1\" >&2; exit \"$2\"; }",
       "RESTORE_MODE=recovery",
@@ -93,7 +93,7 @@ test("v07 deployer retains the release identity and irreversible migration bound
   assert.equal(syntax.status, 0, syntax.stderr);
   assert.match(deployer, /\[\[ \$EUID -ne 0 \]\]/u);
   assert.match(deployer, /SOURCE_TAG" =~ \^v0\\\.6\\\.0-dev/u);
-  assert.match(deployer, /"\$RELEASE_TAG" != v0\.7\.2/u);
+  assert.match(deployer, /"\$RELEASE_TAG" != v0\.7\.3/u);
   assert.match(deployer, /CONFIRM_V07_MIGRATION_V1/u);
   assert.match(deployer, /cat-file -t "refs\/tags\/\$SOURCE_TAG"/u);
   assert.match(deployer, /merge-base --is-ancestor/u);
@@ -179,7 +179,8 @@ test("v07 production entry uses a dedicated exact command and migration workflow
   assert.match(workflow, /install-release-tooling \$V07_TARGET_TAG \$V07_TARGET_SHA/u);
   assert.match(workflow, /deploy-v07 \$V07_SOURCE_TAG \$V07_TARGET_TAG \$V07_SOURCE_SHA \$V07_TARGET_SHA CONFIRM_V07_MIGRATION_V1/u);
   assert.match(workflow, /V07_FULL_DATABASE_CI_REQUIRED/u);
-  assert.match(workflow, /\[\[ "\$target_tag" == v0\.7\.2 \]\]/u);
+  assert.match(workflow, /V07_FULL_TAG_DATABASE_CI_REQUIRED/u);
+  assert.match(workflow, /\[\[ "\$target_tag" == v0\.7\.3 \]\]/u);
   assert.doesNotMatch(workflow, /target_tag" =~ \^v0/u);
   assert.doesNotMatch(workflow, /deploy-app \$V07_SOURCE_TAG/u);
 });
@@ -192,7 +193,7 @@ test("v07 forced-command gateway rejects nearby tags and shell suffixes", () => 
   assert.notEqual(ready.status, 0);
   assert.notEqual(ready.stdout.trim(), "TOOLING_V07_READY");
   const source = "v0.6.0-dev.14";
-  const target = "v0.7.2";
+  const target = "v0.7.3";
   const sourceSha = "a".repeat(40);
   const targetSha = "b".repeat(40);
   const command = `deploy-v07 ${source} ${target} ${sourceSha} ${targetSha} CONFIRM_V07_MIGRATION_V1`;
@@ -203,7 +204,7 @@ test("v07 forced-command gateway rejects nearby tags and shell suffixes", () => 
     `install-release-tooling v0.7.0 ${targetSha} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
     command.replace(target, "v0.7.0-dev.1"),
     command.replace(target, "v0.7.0"),
-    command.replace(target, "v0.7.2-dev.1"),
+    command.replace(target, "v0.7.3-dev.1"),
     command.replace(source, "v0.6.0-dev.9"),
     command.replace(targetSha, `${targetSha};id`),
     `${command} extra`,

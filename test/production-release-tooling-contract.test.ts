@@ -32,7 +32,7 @@ async function readContractFiles() {
 test("forced-command gateway exposes only the exact release-tooling grammar", async () => {
   const { gateway } = await readContractFiles();
 
-  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.7\\.2)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
+  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.7\\.3)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
   assert.match(gateway, /tooling-v07-status/u);
   assert.match(gateway, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
   assert.match(gateway, /exec sudo -n \/usr\/local\/sbin\/ai-project-os-install-release-tooling/u);
@@ -54,7 +54,7 @@ test("forced-command gateway exposes only the exact release-tooling grammar", as
   }
 });
 
-test("deployed v0.7.1 gateway cannot bootstrap the v0.7.2 release", () => {
+test("deployed v0.7.1 gateway cannot bootstrap the v0.7.3 release", () => {
   const oldGateway = spawnSync("git", ["show", "refs/tags/v0.7.1:deploy/production/ai-project-os-actions-gateway"], { encoding: "utf8" });
   assert.equal(oldGateway.status, 0, oldGateway.stderr);
   const denied = spawnSync("bash", ["-s"], {
@@ -62,7 +62,7 @@ test("deployed v0.7.1 gateway cannot bootstrap the v0.7.2 release", () => {
     input: oldGateway.stdout,
     env: {
       ...process.env,
-      SSH_ORIGINAL_COMMAND: `install-release-tooling v0.7.2 ${"a".repeat(40)} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
+      SSH_ORIGINAL_COMMAND: `install-release-tooling v0.7.3 ${"a".repeat(40)} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
     },
   });
   assert.equal(denied.status, 64);
@@ -73,7 +73,7 @@ test("root updater verifies tag identity, package version, CI, and a separate ch
   const { updater } = await readContractFiles();
 
   assert.match(updater, /\[\[ \$EUID -eq 0 \]\]/u);
-  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.7\\.2$'"));
+  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.7\\.3$'"));
   assert.match(updater, /printf 'TOOLING_V07_READY\\n%s %s\\n' "\$state_tag" "\$state_revision"/u);
   assert.ok(updater.includes('[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]'));
   assert.match(updater, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
@@ -96,6 +96,19 @@ test("root updater verifies tag identity, package version, CI, and a separate ch
   assert.doesNotMatch(updater, /package\.json deploy\/production \|/u);
   assert.doesNotMatch(updater, /\/srv\/ai-project-os\/repository/u);
   assert.doesNotMatch(updater, /install-production-deploy\.sh/u);
+});
+
+test("root updater rejects a tag CI without a successful database job", async () => {
+  const updater = await readFile(updaterPath, "utf8");
+  const verifier = updater.match(/tag_ci_jobs_json=\$\(curl[\s\S]*?python3 -c '\n([\s\S]*?)\n' <<<"\$tag_ci_jobs_json" \|\| fail RELEASE_TOOLING_FULL_TAG_DATABASE_CI_REQUIRED/u)?.[1];
+  assert.ok(verifier);
+  const verify = (jobs: Array<{ name: string; conclusion: string }>) => spawnSync("python3", ["-c", verifier], {
+    encoding: "utf8",
+    input: JSON.stringify({ jobs }),
+  });
+  assert.equal(verify([{ name: "Verify database and release candidate", conclusion: "skipped" }]).status, 1);
+  assert.equal(verify([{ name: "tag-attestation", conclusion: "success" }]).status, 1);
+  assert.equal(verify([{ name: "Verify database and release candidate", conclusion: "success" }]).status, 0);
 });
 
 test("v07 installer gateway checks match the actual packaged gateway", async () => {

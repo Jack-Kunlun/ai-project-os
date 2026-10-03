@@ -1,6 +1,6 @@
 # 持续集成与浏览器门禁
 
-仓库的 GitHub Actions 工作流在每次 push 和 pull request 上按改动范围运行发布门禁。只有提交全部改动均为 `src/**/*.css`、`public` 下 PNG/JPEG/WebP/ICO 位图，或历史 `0.6.0-dev.N` 仅递增 `package.json` 版本号时，才使用无需 PostgreSQL 的快速路径：Prisma Client 生成、Lint、类型检查、生产构建及性能预算。`0.7.x` 版本、SVG、客户端代码、脚本、配置、测试和混合改动均使用完整路径。0.7 发布标签必须指向同 SHA 已成功的主分支完整 CI；生产部署仍会停写、备份、预检数据库账本并检查健康。它是 GitHub 适配器，不改变产品对 Gitee、GitLab、自建 GitLab、Gitea、Forgejo 或通用 Git 的支持边界；使用其他 CI 平台时应按同样规则移植仓库命令。
+仓库的 GitHub Actions 工作流在分支 push 和 pull request 上按改动范围运行发布门禁；发布标签始终运行完整门禁。只有提交全部改动均为 `src/**/*.css`、`public` 下 PNG/JPEG/WebP/ICO 位图，或历史 `0.6.0-dev.N` 仅递增 `package.json` 版本号时，才使用无需 PostgreSQL 的快速路径：Prisma Client 生成、Lint、类型检查、生产构建及性能预算。`0.7.x` 版本、SVG、客户端代码、脚本、配置、测试和混合改动均使用完整路径。0.7 发布标签必须指向同 SHA 已成功的主分支完整 CI，且标签 CI 自身的数据库作业必须成功；生产部署仍会停写、备份、预检数据库账本并检查健康。它是 GitHub 适配器，不改变产品对 Gitee、GitLab、自建 GitLab、Gitea、Forgejo 或通用 Git 的支持边界；使用其他 CI 平台时应按同样规则移植仓库命令。
 
 ## 自动门禁
 

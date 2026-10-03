@@ -39,7 +39,7 @@ jobs:
           set -euo pipefail
 
           target_tag="v$(node -p 'require("./package.json").version')"
-          [[ "$target_tag" == v0.7.1 ]] || {
+          [[ "$target_tag" == v0.7.2 ]] || {
             echo "V07_TARGET_TAG_INVALID" >&2; exit 64;
           }
 
@@ -143,7 +143,8 @@ jobs:
             -o ConnectTimeout=15 \
             "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
             "tooling-v07-status")
-          [[ "$output" == "TOOLING_V07_READY" ]] || {
+          expected_status=$(printf 'TOOLING_V07_READY\ntag=%s revision=%s' "$V07_TARGET_TAG" "$V07_TARGET_SHA")
+          [[ "$output" == "$expected_status" ]] || {
             echo "V07_TOOLING_NOT_BOOTSTRAPPED" >&2
             exit 68
           }

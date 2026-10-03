@@ -12,6 +12,80 @@ const gatewayPath = path.join(root, "deploy/production/ai-project-os-actions-gat
 const installerPath = path.join(root, "deploy/production/ai-project-os-install-release-tooling");
 const sudoersPath = path.join(root, "deploy/production/ai-project-os-deploy.sudoers");
 const workflowPath = path.join(root, ".github/workflows/deploy-v07.yml");
+const backupPath = path.join(root, "deploy/production/ai-project-os-backup");
+const restorePath = path.join(root, "deploy/production/ai-project-os-restore");
+const backupArtifactPath = path.join(root, "deploy/production/ai_project_os_backup_artifact.py");
+
+test("v0.7.2 backup target and artifact are accepted across cutover and recovery gates", async () => {
+  const [backup, restore, installer] = await Promise.all([
+    readFile(backupPath, "utf8"),
+    readFile(restorePath, "utf8"),
+    readFile(installerPath, "utf8"),
+  ]);
+  const backupName = "20261003T040000Z-pre-deploy-to-v0.7.2.Abc123";
+  const oldBackupName = backupName.replace("v0.7.2", "v0.7.1");
+  const checks = [
+    [backup.split("\n").find((line) => line.includes("BACKUP_TARGET_TAG_INVALID")), "TARGET_TAG", "v0.7.2", "v0.7.1"],
+    [backup.split("\n").find((line) => line.includes('[[ -z "$PUBLIC_BACKUP_NAME"')), "PUBLIC_BACKUP_NAME", backupName, oldBackupName],
+    ...backup.split("\n").filter((line) => line.includes('[[ "$name" =~') && line.includes("pre-deploy-to-v0\\.7\\.2"))
+      .map((line) => [line, "name", backupName, oldBackupName]),
+    [restore.split("\n").find((line) => line.includes("RESTORE_TAG_INVALID")), "RELEASE_TAG", "v0.7.2", "v0.7.1"],
+  ] as const;
+  assert.equal(checks.length, 5);
+  for (const [line, variable, accepted, rejected] of checks) {
+    const condition = line?.match(/(\[\[.*\]\]) \|\|/u)?.[1];
+    assert.ok(condition, `${variable} gate missing`);
+    for (const [value, expectedStatus] of [[accepted, 0], [rejected, 1]] as const) {
+      const gateRun: { status: number | null; stderr: string } = spawnSync("bash", ["-c", condition], {
+        encoding: "utf8",
+        env: { ...process.env, [variable]: value },
+      });
+      assert.equal(gateRun.status, expectedStatus, `${variable}=${value}: ${gateRun.stderr}`);
+    }
+  }
+  const releaseGate = restore.split("\n").find((line) => line.includes("RESTORE_TAG_INVALID"))?.match(/(\[\[.*\]\]) \|\|/u)?.[1];
+  assert.ok(releaseGate);
+  const sourceRelease = spawnSync("bash", ["-c", releaseGate], {
+    encoding: "utf8",
+    env: { ...process.env, RELEASE_TAG: "v0.6.0-dev.14" },
+  });
+  assert.equal(sourceRelease.status, 0, sourceRelease.stderr);
+
+  const manifestConditionStart = restore.indexOf('if [[ ! "$MANIFEST_OBJECT" =~');
+  const manifestConditionEnd = restore.indexOf("\n  fail 'RESTORE_MANIFEST_OBJECT_INVALID'", manifestConditionStart);
+  assert.ok(manifestConditionStart > 0 && manifestConditionEnd > manifestConditionStart);
+  const manifestCondition = restore.slice(manifestConditionStart, manifestConditionEnd);
+  for (const [name, expectedStatus] of [[backupName, 0], [oldBackupName, 1]] as const) {
+    const manifest = `cos://ai-project-os-backup-1306016679/production/backups/2026/10/03/${name}/${name}.manifest.json`;
+    const result = spawnSync("bash", ["-c", `MANIFEST_OBJECT=$1\n${manifestCondition}\n  exit 1\nfi\nexit 0`, "test", manifest], { encoding: "utf8" });
+    assert.equal(result.status, expectedStatus, `manifest ${name}: ${result.stderr}`);
+  }
+  const releaseValidationStart = restore.indexOf("validate_backup_release() {");
+  const releaseValidationEnd = restore.indexOf("\n}\n", releaseValidationStart);
+  assert.ok(releaseValidationStart > 0 && releaseValidationEnd > releaseValidationStart);
+  const releaseValidation = restore.slice(releaseValidationStart, releaseValidationEnd + 2);
+  for (const [manifestVersion, expectedStatus] of [["0.6.0-dev.14", 0], ["0.7.2", 68]] as const) {
+    const recovery = spawnSync("bash", ["-c", [
+      "fail() { printf '%s\\n' \"$1\" >&2; exit \"$2\"; }",
+      "RESTORE_MODE=recovery",
+      "RELEASE_TAG=v0.6.0-dev.14",
+      releaseValidation,
+      'validate_backup_release "$1"',
+    ].join("\n"), "test", manifestVersion], { encoding: "utf8" });
+    assert.equal(recovery.status, expectedStatus, `source recovery ${manifestVersion}: ${recovery.stderr}`);
+  }
+
+  const helper = spawnSync("python3", ["-c", [
+    "import runpy, sys",
+    "pattern = runpy.run_path(sys.argv[1])['BACKUP_NAME']",
+    "print(' '.join('yes' if pattern.fullmatch(name) else 'no' for name in sys.argv[2:]))",
+  ].join("\n"), backupArtifactPath, backupName, oldBackupName], { encoding: "utf8" });
+  assert.equal(helper.status, 0, helper.stderr);
+  assert.equal(helper.stdout, "yes no\n");
+  assert.match(installer, /RELEASE_TOOLING_BACKUP_CONTRACT_INVALID/u);
+  assert.match(installer, /RELEASE_TOOLING_RESTORE_CONTRACT_INVALID/u);
+  assert.match(installer, /RELEASE_TOOLING_BACKUP_ARTIFACT_CONTRACT_INVALID/u);
+});
 
 test("v07 deployer retains the release identity and irreversible migration boundaries", async () => {
   const deployer = await readFile(deployerPath, "utf8");
@@ -19,7 +93,7 @@ test("v07 deployer retains the release identity and irreversible migration bound
   assert.equal(syntax.status, 0, syntax.stderr);
   assert.match(deployer, /\[\[ \$EUID -ne 0 \]\]/u);
   assert.match(deployer, /SOURCE_TAG" =~ \^v0\\\.6\\\.0-dev/u);
-  assert.match(deployer, /"\$RELEASE_TAG" != v0\.7\.1/u);
+  assert.match(deployer, /"\$RELEASE_TAG" != v0\.7\.2/u);
   assert.match(deployer, /CONFIRM_V07_MIGRATION_V1/u);
   assert.match(deployer, /cat-file -t "refs\/tags\/\$SOURCE_TAG"/u);
   assert.match(deployer, /merge-base --is-ancestor/u);
@@ -99,11 +173,13 @@ test("v07 production entry uses a dedicated exact command and migration workflow
   assert.match(installer, /cmp -s <\(tail -n \+2 "\$V07_STATE_FILE"\) <\(sha256sum "\$\{V07_STATUS_FILES\[@\]\}"\)/u);
   assert.match(workflow, /tooling-v07-status/u);
   assert.match(workflow, /V07_TOOLING_NOT_BOOTSTRAPPED/u);
+  assert.match(workflow, /expected_status=\$\(printf 'TOOLING_V07_READY\\ntag=%s revision=%s' "\$V07_TARGET_TAG" "\$V07_TARGET_SHA"\)/u);
+  assert.match(workflow, /\[\[ "\$output" == "\$expected_status" \]\]/u);
   assert.doesNotMatch(workflow, /bridge_tag|V07_BRIDGE|tooling-bridge-status/u);
   assert.match(workflow, /install-release-tooling \$V07_TARGET_TAG \$V07_TARGET_SHA/u);
   assert.match(workflow, /deploy-v07 \$V07_SOURCE_TAG \$V07_TARGET_TAG \$V07_SOURCE_SHA \$V07_TARGET_SHA CONFIRM_V07_MIGRATION_V1/u);
   assert.match(workflow, /V07_FULL_DATABASE_CI_REQUIRED/u);
-  assert.match(workflow, /\[\[ "\$target_tag" == v0\.7\.1 \]\]/u);
+  assert.match(workflow, /\[\[ "\$target_tag" == v0\.7\.2 \]\]/u);
   assert.doesNotMatch(workflow, /target_tag" =~ \^v0/u);
   assert.doesNotMatch(workflow, /deploy-app \$V07_SOURCE_TAG/u);
 });
@@ -116,7 +192,7 @@ test("v07 forced-command gateway rejects nearby tags and shell suffixes", () => 
   assert.notEqual(ready.status, 0);
   assert.notEqual(ready.stdout.trim(), "TOOLING_V07_READY");
   const source = "v0.6.0-dev.14";
-  const target = "v0.7.1";
+  const target = "v0.7.2";
   const sourceSha = "a".repeat(40);
   const targetSha = "b".repeat(40);
   const command = `deploy-v07 ${source} ${target} ${sourceSha} ${targetSha} CONFIRM_V07_MIGRATION_V1`;
@@ -127,7 +203,7 @@ test("v07 forced-command gateway rejects nearby tags and shell suffixes", () => 
     `install-release-tooling v0.7.0 ${targetSha} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,
     command.replace(target, "v0.7.0-dev.1"),
     command.replace(target, "v0.7.0"),
-    command.replace(target, "v0.7.1-dev.1"),
+    command.replace(target, "v0.7.2-dev.1"),
     command.replace(source, "v0.6.0-dev.9"),
     command.replace(targetSha, `${targetSha};id`),
     `${command} extra`,

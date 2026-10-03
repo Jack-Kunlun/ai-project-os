@@ -26,9 +26,9 @@ V07_STATUS_FILES=(
   /etc/sudoers.d/ai-project-os-deploy
 )
 
-# New tooling is installed only from the reviewed 0.7.2 patch release.
+# New tooling is installed only from the reviewed 0.7.3 patch release.
 # The running 0.6 tag is verified separately by the migration deployer.
-readonly RELEASE_TAG_PATTERN='^v0\.7\.2$'
+readonly RELEASE_TAG_PATTERN='^v0\.7\.3$'
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -61,7 +61,7 @@ for path in sys.argv[1:]:
             raise SystemExit(1)
 PY
   IFS=' ' read -r state_tag state_revision < "$V07_STATE_FILE"
-  [[ "$state_tag" == tag=v0.7.2 && "$state_revision" =~ ^revision=[0-9a-f]{40}$ ]] || fail V07_TOOLING_STATUS_INVALID 70
+  [[ "$state_tag" == tag=v0.7.3 && "$state_revision" =~ ^revision=[0-9a-f]{40}$ ]] || fail V07_TOOLING_STATUS_INVALID 70
   cmp -s <(tail -n +2 "$V07_STATE_FILE") <(sha256sum "${V07_STATUS_FILES[@]}") || fail V07_TOOLING_STATUS_INVALID 70
   printf 'TOOLING_V07_READY\n%s %s\n' "$state_tag" "$state_revision"
   exit 0
@@ -136,24 +136,42 @@ ci_runs_json=$(curl --fail --silent --show-error \
   --header 'X-GitHub-Api-Version: 2022-11-28' \
   "$ci_runs_url")
 
-if ! python3 -c '
+tag_ci_run_id=$(python3 -c '
 import json
 import sys
 
 payload = json.load(sys.stdin)
 revision, tag = sys.argv[1:3]
-accepted = any(
+accepted = [run.get("id") for run in payload.get("workflow_runs", []) if
     run.get("head_sha") == revision
     and run.get("head_branch") == tag
     and run.get("event") == "push"
     and run.get("status") == "completed"
     and run.get("conclusion") == "success"
-    for run in payload.get("workflow_runs", [])
+]
+if not accepted or not isinstance(accepted[0], int):
+    raise SystemExit(1)
+print(accepted[0])
+' "$EXPECTED_REVISION" "$RELEASE_TAG" <<<"$ci_runs_json") || fail RELEASE_TOOLING_SUCCESSFUL_CI_NOT_FOUND 72
+[[ "$tag_ci_run_id" =~ ^[1-9][0-9]*$ ]] || fail RELEASE_TOOLING_SUCCESSFUL_CI_NOT_FOUND 72
+
+tag_ci_jobs_json=$(curl --fail --silent --show-error \
+  --header 'Accept: application/vnd.github+json' \
+  --header 'X-GitHub-Api-Version: 2022-11-28' \
+  "https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/runs/$tag_ci_run_id/jobs?per_page=100") || \
+  fail RELEASE_TOOLING_TAG_CI_JOBS_UNAVAILABLE 72
+python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+accepted = any(
+    job.get("name") == "Verify database and release candidate"
+    and job.get("conclusion") == "success"
+    for job in payload.get("jobs", [])
 )
 raise SystemExit(0 if accepted else 1)
-' "$EXPECTED_REVISION" "$RELEASE_TAG" <<<"$ci_runs_json"; then
-  fail RELEASE_TOOLING_SUCCESSFUL_CI_NOT_FOUND 72
-fi
+' <<<"$tag_ci_jobs_json" || fail RELEASE_TOOLING_FULL_TAG_DATABASE_CI_REQUIRED 72
 
 candidate_root=$(mktemp -d /srv/ai-project-os/.release-tooling.XXXXXX)
 STAGED_FILES=()
@@ -162,7 +180,7 @@ NGINX_CONFIG_PROMOTED=false
 NGINX_CONFIG_COMMITTED=false
 NGINX_BACKUP_PATH=""
 NGINX_WAS_ACTIVE=false
-if [[ "$RELEASE_TAG" == v0.7.2 ]]; then
+if [[ "$RELEASE_TAG" == v0.7.3 ]]; then
   IS_V07_RELEASE=true
 fi
 
@@ -368,7 +386,7 @@ if "zone=ai_project_os_auth" in body:
     raise SystemExit(1)
 PY
 if [[ "$IS_V07_RELEASE" == true ]]; then
-  grep -Fq '^deploy-v07\ (v0\.6\.0-dev\.[1-9][0-9]+)\ (v0\.7\.2)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V07_MIGRATION_V1)$' "$GATEWAY" || \
+  grep -Fq '^deploy-v07\ (v0\.6\.0-dev\.[1-9][0-9]+)\ (v0\.7\.3)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V07_MIGRATION_V1)$' "$GATEWAY" || \
     fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69
   grep -Fq 'exec sudo -n /usr/local/sbin/ai-project-os-v07-deploy' "$GATEWAY" || \
     fail RELEASE_TOOLING_V07_GATEWAY_CONTRACT_INVALID 69
@@ -383,11 +401,11 @@ grep -Fq 'v0.5.0-dev.1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CO
 grep -Fq 'v0.5.0-dev.4' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'v0.6.0-dev.6' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
-grep -Fq '"$TARGET_TAG" == v0.7.2' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
-grep -Fq 'pre-deploy-to-v0\.7\.2' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
-grep -Fq '"$RELEASE_TAG" == v0.7.2' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
-grep -Fq 'pre-deploy-to-v0\.7\.2' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
-grep -Fq 'pre-deploy-to-v0\.7\.2' "$BACKUP_ARTIFACT_HELPER" || fail RELEASE_TOOLING_BACKUP_ARTIFACT_CONTRACT_INVALID 69
+grep -Fq '"$TARGET_TAG" == v0.7.3' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.7\.3' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+grep -Fq '"$RELEASE_TAG" == v0.7.3' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.7\.3' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.7\.3' "$BACKUP_ARTIFACT_HELPER" || fail RELEASE_TOOLING_BACKUP_ARTIFACT_CONTRACT_INVALID 69
 if ! python3 - "$BACKUP_ARTIFACT_HELPER" <<'PY'
 import ast
 import re

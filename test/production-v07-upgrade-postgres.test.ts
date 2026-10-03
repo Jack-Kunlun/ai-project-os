@@ -151,11 +151,11 @@ async function expectPreflightCode(
 }
 
 test("v0.7 preflight rejects invalid phase and tag before connecting", async () => {
-  await expectPreflightCode("during-stop", "v0.7.2", "", "V07_UPGRADE_PREFLIGHT_PHASE_INVALID");
-  await expectPreflightCode("pre-stop", "v0.7.2-dev.0", "", "V07_UPGRADE_PREFLIGHT_TARGET_TAG_INVALID");
+  await expectPreflightCode("during-stop", "v0.7.3", "", "V07_UPGRADE_PREFLIGHT_PHASE_INVALID");
+  await expectPreflightCode("pre-stop", "v0.7.3-dev.0", "", "V07_UPGRADE_PREFLIGHT_TARGET_TAG_INVALID");
 });
 
-test("v0.7.2-dev.1 preflight validates the 117 to 135 migration transition and stopped writers", {
+test("v0.7.3-dev.1 preflight validates the 117 to 135 migration transition and stopped writers", {
   skip: !shouldRun ? "disposable PostgreSQL v0.7 upgrade gate is required" : false,
 }, async () => {
   const databaseUrl = validateDisposableDatabaseUrl(configuredUrl as string);
@@ -178,11 +178,11 @@ test("v0.7.2-dev.1 preflight validates the 117 to 135 migration transition and s
       VALUES ($1, $2, repeat('a', 43), repeat('b', 22), 1, 'user', CURRENT_TIMESTAMP)
     `, [ownerId, `v07_upgrade_${ownerId.slice(0, 8)}`]);
 
-    assert.deepEqual(await runV07UpgradePreflight("pre-stop", "v0.7.2-dev.1", databaseUrl), {
+    assert.deepEqual(await runV07UpgradePreflight("pre-stop", "v0.7.3-dev.1", databaseUrl), {
       ok: true,
       kind: "v07-upgrade-preflight",
       phase: "pre-stop",
-      targetTag: "v0.7.2-dev.1",
+      targetTag: "v0.7.3-dev.1",
       migrationCount: sourceMigrationCount,
       writerSessions: "not-checked",
     });
@@ -195,19 +195,19 @@ test("v0.7.2-dev.1 preflight validates the 117 to 135 migration transition and s
     assert.ok(sourceLastChecksum);
 
     await admin.query('UPDATE public."_prisma_migrations" SET "checksum" = $1 WHERE "migration_name" = $2', ["0".repeat(64), sourceLastMigration]);
-    await expectPreflightCode("pre-stop", "v0.7.2-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_LEDGER_INVALID");
+    await expectPreflightCode("pre-stop", "v0.7.3-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_LEDGER_INVALID");
     await admin.query('UPDATE public."_prisma_migrations" SET "checksum" = $1 WHERE "migration_name" = $2', [sourceLastChecksum.checksum, sourceLastMigration]);
 
     await admin.query('UPDATE public."_prisma_migrations" SET "finished_at" = NULL WHERE "migration_name" = $1', [sourceLastMigration]);
-    await expectPreflightCode("pre-stop", "v0.7.2-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_LEDGER_INVALID");
+    await expectPreflightCode("pre-stop", "v0.7.3-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_LEDGER_INVALID");
     await admin.query('UPDATE public."_prisma_migrations" SET "finished_at" = $1 WHERE "migration_name" = $2', [sourceLastChecksum.finished_at, sourceLastMigration]);
 
     await admin.query('UPDATE public."_prisma_migrations" SET "rolled_back_at" = clock_timestamp() WHERE "migration_name" = $1', [sourceLastMigration]);
-    await expectPreflightCode("pre-stop", "v0.7.2-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_LEDGER_INVALID");
+    await expectPreflightCode("pre-stop", "v0.7.3-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_LEDGER_INVALID");
     await admin.query('UPDATE public."_prisma_migrations" SET "rolled_back_at" = NULL WHERE "migration_name" = $1', [sourceLastMigration]);
 
     await admin.query('DELETE FROM public."_prisma_migrations" WHERE "migration_name" = $1', [sourceLastMigration]);
-    await expectPreflightCode("pre-stop", "v0.7.2-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_COUNT_INVALID");
+    await expectPreflightCode("pre-stop", "v0.7.3-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_COUNT_INVALID");
     await admin.query(`
       INSERT INTO public."_prisma_migrations"
         ("id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count")
@@ -228,10 +228,10 @@ test("v0.7.2-dev.1 preflight validates the 117 to 135 migration transition and s
         ("id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count")
       VALUES ($1, $2, NULL, $3, NULL, NULL, CURRENT_TIMESTAMP, 0)
     `, [randomUUID(), "0".repeat(64), "20260924010000_incomplete_extra_gate_row"]);
-    await expectPreflightCode("pre-stop", "v0.7.2-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_COUNT_INVALID");
+    await expectPreflightCode("pre-stop", "v0.7.3-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_DATABASE_MIGRATION_COUNT_INVALID");
     await admin.query('DELETE FROM public."_prisma_migrations" WHERE "migration_name" = $1', ["20260924010000_incomplete_extra_gate_row"]);
 
-    assert.equal((await runV07UpgradePreflight("post-stop", "v0.7.2-dev.1", databaseUrl)).writerSessions, "stopped");
+    assert.equal((await runV07UpgradePreflight("post-stop", "v0.7.3-dev.1", databaseUrl)).writerSessions, "stopped");
     for (const name of writerNames) {
       const password = passwords.get(name);
       assert.ok(password);
@@ -242,7 +242,7 @@ test("v0.7.2-dev.1 preflight validates the 117 to 135 migration transition and s
       });
       await writer.connect();
       connectedWriters.push(writer);
-      await expectPreflightCode("post-stop", "v0.7.2-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_WRITER_SESSIONS_PRESENT");
+      await expectPreflightCode("post-stop", "v0.7.3-dev.1", databaseUrl, "V07_UPGRADE_PREFLIGHT_WRITER_SESSIONS_PRESENT");
       await writer.end();
       connectedWriters.pop();
     }
@@ -275,11 +275,11 @@ test("v0.7.2-dev.1 preflight validates the 117 to 135 migration transition and s
       GRANT EXECUTE ON FUNCTION public."project_git_material_finalize_result"(uuid, character varying, uuid, bigint, character varying, character varying, jsonb) TO "${gitAutomationWorker}";
     `);
 
-    assert.deepEqual(await runV07UpgradePreflight("post-migration", "v0.7.2", databaseUrl), {
+    assert.deepEqual(await runV07UpgradePreflight("post-migration", "v0.7.3", databaseUrl), {
       ok: true,
       kind: "v07-upgrade-preflight",
       phase: "post-migration",
-      targetTag: "v0.7.2",
+      targetTag: "v0.7.3",
       migrationCount: targetMigrationCount,
       writerSessions: "not-checked",
     });

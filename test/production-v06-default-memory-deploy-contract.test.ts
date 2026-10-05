@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -59,7 +59,7 @@ test(".10 to .11 migration route is exact, backup-first, and isolated", async ()
 });
 
 test("the previous .10 tooling updater accepts retained gateway and sudoers contracts before the second bootstrap", async () => {
-  const oldUpdater = execFileSync("git", ["show", "v0.6.0-dev.10:deploy/production/ai-project-os-install-release-tooling"], { encoding: "utf8" });
+  const oldUpdater = await readFile(path.join(root, "test/fixtures/release-tooling/v060dev10-release-tooling-installer.txt"), "utf8");
   const [newUpdater, gateway, sudoers, workflow] = await Promise.all([
     readFile(path.join(root, "deploy/production/ai-project-os-install-release-tooling"), "utf8"),
     readFile(gatewayPath, "utf8"),

@@ -54,12 +54,11 @@ test("forced-command gateway exposes only the exact release-tooling grammar", as
   }
 });
 
-test("deployed v0.7.1 gateway cannot bootstrap the v0.7.3 release", () => {
-  const oldGateway = spawnSync("git", ["show", "refs/tags/v0.7.1:deploy/production/ai-project-os-actions-gateway"], { encoding: "utf8" });
-  assert.equal(oldGateway.status, 0, oldGateway.stderr);
+test("deployed v0.7.1 gateway cannot bootstrap the v0.7.3 release", async () => {
+  const oldGateway = await readFile(path.join(repositoryRoot, "test/fixtures/release-tooling/v071-actions-gateway.txt"), "utf8");
   const denied = spawnSync("bash", ["-s"], {
     encoding: "utf8",
-    input: oldGateway.stdout,
+    input: oldGateway,
     env: {
       ...process.env,
       SSH_ORIGINAL_COMMAND: `install-release-tooling v0.7.3 ${"a".repeat(40)} CONFIRM_INSTALL_RELEASE_TOOLING_V1`,

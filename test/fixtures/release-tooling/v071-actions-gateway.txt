@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+original_command=${SSH_ORIGINAL_COMMAND-}
+
+# The first 0.7 tooling install is performed by trusted host operations from
+# the verified 0.7 tag. The workflow requires this exact new gateway before
+# it can ask the root-owned updater to refresh 0.7 tooling.
+if [[ "$original_command" == tooling-v07-status ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-install-release-tooling --status
+fi
+
+# New tooling refreshes accept only the 0.7 release line. Historical 0.6
+# deploy commands remain available solely for source-version compatibility.
+if [[ "$original_command" =~ ^install-release-tooling\ (v0\.7\.1)\ ([0-9a-f]{40})\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-install-release-tooling \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+fi
+
+if [[ "$original_command" =~ ^deploy-v07\ (v0\.6\.0-dev\.[1-9][0-9]+)\ (v0\.7\.1)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V07_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v07-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
+# The 0.6 migration route fixes both source and target release families. The
+# root deployer verifies the running source, stopped-writer backup, and ledger.
+if [[ "$original_command" =~ ^deploy-v06\ (v0\.5\.0-dev\.(1|4))\ (v0\.6\.0-dev\.6)\ ([0-9a-f]{40})\ (CONFIRM_V06_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v06-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
+# The .6 to .7 path is an application-only patch. It has its own exact
+# grammar so the historical .5 to .6 migration route remains unchanged.
+if [[ "$original_command" =~ ^deploy-v06-patch\ (v0\.6\.0-dev\.6)\ (v0\.6\.0-dev\.7)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V06_PATCH_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v06-patch-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
+# Subsequent 0.6 application releases keep the current database unchanged.
+if [[ "$original_command" =~ ^deploy-app\ (v0\.6\.0-dev\.[1-9][0-9]*)\ (v0\.6\.0-dev\.[1-9][0-9]*)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_APP_NO_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-app-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
+# The .7 to .8 path applies the reviewed 107 to 116 migration set.
+if [[ "$original_command" =~ ^deploy-v06-next\ (v0\.6\.0-dev\.7)\ (v0\.6\.0-dev\.8)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V06_NEXT_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v06-next-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
+# The .10 to .11 route applies the reviewed 116 to 117 migration set.
+if [[ "$original_command" =~ ^deploy-v06-default-memory\ (v0\.6\.0-dev\.10)\ (v0\.6\.0-dev\.11)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V06_DEFAULT_MEMORY_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v06-default-memory-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
+if [[ "$original_command" =~ ^preserve-deploy\ (v0\.5\.0-dev\.1)\ (v0\.5\.0-dev\.4)\ ([0-9a-f]{40})\ (CONFIRM_PRESERVE_DATA_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-preserve-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+fi
+
+if [[ "$original_command" == configure-github-oauth ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-configure-github-oauth
+fi
+
+printf 'AI_PROJECT_OS_DEPLOY_COMMAND_DENIED\n' >&2
+exit 64

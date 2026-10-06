@@ -1,2 +1,2 @@
 /** Public build identity returned by health and integration clients. */
-export const APP_VERSION = "0.7.6" as const;
+export const APP_VERSION = "0.7.7" as const;

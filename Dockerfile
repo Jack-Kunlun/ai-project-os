@@ -1,7 +1,7 @@
 FROM node:24.19.0-bookworm-slim AS base
 
 LABEL org.opencontainers.image.title="AI Project OS" \
-      org.opencontainers.image.version="0.7.6"
+      org.opencontainers.image.version="0.7.7"
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"

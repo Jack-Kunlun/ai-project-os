@@ -21,7 +21,7 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(form, /BrandMark/u);
   assert.match(await readFile("src/components/brand-mark.tsx", "utf8"), /ai-project-os-admin-crisp\.png/u);
   assert.doesNotMatch(form, />OS<\/span>/u);
-  assert.match(form, /记住我/u);
+  assert.doesNotMatch(form, /记住我/u);
   assert.match(form, /href="\/register"[\s\S]*创建账号/u);
   assert.match(form, /忘记密码/u);
   assert.match(form, /使用 GitHub 登录/u);
@@ -68,8 +68,8 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(registerPage, /isLocalRegistrationEnabled/u);
   assert.match(registerForm, /localRegistrationEnabled \?/u);
   assert.match(registerForm, /本地用户名和密码注册暂未开放/u);
-  assert.match(registerForm, /使用 GitHub 注册或登录/u);
-  assert.match(registerForm, /首次 GitHub 登录会创建普通用户账号/u);
+  assert.doesNotMatch(registerForm, /使用 GitHub 注册或登录/u);
+  assert.doesNotMatch(registerForm, /或使用 GitHub/u);
   assert.match(registerForm, /不收集邮箱/u);
   assert.match(registerForm, /邮件找回密码/u);
   assert.doesNotMatch(registerForm, /id="register-email"/u);

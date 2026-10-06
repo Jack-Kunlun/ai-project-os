@@ -57,9 +57,18 @@ def source_docker(*args):
 m.docker=source_docker
 m.restart_source([{'Id':app},{'Id':migrate}])
 assert calls[-1]==('start',migrate)
+calls=[]
+m.require_ci=lambda revision: calls.append(revision)
+assert m.release_acceptance(sha,'CONFIRM_V074_WITHOUT_BACKUP')=='full_main_and_tag_ci'
+assert calls==[sha]
+calls.clear()
+assert m.release_acceptance(sha,'CONFIRM_V074_FAST_WITHOUT_BACKUP_OR_LEGACY_ACCEPTANCE')=='waived_by_user_pre_1_0'
+assert calls==[]
+try: m.release_acceptance(sha,'FAST'); raise AssertionError('implicit waiver accepted')
+except RuntimeError as e: assert str(e)=='V074_ARGUMENTS_INVALID'
 print('V074_OFFLINE_BEHAVIOR_OK')
 `], { encoding: "utf8" });
-  assert.equal(result.trim(), "V074_OFFLINE_BEHAVIOR_OK");
+  assert.equal(result.trim(), "V074_RELEASE_ACCEPTANCE_WAIVED_BY_USER_PRE_1_0\nV074_OFFLINE_BEHAVIOR_OK");
 });
 
 test("v0.7.4 cutover keeps old source identity, stop and mutation boundaries", () => {

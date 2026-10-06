@@ -100,6 +100,19 @@ def require_ci(revision):
         require(accepted, 'FULL_DATABASE_CI_REQUIRED')
 
 
+def release_acceptance(revision, confirmation):
+    require(confirmation in ('CONFIRM_V074_WITHOUT_BACKUP',
+                             'CONFIRM_V074_FAST_WITHOUT_BACKUP_OR_LEGACY_ACCEPTANCE'), 'ARGUMENTS_INVALID')
+    if confirmation == 'CONFIRM_V074_WITHOUT_BACKUP':
+        require_ci(revision)
+        return 'full_main_and_tag_ci'
+    # Explicit pre-1.0 operator decision: reuse completed feature/security checks.
+    # Exact annotated tag, source identity, migration ledger, stop boundaries and
+    # target health remain mandatory in main, regardless of this CI waiver.
+    print('V074_RELEASE_ACCEPTANCE_WAIVED_BY_USER_PRE_1_0', flush=True)
+    return 'waived_by_user_pre_1_0'
+
+
 def env_values():
     trusted(ENV, 0o600)
     values = {}
@@ -252,7 +265,8 @@ def atomic_write(path, data, mode):
 def main(args):
     require(os.geteuid() == 0, 'ROOT_REQUIRED')
     require(len(args) == 2 and re.fullmatch(r'[a-f0-9]{40}', args[0])
-            and args[1] == 'CONFIRM_V074_WITHOUT_BACKUP', 'ARGUMENTS_INVALID')
+            and args[1] in ('CONFIRM_V074_WITHOUT_BACKUP',
+                           'CONFIRM_V074_FAST_WITHOUT_BACKUP_OR_LEGACY_ACCEPTANCE'), 'ARGUMENTS_INVALID')
     revision = args[0]
     signal.signal(signal.SIGTERM, interrupted)
     os.umask(0o077)
@@ -279,7 +293,7 @@ def main(args):
     require(not run(['git', '-C', str(ROOT), 'status', '--porcelain']), 'MANAGED_CHECKOUT_DIRTY')
     values = env_values()
     postgres_id, old_writers = source_state()
-    require_ci(revision)
+    ci_acceptance = release_acceptance(revision, args[1])
     run(['git', '-C', str(ROOT), 'fetch', '--no-tags', 'origin', 'refs/tags/' + TAG + ':refs/tags/' + TAG])
     require(run(['git', '-C', str(ROOT), 'cat-file', '-t', 'refs/tags/' + TAG]) == 'tag', 'TAG_NOT_ANNOTATED')
     require(run(['git', '-C', str(ROOT), 'rev-parse', 'refs/tags/' + TAG + '^{}']) == revision, 'TAG_REVISION_MISMATCH')
@@ -320,7 +334,7 @@ def main(args):
         health = wait_health(); writers_healthy = True
         healthy('0.7.4', public=True)
         record = ('DEPLOY_OK\ntag=' + TAG + '\nsource_tag=v0.7.3\nsource_revision=' + SOURCE_REVISION
-                  + '\nrevision=' + revision + '\nmigration_count=140\nbackup=waived_by_user\nhealth='
+                  + '\nrevision=' + revision + '\nmigration_count=140\nbackup=waived_by_user\nci_acceptance=' + ci_acceptance + '\nhealth='
                   + json.dumps(health, separators=(',', ':')) + '\ncompleted_at='
                   + time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()) + '\n')
         atomic_write(RESULT, record.encode(), 0o600)

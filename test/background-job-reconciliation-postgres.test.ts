@@ -291,6 +291,12 @@ export default defineConfig({
       );
       await stageMigrations(tempRoot, postMemorySchemaMigrationNames);
       await deployStagedMigrations(tempRoot, url);
+      // Retain the historical upgrade ledger while making current authorization
+      // predicates explicit for these active, pre-account-closure workspaces.
+      await raw.query('ALTER TABLE "Workspace" ADD COLUMN "closedAt" TIMESTAMP(3)');
+      assert.equal((await raw.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM "Workspace" WHERE "closedAt" IS NOT NULL',
+      )).rows[0]?.count, "0");
 
       db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       const historicalProvider = await db.aiProviderConnection.findUniqueOrThrow({

@@ -46,7 +46,7 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "MembershipSubscription", "MembershipMutationPreview", "MembershipSubscriptionAudit", "PlatformTokenGrant", "PlatformTokenGrantLegacyNullIssuerSnapshot",
   "MembershipApplication", "MembershipApplicationPreview", "MembershipApplicationAudit",
   "PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenLedgerEntry",
-  "PlatformTokenGrantMutationPreview", "PlatformTokenGrantAudit", "AppSession", "LocalRegistrationBudget", "McpExportGrant", "McpExportApproval", "McpExportDispatchAudit", "McpExportOAuthAuthorizationRequest", "McpExportOAuthCode", "McpExportOAuthAccessToken", "McpExportOAuthAdmissionBudget", "Workspace", "WorkspaceMembership",
+  "PlatformTokenGrantMutationPreview", "PlatformTokenGrantAudit", "AppSession", "LocalRegistrationBudget", "SmsAuthChallenge", "SmsProviderConfig", "SmsProviderProbe", "SmsProviderConfigAudit", "AccountClosureReceipt", "AccountClosureBudget", "PhoneAuthBudget", "GraphicCaptchaChallenge", "GraphicCaptchaBudget", "McpExportGrant", "McpExportApproval", "McpExportDispatchAudit", "McpExportOAuthAuthorizationRequest", "McpExportOAuthCode", "McpExportOAuthAccessToken", "McpExportOAuthAdmissionBudget", "Workspace", "WorkspaceMembership",
   "WorkspaceRoleMutationPreview", "WorkspaceRoleMutationAudit",
   "ProjectMembership", "MembershipAccessAudit", "MembershipGovernanceExecution", "MembershipGovernanceApproval",
   "WorkspaceInvitation", "WorkspaceInvitationAudit", "OidcProvider", "OidcIdentity", "OidcLoginAttempt",
@@ -86,6 +86,8 @@ export const ENTITLEMENT_PROTECTED_RELATIONS = Object.freeze([
   "PlatformTokenGrantMutationPreview",
   "PlatformTokenGrantAudit",
   "LocalRegistrationBudget",
+  "SmsAuthChallenge", "SmsProviderConfig", "SmsProviderProbe", "SmsProviderConfigAudit", "AccountClosureReceipt", "AccountClosureBudget",
+  "PhoneAuthBudget", "GraphicCaptchaChallenge", "GraphicCaptchaBudget",
 ] as const);
 
 // Review decisions are written through the dedicated entitlement-writer
@@ -313,6 +315,16 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
  * EXECUTE privilege for PUBLIC, runtime, or entitlement-writer roles.
  */
 export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
+  triggerFunction("app_user_phone_auth_guard", "", "verified phone claims and closure release"),
+  triggerFunction("sms_auth_expected_code_guard", "", "Immutable expected SMS code and verification match"),
+  triggerFunction("sms_provider_config_version_guard", "", "SMS provider version compare-and-swap"),
+  triggerFunction("sms_provider_probe_lifecycle_guard", "", "SMS provider real probe lifecycle"),
+  triggerFunction("sms_provider_config_audit_insert_guard", "", "SMS provider audit matches active configuration"),
+  triggerFunction("sms_provider_config_audit_immutable_guard", "", "SMS provider immutable configuration audit"),
+  triggerFunction("account_closure_final_state_guard", "", "closure final state completeness"),
+  triggerFunction("account_closure_receipt_guard", "", "irreversible self-service closure evidence"),
+  triggerFunction("workspace_account_closure_guard", "", "exclusive personal workspace closure"),
+  triggerFunction("closed_workspace_write_guard", "", "closed workspace access exclusion"),
   triggerFunction("notification_subject_context_guard", "", "notification subject and intent immutability trigger"),
   triggerFunction("git_connection_governance_security_guard", "", "Git connection security-field governance trigger"),
   triggerFunction("git_connection_configuration_version_guard", "", "Git connection configuration-version trigger"),

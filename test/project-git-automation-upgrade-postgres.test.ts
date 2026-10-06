@@ -70,7 +70,7 @@ async function createActiveGrant(db: PrismaClient, admin: Client): Promise<Reado
   const connectionOwnerActor = { id: connectionOwnerId, role: "user" as const, accountAccessVersion: 1 };
   const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
 
-  await db.appUser.create({ data: { id: connectionOwnerId, username: `automation_upgrade_owner_${suffix}`, role: "user" } });
+  await db.appUser.create({ select: { id: true }, data: { id: connectionOwnerId, username: `automation_upgrade_owner_${suffix}`, role: "user" } });
   await db.project.create({
     data: { id: projectId, workspaceId, name: `Automation upgrade ${suffix}`, slug: `automation-upgrade-${suffix}` },
   });

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { LogoutButton } from "@/app/logout-button";
+import { AccountClosurePanel } from "@/components/account-closure-panel";
 import { AppHeader } from "@/components/app-header";
 
 type Profile = {
@@ -14,6 +15,8 @@ type Profile = {
   emailVerifiedAt: string | null;
   role: "admin" | "user";
   hasLocalPassword: boolean;
+  phoneE164: string | null;
+  phoneAuthStatus: "disabled" | "unavailable" | "available";
   workspaceMemberships: Array<{ role: "owner" | "admin" | "member" | "viewer"; workspace: { id: string; name: string } }>;
   oidcIdentities: Array<{ email: string | null; lastLoginAt: string; provider: { id: string; name: string } }>;
   oidcLinkableProviders: Array<{ id: string; name: string; workspace: { id: string; name: string } }>;
@@ -173,6 +176,7 @@ export function ProfileClient({
           <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); }} />
           <PasswordForm hasLocalPassword={profile?.hasLocalPassword ?? true} />
         </section>
+        {profile ? <AccountClosurePanel hasLocalPassword={profile.hasLocalPassword} phoneE164={profile.phoneE164} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
 
       </div>
     </main>

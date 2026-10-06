@@ -4099,6 +4099,14 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       ...candidateMatrixPostWorkspaceRbacMigrationNames,
     ]);
     await migrations.deploy();
+    // This historical AI/RBAC fixture predates account closure, but invokes
+    // the current authorization service below. Represent an active workspace
+    // with the current nullable predicate column without applying newer
+    // account lifecycle migrations or changing the historical ledger.
+    await safeQuery(client, 'ALTER TABLE "Workspace" ADD COLUMN "closedAt" TIMESTAMP(3)');
+    assert.equal((await safeQuery<{ count: string }>(client,
+      'SELECT count(*)::text AS count FROM "Workspace" WHERE "closedAt" IS NOT NULL',
+    )).rows[0]?.count, "0");
 
     // The governance migration quarantines the RBAC backfill as pending. Move
     // only the memberships needed by candidate review to confirmed with the

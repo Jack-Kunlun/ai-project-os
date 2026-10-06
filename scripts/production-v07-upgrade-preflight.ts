@@ -98,13 +98,13 @@ async function expectedMigrations(includeTarget: boolean): Promise<readonly Expe
   const candidates = entries.filter((entry) => entry.isDirectory() && /^\d{14}_/u.test(entry.name));
   const names = candidates.map((entry) => entry.name).sort();
   if (names.some((name) => !/^\d{14}_[a-z0-9_]+$/u.test(name))
-    || names.length !== TARGET_MIGRATION_COUNT
+    || names.length < TARGET_MIGRATION_COUNT
     || names[SOURCE_MIGRATION_COUNT - 1] !== SOURCE_LAST_MIGRATION
-    || names.at(-1) !== TARGET_LAST_MIGRATION) {
+    || names[TARGET_MIGRATION_COUNT - 1] !== TARGET_LAST_MIGRATION) {
     throw new Error("V07_UPGRADE_PREFLIGHT_RELEASE_MIGRATION_MANIFEST_INVALID");
   }
 
-  const selected = includeTarget ? names : names.slice(0, SOURCE_MIGRATION_COUNT);
+  const selected = includeTarget ? names.slice(0, TARGET_MIGRATION_COUNT) : names.slice(0, SOURCE_MIGRATION_COUNT);
   if (selected.length !== (includeTarget ? TARGET_MIGRATION_COUNT : SOURCE_MIGRATION_COUNT)) {
     throw new Error("V07_UPGRADE_PREFLIGHT_RELEASE_MIGRATION_MANIFEST_INVALID");
   }

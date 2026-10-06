@@ -15,7 +15,10 @@ export async function createPostgresWorkspaceFixture(
   const workspaceId = randomUUID();
 
   await db.$transaction(async (tx) => {
+    // Historical upgrade gates may predate later nullable account columns.
+    // Only return the existing identity needed to seed this fixture.
     await tx.appUser.create({
+      select: { id: true },
       data: {
         id: ownerId,
         username: `postgres_gate_workspace_owner_${suffix}`,
@@ -25,6 +28,7 @@ export async function createPostgresWorkspaceFixture(
       },
     });
     await tx.workspace.create({
+      select: { id: true },
       data: {
         id: workspaceId,
         name: `Postgres gate workspace ${suffix}`,

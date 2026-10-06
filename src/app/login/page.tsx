@@ -1,3 +1,5 @@
+import { isLocalRegistrationEnabled } from "@/lib/local-registration-config";
+import { getPhoneAuthStatus } from "@/lib/phone-auth-config";
 import { redirect } from "next/navigation";
 import { getPageSession, isApplicationInitialized } from "@/lib/auth";
 import { LoginForm } from "./login-form";
@@ -24,22 +26,24 @@ const githubFailureMessages: Record<string, string> = {
   GITHUB_OAUTH_CONFIG_INVALID: "GitHub 登录配置无效，请联系工作区管理员。",
 };
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ password?: string; oidc?: string; github?: string; returnTo?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ password?: string; account?: string; oidc?: string; github?: string; returnTo?: string }> }) {
   if (!(await isApplicationInitialized())) redirect("/setup");
   const existingSession = await getPageSession();
   if (existingSession !== null) {
     redirect(existingSession.role === "admin" ? "/admin" : "/dashboard");
   }
   const params = await searchParams;
-  const notice = params.password === "updated"
+  const notice = params.account === "closed"
+    ? "账号已注销。你可以使用该手机号重新注册，新账号不会关联旧工作区。"
+    : params.password === "updated"
     ? "密码已更新，请使用新密码重新登录。"
     : params.github
       ? githubFailureMessages[params.github] ?? "GitHub 登录未完成，请重试或联系工作区管理员。"
       : params.oidc
         ? "企业身份登录未完成，请重试或联系工作区管理员。"
         : undefined;
-  const noticeTone = params.password === "updated" ? "success" as const : notice ? "error" as const : undefined;
+  const noticeTone = (params.password === "updated" || params.account === "closed") ? "success" as const : notice ? "error" as const : undefined;
   const returnTo = canonicalInternalReturnPath(params.returnTo);
   const githubAvailability = await getGitHubOAuthAvailability();
-  return <LoginForm notice={notice} noticeTone={noticeTone} oidcProviders={await listPublicOidcProviders()} returnTo={returnTo} githubLoginAvailable={githubAvailability.status === "available"} githubAvailability={githubAvailability.status} />;
+  return <LoginForm phoneAuthStatus={await getPhoneAuthStatus()} phoneAutoRegistrationEnabled={isLocalRegistrationEnabled()} notice={notice} noticeTone={noticeTone} oidcProviders={await listPublicOidcProviders()} returnTo={returnTo} githubLoginAvailable={githubAvailability.status === "available"} githubAvailability={githubAvailability.status} />;
 }

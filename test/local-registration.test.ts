@@ -21,6 +21,13 @@ test("local registration rejects usernames outside the documented ASCII policy",
   }
 });
 
+test("unverified phone-shaped usernames fail with a stable input error before costly work", async () => {
+  let admitted = false;
+  await assert.rejects(registerLocalAccount({ username: "13800000999", password: "StrongPassword_2026" }, async () => { admitted = true; }, {} as never),
+    (error: unknown) => error instanceof ApiError && error.code === "LOCAL_REGISTRATION_INVALID_INPUT");
+  assert.equal(admitted, false);
+});
+
 test("registration abuse budget fingerprints normalized usernames without storing them", () => {
   const first = localRegistrationUsernameFingerprint("alice_123");
   assert.match(first, /^[a-f0-9]{64}$/u);

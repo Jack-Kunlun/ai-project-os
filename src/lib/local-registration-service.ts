@@ -15,6 +15,12 @@ export function normalizeLocalRegistrationUsername(value: unknown): string {
   return value.toLowerCase();
 }
 
+function requirePhoneUsernameMatches(username: string, phoneE164?: string): void {
+  if (/^1[3-9][0-9]{9}$/u.test(username) && phoneE164 !== `+86${username}`) {
+    throw new ApiError(400, "LOCAL_REGISTRATION_INVALID_INPUT", "手机号需验证后才能作为用户名，请使用其他用户名或完成手机号验证");
+  }
+}
+
 export type LocalRegistrationAdmission = (normalizedUsername: string, db: PrismaClient) => Promise<void>;
 
 function isUsernameUniqueConflict(error: Prisma.PrismaClientKnownRequestError): boolean {
@@ -36,6 +42,7 @@ export async function registerLocalAccount(
   now = new Date(),
 ): Promise<CreatedSession> {
   const username = normalizeLocalRegistrationUsername(input.username);
+  requirePhoneUsernameMatches(username);
   validateAccountPassword(input.password);
   await admission(username, db);
   const password = await createPasswordRecord(input.password);
@@ -49,45 +56,7 @@ export async function registerLocalAccount(
           throw new ApiError(409, "LOCAL_REGISTRATION_NOT_INITIALIZED", "平台管理员尚未完成初始化");
         }
 
-        const existing = await tx.appUser.findFirst({
-          where: { username: { equals: username, mode: "insensitive" } },
-          select: { id: true },
-        });
-        if (existing !== null) {
-          throw new ApiError(409, "LOCAL_REGISTRATION_USERNAME_TAKEN", "该用户名已被使用");
-        }
-
-        const user = await tx.appUser.create({
-          data: {
-            username,
-            role: "user",
-            email: null,
-            emailVerifiedAt: null,
-            ...password,
-          },
-        });
-        await lockActorAccess(tx, user.id);
-
-        const workspaceId = randomUUID();
-        await lockWorkspaceAccess(tx, workspaceId);
-        const workspace = await tx.workspace.create({
-          data: {
-            id: workspaceId,
-            name: `${username} 的工作区`,
-            slug: `user-${user.id}`,
-            createdById: user.id,
-          },
-          select: { id: true },
-        });
-        await grantWorkspaceMembership(tx, {
-          workspaceId: workspace.id,
-          userId: user.id,
-          role: "owner",
-          actorId: user.id,
-          reason: "local_registration_personal_workspace_created",
-        });
-
-        return createSessionInTransaction(tx, user, now);
+        return createOrdinaryAccountInTransaction(tx, { username, password }, now);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034" && attempt < 2) continue;
@@ -97,4 +66,54 @@ export async function registerLocalAccount(
       throw error;
     }
   }
+}
+
+export async function createOrdinaryAccountInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { id?: string; username: string; password?: Awaited<ReturnType<typeof createPasswordRecord>>; phoneE164?: string },
+  now: Date,
+): Promise<CreatedSession> {
+  const username = input.username;
+  requirePhoneUsernameMatches(username, input.phoneE164);
+  const existing = await tx.appUser.findFirst({
+    where: { username: { equals: username, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (existing !== null) {
+    throw new ApiError(409, "LOCAL_REGISTRATION_USERNAME_TAKEN", "该用户名已被使用");
+  }
+
+  const user = await tx.appUser.create({
+    data: {
+      id: input.id,
+      username,
+      role: "user",
+      email: null,
+      emailVerifiedAt: null,
+      ...input.password,
+      ...(input.phoneE164 ? { phoneE164: input.phoneE164, phoneVerifiedAt: now } : {}),
+    },
+  });
+  await lockActorAccess(tx, user.id);
+
+  const workspaceId = randomUUID();
+  await lockWorkspaceAccess(tx, workspaceId);
+  const workspace = await tx.workspace.create({
+    data: {
+      id: workspaceId,
+      name: `${username} 的工作区`,
+      slug: `user-${user.id}`,
+      createdById: user.id,
+    },
+    select: { id: true },
+  });
+  await grantWorkspaceMembership(tx, {
+    workspaceId: workspace.id,
+    userId: user.id,
+    role: "owner",
+    actorId: user.id,
+    reason: "local_registration_personal_workspace_created",
+  });
+
+  return createSessionInTransaction(tx, user, now);
 }

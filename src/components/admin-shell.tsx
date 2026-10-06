@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
  * outside the /admin layout. The shared /admin layout renders the five
  * product-level sections below.
  */
-export type AdminSection = "overview" | "models" | "modelRoutes" | "credits" | "probes" | "git" | "mcp" | "users" | "memberships" | "accountAccess" | "audit" | "operations" | "failures" | "guide" | "account";
+export type AdminSection = "overview" | "models" | "modelRoutes" | "credits" | "probes" | "sms" | "git" | "mcp" | "users" | "memberships" | "accountAccess" | "audit" | "operations" | "failures" | "guide" | "account";
 
 type PrimarySection = "overview" | "users" | "configuration" | "security" | "operations";
 
@@ -42,9 +42,10 @@ const moduleGroups: ReadonlyArray<Readonly<{
   {
     key: "configuration",
     label: "配置中心",
-    matches: (pathname) => pathname.startsWith("/admin/models") || pathname === "/admin/operations/probes",
+    matches: (pathname) => pathname.startsWith("/admin/models") || pathname.startsWith("/admin/sms") || pathname === "/admin/operations/probes",
     links: [
       { label: "能力配置", href: "/admin/models", exact: true },
+      { label: "短信服务", href: "/admin/sms", exact: true },
       { label: "探测预算", href: "/admin/operations/probes", exact: true },
     ],
   },
@@ -245,12 +246,12 @@ export function AdminAppShell({ children }: { children: ReactNode }) {
 /** Compatibility frame for non-/admin pages and legacy callers. */
 export function AdminPageFrame({ active, children, showSidebar = true }: { active: AdminSection; children: ReactNode; showSidebar?: boolean }) {
   if (!showSidebar) return <>{children}</>;
-  const primary: PrimarySection = active === "overview" ? "overview" : active === "users" || active === "memberships" || active === "credits" || active === "accountAccess" ? "users" : active === "models" || active === "modelRoutes" || active === "probes" ? "configuration" : active === "mcp" || active === "audit" ? "security" : "operations";
+  const primary: PrimarySection = active === "overview" ? "overview" : active === "users" || active === "memberships" || active === "credits" || active === "accountAccess" ? "users" : active === "models" || active === "modelRoutes" || active === "probes" || active === "sms" ? "configuration" : active === "mcp" || active === "audit" ? "security" : "operations";
   return <div className="w-full px-4 pb-12 pt-4 sm:px-5 lg:px-6"><div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start lg:gap-5"><aside className="sticky top-4 hidden rounded-2xl border border-indigo-100 bg-white/95 p-3 shadow-sm backdrop-blur lg:block"><NavigationLinks key={primary} active={primary} /></aside><div className="min-w-0">{children}</div></div></div>;
 }
 
 /** Compatibility export for callers that only need the sidebar. */
 export function AdminShell({ active }: { active: AdminSection }) {
-  const primary: PrimarySection = active === "overview" ? "overview" : active === "users" || active === "memberships" || active === "credits" || active === "accountAccess" ? "users" : active === "models" || active === "modelRoutes" || active === "probes" ? "configuration" : active === "mcp" || active === "audit" ? "security" : "operations";
+  const primary: PrimarySection = active === "overview" ? "overview" : active === "users" || active === "memberships" || active === "credits" || active === "accountAccess" ? "users" : active === "models" || active === "modelRoutes" || active === "probes" || active === "sms" ? "configuration" : active === "mcp" || active === "audit" ? "security" : "operations";
   return <NavigationLinks key={primary} active={primary} />;
 }

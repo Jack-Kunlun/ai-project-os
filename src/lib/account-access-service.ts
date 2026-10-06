@@ -189,6 +189,7 @@ type AccountTarget = Readonly<{
   displayName: string | null;
   role: AppUser["role"];
   disabledAt: Date | null;
+  closedAt?: Date | null;
   disabledReason: string | null;
   disabledById: string | null;
   accountAccessVersion: number;
@@ -200,6 +201,7 @@ const targetSelect = {
   displayName: true,
   role: true,
   disabledAt: true,
+  closedAt: true,
   disabledReason: true,
   disabledById: true,
   accountAccessVersion: true,
@@ -421,6 +423,7 @@ async function previewInTransaction(
   if (adminId === targetId) return fail("ACCOUNT_ACCESS_SELF_FORBIDDEN");
   const target = await loadTarget(tx, targetId);
   if (target === null) return fail("ACCOUNT_ACCESS_USER_NOT_FOUND");
+  if (target.closedAt) return fail("ACCOUNT_ACCESS_ACTION_CONFLICT");
   const state = targetState(target);
   assertActionAllowed(nextAction, state);
   const currentVersion = positiveVersion(target.accountAccessVersion)!;
@@ -623,6 +626,7 @@ async function executeInTransaction(
   ) return fail("ACCOUNT_ACCESS_PREVIEW_STALE");
   if (preview.consumedAt !== null) return fail("ACCOUNT_ACCESS_PREVIEW_STALE");
   assertPreviewEvidence({ issuedAt: preview.issuedAt, expiresAt: preview.expiresAt, now });
+  if (target.closedAt) return fail("ACCOUNT_ACCESS_ACTION_CONFLICT");
   const state = targetState(target);
   assertActionAllowed(nextAction, state);
   const currentSessionCount = await activeSessionCount(tx, targetId);

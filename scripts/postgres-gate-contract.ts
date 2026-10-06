@@ -100,6 +100,20 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "v07-upgrade", file: "test/production-v07-upgrade-postgres.test.ts", database: "ai_project_os_production_v07_upgrade_test", gateEnv: "PRODUCTION_V07_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V07_UPGRADE_TEST_DATABASE_URL", setup: "self" },
 ]);
 
+/** Gate suites with a dedicated cluster/role lifecycle stay out of the generic runner. */
+export const SPECIALIZED_POSTGRES_GATE_RUNNERS = Object.freeze([
+  Object.freeze({
+    runner: "scripts/run-phone-auth-postgres.ts",
+    files: Object.freeze([
+      "test/phone-auth-postgres.test.ts",
+      "test/sms-provider-admin-postgres.test.ts",
+      "test/sms-provider-adapters-postgres.test.ts",
+      "test/account-closure-postgres.test.ts",
+      "test/graphic-captcha-postgres.test.ts",
+    ] as const),
+  }),
+] as const);
+
 export const POSTGRES_GATE_TEST_USER = "ai_project_os_gate";
 
 function invalidAdminUrl(): never {

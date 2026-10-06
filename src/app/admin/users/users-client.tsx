@@ -10,7 +10,7 @@ type Summary = Readonly<{
     username: string;
     displayName: string | null;
     state: "enabled" | "disabled";
-    disabledAt: string | null;
+    closedAt: string | null; disabledAt: string | null;
     accountAccessVersion: number;
   }>;
   membership: Readonly<{
@@ -133,7 +133,7 @@ export function AdminUsersClient({ username }: { username: string }) {
                     </div>
                   </td>
                   <td className="px-5 py-4 align-middle">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-semibold ${item.user.state === "enabled" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{item.user.state === "enabled" ? "已启用" : "已停用"}</span>
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-semibold ${item.user.state === "enabled" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{item.user.closedAt ? "已注销" : item.user.state === "enabled" ? "已启用" : "已停用"}</span>
                     {item.user.state === "disabled" ? <p className="mt-1 text-xs text-slate-400">停用于 {date(item.user.disabledAt)}</p> : null}
                   </td>
                   <td className="px-5 py-4 align-middle text-xs text-slate-600"><span className="font-semibold text-slate-800">{membershipLabels[item.membership.state]}</span>{item.membership.expiresAt ? <span className="ml-2 text-slate-500">至 {date(item.membership.expiresAt)}</span> : null}</td>

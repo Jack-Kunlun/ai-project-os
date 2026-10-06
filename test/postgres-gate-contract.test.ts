@@ -6,6 +6,7 @@ import {
   buildPostgresGateDatabaseUrl,
   POSTGRES_GATES,
   selectPostgresGates,
+  SPECIALIZED_POSTGRES_GATE_RUNNERS,
   validatePostgresGateAdminUrl,
 } from "../scripts/postgres-gate-contract";
 
@@ -13,6 +14,10 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
   // v0.3 -> v0.4 upgrade preflight remains an explicit historical test, but
   // v0.5 production uses a clean reset and must not run that old upgrade gate.
   const historicalOnly = new Set(["test/production-upgrade-preflight-postgres.test.ts"]);
+  const specializedFiles = SPECIALIZED_POSTGRES_GATE_RUNNERS.flatMap((entry) => [...entry.files]);
+  const specializedFileSet = new Set<string>(specializedFiles);
+  assert.equal(specializedFileSet.size, specializedFiles.length, "specialized gate files must be listed once");
+  assert.ok(specializedFiles.every((file) => !POSTGRES_GATES.some((gate) => gate.file === file)));
   const testRoot = join(process.cwd(), "test");
   const files = (await readdir(testRoot))
     .filter((file) => file.endsWith("-postgres.test.ts"));
@@ -24,9 +29,16 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
 
   assert.deepEqual(
     POSTGRES_GATES.map((gate) => gate.file).sort(),
-    gatedFiles.filter((file) => !historicalOnly.has(file)).sort(),
+    gatedFiles.filter((file) => !historicalOnly.has(file) && !specializedFileSet.has(file)).sort(),
   );
   assert.deepEqual(gatedFiles.filter((file) => historicalOnly.has(file)), [...historicalOnly]);
+  assert.deepEqual(gatedFiles.filter((file) => specializedFileSet.has(file)).sort(), [...specializedFileSet].sort());
+  for (const specialized of SPECIALIZED_POSTGRES_GATE_RUNNERS) {
+    const runner = await readFile(specialized.runner, "utf8");
+    const filesBlock = runner.match(/const files\s*=\s*\[([\s\S]*?)\];/u)?.[1] ?? "";
+    const runnerFiles = [...filesBlock.matchAll(/"(test\/[^"]+\.test\.ts)"/gu)].map((match) => match[1]);
+    assert.deepEqual(runnerFiles.sort(), [...specialized.files].sort(), `${specialized.runner} must execute its manifest exactly once`);
+  }
   assert.equal(new Set(POSTGRES_GATES.map((gate) => gate.id)).size, POSTGRES_GATES.length);
   assert.deepEqual(
     POSTGRES_GATES.filter((gate) => gate.seedAdmin === true).map((gate) => gate.id),

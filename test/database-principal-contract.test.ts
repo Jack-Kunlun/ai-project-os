@@ -65,7 +65,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
   assert.equal(DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.length, 7);
   assert.equal(DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX.length, 10);
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 93);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 103);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false
@@ -75,6 +75,20 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.filter((trigger) => trigger.securityDefiner).map((trigger) => trigger.name).join(","), "project_git_automation_pause_cursor_on_grant_terminal,project_git_automation_pause_cursor_after_unknown,project_git_material_guard_grant_scope,project_git_material_consent_audit_capture,project_git_material_cursor_audit_capture,project_git_material_run_audit_capture,project_git_material_initialize_cursors,project_git_material_pause_on_grant_terminal,project_git_material_pause_cursor_after_unknown,project_git_automation_guard_project_delete");
   assert.equal(new Set(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.map((trigger) => trigger.name)).size, DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length);
   assert.ok(Object.isFrozen(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX));
+  for (const [directory, names] of [
+    ["20261006010000_add_phone_sms_auth", ["app_user_phone_auth_guard"]],
+    ["20261006014000_add_sms_provider_adapters", ["sms_auth_expected_code_guard"]],
+    ["20261006011000_add_sms_provider_config", ["sms_provider_config_version_guard", "sms_provider_probe_lifecycle_guard", "sms_provider_config_audit_insert_guard", "sms_provider_config_audit_immutable_guard"]],
+    ["20261006012000_add_account_closure", ["account_closure_receipt_guard", "workspace_account_closure_guard", "closed_workspace_write_guard", "account_closure_final_state_guard"]],
+  ] as const) {
+    const sql = readFileSync(`prisma/migrations/${directory}/migration.sql`, "utf8");
+    for (const name of names) {
+      assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((entry) => entry.name === name));
+      assert.ok(sql.includes(`FUNCTION "${name}"()`));
+      assert.ok(sql.includes(`REVOKE ALL ON FUNCTION "${name}"() FROM PUBLIC`));
+    }
+  }
+
   assert.ok(DATABASE_PRINCIPAL_RELATIONS.includes("ProjectMcpActionResultImport"));
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "project_mcp_action_result_import_guard"));
   assert.match(mcpActionResultImportMigration, /CREATE OR REPLACE FUNCTION "project_mcp_action_result_import_guard"\(\)/u);
@@ -306,7 +320,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   }
   assert.match(gitAutomationMaterialMigration, /"ProjectGitRepositoryMaterialPublicationHead"[\s\S]*?project_git_material_head_guard/u);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "legacy_mcp_source_reference_guard"));
-  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 135/u);
+  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 140/u);
   assert.ok(DATABASE_PRINCIPAL_RELATIONS.includes("LocalRegistrationBudget"));
   assert.ok(ENTITLEMENT_PROTECTED_RELATIONS.includes("LocalRegistrationBudget"));
   assert.ok(!(RUNTIME_ONLY_CONTROL_PLANE_RELATIONS as readonly string[]).includes("LocalRegistrationBudget"));

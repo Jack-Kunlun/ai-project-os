@@ -69,11 +69,18 @@ async function migrationNames(): Promise<string[]> {
     .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
     .map((entry) => entry.name)
     .sort();
+  assert.ok(names.length >= targetMigrationCount);
+  assert.equal(names[sourceMigrationCount - 1], sourceLastMigration);
+  assert.equal(names[targetMigrationCount - 1], targetLastMigration);
+  return names.slice(0, targetMigrationCount);
+}
+
+test("v0.7 upgrade snapshot stays on the historical 117-to-135 migration prefix", async () => {
+  const names = await migrationNames();
   assert.equal(names.length, targetMigrationCount);
   assert.equal(names[sourceMigrationCount - 1], sourceLastMigration);
-  assert.equal(names.at(-1), targetLastMigration);
-  return names;
-}
+  assert.equal(names[targetMigrationCount - 1], targetLastMigration);
+});
 
 async function createMigrationSnapshot(names: readonly string[]): Promise<{ root: string; configPath: string }> {
   const root = await mkdtemp(resolve(tmpdir(), "ai-project-os-v07-upgrade-"));

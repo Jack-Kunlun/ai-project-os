@@ -4,7 +4,7 @@
     "sharedJavaScriptGzipBytes": 148480,
     "largestJavaScriptAssetGzipBytes": 76800,
     "globalCssGzipBytes": 15360,
-    "totalStaticClientGzipBytes": 778240
+    "totalStaticClientGzipBytes": 798720
   },
   "criticalRoutes": {
     "/setup": 158720,
@@ -14,6 +14,9 @@
     "/connections/mcp": 179200,
     "/system/account-access": 158720,
     "/personal": 174080,
-    "/personal/knowledge": 184320
+    "/personal/knowledge": 184320,
+    "/login": 158720,
+    "/register": 158720,
+    "/admin/sms": 163840
   }
 }

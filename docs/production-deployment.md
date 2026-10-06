@@ -174,3 +174,7 @@ sudo deploy/production/install-production-deploy.sh \
 ## 部署后仍需人工验收
 
 `/api/health`、容器健康和公网 HTTPS 只证明基础运行状态。首次 `/setup` 管理员初始化、管理员登录、会话 Cookie 的 `Secure` 属性、文件上传，以及重新配置的模型、Git、OIDC、Embedding 和第三方 MCP 连接仍需分别现场验证。
+
+## v0.7.6 无迁移补丁升级
+
+`deploy/production/ai-project-os-v076-deploy.py` 是从精确 v0.7.5 主分支提交 `bf280d715a94f91522d9c8f8bf614c1e860cc9e3` 到 v0.7.6 的人工升级入口，使用 `CONFIRM_V076_FAST_WITHOUT_BACKUP_OR_LEGACY_ACCEPTANCE`。它沿用经哈希固定的 v0.7.4 基础函数，核对源运行记录/镜像、带注释标签、140 条账本与配置哈希，提前构建三种写服务再切换，不运行 migrate/reconcile，不改生产环境。此前已人工启用的 `PHONE_AUTH_ENABLED=true` 将保留。开关开启但无可用供应商时，本地注册与短信登录暂不可用，这是用户已选择的部署状态，不能表述为短信服务已经验收。详见 [v0.7.6 说明](releases/v0.7.6.md)。

@@ -118,6 +118,29 @@ test("provider failures and oversized responses stay generic and do not disclose
   );
 });
 
+test("PNVS check permission rejection gives fixed guidance without exposing the provider payload", async () => {
+  const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
+    Code: "Forbidden.NoPermission", Message: `private-detail ${config.accessKeySecret}`,
+    AccessDeniedDetail: "private-policy", Model: { VerifyResult: "PASS" },
+  }), { status: 403 });
+  await assert.rejects(checkAliyunSmsCode({ phoneE164: "+8613800138000", purpose: "test", challengeId, code: "012345" }, config, { ...dependencies, fetchImpl }),
+    (error: unknown) => error instanceof ApiError && error.status === 503
+      && error.code === "SMS_PROVIDER_VERIFY_PERMISSION_DENIED"
+      && error.message.includes("dypns:CheckSmsVerifyCode")
+      && !error.message.includes(config.accessKeySecret) && !error.message.includes("private"));
+  await assert.rejects(sendAliyunSmsCode({ phoneE164: "+8613800138000", purpose: "test", challengeId }, config, { ...dependencies, fetchImpl }),
+    (error: unknown) => error instanceof ApiError && error.code === "SMS_PROVIDER_UNAVAILABLE");
+});
+
+test("unrecognized, malformed and oversized check permission responses remain fail closed", async () => {
+  for (const body of [JSON.stringify({ Code: "OTHER", Message: "private-detail" }), "invalid-json",
+    `${JSON.stringify({ Code: "Forbidden.NoPermission" })}${" ".repeat(65 * 1024)}`]) {
+    const fetchImpl: typeof fetch = async () => new Response(body, { status: 403 });
+    await assert.rejects(checkAliyunSmsCode({ phoneE164: "+8613800138000", purpose: "test", challengeId, code: "012345" }, config, { ...dependencies, fetchImpl }),
+      (error: unknown) => error instanceof ApiError && error.code === "SMS_PROVIDER_UNAVAILABLE" && !error.message.includes("private-detail"));
+  }
+});
+
 // Golden expected output published by Aliyun, independent of this implementation:
 // https://help.aliyun.com/zh/sdk/product-overview/v3-request-structure-and-signature
 // 固定参数示例 (RunInstances, YourAccessKeyId / YourAccessKeySecret).

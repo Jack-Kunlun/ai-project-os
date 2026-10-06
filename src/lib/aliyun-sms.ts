@@ -139,8 +139,11 @@ function buildAuthorization(input: {
   return { authorization, headers: { ...requestHeaders, authorization, accept: "application/json" } };
 }
 
-async function readJsonResponse(response: Response): Promise<RpcResponse> {
-  if (!response.ok || !response.body) {
+async function readJsonResponse(response: Response, action: "SendSmsVerifyCode" | "CheckSmsVerifyCode"): Promise<RpcResponse> {
+  // Read only the bounded body of the observed verification permission failure.
+  // Other HTTP errors remain generic; provider Message/AccessDeniedDetail never escape.
+  const checkPermissionFailure = action === "CheckSmsVerifyCode" && response.status === 403;
+  if ((!response.ok && !checkPermissionFailure) || !response.body) {
     await response.body?.cancel().catch(() => undefined);
     throw providerUnavailable();
   }
@@ -170,6 +173,12 @@ async function readJsonResponse(response: Response): Promise<RpcResponse> {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw providerUnavailable();
   const record = parsed as Record<string, unknown>;
+  if (!response.ok) {
+    if (checkPermissionFailure && record.Code === "Forbidden.NoPermission") {
+      throw new ApiError(503, "SMS_PROVIDER_VERIFY_PERMISSION_DENIED", "阿里云凭据缺少验证码核验权限，请管理员授予 dypns:CheckSmsVerifyCode 权限。");
+    }
+    throw providerUnavailable();
+  }
   const model = record.Model;
   return {
     Code: record.Code,
@@ -213,9 +222,9 @@ async function invokeRpc(
       redirect: "error",
       signal: controller.signal,
     });
-    return await readJsonResponse(response);
+    return await readJsonResponse(response, action);
   } catch (error) {
-    if (error instanceof ApiError && error.code === "SMS_PROVIDER_UNAVAILABLE") throw error;
+    if (error instanceof ApiError && (error.code === "SMS_PROVIDER_UNAVAILABLE" || error.code === "SMS_PROVIDER_VERIFY_PERMISSION_DENIED")) throw error;
     throw providerUnavailable();
   } finally {
     clearTimeout(timer);

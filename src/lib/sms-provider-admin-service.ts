@@ -44,6 +44,12 @@ function stale(): never {
 function probeInvalid(): never {
   throw new ApiError(409, "SMS_PROVIDER_PROBE_REQUIRED", "请先完成当前配置的短信验证");
 }
+function probeRestartRequired(): never {
+  throw new ApiError(409, "SMS_PROVIDER_TEST_RESTART_REQUIRED", "当前短信测试已失效，请重新发送测试短信后验证");
+}
+function probeExpired(): never {
+  throw new ApiError(409, "SMS_PROVIDER_TEST_EXPIRED", "测试验证码已过期，请重新发送测试短信");
+}
 function unavailable(): never {
   throw new ApiError(503, "SMS_PROVIDER_ADMIN_UNAVAILABLE", "短信服务暂不可用，请稍后再试");
 }
@@ -283,7 +289,9 @@ export async function verifySmsProviderProbe(input: unknown, actorInput: unknown
     if (!probe || probe.actorId !== actor.id || probe.actorAccountAccessVersion !== actor.accountAccessVersion
       || !(["aliyun-pnvs", "aliyun-sms", "tencent-sms"].includes(probe.provider)) || probe.baseVersion !== (active?.version ?? 0)
       || probe.phoneE164 !== initial.phoneE164 || probe.phoneFingerprint !== budget.fingerprint
-      || probe.expiresAt <= budget.now || probe.consumedAt !== null) probeInvalid();
+      || probe.consumedAt !== null) probeInvalid();
+    if (probe.status === "failed") probeRestartRequired();
+    if (probe.expiresAt <= budget.now) probeExpired();
     if (probe.status === "verified") return { probe, alreadyVerified: true };
     if (probe.status !== "sent" || probe.attemptCount >= 5) probeInvalid();
     await setSmsAdminContext(tx);
@@ -305,9 +313,12 @@ export async function verifySmsProviderProbe(input: unknown, actorInput: unknown
       const digest = smsCodeDigest({ id: admission.probe.id, phone: admission.probe.phoneE164, purpose: "test", code: code.data }, phoneAuthSecret());
       passed = admission.probe.expectedCodeDigest !== null && equalSmsDigest(admission.probe.expectedCodeDigest, digest);
     }
-  } catch {
+  } catch (error) {
     await markProbeFailed(admission.probe.id, actor, db).catch(() => undefined);
-    throw new ApiError(503, "SMS_PROVIDER_TEST_VERIFY_FAILED", "短信验证服务暂不可用，请重新测试");
+    if (error instanceof ApiError && error.code === "SMS_PROVIDER_VERIFY_PERMISSION_DENIED") {
+      throw new ApiError(503, "SMS_PROVIDER_TEST_VERIFY_FAILED", "阿里云凭据缺少 dypns:CheckSmsVerifyCode 核验权限。请补充授权后重新发送测试短信；当前测试已失效。");
+    }
+    throw new ApiError(503, "SMS_PROVIDER_TEST_VERIFY_FAILED", "短信核验调用失败，当前测试已失效。请重新发送测试短信后验证");
   }
   const completion = await db.$transaction(async (tx) => {
     await writer(tx, db);

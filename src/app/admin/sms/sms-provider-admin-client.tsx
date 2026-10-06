@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { GraphicCaptchaDialog, type GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
+import { modalNativeBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
 
 type SmsProvider = "aliyun-pnvs" | "aliyun-sms" | "tencent-sms";
 type TemplateParams = readonly ["code"] | readonly ["code", "minutes"] | readonly ["minutes", "code"];
@@ -195,8 +196,13 @@ export function SmsProviderAdminClient() {
   useEffect(() => {
     const dialog = editorDialogRef.current;
     if (!dialog) return;
-    if (editorOpen && !dialog.open) dialog.showModal();
-    else if (!editorOpen && dialog.open) dialog.close();
+    if (editorOpen) {
+      if (!dialog.open) dialog.showModal();
+      const previousOverflow = document.documentElement.style.overflow;
+      document.documentElement.style.overflow = "hidden";
+      return () => { document.documentElement.style.overflow = previousOverflow; };
+    }
+    if (dialog.open) dialog.close();
   }, [editorOpen]);
 
   async function reload() {
@@ -393,43 +399,61 @@ export function SmsProviderAdminClient() {
     : candidate.provider === "aliyun-sms" ? "模板变量名必须与已审核模板一致。" : "请填写已审核的 PNVS 模板信息。";
 
   return <>
-  <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-    <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7" aria-labelledby="sms-provider-list-title">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><h2 id="sms-provider-list-title" className="text-xl font-semibold text-slate-950">短信供应商</h2><p className="mt-2 text-sm leading-6 text-slate-500">当前保留一份生效配置，更换前须重新完成短信测试。</p></div>
-        <button ref={editorTriggerRef} type="button" onClick={openEditor} disabled={loading || pending || !state} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{state?.config.configured ? "编辑或更换供应商" : "新增供应商"}</button>
+  <div className="mt-5 space-y-4">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white" aria-labelledby="sms-provider-list-title">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+        <div className="flex items-center gap-3">
+          <h2 id="sms-provider-list-title" className="text-base font-semibold text-slate-950">供应商配置</h2>
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{state?.config.configured ? "1 个供应商" : "未配置"}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => void reload()} disabled={pending || loading} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-40">刷新</button>
+          <button ref={editorTriggerRef} type="button" onClick={openEditor} disabled={loading || pending || !state} className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-40">{state?.config.configured ? "编辑或更换供应商" : <><span aria-hidden="true" className="text-lg leading-none">＋</span>新增供应商</>}</button>
+        </div>
       </div>
-      {state?.phoneAuthEnabled === false ? <p role="status" className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">部署环境尚未启用手机号认证开关。保存的供应商配置不会启用注册或短信登录。</p> : null}
-      {state?.smsLimitsReady === false ? <p role="status" className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">测试短信前需要先在部署环境设置独立的 <code>PHONE_AUTH_SECRET</code>，用于手机号指纹和发送限额；请勿把该密钥填写在此表单。</p> : null}
-      {state?.phoneAuthEnabled && state.phoneAuthReady === false && state.config.enabled ? <p role="status" className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">数据库中的供应商配置已启用，但手机号认证服务当前无法加载该配置或主密钥。</p> : null}
-      {loading && !state ? <p className="mt-5 text-sm text-slate-500">正在读取供应商配置…</p> : state?.config.configured ? <div className="mt-5">
-        <table className="w-full table-fixed text-left text-sm"><caption className="sr-only">当前生效短信供应商</caption><thead><tr className="border-b border-slate-200 text-xs text-slate-500"><th className="w-2/5 pb-3 pr-3">供应商</th><th className="pb-3 pr-3">签名与模板</th><th className="w-20 pb-3">状态</th></tr></thead>
-          <tbody><tr className="border-b border-slate-100 align-top"><td className="break-words py-4 pr-3 font-medium text-slate-900">{providerLabel(state.config.provider)}<p className="mt-2 text-xs font-normal text-slate-500">配置版本 {state.config.version}</p></td><td className="break-words py-4 pr-3 text-slate-600">{state.config.signName ?? (state.config.canDecrypt ? "未设置" : "配置暂不可读取")}<p className="mt-2 text-xs">{state.config.templateCode ?? "—"}</p></td><td className="py-4"><span className={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${state.config.enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{state.config.enabled ? "已启用" : "已停用"}</span></td></tr></tbody>
+      {loading && !state ? <p className="px-6 py-16 text-center text-sm text-slate-500">正在读取供应商配置…</p> : state?.config.configured ? <div className="px-5 sm:px-6">
+        <table className="w-full table-fixed text-left text-sm"><caption className="sr-only">当前生效短信供应商</caption><thead><tr className="border-b border-slate-100 text-xs text-slate-500"><th className="w-2/5 py-3 pr-3 font-medium">供应商</th><th className="py-3 pr-3 font-medium">签名与模板</th><th className="w-20 py-3 font-medium">状态</th></tr></thead>
+          <tbody><tr><td className="break-words py-5 pr-3 font-medium text-slate-900">{providerLabel(state.config.provider)}<p className="mt-1 text-xs font-normal text-slate-400">配置版本 {state.config.version}</p></td><td className="break-words py-5 pr-3 text-slate-600">{state.config.signName ?? (state.config.canDecrypt ? "未设置" : "配置暂不可读取")}<p className="mt-1 font-mono text-xs text-slate-400">{state.config.templateCode ?? "—"}</p></td><td className="py-5"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${state.config.enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${state.config.enabled ? "bg-emerald-500" : "bg-slate-400"}`} />{state.config.enabled ? "已启用" : "已停用"}</span></td></tr></tbody>
         </table>
-        <p className="mt-4 text-xs leading-5 text-slate-500">最近验证：{dateLabel(state.config.verifiedAt)}。凭据已加密保存；编辑时须重新填写，不会回显。</p>
-      </div> : state ? <p className="mt-5 rounded-2xl bg-slate-50 p-5 text-sm leading-6 text-slate-600">尚未配置短信供应商。点击“新增供应商”填写配置并完成真实短信验证。</p> : null}
-      {pageError ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{pageError}</p> : null}
-      {!editorOpen && notice ? <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p> : null}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 py-3">
+          <p className="text-xs leading-5 text-slate-500">最近验证：{dateLabel(state.config.verifiedAt)}</p>
+          <button type="button" onClick={() => void changeEnabled(!state.config.enabled)} disabled={pending || loading} className="inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-40">{state.config.enabled ? "停用服务" : "启用服务"}</button>
+        </div>
+      </div> : state ? <div className="flex flex-col items-center px-5 py-12 text-center sm:py-14">
+        <div aria-hidden="true" className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-500"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-6 w-6"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="m4 7 8 6 8-6" /></svg></div>
+        <h3 className="text-sm font-semibold text-slate-800">尚未配置短信供应商</h3>
+        <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">添加供应商并验证测试短信后，即可保存配置。</p>
+        <p className="mt-3 text-xs leading-5 text-slate-400">支持阿里云号码认证、阿里云短信和腾讯云短信</p>
+      </div> : null}
+      {pageError ? <p role="alert" className="mx-5 mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700 sm:mx-6">{pageError}</p> : null}
+      {!editorOpen && notice ? <p role="status" className="mx-5 mb-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800 sm:mx-6">{notice}</p> : null}
     </section>
-    <aside className="space-y-5">
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="sms-provider-state-title">
-        <h2 id="sms-provider-state-title" className="text-lg font-semibold text-slate-950">服务状态</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-500">停用后，未完成的验证码会失效。重新启用时沿用当前已验证配置。</p>
-        <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={() => void changeEnabled(true)} disabled={pending || loading || !state?.config.configured || state.config.enabled} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">启用服务</button><button type="button" onClick={() => void changeEnabled(false)} disabled={pending || loading || !state?.config.enabled} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">停用服务</button><button type="button" onClick={() => void reload()} disabled={pending || loading} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 disabled:opacity-40">刷新</button></div>
-      </section>
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="sms-provider-audit-title">
-        <div className="flex items-baseline justify-between gap-3"><h2 id="sms-provider-audit-title" className="text-lg font-semibold text-slate-950">配置变更记录</h2><span className="text-xs text-slate-400">最近 20 条</span></div>
-        <ol className="mt-4 divide-y divide-slate-100">{state?.audits.length ? state.audits.map((audit) => <li key={audit.id} className="py-3 first:pt-0 last:pb-0"><p className="text-sm font-medium text-slate-800">{providerLabel(audit.provider)} · {auditLabels[audit.action] ?? "短信服务状态变更"} · v{audit.configVersion}</p><p className="mt-1 text-xs text-slate-500">{dateLabel(audit.createdAt)} · {audit.enabled ? "启用" : "停用"}</p></li>) : <li className="py-3 text-sm text-slate-500">暂无配置变更记录</li>}</ol>
-      </section>
-      <p className="px-1 text-xs leading-5 text-slate-400">支持阿里云个人号码认证 PNVS、阿里云企业短信 SendSms 和腾讯云短信 SendSms。真实测试短信会消耗对应服务商额度。</p>
-    </aside>
+    <section className="rounded-2xl border border-slate-200 bg-white px-5 py-4 sm:px-6" aria-labelledby="sms-phone-auth-title">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3"><h2 id="sms-phone-auth-title" className="text-sm font-semibold text-slate-900">手机号认证</h2>{state ? <span className={`rounded-md px-2 py-0.5 text-xs ${state.phoneAuthReady ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{state.phoneAuthReady ? "可用" : state.phoneAuthEnabled ? "待配置供应商" : "未开启"}</span> : null}</div>
+        <span className="text-xs text-slate-400">服务器总开关</span>
+      </div>
+      <p role="status" className="mt-2 text-sm leading-6 text-slate-500">{state?.phoneAuthEnabled === false ? "总开关尚未开启，注册与登录暂不使用短信验证。可先完成供应商配置和测试。" : "开启总开关且启用已验证的供应商后，手机号注册与验证码登录才可用。"}</p>
+      {state?.smsLimitsReady === false ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">测试短信前，请由运维设置独立的手机号安全密钥；不要填写在供应商表单中。</p> : null}
+      {state?.phoneAuthEnabled && state.phoneAuthReady === false && state.config.enabled ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">供应商已启用，但认证配置无法加载，请联系运维检查配置与主密钥。</p> : null}
+      <details className="group mt-3 border-t border-slate-100 pt-3">
+        <summary className="w-fit cursor-pointer text-xs font-medium text-indigo-600">在哪里开启？</summary>
+        <div className="mt-3 space-y-2 text-xs leading-6 text-slate-500">
+          <p>由运维修改服务器配置 <code className="break-all rounded bg-slate-50 px-1.5 py-0.5 text-slate-700">/etc/ai-project-os/production.env</code>，设置 <code className="rounded bg-slate-50 px-1.5 py-0.5 text-slate-700">PHONE_AUTH_ENABLED=true</code> 后重建应用容器。</p>
+          <p>后台的“启用服务／停用服务”只控制当前短信供应商，不修改服务器总开关。停用供应商后，未完成的验证码会失效。</p>
+        </div>
+      </details>
+    </section>
+    <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-700 sm:px-6">配置变更记录<span className="ml-2 text-xs font-normal text-slate-400">{state?.audits.length ? `最近 ${state.audits.length} 条` : "暂无记录"}</span></summary>
+      <ol className="mx-5 divide-y divide-slate-100 border-t border-slate-100 sm:mx-6">{state?.audits.length ? state.audits.map((audit) => <li key={audit.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><p className="text-sm text-slate-700">{providerLabel(audit.provider)} · {auditLabels[audit.action] ?? "短信服务状态变更"} · v{audit.configVersion}</p><p className="text-xs text-slate-400">{dateLabel(audit.createdAt)} · {audit.enabled ? "启用" : "停用"}</p></li>) : <li className="py-5 text-center text-xs text-slate-400">配置或启停服务后，变更记录会显示在这里。</li>}</ol>
+    </details>
   </div>
-  <dialog ref={editorDialogRef} aria-labelledby="sms-provider-editor-title" onCancel={(event) => { event.preventDefault(); closeEditor(); }} className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-0 shadow-2xl backdrop:bg-slate-950/50">
-    {editorOpen ? <div className="p-5 sm:p-7">
-      <div className="flex items-start justify-between gap-4"><div><h2 id="sms-provider-editor-title" className="text-xl font-semibold text-slate-950">{state?.config.configured ? "编辑或更换短信供应商" : "新增短信供应商"}</h2><p className="mt-2 text-sm leading-6 text-slate-500">{providerDescription(candidate.provider)}{providerTemplateInstruction}图形验证后发送测试短信，验证短信验证码后才能保存并启用。</p></div><button type="button" aria-label="关闭配置弹窗" onClick={() => closeEditor()} disabled={pending} className="shrink-0 rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">✕</button></div>
-      {candidate.provider === "aliyun-pnvs" ? <p className="mt-4 rounded-xl bg-slate-50 p-3 text-xs leading-6 text-slate-600">注册、登录、测试及注销用途由系统自动区分；模板参数自动生成 <code>{'{"code":"##code##","min":"5"}'}</code>，验证码为 6 位数字，有效期 5 分钟。</p> : null}
-      <form onSubmit={requestTest} className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-2">
-        <label className="text-xs font-semibold text-slate-600">短信供应商
+  <dialog ref={editorDialogRef} aria-labelledby="sms-provider-editor-title" onCancel={(event) => { event.preventDefault(); closeEditor(); }} className={`m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[740px] overflow-y-auto rounded-2xl p-0 ${modalSurfaceClassName} ${modalNativeBackdropClassName}`}>
+    {editorOpen ? <div className="p-5 sm:p-6">
+      <div className="flex items-start justify-between gap-4"><div><h2 id="sms-provider-editor-title" className="text-lg font-semibold text-slate-950">{state?.config.configured ? "编辑或更换短信供应商" : "新增短信供应商"}</h2><p className="mt-2 text-sm leading-6 text-slate-500">配置供应商 → 验证测试短信 → 保存启用</p></div><button type="button" aria-label="关闭配置弹窗" onClick={() => closeEditor()} disabled={pending} className="shrink-0 rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">✕</button></div>
+      <form onSubmit={requestTest} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
+        <label className="text-xs font-semibold text-slate-600 sm:col-span-2">短信供应商
           <select value={candidate.provider} onChange={(event) => updateProvider(event.target.value as SmsProvider)} disabled={candidateFieldsDisabled} className={inputClass}>
             <option value="aliyun-pnvs">阿里云号码认证服务（PNVS）</option>
             <option value="aliyun-sms">阿里云短信服务（SendSms）</option>
@@ -437,6 +461,8 @@ export function SmsProviderAdminClient() {
           </select>
         </label>
 
+        <p className="-mt-1 text-xs leading-5 text-slate-500 sm:col-span-2">{providerDescription(candidate.provider)}{providerTemplateInstruction}</p>
+        <div className="mt-1 flex items-center gap-3 sm:col-span-2"><span className="text-xs font-semibold text-slate-700">供应商凭据与模板</span><span className="h-px flex-1 bg-slate-100" /><span className="text-xs text-slate-400">凭据加密保存，不会回显</span></div>
         {candidate.provider === "aliyun-pnvs" ? <>
           <label className="text-xs font-semibold text-slate-600">AccessKey ID<input autoComplete="off" maxLength={128} value={candidate.accessKeyId} onChange={(event) => updateCandidate("accessKeyId", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
           <label className="text-xs font-semibold text-slate-600">AccessKey Secret<input type="password" autoComplete="new-password" maxLength={256} value={candidate.accessKeySecret} onChange={(event) => updateCandidate("accessKeySecret", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
@@ -476,12 +502,14 @@ export function SmsProviderAdminClient() {
           </label>
         </> : null}
 
+        {candidate.provider === "aliyun-pnvs" ? <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500 sm:col-span-2">用途名称和模板参数由系统生成，验证码为 6 位数字，有效期 5 分钟。<br /><code className="break-all">{'{"code":"##code##","min":"5"}'}</code></p> : null}
+        <div className="mt-2 flex items-center gap-3 sm:col-span-2"><span className="text-xs font-semibold text-slate-700">测试短信</span><span className="h-px flex-1 bg-slate-100" /></div>
         <label className="text-xs font-semibold text-slate-600">测试手机号（中国大陆 +86）<input autoComplete="tel" inputMode="tel" maxLength={14} placeholder="13800138000" value={phone} onChange={(event) => { if (captchaRequest) closeCaptcha(captchaRequest.sequence); setPhone(event.target.value); setProbeId(null); setVerified(false); setCode(""); }} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
-        <div className="sm:col-span-2"><button ref={testButtonRef} type="submit" disabled={pending || loading || state?.smsLimitsReady !== true} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "处理中…" : "发送真实测试短信"}</button><p className="mt-2 text-xs leading-5 text-slate-500">此操作会真实发送短信并消耗服务商短信额度；请使用你本人可接收的手机号。</p></div>
+        <div className="self-end"><button ref={testButtonRef} type="submit" disabled={pending || loading || state?.smsLimitsReady !== true} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "处理中…" : "发送真实测试短信"}</button></div><p className="-mt-1 text-xs leading-5 text-slate-400 sm:col-span-2">此操作会真实发送短信并消耗服务商短信额度；请使用你本人可接收的手机号。</p>
       </form>
 
       {probeId ? <form onSubmit={verifyTest} className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:flex sm:items-end sm:gap-3"><label className="block flex-1 text-xs font-semibold text-slate-600">短信验证码<input id="sms-provider-test-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required disabled={pending || verified} className={inputClass} /></label><button type="submit" disabled={pending || verified} className="mt-3 w-full rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50 sm:mt-0 sm:w-auto">{verified ? "已验证" : pending ? "验证中…" : "验证验证码"}</button></form> : null}
-      {verified ? <button type="button" onClick={() => void saveConfig()} disabled={pending} className="mt-4 w-full rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{pending ? "保存中…" : "保存并启用短信服务"}</button> : null}
+      {verified ? <button type="button" onClick={() => void saveConfig()} disabled={pending} className="mt-4 inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{pending ? "保存中…" : "保存并启用短信服务"}</button> : null}
       {formError ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{formError}</p> : null}
       {notice ? <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm leading-6 text-emerald-800">{notice}</p> : null}
     </div> : null}

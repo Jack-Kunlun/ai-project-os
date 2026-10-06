@@ -12,6 +12,7 @@ import {
   valuesLabel,
   type AuditEvent,
 } from "@/app/admin/audit/audit-view-model";
+import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 
 const FOCUSABLE_SELECTOR = "button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])";
 
@@ -106,7 +107,7 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex justify-end bg-slate-950/45 backdrop-blur-sm"
+      className={`fixed inset-0 z-[80] flex justify-end ${modalBackdropClassName}`}
       role="presentation"
       onMouseDown={(mouseEvent) => {
         if (mouseEvent.target === mouseEvent.currentTarget) onClose();
@@ -117,9 +118,9 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex h-full w-full max-w-xl flex-col overflow-y-auto bg-white shadow-2xl"
+        className={`flex h-full w-full max-w-xl flex-col overflow-y-auto ${modalSurfaceClassName}`}
       >
-        <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-100 bg-white px-5 py-4 sm:px-6">
+        <div className={`sticky top-0 z-10 flex items-start justify-between gap-3 px-5 py-4 sm:px-6 ${modalHeaderClassName}`}>
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Audit detail</p>
             <h2 id={titleId} className="mt-2 text-lg font-semibold text-slate-950">
@@ -130,7 +131,7 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+            className="whitespace-nowrap rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
           >
             关闭详情
           </button>

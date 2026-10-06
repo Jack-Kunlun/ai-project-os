@@ -9,12 +9,9 @@ type PhoneAuthStatus = "disabled" | "unavailable" | "available";
 type RegisterFormProps = {
   localRegistrationEnabled: boolean;
   phoneAuthStatus?: PhoneAuthStatus;
-  githubLoginAvailable: boolean;
-  githubAvailability: "notConfigured" | "configurationInvalid" | "bootstrapPending" | "available";
-  githubMessage?: string;
 };
 
-export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disabled", githubLoginAvailable, githubAvailability, githubMessage }: RegisterFormProps) {
+export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disabled" }: RegisterFormProps) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [phone, setPhone] = useState("");
@@ -68,19 +65,11 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
     }
   }
 
-  const githubHref = `/api/auth/github/start?intent=login&remember=${remember ? "true" : "false"}&returnTo=${encodeURIComponent("/dashboard")}`;
-  const githubUnavailableMessage = {
-    notConfigured: "GitHub 登录尚未配置，请联系工作区管理员。",
-    configurationInvalid: "GitHub 登录配置无效，请联系工作区管理员。",
-    bootstrapPending: "平台管理员尚未完成初始化，GitHub 登录暂不可用。",
-    available: "",
-  }[githubAvailability];
-
   return (
     <div className="mt-4">
       {localRegistrationEnabled ? <form onSubmit={submit}>
       <fieldset disabled={pending}>
-      <div className={phoneVerificationRequired ? "grid gap-3 md:grid-cols-3" : ""}>
+      <div>
         <div>
       <label htmlFor="register-username" className="block text-sm font-semibold">用户名</label>
       <input
@@ -100,7 +89,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
 
         </div>
       {phoneVerificationRequired ? (
-        <>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="register-phone" className="block text-sm font-semibold">手机号</label>
             <div className="mt-2 flex h-10 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100">
@@ -136,7 +125,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
             onCodeChange={setSmsCode}
             onChallengeIdChange={setSmsChallengeId}
           />
-        </>
+        </div>
       ) : null}
       </div>
 
@@ -185,21 +174,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
       {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <button type="submit" disabled={pending || (phoneVerificationRequired && phoneAuthStatus !== "available")} className="mx-auto mt-3 block h-11 w-full max-w-xs rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-center text-base font-semibold tracking-[0.16em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "正在创建账号…" : "创建账号"}</button>
-      </form> : <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">本地用户名和密码注册暂未开放。请使用下方可用的登录方式，或联系管理员。</p>}
-
-      <div className="my-3 flex items-center gap-4 text-sm text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>或使用 GitHub</span><span className="h-px flex-1 bg-slate-200" /></div>
-      {githubLoginAvailable ? (
-        <div>
-          <a href={githubHref} className="mx-auto flex h-11 w-full max-w-xs items-center justify-center rounded-xl border border-slate-300 bg-white text-base font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-indigo-50">使用 GitHub 注册或登录</a>
-          <p className="mt-2 text-center text-xs text-slate-400">首次 GitHub 登录会创建普通用户账号；已有绑定身份会直接登录。</p>
-        </div>
-      ) : (
-        <div>
-          <button type="button" disabled className="mx-auto flex h-11 w-full max-w-xs items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-base font-semibold text-slate-500">使用 GitHub 注册或登录</button>
-          <p className="mt-2 text-center text-xs text-slate-400">{githubUnavailableMessage}</p>
-        </div>
-      )}
-      {githubMessage ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{githubMessage}</p> : null}
+      </form> : <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">本地用户名和密码注册暂未开放。请返回登录页使用其他可用方式，或联系管理员。</p>}
     </div>
   );
 }

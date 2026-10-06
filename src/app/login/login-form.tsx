@@ -183,7 +183,7 @@ export function LoginForm({
                 </div>
               </>
             ) : (
-              <div className="mt-7 grid gap-4 sm:grid-cols-2">
+              <div className="mt-7 space-y-5">
                 <div>
                   <label className="block text-sm font-semibold" htmlFor="login-phone">手机号</label>
                   <div className="mt-2 flex h-14 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100">
@@ -211,6 +211,7 @@ export function LoginForm({
                 <SmsCodeInput
                   key={phone}
                   id="login-sms-code"
+                  size="large"
                   phoneE164={`+86${phone}`}
                   purpose="login"
                   availability="available"

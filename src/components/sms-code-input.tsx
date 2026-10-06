@@ -19,6 +19,7 @@ type SmsCodeInputProps = {
   purpose: SmsPurpose;
   availability: SmsAvailability;
   code: string;
+  size?: "default" | "large";
   onCodeChange: Dispatch<SetStateAction<string>>;
   onChallengeIdChange: Dispatch<SetStateAction<string | null>>;
 };
@@ -31,6 +32,7 @@ export function SmsCodeInput({
   purpose,
   availability,
   code,
+  size = "default",
   onCodeChange,
   onChallengeIdChange,
 }: SmsCodeInputProps) {
@@ -183,6 +185,7 @@ export function SmsCodeInput({
   const phoneIsValid = /^\+861[3-9][0-9]{9}$/u.test(phoneE164);
   const unavailable = availability === "unavailable";
   const sendDisabled = unavailable || !phoneIsValid || pending || secondsRemaining > 0;
+  const controlHeight = size === "large" ? "h-14" : "h-10";
 
   return (
     <div>
@@ -202,14 +205,14 @@ export function SmsCodeInput({
           disabled={unavailable}
           aria-describedby={`${id}-message`}
           placeholder="输入 6 位验证码"
-          className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50/80 px-3 text-base outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+          className={`${controlHeight} min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50/80 px-3 text-base outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60`}
         />
         <button
           ref={sendButtonRef}
           type="button"
           onClick={sendCode}
           disabled={sendDisabled}
-          className="h-10 shrink-0 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+          className={`${controlHeight} shrink-0 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400`}
         >
           {unavailable ? "暂不可用" : pending ? "发送中…" : secondsRemaining > 0 ? `${secondsRemaining} 秒后重发` : "获取验证码"}
         </button>

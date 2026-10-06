@@ -19,6 +19,10 @@ import { equalSmsDigest, normalizeMainlandPhone, smsCodeDigest } from "@/lib/pho
 import { reserveSmsSendBudget, reserveSmsVerifyBudget, smsDatabaseClock } from "@/lib/phone-auth-budget";
 
 const CONFIG_ID = "active" as const;
+// PNVS uses SchemeName to bind send/check to a purpose. This is an application
+// namespace, not a supplier setting. Keep stored configurations untouched so
+// outstanding challenges continue to check against their original scheme.
+const PNVS_ADMIN_SCHEME_PREFIX = "aipos";
 const UUID_SCHEMA = z.string().uuid();
 const VERSION_SCHEMA = z.number().int().min(0).max(2_147_483_646);
 const CODE_SCHEMA = z.string().regex(/^[0-9]{6}$/u);
@@ -52,7 +56,14 @@ function record(value: unknown): Record<string, unknown> | null {
 /** Provider registry rejects unrecognized fields and any endpoint override. */
 export function parseSmsProviderCandidate(input: unknown): Readonly<{ provider: SmsProviderId; config: ProviderConfig }> {
   try {
-    const config = normalizeSmsProviderConfig(input);
+    const value = record(input);
+    const candidate = value && (value.provider === undefined || value.provider === "aliyun-pnvs")
+      // Accept the legacy UI field during rolling upgrades, but never let an
+      // administrator choose the application's namespace. Unknown fields are
+      // still rejected by the provider registry below.
+      ? { ...value, schemePrefix: PNVS_ADMIN_SCHEME_PREFIX }
+      : input;
+    const config = normalizeSmsProviderConfig(candidate);
     return Object.freeze({ provider: smsProviderId(config), config });
   } catch { return invalidInput(); }
 }

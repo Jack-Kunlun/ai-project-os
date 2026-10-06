@@ -320,7 +320,7 @@ export function SmsProviderAdminClient() {
       const result = await response.json() as { probeId: string };
       if (request.sequence !== captchaSequence.current || controller.signal.aborted) return;
       setProbeId(result.probeId);
-      setNotice("测试短信已发送。输入短信中的验证码完成真实验证后，才能保存并启用这份配置。");
+      setNotice("测试短信已发送，请在 5 分钟内输入验证码。验证成功后才能保存并启用这份配置。");
       testRequestLock.current = false;
       setCaptchaRequest(null);
       setCaptchaCloseSequence((current) => current + 1);
@@ -356,7 +356,13 @@ export function SmsProviderAdminClient() {
       const response = await fetch("/api/admin/sms/test/verify", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ probeId, code }),
       });
-      if (!response.ok) throw new Error((await responseError(response)).message);
+      if (!response.ok) {
+        const failure = await responseError(response);
+        if (["SMS_PROVIDER_TEST_VERIFY_FAILED", "SMS_PROVIDER_TEST_RESTART_REQUIRED", "SMS_PROVIDER_TEST_EXPIRED", "SMS_PROVIDER_PROBE_REQUIRED", "SMS_PROVIDER_CONFIG_STALE"].includes(failure.code ?? "")) {
+          setProbeId(null); setVerified(false); setCode("");
+        }
+        throw new Error(failure.message);
+      }
       setVerified(true); setNotice("短信验证码已验证。现在可以保存并启用这份配置。");
     } catch (verifyError) { setFormError(safeFailureMessage(verifyError instanceof Error ? verifyError.message : "短信验证码验证失败", candidate)); }
     finally { operationLock.current = false; setPending(false); }

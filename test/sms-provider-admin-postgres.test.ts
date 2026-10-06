@@ -5,7 +5,7 @@ import { newCaptchaBrowserToken } from "@/lib/graphic-captcha-cookie";
 import { issueGraphicCaptchaFixture } from "./graphic-captcha-fixture";
 import test from "node:test";
 import { getEntitlementDb } from "../src/lib/db";
-import { phoneAuthSecret } from "../src/lib/phone-auth-config";
+import { phoneAuthSecret, sealSmsConfig } from "../src/lib/phone-auth-config";
 import { phoneFingerprint } from "../src/lib/phone-auth-identity";
 import {
   getSmsProviderAdminState,
@@ -47,6 +47,7 @@ test("admin SMS configuration is test-before-save, encrypted, versioned, and inv
   const phone = "13800000991";
   const code = "123456";
   const savedFetch = globalThis.fetch;
+  let rejectProviderCheck = false;
   const seenActions: string[] = [];
   const priorConfig = await db.smsProviderConfig.findUnique({ where: { id: "active" } });
   await db.smsProviderConfig.deleteMany({ where: { id: "active" } });
@@ -64,10 +65,11 @@ test("admin SMS configuration is test-before-save, encrypted, versioned, and inv
     assert.ok(action === "SendSmsVerifyCode" || action === "CheckSmsVerifyCode");
     seenActions.push(action);
     if (action === "SendSmsVerifyCode") {
-      assert.equal(url.searchParams.get("PhoneNumber"), phone);
+      assert.ok([phone, "13800000992"].includes(url.searchParams.get("PhoneNumber") ?? ""));
       assert.equal(url.searchParams.get("CountryCode"), "86");
       return new Response(JSON.stringify({ Code: "OK", Success: true }), { status: 200, headers: { "content-type": "application/json" } });
     }
+    if (rejectProviderCheck) return new Response(JSON.stringify({ Code: "Forbidden.NoPermission", Success: false, Message: "private-provider-diagnostic" }), { status: 403 });
     const valid = url.searchParams.get("VerifyCode") === code;
     return new Response(JSON.stringify({ Code: "OK", Success: true, Model: { VerifyResult: valid ? "PASS" : "FAIL" } }), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
@@ -112,6 +114,45 @@ test("admin SMS configuration is test-before-save, encrypted, versioned, and inv
       await assert.rejects(() => db.smsProviderConfigAudit.update({ where: { id: publicState.audits[0]!.id }, data: { enabled: false } }));
     });
 
+    await t.test("failed provider checks invalidate the proof and subsequent retries explicitly require a new SMS", async () => {
+      const failedPhone = "13800000992";
+      const captcha = await issueGraphicCaptchaFixture({ phone: failedPhone, purpose: "test", actor }, db);
+      const started = await sendSmsProviderProbe({ config: candidate, phone: failedPhone, expectedVersion: 1, captcha: captcha.captcha }, actor, db, captcha.browserToken);
+      rejectProviderCheck = true;
+      const checksBefore = seenActions.filter((action) => action === "CheckSmsVerifyCode").length;
+      try {
+        await assert.rejects(() => verifySmsProviderProbe({ probeId: started.probeId, code }, actor), (error: unknown) => error instanceof ApiError && error.code === "SMS_PROVIDER_TEST_VERIFY_FAILED" && error.message.includes("dypns:CheckSmsVerifyCode") && !error.message.includes("private-provider-diagnostic"));
+        const failed = await db.smsProviderProbe.findUniqueOrThrow({ where: { id: started.probeId } });
+        assert.equal(failed.status, "failed"); assert.equal(failed.attemptCount, 1);
+        await assert.rejects(() => verifySmsProviderProbe({ probeId: started.probeId, code }, actor), (error: unknown) => error instanceof ApiError && error.code === "SMS_PROVIDER_TEST_RESTART_REQUIRED");
+        assert.equal(seenActions.filter((action) => action === "CheckSmsVerifyCode").length, checksBefore + 1);
+        await assert.rejects(() => saveSmsProviderConfig({ probeId: started.probeId, expectedVersion: 1 }, actor), ApiError);
+        assert.equal((await db.smsProviderConfig.findUniqueOrThrow({ where: { id: "active" } })).version, 1);
+      } finally { rejectProviderCheck = false; }
+    });
+
+    await t.test("an expired test code reports expiry without calling the provider or activating configuration", async () => {
+      const probeId = randomUUID();
+      const sealed = await sealSmsConfig(candidate, probeId);
+      const now = new Date();
+      await db.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.sms_provider_admin_context', 'service-v1', true)`;
+        await tx.smsProviderProbe.create({ data: {
+          id: probeId, actorId: actor.id, actorAccountAccessVersion: 1, baseVersion: 1,
+          provider: "aliyun-pnvs", ...sealed, phoneE164: "+86" + phone,
+          phoneFingerprint: phoneFingerprint("+86" + phone, phoneAuthSecret()),
+          status: "pending", createdAt: now, expiresAt: new Date(now.getTime() + 1000),
+        } });
+        await tx.smsProviderProbe.update({ where: { id: probeId }, data: { status: "sent" } });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      const checksBefore = seenActions.filter((action) => action === "CheckSmsVerifyCode").length;
+      await assert.rejects(() => verifySmsProviderProbe({ probeId, code }, actor), (error: unknown) => error instanceof ApiError && error.code === "SMS_PROVIDER_TEST_EXPIRED");
+      assert.equal(seenActions.filter((action) => action === "CheckSmsVerifyCode").length, checksBefore);
+      assert.equal((await db.smsProviderProbe.findUniqueOrThrow({ where: { id: probeId } })).attemptCount, 0);
+      assert.equal((await db.smsProviderConfig.findUniqueOrThrow({ where: { id: "active" } })).version, 1);
+    });
+
     await t.test("switching provider state advances version and supersedes outstanding phone challenges", async () => {
       const now = new Date();
       const challengeId = randomUUID();
@@ -142,8 +183,8 @@ test("admin SMS configuration is test-before-save, encrypted, versioned, and inv
       await tx.$executeRaw`SELECT set_config('app.sms_provider_admin_context', 'service-v1', true)`;
       await seedVerifiedSmsConfigFixture(tx, priorConfig);
     });
-    await db.smsAuthChallenge.deleteMany({ where: { phoneE164: "+86" + phone } });
-    await db.phoneAuthBudget.deleteMany({ where: { scope: { in: ["send_phone_hour", "send_phone_day", "send_global_hour", "send_global_day", "verify_phone_hour", "verify_global_hour"] }, keyFingerprint: { in: [phoneFingerprint("+86" + phone, phoneAuthSecret()), "0".repeat(64)] } } });
+    await db.smsAuthChallenge.deleteMany({ where: { phoneE164: { in: ["+86" + phone, "+8613800000992"] } } });
+    await db.phoneAuthBudget.deleteMany({ where: { scope: { in: ["send_phone_hour", "send_phone_day", "send_global_hour", "send_global_day", "verify_phone_hour", "verify_global_hour"] }, keyFingerprint: { in: [phoneFingerprint("+86" + phone, phoneAuthSecret()), phoneFingerprint("+8613800000992", phoneAuthSecret()), "0".repeat(64)] } } });
     await db.appUser.deleteMany({ where: { id: { in: [actor.id, outsider.id] } } });
   }
 });

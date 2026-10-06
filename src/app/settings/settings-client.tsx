@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/app-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
@@ -446,16 +447,16 @@ function ProviderCreateDialog({
     if (!pending) onClose();
   };
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-3 sm:p-6" role="presentation">
-    <button type="button" aria-label="关闭新增供应商" tabIndex={-1} onClick={close} className="absolute inset-0 bg-slate-950/50" />
+    <button type="button" aria-label="关闭新增供应商" tabIndex={-1} onClick={close} className={`absolute inset-0 ${modalBackdropClassName}`} />
     {/* Match the overlay's p-3/sm:p-6 insets so tall screens can show more of the form while short screens remain contained. */}
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className="relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-slate-950 shadow-2xl shadow-slate-950/30 sm:max-h-[calc(100dvh-3rem)]">
-      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 px-6 py-4 text-white sm:px-7">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className={`relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl sm:max-h-[calc(100dvh-3rem)] ${modalSurfaceClassName}`}>
+      <header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-5 py-4 sm:px-6`}>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">New connection</p>
-          <h2 id="provider-create-dialog-title" className="mt-2 text-2xl font-semibold">新增供应商</h2>
-          <p id="provider-create-dialog-description" className="mt-2 text-xs leading-5 text-slate-300">使用官方固定端点先测试未保存凭据，测试成功后才能保存为已验证连接。</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">New connection</p>
+          <h2 id="provider-create-dialog-title" className="mt-1 text-lg font-semibold text-slate-950">新增供应商</h2>
+          <p id="provider-create-dialog-description" className="mt-2 text-xs leading-5 text-slate-600">使用官方固定端点先测试未保存凭据，测试成功后才能保存为已验证连接。</p>
         </div>
-        <button ref={closeRef} type="button" aria-label="关闭新增供应商" onClick={close} disabled={pending} className="rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10 disabled:opacity-50">关闭</button>
+        <button ref={closeRef} type="button" aria-label="关闭新增供应商" onClick={close} disabled={pending} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">关闭</button>
       </header>
       <ProviderCreateForm catalog={catalog} onCreated={onCreated} onPendingChange={setPending} />
     </div>
@@ -582,43 +583,43 @@ function ProviderCreateForm({
   }
 
   return (
-    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col text-white">
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col text-slate-900">
       {/* The body owns overflow so the header and action footer stay available while fields scroll. */}
-      <div className="app-scrollbar-dark min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-5 sm:px-7">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6">
         <Field label="供应商">
-          <select value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className="dark-field">
+          <select value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className="light-field">
             {catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{entry.displayName}</option>)}
           </select>
         </Field>
-        <Field label="连接名称"><input value={name} onChange={(event) => { clearProof(); setName(event.target.value); }} maxLength={80} required className="dark-field" /></Field>
-        <Field label={definition?.apiKeyLabel ?? "API Key"}><input type="password" value={apiKey} onChange={(event) => { clearProof(); setApiKey(event.target.value); }} autoComplete="new-password" maxLength={512} required className="dark-field" /></Field>
-        <Field label="生成模型（可选）"><input list={`generation-${kind}`} value={generationModelId} onChange={(event) => { clearProof(); setGenerationModelId(event.target.value); }} className="dark-field" /></Field>
+        <Field label="连接名称"><input value={name} onChange={(event) => { clearProof(); setName(event.target.value); }} maxLength={80} required className="light-field" /></Field>
+        <Field label={definition?.apiKeyLabel ?? "API Key"}><input type="password" value={apiKey} onChange={(event) => { clearProof(); setApiKey(event.target.value); }} autoComplete="new-password" maxLength={512} required className="light-field" /></Field>
+        <Field label="生成模型（可选）"><input list={`generation-${kind}`} value={generationModelId} onChange={(event) => { clearProof(); setGenerationModelId(event.target.value); }} className="light-field" /></Field>
         <datalist id={`generation-${kind}`}>{definition?.generationModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist>
-        {definition?.supportsVision ? <><Field label="图片识别模型（可选）"><input list={`vision-${kind}`} value={visionModelId} onChange={(event) => { clearProof(); setVisionModelId(event.target.value); }} className="dark-field" /></Field><datalist id={`vision-${kind}`}>{definition.visionModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist></> : null}
+        {definition?.supportsVision ? <><Field label="图片识别模型（可选）"><input list={`vision-${kind}`} value={visionModelId} onChange={(event) => { clearProof(); setVisionModelId(event.target.value); }} className="light-field" /></Field><datalist id={`vision-${kind}`}>{definition.visionModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist></> : null}
         {definition?.supportsEmbeddings ? (
           <>
-            <label className="mt-5 flex items-center gap-3 text-sm text-slate-200"><input type="checkbox" checked={embeddingEnabled} onChange={(event) => { clearProof(); setEmbeddingEnabled(event.target.checked); }} /> 同时配置向量模型</label>
-            {embeddingEnabled ? <div className="grid grid-cols-[1fr_7rem] gap-3"><Field label="向量模型"><input list={`embedding-${kind}`} value={embeddingModelId} onChange={(event) => { clearProof(); chooseEmbeddingModel(event.target.value); }} required className="dark-field" /></Field><Field label="维度"><input type="number" min={8} max={8192} value={embeddingDimensions} onChange={(event) => { clearProof(); setEmbeddingDimensions(event.target.value); }} required className="dark-field" /></Field></div> : null}
+            <label className="mt-5 flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={embeddingEnabled} onChange={(event) => { clearProof(); setEmbeddingEnabled(event.target.checked); }} /> 同时配置向量模型</label>
+            {embeddingEnabled ? <div className="grid grid-cols-[1fr_7rem] gap-3"><Field label="向量模型"><input list={`embedding-${kind}`} value={embeddingModelId} onChange={(event) => { clearProof(); chooseEmbeddingModel(event.target.value); }} required className="light-field" /></Field><Field label="维度"><input type="number" min={8} max={8192} value={embeddingDimensions} onChange={(event) => { clearProof(); setEmbeddingDimensions(event.target.value); }} required className="light-field" /></Field></div> : null}
             <datalist id={`embedding-${kind}`}>{definition.embeddingModelSuggestions.map((item) => <option key={item.id} value={item.id} />)}</datalist>
           </>
-        ) : <p className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-xs leading-5 text-amber-100">DeepSeek 当前作为生成供应商使用；语义索引需为项目另选 OpenAI、Qwen 或 GLM。</p>}
-        <div className="mt-5 rounded-xl border border-white/10 bg-white/[.06] px-4 py-3 text-xs leading-5 text-slate-300">
-          <p className="font-semibold text-slate-100">能力说明</p>
+        ) : <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">DeepSeek 当前作为生成供应商使用；语义索引需为项目另选 OpenAI、Qwen 或 GLM。</p>}
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
+          <p className="font-semibold text-slate-800">能力说明</p>
           <p className="mt-1">生成模型用于文本、摘要和计划；图片识别模型可选，留空即关闭；向量模型可选，维度必须匹配，切换模型或维度后需重建相关索引。API Key 只在服务端加密保存；连接测试会单独消耗平台探测预算。</p>
-          {definition ? <div className="mt-3 space-y-1 text-slate-400"><p>生成推荐：{definition.generationModelSuggestions.join("、") || "暂无"}</p><p>图片推荐：{definition.visionModelSuggestions.join("、") || "暂无"}</p><p>向量推荐：{definition.embeddingModelSuggestions.map((item) => `${item.id}（${item.dimensions} 维）`).join("、") || "暂无"}</p></div> : null}
+          {definition ? <div className="mt-3 space-y-1 text-slate-500"><p>生成推荐：{definition.generationModelSuggestions.join("、") || "暂无"}</p><p>图片推荐：{definition.visionModelSuggestions.join("、") || "暂无"}</p><p>向量推荐：{definition.embeddingModelSuggestions.map((item) => `${item.id}（${item.dimensions} 维）`).join("、") || "暂无"}</p></div> : null}
         </div>
       </div>
-      <footer className="shrink-0 border-t border-white/10 bg-slate-950 px-6 py-4 sm:px-7">
-        {message ? <p className="mb-3 text-xs leading-5 text-slate-300" role="status">{message}</p> : null}
-        <div className="grid gap-3 sm:grid-cols-2"><button type="button" onClick={() => void testConnection()} disabled={pending || catalog.length === 0 || apiKey.trim().length < 8} className="rounded-xl border border-indigo-300 px-4 py-3 text-sm font-semibold text-indigo-100 transition hover:bg-white/10 disabled:opacity-50">{pending ? "处理中…" : "测试连接"}</button><button disabled={pending || catalog.length === 0 || proof === null} className="rounded-xl bg-indigo-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 disabled:opacity-50">{pending ? "保存中…" : "保存连接"}</button></div>
+      <footer className={`${modalFooterClassName} grid shrink-0 gap-3 px-5 py-4 sm:grid-cols-2 sm:px-6`}>
+        {message ? <p className="text-xs leading-5 text-slate-600 sm:col-span-2" role="status">{message}</p> : null}
+        <button type="button" onClick={() => void testConnection()} disabled={pending || catalog.length === 0 || apiKey.trim().length < 8} className="rounded-lg border border-indigo-200 px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "处理中…" : "测试连接"}</button><button disabled={pending || catalog.length === 0 || proof === null} className="rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "保存中…" : "保存连接"}</button>
       </footer>
-      <style jsx>{`.dark-field{margin-top:.5rem;width:100%;border-radius:.75rem;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.1);padding:.75rem 1rem;font-size:.875rem;color:white;outline:none}.dark-field:focus{border-color:#a5b4fc;box-shadow:0 0 0 2px rgba(165,180,252,.2)}select.dark-field option{color:#0f172a}`}</style>
+      <style jsx>{`.light-field{margin-top:.5rem;width:100%;border-radius:.5rem;border:1px solid #e2e8f0;background:#fff;padding:.75rem 1rem;font-size:.875rem;color:#0f172a;outline:none}.light-field:focus{border-color:#818cf8;box-shadow:0 0 0 3px #e0e7ff}select.light-field option{color:#0f172a}`}</style>
     </form>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="mt-5 block text-sm font-medium text-slate-200">{label}{children}</label>;
+  return <label className="mt-5 block text-sm font-medium text-slate-700">{label}{children}</label>;
 }
 
 function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished }: { provider: Provider; catalog?: ProviderCatalogEntry; onChanged: (provider: Provider) => void; onRemoved: (providerId: string) => void; onProbeFinished: () => Promise<void> }) {

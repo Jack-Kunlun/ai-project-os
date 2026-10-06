@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
 
 type ConfirmTone = "primary" | "warning" | "danger";
 
@@ -93,14 +94,14 @@ export function useAppConfirmDialog() {
       : true;
   const tone = options?.tone ?? "primary";
   const confirmClass = tone === "danger" ? "bg-rose-600 hover:bg-rose-500" : tone === "warning" ? "bg-amber-600 hover:bg-amber-500" : "bg-indigo-600 hover:bg-indigo-500";
-  const descriptionClass = tone === "danger" ? "text-rose-700" : "text-slate-500";
+  const descriptionClass = tone === "danger" ? "text-rose-700" : "text-slate-600";
 
   const dialog = request === null || options === undefined ? null : (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(false); }}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl sm:rounded-[2rem]">
-        <header className="shrink-0 border-b border-slate-100 px-7 py-5 sm:px-8">
+    <div className={`fixed inset-0 z-[80] flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(false); }}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
+        <header className={`${modalHeaderClassName} px-7 py-5 sm:px-8`}>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{options.eyebrow ?? "Confirm action"}</p>
-          <h2 id={titleId} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{options.title}</h2>
+          <h2 id={titleId} className="mt-2 text-lg font-semibold tracking-tight text-slate-950">{options.title}</h2>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
           <p id={descriptionId} className={`whitespace-pre-wrap break-words text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
@@ -111,9 +112,9 @@ export function useAppConfirmDialog() {
             </label>
           ) : null}
         </div>
-        <footer className="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-5 sm:px-8">
-          <button type="button" onClick={() => close(false)} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">{options.cancelLabel ?? "取消"}</button>
-          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`rounded-xl px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{options.confirmLabel ?? "确认"}</button>
+        <footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
+          <button type="button" onClick={() => close(false)} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">{options.cancelLabel ?? "取消"}</button>
+          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{options.confirmLabel ?? "确认"}</button>
         </footer>
       </section>
     </div>

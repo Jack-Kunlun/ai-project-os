@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { modalBackdropClassName, modalSurfaceClassName } from "./modal-styles";
 
 /**
  * Legacy section names are kept for pages which still use AdminPageFrame
@@ -226,14 +227,14 @@ export function AdminAppShell({ children }: { children: ReactNode }) {
 
       {drawerOpen ? (
         <div className="fixed inset-0 z-50 lg:hidden" aria-label="移动端管理导航">
-          <button type="button" tabIndex={-1} aria-label="关闭管理导航" className="absolute inset-0 bg-slate-950/40" onClick={() => setDrawerOpen(false)} />
-          <div ref={drawerRef} id="admin-mobile-navigation" role="dialog" aria-modal="true" aria-labelledby="admin-mobile-navigation-title" className="absolute right-0 top-0 h-full w-full max-w-sm overflow-y-auto bg-white p-4 shadow-2xl">
+          <button type="button" tabIndex={-1} aria-label="关闭管理导航" className={`absolute inset-0 ${modalBackdropClassName}`} onClick={() => setDrawerOpen(false)} />
+          <div ref={drawerRef} id="admin-mobile-navigation" role="dialog" aria-modal="true" aria-labelledby="admin-mobile-navigation-title" className={`absolute right-0 top-0 h-full w-full max-w-sm overflow-y-auto border-l border-slate-200 p-4 ${modalSurfaceClassName}`}>
             <div className="flex items-center justify-between border-b border-slate-100 px-2 pb-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Admin workspace</p>
                 <h2 id="admin-mobile-navigation-title" className="mt-1 text-lg font-semibold text-slate-950">管理工作台导航</h2>
               </div>
-              <button ref={closeRef} type="button" aria-label="关闭管理导航" onClick={() => setDrawerOpen(false)} className="min-h-10 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
+              <button ref={closeRef} type="button" aria-label="关闭管理导航" onClick={() => setDrawerOpen(false)} className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
             </div>
             <div className="mt-4"><NavigationLinks key={active} active={active} pathname={pathname} onNavigate={() => setDrawerOpen(false)} /></div>
           </div>

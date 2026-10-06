@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import type { MaterialKind } from "./materials/materials-navigation";
 
 type UploadPolicy = { maxFiles: number };
@@ -203,15 +204,15 @@ export function ProjectMaterialIntake({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 p-4 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className="my-4 w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl sm:my-6">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 sm:px-8">
+    <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto ${modalBackdropClassName} p-4 sm:p-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`my-4 w-full max-w-5xl overflow-hidden rounded-2xl sm:my-6 ${modalSurfaceClassName}`}>
+        <div className={`flex flex-wrap items-start justify-between gap-4 px-6 py-5 sm:px-8 ${modalHeaderClassName}`}>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Add source</p>
-          <h2 id="add-source-dialog-title" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">添加来源</h2>
+          <h2 id="add-source-dialog-title" className="mt-1 text-lg font-semibold tracking-tight text-slate-950">添加来源</h2>
           <p id="add-source-dialog-description" className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">新增的内容会先进入“原始资料”，经过核对后才会形成已确认事实；不会自动成为 AI 可引用记忆。</p>
         </div>
-        <button ref={closeButtonRef} type="button" onClick={closeDrawer} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
+        <button ref={closeButtonRef} type="button" onClick={closeDrawer} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
       </div>
 
       <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-6 py-6 sm:px-8">
@@ -224,17 +225,17 @@ export function ProjectMaterialIntake({
       {message ? <p role="status" aria-live="polite" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800">{message}</p> : null}
 
       <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-2">
-        <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl bg-slate-950 p-5 text-white">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">输入文本</p>
-          <h3 className="mt-2 text-xl font-semibold">粘贴一段原始资料</h3>
-          <p className="mt-2 text-xs leading-5 text-slate-400">适合会议记录、项目进展、需求说明和临时笔记。系统保留原文，不会把未审核内容当成事实。</p>
-          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-4 w-full resize-y rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/20" />
-          <details className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-            <summary className="cursor-pointer text-xs font-semibold text-slate-300">补充来源链接和资料时间（可选）</summary>
-            <label className="mt-4 block text-xs text-slate-300">来源链接<input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500" /></label>
-            <label className="mt-4 block text-xs text-slate-300">资料时间<input type="datetime-local" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none [color-scheme:dark]" /></label>
+        <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">输入文本</p>
+          <h3 className="mt-2 text-xl font-semibold text-slate-950">粘贴一段原始资料</h3>
+          <p className="mt-2 text-xs leading-5 text-slate-600">适合会议记录、项目进展、需求说明和临时笔记。系统保留原文，不会把未审核内容当成事实。</p>
+          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" />
+          <details className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <summary className="cursor-pointer text-xs font-semibold text-slate-700">补充来源链接和资料时间（可选）</summary>
+            <label className="mt-4 block text-xs text-slate-600">来源链接<input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400" /></label>
+            <label className="mt-4 block text-xs text-slate-600">资料时间<input type="datetime-local" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none [color-scheme:light]" /></label>
           </details>
-          <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-indigo-300 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? "保存中…" : "加入原始资料"}</button>
+          <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? "保存中…" : "加入原始资料"}</button>
         </form>
 
         <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -255,7 +256,7 @@ export function ProjectMaterialIntake({
           </div>
           <p className="mt-3 text-[12px] leading-5 text-slate-400">单次最多 {maxFiles} 个文件；文件夹中的不支持格式会自动跳过。</p>
           {files.length > 0 ? <div className="mt-4 min-w-0 rounded-xl bg-white p-4 text-xs text-slate-600"><p className="font-semibold text-slate-800">已选择 {files.length} 个文件</p><p className="mt-2 line-clamp-3 [overflow-wrap:anywhere]">{files.map(selectedFileName).join("、")}</p></div> : null}
-          <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? "上传并解析中…" : files.length > 0 ? `上传并解析 ${files.length} 个文件` : "请先选择文件或文件夹"}</button>
+          <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? "上传并解析中…" : files.length > 0 ? `上传并解析 ${files.length} 个文件` : "请先选择文件或文件夹"}</button>
         </div>
       </div>
 

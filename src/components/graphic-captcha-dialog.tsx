@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { modalNativeBackdropClassName, modalSurfaceClassName } from "./modal-styles";
 
 export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test";
 export type GraphicCaptchaProof = Readonly<{ challengeId: string; answer: string }>;
@@ -185,10 +186,10 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
       aria-labelledby="graphic-captcha-title"
       aria-describedby="graphic-captcha-description"
       onClose={handleClose}
-      className="fixed inset-0 m-0 h-dvh w-dvw max-h-none max-w-none border-0 bg-transparent p-0 backdrop:bg-slate-950/55"
+      className={`fixed inset-0 m-0 h-dvh w-dvw max-h-none max-w-none border-0 bg-transparent p-0 ${modalNativeBackdropClassName}`}
     >
       <div className="flex min-h-full items-center justify-center p-4">
-        <section className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+        <section className={`w-full max-w-sm rounded-2xl p-5 sm:p-6 ${modalSurfaceClassName}`}>
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="graphic-captcha-title" className="text-lg font-semibold text-slate-950">安全验证</h2>
@@ -236,7 +237,7 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
               type="button"
               onClick={() => void loadChallenge()}
               disabled={loading || submitting}
-              className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? "加载中…" : "刷新验证码"}
             </button>
@@ -244,7 +245,7 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
               type="button"
               onClick={() => void submitAnswer()}
               disabled={loading || submitting || !challenge || !/^[A-Za-z0-9]{6}$/u.test(answer.trim())}
-              className="flex-1 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex-1 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? "验证并发送中…" : "验证并发送短信"}
             </button>

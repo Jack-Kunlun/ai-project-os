@@ -5165,11 +5165,14 @@ model AppUser {
   displayName                                        String?                               @db.VarChar(160)
   email                                              String?                               @unique @db.VarChar(320)
   emailVerifiedAt                                    DateTime?
+  phoneE164                                          String?                               @unique @db.VarChar(14)
+  phoneVerifiedAt                                    DateTime?
   passwordHash                                       String?                               @db.VarChar(128)
   passwordSalt                                       String?                               @db.VarChar(128)
   passwordVersion                                    Int                                   @default(1)
   role                                               AppUserRole                           @default(user)
   disabledAt                                         DateTime?
+  closedAt                                           DateTime?
   disabledReason                                     String?                               @db.VarChar(500)
   disabledById                                       String?                               @db.Uuid
   accountAccessVersion                               Int                                   @default(1)
@@ -6488,6 +6491,7 @@ model McpExportDispatchAudit {
 }
 
 model Workspace {
+  closedAt                      DateTime?
   id                            String                          @id @default(uuid()) @db.Uuid
   name                          String                          @db.VarChar(160)
   slug                          String                          @unique @db.VarChar(80)
@@ -9279,4 +9283,130 @@ model ProviderCallAudit {
   @@index([callKey])
   @@index([reservationId])
   @@index([webAiGrantReferenceId, personalDelegationId, effectiveRouteSelectionId], map: "ProviderCallAudit_personal_runtime_evidence_idx")
+}
+
+/// One-use SMS proofs; no plaintext verification codes or provider credentials.
+model SmsAuthChallenge {
+  id               String    @id @db.Uuid
+  phoneE164        String    @db.VarChar(14)
+  phoneFingerprint String    @db.Char(64)
+  purpose          String    @db.VarChar(16)
+  providerScheme   String    @db.VarChar(20)
+  configVersion    Int
+  expectedCodeDigest  String?   @db.Char(64)
+  codeDigest       String?   @db.Char(64)
+  verifiedAt       DateTime?
+  status           String    @default("pending") @db.VarChar(16)
+  attemptCount     Int       @default(0)
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  consumedByUserId String?   @db.Uuid
+  createdAt        DateTime  @default(now())
+
+  @@index([phoneFingerprint, createdAt])
+  @@index([expiresAt])
+}
+
+/// Durable deployment-wide and per-phone limits shared by all replicas.
+model PhoneAuthBudget {
+  scope           String   @db.VarChar(32)
+  keyFingerprint  String   @db.Char(64)
+  windowStartedAt DateTime
+  attemptCount    Int
+  updatedAt       DateTime @updatedAt
+
+  @@id([scope, keyFingerprint])
+  @@index([updatedAt])
+}
+
+/// Active platform SMS provider. Ciphertext is never returned by admin APIs.
+model SmsProviderConfig {
+  id                  String   @id @db.VarChar(16)
+  provider            String   @db.VarChar(32)
+  version             Int
+  enabled             Boolean  @default(false)
+  ciphertext          Bytes
+  nonce               Bytes
+  authTag             Bytes
+  fingerprint         String   @db.Char(64)
+  verifiedAt          DateTime
+  updatedById         String   @db.Uuid
+  updatedAt           DateTime @updatedAt
+}
+
+/// Short-lived encrypted candidate and single-use real send/check evidence.
+model SmsProviderProbe {
+  id                        String    @id @db.Uuid
+  actorId                   String    @db.Uuid
+  actorAccountAccessVersion Int
+  baseVersion               Int
+  provider                  String    @db.VarChar(32)
+  ciphertext                Bytes
+  nonce                     Bytes
+  authTag                   Bytes
+  fingerprint               String    @db.Char(64)
+  phoneE164                 String    @db.VarChar(14)
+  phoneFingerprint          String    @db.Char(64)
+  status                    String    @db.VarChar(16)
+  expectedCodeDigest  String?   @db.Char(64)
+  attemptCount              Int       @default(0)
+  createdAt                 DateTime  @default(now())
+  expiresAt                 DateTime
+  verifiedAt                DateTime?
+  consumedAt                DateTime?
+  @@index([phoneFingerprint, createdAt])
+  @@index([expiresAt])
+}
+
+model SmsProviderConfigAudit {
+  id             String   @id @db.Uuid
+  actorId        String   @db.Uuid
+  action         String   @db.VarChar(16)
+  provider       String   @db.VarChar(32)
+  configVersion  Int
+  enabled        Boolean
+  createdAt      DateTime @default(now())
+  @@index([createdAt])
+}
+
+/// Minimal immutable evidence of an irreversible self-service account closure.
+model AccountClosureReceipt {
+  id                  String   @id @db.Uuid
+  userId              String   @unique @db.Uuid
+  versionBefore       Int
+  versionAfter        Int
+  method              String   @db.VarChar(16)
+  archivedWorkspaceIds Json
+  transactionId       BigInt   @default(dbgenerated("txid_current()"))
+  createdAt           DateTime @default(now())
+}
+model AccountClosureBudget {
+  userId          String   @id @db.Uuid
+  windowStartedAt DateTime
+  attemptCount    Int
+  updatedAt       DateTime @updatedAt
+}
+
+/// Short-lived, single-attempt graphic CAPTCHA; answers are keyed hashes only.
+model GraphicCaptchaChallenge {
+  id String @id @db.Uuid
+  phoneFingerprint String @db.Char(64)
+  purpose String @db.VarChar(16)
+  browserFingerprint String @db.Char(64)
+  actorId String? @db.Uuid
+  actorAccountAccessVersion Int?
+  answerDigest String @db.Char(64)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  consumedAt DateTime?
+  @@index([expiresAt])
+}
+model GraphicCaptchaBudget {
+  scope String @db.VarChar(32)
+  keyFingerprint String @db.Char(64)
+  windowStartedAt DateTime
+  attemptCount Int
+  updatedAt DateTime @updatedAt
+  @@id([scope, keyFingerprint])
+  @@index([updatedAt])
 }

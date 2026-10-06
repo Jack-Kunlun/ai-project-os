@@ -4,6 +4,9 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
+import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
+
+type PhoneAuthStatus = "disabled" | "unavailable" | "available";
 
 type LoginFormProps = {
   notice?: string;
@@ -12,6 +15,8 @@ type LoginFormProps = {
   returnTo?: string;
   githubLoginAvailable?: boolean;
   githubAvailability?: "notConfigured" | "configurationInvalid" | "bootstrapPending" | "available";
+  phoneAuthStatus?: PhoneAuthStatus;
+  phoneAutoRegistrationEnabled?: boolean;
 };
 
 export function LoginForm({
@@ -21,20 +26,58 @@ export function LoginForm({
   returnTo = "/dashboard",
   githubLoginAvailable = false,
   githubAvailability = githubLoginAvailable ? "available" : "notConfigured",
+  phoneAuthStatus = "disabled",
+  phoneAutoRegistrationEnabled = false,
 }: LoginFormProps) {
   const router = useRouter();
+  const [method, setMethod] = useState<"password" | "sms">("password");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [smsCode, setSmsCode] = useState("");
+  const [smsChallengeId, setSmsChallengeId] = useState<string | null>(null);
   const [remember, setRemember] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpVisible, setHelpVisible] = useState(false);
+  const [smsSuccessNotice, setSmsSuccessNotice] = useState<string | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (method === "sms" && phoneAuthStatus !== "available") return;
     setPending(true);
     setError(null);
+    setSmsSuccessNotice(null);
     try {
+      if (method === "sms") {
+        if (!smsChallengeId || smsCode.length !== 6) {
+          throw new Error("请先获取并填写短信验证码。");
+        }
+        const response = await fetch("/api/auth/sms/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ phone: `+86${phone}`, challengeId: smsChallengeId, code: smsCode, remember }),
+        });
+        const payload = await response.json().catch(() => null) as {
+          error?: { code?: string };
+          user?: { role?: "admin" | "user" };
+          registered?: boolean;
+        } | null;
+        if (!response.ok || !payload?.user?.role) {
+          const safeMessage = payload?.error?.code === "LOCAL_REGISTRATION_DISABLED"
+            ? "该手机号尚未注册，当前暂未开放新账号注册。"
+            : "验证码登录失败，请检查验证码或稍后重试。";
+          throw new Error(safeMessage);
+        }
+        if (payload.registered === true && phoneAutoRegistrationEnabled) {
+          setSmsSuccessNotice("该手机号尚未注册，已为你创建账号和个人工作区。");
+          await new Promise((resolve) => window.setTimeout(resolve, 900));
+        }
+        router.replace(payload.user.role === "admin" ? "/admin" : returnTo);
+        router.refresh();
+        return;
+      }
+
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -61,6 +104,16 @@ export function LoginForm({
     bootstrapPending: "平台管理员尚未完成初始化，GitHub 登录暂不可用",
     available: "",
   }[githubAvailability];
+  const smsLoginAvailable = phoneAuthStatus === "available";
+
+  function changeLoginMethod(nextMethod: "password" | "sms") {
+    if (nextMethod === "sms" && !smsLoginAvailable) return;
+    setMethod(nextMethod);
+    setError(null);
+    setHelpVisible(false);
+    setSmsCode("");
+    setSmsChallengeId(null);
+  }
 
   return (
     <main className="flex min-h-screen flex-col justify-center overflow-x-hidden bg-[radial-gradient(circle_at_8%_5%,rgba(224,231,255,.72),transparent_24%),radial-gradient(circle_at_92%_94%,rgba(237,233,254,.68),transparent_25%),#f7f9fd] px-4 py-4 text-slate-950 sm:px-6 sm:py-5">
@@ -101,28 +154,84 @@ export function LoginForm({
             <h2 className="mt-3 text-[30px] font-semibold tracking-[-0.04em] sm:text-[34px]">登录 AI Project OS</h2>
             <p className="mt-2 text-[14px] leading-6 text-slate-500">使用账号登录你的工作区，继续处理项目资料与治理任务。</p>
 
-            <label className="mt-7 block text-sm font-semibold" htmlFor="login-username">用户名</label>
-            <div className="relative mt-2">
-              <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><UserIcon /></span>
-              <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required placeholder="输入登录名" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
-            </div>
+            {phoneAuthStatus !== "disabled" ? (
+              <div className="mt-5">
+                <div role="tablist" aria-label="选择登录方式" className="grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+                  <button type="button" role="tab" aria-selected={method === "password"} onClick={() => changeLoginMethod("password")} className={`h-10 rounded-lg px-3 text-sm font-semibold transition ${method === "password" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>用户名密码</button>
+                  <button type="button" role="tab" aria-selected={method === "sms"} disabled={!smsLoginAvailable} onClick={() => changeLoginMethod("sms")} className={`h-10 rounded-lg px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:text-slate-400 ${method === "sms" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>手机号验证码</button>
+                </div>
+                {smsLoginAvailable ? (
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    {phoneAutoRegistrationEnabled ? "验证码验证后登录；手机号首次使用时会自动创建账号和个人工作区。" : "验证码用于登录已有账号；如需新账号，请先完成注册。"}
+                  </p>
+                ) : <p role="status" className="mt-2 text-xs leading-5 text-amber-800">短信服务暂不可用，请稍后重试或联系管理员。</p>}
+              </div>
+            ) : null}
 
-            <label className="mt-5 block text-sm font-semibold" htmlFor="login-password">密码</label>
-            <div className="relative mt-2">
-              <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><LockIcon /></span>
-              <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
-            </div>
+            {method === "password" ? (
+              <>
+                <label className="mt-7 block text-sm font-semibold" htmlFor="login-username">用户名或手机号</label>
+                <div className="relative mt-2">
+                  <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><UserIcon /></span>
+                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required placeholder="输入用户名或手机号" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+                </div>
+
+                <label className="mt-5 block text-sm font-semibold" htmlFor="login-password">密码</label>
+                <div className="relative mt-2">
+                  <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><LockIcon /></span>
+                  <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+                </div>
+              </>
+            ) : (
+              <div className="mt-7 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-semibold" htmlFor="login-phone">手机号</label>
+                  <div className="mt-2 flex h-14 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100">
+                    <span aria-hidden="true" className="flex shrink-0 items-center border-r border-slate-200 px-4 text-sm text-slate-500">+86</span>
+                    <input
+                      id="login-phone"
+                      type="tel"
+                      inputMode="numeric"
+                      value={phone}
+                      onChange={(event) => {
+                        setPhone(normalizeMainlandPhoneInput(event.target.value));
+                        setSmsCode("");
+                        setSmsChallengeId(null);
+                      }}
+                      autoComplete="tel-national"
+                      minLength={11}
+                      maxLength={11}
+                      required
+                      pattern="1[3-9][0-9]{9}"
+                      placeholder="输入 11 位手机号"
+                      className="min-w-0 flex-1 bg-transparent px-3 text-[16px] outline-none"
+                    />
+                  </div>
+                </div>
+                <SmsCodeInput
+                  key={phone}
+                  id="login-sms-code"
+                  phoneE164={`+86${phone}`}
+                  purpose="login"
+                  availability="available"
+                  code={smsCode}
+                  onCodeChange={setSmsCode}
+                  onChallengeIdChange={setSmsChallengeId}
+                />
+              </div>
+            )}
 
             <div className="mt-5 flex items-center justify-between gap-4 text-[12px]">
               <label className="flex cursor-pointer items-center gap-2.5 text-slate-600">
                 <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 accent-indigo-600" />
                 <span>记住我</span>
               </label>
-              <button type="button" onClick={() => setHelpVisible((visible) => !visible)} className="font-semibold text-indigo-600 transition hover:text-indigo-500">忘记密码？</button>
+              {method === "password" ? <button type="button" onClick={() => setHelpVisible((visible) => !visible)} className="font-semibold text-indigo-600 transition hover:text-indigo-500">忘记密码？</button> : null}
             </div>
 
             {helpVisible ? <p role="status" className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-700">当前部署不通过邮件重置密码。请联系工作区管理员恢复本地账户，或使用已绑定的 GitHub / 企业身份登录。</p> : null}
             {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeTone === "error" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{notice}</p> : null}
+            {smsSuccessNotice ? <p role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{smsSuccessNotice}</p> : null}
             {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
             <button type="submit" disabled={pending} className="mt-6 h-[52px] w-full rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-[16px] font-semibold tracking-[0.22em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "登录中…" : "登 录"}</button>

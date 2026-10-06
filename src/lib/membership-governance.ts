@@ -404,6 +404,7 @@ export async function findConfirmedWorkspaceMembership(
   const rows = await db.workspaceMembership.findMany({
     where: {
       workspaceId,
+      workspace: { closedAt: null },
       userId,
       accessState: MembershipAccessState.confirmed,
     },

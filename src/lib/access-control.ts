@@ -156,7 +156,7 @@ export async function getProjectPermission(
 ): Promise<ProjectPermission | null> {
   const canonicalId = canonicalProjectId(projectId);
   const project = await db.project.findUnique({
-    where: { id: canonicalId },
+    where: { id: canonicalId, workspace: { closedAt: null } },
     select: {
       membershipInheritanceMode: true,
       workspaceId: true,

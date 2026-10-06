@@ -1,3 +1,4 @@
+import { getPhoneAuthStatus } from "@/lib/phone-auth-config";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
         tx.appUser.findUnique({
           where: { id: sessionUser.id },
           select: {
-            id: true, username: true, displayName: true, email: true, emailVerifiedAt: true, role: true, passwordHash: true, createdAt: true, updatedAt: true,
+            id: true, username: true, displayName: true, email: true, emailVerifiedAt: true, role: true, passwordHash: true, phoneE164: true, createdAt: true, updatedAt: true,
             workspaceMemberships: { where: { accessState: "confirmed" }, select: { role: true, workspace: { select: { id: true, name: true } } } },
             oidcIdentities: { select: { email: true, lastLoginAt: true, provider: { select: { id: true, name: true } } } },
             githubIdentity: { select: { githubUserId: true, login: true, email: true, displayName: true, lastLoginAt: true } },
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     return NextResponse.json(
-      { profile },
+      { profile: { ...profile, phoneAuthStatus: await getPhoneAuthStatus(db) } },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {

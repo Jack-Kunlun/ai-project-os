@@ -71,6 +71,7 @@ type SafeUser = Readonly<{
   username: string;
   displayName: string | null;
   state: "enabled" | "disabled";
+  closedAt: Date | null;
   disabledAt: Date | null;
   accountAccessVersion: number;
 }>;
@@ -145,6 +146,7 @@ function mapUser(
     username: string;
     displayName: string | null;
     disabledAt: Date | null;
+    closedAt?: Date | null;
     accountAccessVersion: number;
     membershipSubscription: { status: "active" | "revoked"; startsAt: Date; expiresAt: Date; version: number } | null;
   }>,
@@ -159,6 +161,7 @@ function mapUser(
       displayName: row.displayName,
       state: disabled ? "disabled" : "enabled",
       disabledAt: row.disabledAt,
+      closedAt: row.closedAt ?? null,
       accountAccessVersion: row.accountAccessVersion,
     }),
     membership: Object.freeze({
@@ -215,6 +218,7 @@ export async function listAdminUsers(input: Readonly<{
       username: true,
       displayName: true,
       disabledAt: true,
+      closedAt: true,
       accountAccessVersion: true,
       membershipSubscription: { select: { status: true, startsAt: true, expiresAt: true, version: true } },
     },
@@ -271,6 +275,7 @@ export async function getAdminUserOperationsDetail(input: Readonly<{
       username: true,
       displayName: true,
       disabledAt: true,
+      closedAt: true,
       accountAccessVersion: true,
       role: true,
       membershipSubscription: { select: { status: true, startsAt: true, expiresAt: true, version: true } },
@@ -302,7 +307,7 @@ export async function getAdminUserOperationsDetail(input: Readonly<{
       withdrawnAt: membershipApplication.withdrawnAt,
     }),
     records: Object.freeze({
-      account: Object.freeze(accountRecords.map((record) => ({ event: record.event, version: record.versionAfter, occurredAt: record.transitionAt }))),
+      account: Object.freeze([...(target.closedAt ? [{ event: "账号已注销", version: target.accountAccessVersion, occurredAt: target.closedAt }] : []), ...accountRecords.map((record) => ({ event: record.event, version: record.versionAfter, occurredAt: record.transitionAt }))]),
       membership: Object.freeze(membershipRecords.map((record) => ({ event: record.eventKind, status: record.statusAfter ?? "unknown", version: record.versionAfter, occurredAt: record.transitionAt }))),
       credits: Object.freeze(creditRecords.map((record) => ({ event: record.event, status: record.statusAfter, version: record.versionAfter, amount: record.amount, remainingTokens: record.remainingAfter, occurredAt: record.transitionAt }))),
     }),

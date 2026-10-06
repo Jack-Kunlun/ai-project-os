@@ -7,6 +7,7 @@ import { authorizeApiRequest } from "@/lib/access-control";
 import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { findCurrentWorkspaceMembership, grantWorkspaceMembership } from "@/lib/membership-governance";
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
+import { normalizeMainlandPhone } from "@/lib/phone-auth-identity";
 import { createBootstrapSignupOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
@@ -466,13 +467,16 @@ export async function loginAdmin(
   input: Readonly<{ username: unknown; password: unknown }>,
   db: PrismaClient = getDb(),
 ): Promise<CreatedSession> {
-  let username: string;
-  try {
-    username = canonicalUsername(input.username);
-  } catch {
-    return fail("AUTH_INVALID_CREDENTIALS");
-  }
-  const user = await db.appUser.findUnique({ where: { username } });
+  let username: string | null = null;
+  let phone: string | null = null;
+  try { username = canonicalUsername(input.username); } catch { /* Phone aliases also accept +86. */ }
+  try { phone = normalizeMainlandPhone(input.username); } catch { /* A non-phone username remains valid. */ }
+  if (username === null && phone === null) return fail("AUTH_INVALID_CREDENTIALS");
+  const byUsername = username === null ? null : await db.appUser.findUnique({ where: { username } });
+  const byPhone = phone === null ? null : await db.appUser.findUnique({ where: { phoneE164: phone } });
+  // Never choose between two different principals on an ambiguous legacy alias.
+  if (byUsername && byPhone && byUsername.id !== byPhone.id) return fail("AUTH_INVALID_CREDENTIALS");
+  const user = byPhone ?? byUsername;
   if (
     user === null ||
     user.disabledAt !== null ||
@@ -486,6 +490,15 @@ export async function loginAdmin(
     data: { revokedAt: new Date() },
   });
   return createSession(db, user);
+}
+
+export async function createPhoneSessionInTransaction(tx: Prisma.TransactionClient, userId: string, now: Date): Promise<CreatedSession> {
+  await lockActorAccess(tx, userId);
+  const user = await tx.appUser.findUnique({ where: { id: userId } });
+  if (!user || user.disabledAt || !user.phoneE164 || !user.phoneVerifiedAt) return fail("AUTH_INVALID_CREDENTIALS");
+  if (user.role === "user") await ensureLocalPersonalWorkspace(tx, user);
+  await tx.appSession.updateMany({ where: { userId, expiresAt: { lte: now }, revokedAt: null }, data: { revokedAt: now } });
+  return createSessionInTransaction(tx, user, now);
 }
 
 export async function updateAccountUsername(

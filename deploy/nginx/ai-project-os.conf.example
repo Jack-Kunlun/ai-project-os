@@ -3,6 +3,8 @@
 
 limit_req_zone $binary_remote_addr zone=ai_project_os_auth:10m rate=10r/m;
 limit_req_zone $binary_remote_addr zone=ai_project_os_registration:10m rate=1r/m;
+limit_req_zone $binary_remote_addr zone=ai_project_os_graphic_captcha:10m rate=20r/m;
+limit_req_zone $binary_remote_addr zone=ai_project_os_sms:10m rate=1r/m;
 # Public MCP OAuth authorization fetches remote CIMD metadata. Apply this
 # source limit before proxying; configure real_ip only for trusted upstreams.
 limit_req_zone $binary_remote_addr zone=ai_project_os_oauth_authorize:10m rate=3r/m;
@@ -42,6 +44,42 @@ server {
         include /etc/nginx/snippets/ai-project-os-proxy.conf;
     }
 
+    # Shared durable app budgets remain authoritative across IPs and replicas.
+    location = /api/auth/sms/captcha {
+        limit_req zone=ai_project_os_graphic_captcha burst=5 nodelay;
+        limit_req_status 429;
+        client_max_body_size 2k;
+        include /etc/nginx/snippets/ai-project-os-proxy.conf;
+    }
+
+    location = /api/auth/sms/send {
+        limit_req zone=ai_project_os_sms burst=1 nodelay;
+        limit_req_status 429;
+        client_max_body_size 2k;
+        include /etc/nginx/snippets/ai-project-os-proxy.conf;
+    }
+
+    location = /api/admin/sms/test {
+        limit_req zone=ai_project_os_sms burst=1 nodelay;
+        limit_req_status 429;
+        client_max_body_size 4k;
+        include /etc/nginx/snippets/ai-project-os-proxy.conf;
+    }
+
+    location = /api/auth/sms/login {
+        limit_req zone=ai_project_os_auth burst=5 nodelay;
+        limit_req_status 429;
+        client_max_body_size 2k;
+        include /etc/nginx/snippets/ai-project-os-proxy.conf;
+    }
+
+    location = /api/profile/close {
+        limit_req zone=ai_project_os_auth burst=3 nodelay;
+        limit_req_status 429;
+        client_max_body_size 2k;
+        include /etc/nginx/snippets/ai-project-os-proxy.conf;
+    }
+
     location = /api/setup {
         limit_req zone=ai_project_os_auth burst=3 nodelay;
         include /etc/nginx/snippets/ai-project-os-proxy.conf;
@@ -58,7 +96,7 @@ server {
         include /etc/nginx/snippets/ai-project-os-proxy.conf;
     }
 
-    location ~* ^/api/projects/[0-9a-f-]{36}/assets$ {
+    location ~* "^/api/projects/[0-9a-f-]{36}/assets$" {
         limit_req zone=ai_project_os_upload burst=4 nodelay;
         limit_conn ai_project_os_upload_conn 2;
         client_body_timeout 60s;

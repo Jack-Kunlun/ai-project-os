@@ -30,6 +30,7 @@ test("Git worker opens only an existing sealed credential with the expected fing
       tlsCaCertificate: null,
       sshKnownHost: null,
       resolvedAddressFingerprint: "a".repeat(64),
+      verifiedAddresses: null,
       credentialId: randomUUID(),
     },
     credential: {

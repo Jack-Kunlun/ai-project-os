@@ -512,7 +512,7 @@ export async function executeGitConnectionMutation(
       await setConfig(tx, "app.personal_git_credential_rotation_connection_id", connection.id);
       await rotateCredential(connection.credentialId, "git", encodeGitCredential(connection.authKind, parsed.data.secret), tx);
       statusAfter = "configured";
-      await tx.gitConnection.update({ where: { id: connection.id }, data: { configurationVersion: { increment: 1 }, status: "configured", resolvedAddressFingerprint: null, lastTestedAt: null, lastErrorCode: null, ownerAccountAccessVersion: actorVersion }, });
+      await tx.gitConnection.update({ where: { id: connection.id }, data: { configurationVersion: { increment: 1 }, status: "configured", resolvedAddressFingerprint: null, verifiedAddresses: Prisma.DbNull, lastTestedAt: null, lastErrorCode: null, ownerAccountAccessVersion: actorVersion }, });
     } else if (action === "disable") {
       statusAfter = "disabled";
       await tx.gitConnection.update({ where: { id: connection.id }, data: { status: "disabled", disabledAt: now, configurationVersion: { increment: 1 } } });
@@ -525,7 +525,7 @@ export async function executeGitConnectionMutation(
       if (connection.credentialId !== null) await tx.externalCredential.delete({ where: { id: connection.credentialId } });
       statusAfter = null;
     } else if (action === "retrust") {
-      await tx.gitConnection.update({ where: { id: connection.id }, data: { status: "configured", resolvedAddressFingerprint: null, lastTestedAt: null, lastErrorCode: null, configurationVersion: { increment: 1 } } });
+      await tx.gitConnection.update({ where: { id: connection.id }, data: { status: "configured", resolvedAddressFingerprint: null, verifiedAddresses: Prisma.DbNull, lastTestedAt: null, lastErrorCode: null, configurationVersion: { increment: 1 } } });
     }
     await tx.gitConnectionMutationPreview.update({ where: { id: preview.id }, data: { consumedAt: now, executionStatus } });
     const connectionAfter = statusAfter === null

@@ -36,6 +36,7 @@ async function createFixtureProbe(
   kind: "git" | "mcp",
   identity: ReturnType<typeof requireConnectionIdentity>,
   db: FixtureDb,
+  gitEndpoint?: Readonly<{ addressFingerprint: string | null; verifiedAddresses: readonly string[] | null }>,
 ): Promise<{ actor: PersonalConnectionProbeActor; probeId: string; requestKey: string }> {
   const actor = fixtureActor(identity.ownerUserId, identity.ownerAccountAccessVersion);
   const requestKey = randomUUID();
@@ -51,7 +52,7 @@ async function createFixtureProbe(
     },
     secret: null,
   }, actor, async () => kind === "git"
-    ? { addressFingerprint: FIXTURE_FINGERPRINT, commitSha: "b".repeat(40), resultSnapshot: {} }
+    ? { addressFingerprint: gitEndpoint === undefined ? FIXTURE_FINGERPRINT : gitEndpoint.addressFingerprint, verifiedAddresses: gitEndpoint?.verifiedAddresses ?? null, commitSha: "b".repeat(40), resultSnapshot: {} }
     : { addressFingerprint: FIXTURE_FINGERPRINT, protocolVersion: "2025-06-18", catalogFingerprint: "c".repeat(64), resultCount: 0, resultSnapshot: [] }, db);
   if (probe.draftProbeId === null) throw new Error("PERSONAL_CONNECTION_PROBE_FIXTURE_PROBE_NOT_SETTLED");
   return { actor, probeId: probe.draftProbeId, requestKey };
@@ -62,7 +63,14 @@ export async function createGitConnectionFixture(
   db: FixtureDb,
 ): Promise<Prisma.GitConnectionGetPayload<object>> {
   const identity = requireConnectionIdentity(data);
-  const { actor, probeId, requestKey } = await createFixtureProbe("git", identity, db);
+  const verifiedAddresses = Array.isArray(data.verifiedAddresses)
+    && data.verifiedAddresses.every((address) => typeof address === "string")
+    ? data.verifiedAddresses as string[]
+    : null;
+  const { actor, probeId, requestKey } = await createFixtureProbe("git", identity, db, {
+    addressFingerprint: typeof data.resolvedAddressFingerprint === "string" ? data.resolvedAddressFingerprint : null,
+    verifiedAddresses,
+  });
   return db.$transaction(async (tx) => {
     await consumePersonalConnectionProbe({
       kind: "git",

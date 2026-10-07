@@ -40,17 +40,39 @@ function ipv4Parts(address: string): readonly number[] | null {
     : null;
 }
 
+function mappedIpv4Address(address: string): string | null {
+  const dotted = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/u)?.[1];
+  if (dotted !== undefined) return ipv4Parts(dotted) === null ? null : dotted;
+  const hexadecimal = address.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
+  if (hexadecimal === null) return null;
+  const high = Number.parseInt(hexadecimal[1]!, 16);
+  const low = Number.parseInt(hexadecimal[2]!, 16);
+  return `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
+}
+
+function canonicalIpAddress(address: unknown): string | null {
+  if (typeof address !== "string") return null;
+  if (isIP(address) === 4) return ipv4Parts(address) === null ? null : address;
+  if (isIP(address) !== 6) return null;
+  try {
+    const hostname = new URL(`http://[${address}]/`).hostname;
+    const canonical = hostname.slice(1, -1).toLowerCase();
+    return isIP(canonical) === 6 ? canonical : null;
+  } catch {
+    return null;
+  }
+}
+
 function isMetadataAddress(address: string): boolean {
   const normalized = address.toLowerCase().split("%")[0]!;
   if (normalized === "169.254.169.254" || normalized === "fd00:ec2::254") return true;
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/u)?.[1];
-  return mapped === "169.254.169.254";
+  return mappedIpv4Address(normalized) === "169.254.169.254";
 }
 
 function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase().split("%")[0]!;
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/u)?.[1];
-  if (mapped !== undefined) return isPrivateAddress(mapped);
+  const mapped = mappedIpv4Address(normalized);
+  if (mapped !== null) return isPrivateAddress(mapped);
   const parts = ipv4Parts(normalized);
   if (parts !== null) {
     const [a, b] = parts;
@@ -66,6 +88,12 @@ function isPrivateAddress(address: string): boolean {
   return normalized === "::" || normalized === "::1" ||
     normalized.startsWith("fc") || normalized.startsWith("fd") ||
     /^fe[89ab]/u.test(normalized);
+}
+
+function endpointFingerprint(url: URL, addresses: readonly string[]): string {
+  return createHash("sha256")
+    .update(`${url.hostname.toLowerCase()}:${url.port || (url.protocol === "ssh:" ? "22" : "443")}:${addresses.join(",")}`, "utf8")
+    .digest("hex");
 }
 
 export function canonicalGitBaseUrl(value: unknown, transport: GitTransport): string {
@@ -207,13 +235,13 @@ export async function resolveGitEndpoint(input: Readonly<{
     if (abort !== undefined) input.signal?.removeEventListener("abort", abort);
   }
   if (input.signal?.aborted) throw new Error("GIT_OPERATION_ABORTED");
-  const addresses = [...new Set(rows.map((row) => row.address.toLowerCase()))].sort();
+  const resolvedAddresses = rows.map((row) => canonicalIpAddress(row.address));
+  if (resolvedAddresses.some((address) => address === null)) return fail("GIT_NETWORK_BLOCKED");
+  const addresses = [...new Set(resolvedAddresses as string[])].sort();
   if (addresses.length === 0) return fail("GIT_HOST_UNRESOLVED");
   if (addresses.some(isMetadataAddress)) return fail("GIT_NETWORK_BLOCKED");
   if (!input.allowPrivateNetwork && addresses.some(isPrivateAddress)) return fail("GIT_NETWORK_BLOCKED");
-  const fingerprint = createHash("sha256")
-    .update(`${url.hostname.toLowerCase()}:${url.port || (url.protocol === "ssh:" ? "22" : "443")}:${addresses.join(",")}`, "utf8")
-    .digest("hex");
+  const fingerprint = endpointFingerprint(url, addresses);
   return Object.freeze({ addresses: Object.freeze(addresses), fingerprint });
 }
 
@@ -221,8 +249,43 @@ export async function assertPinnedGitEndpoint(input: Readonly<{
   baseUrl: string;
   allowPrivateNetwork: boolean;
   expectedFingerprint: string | null;
+  /** Stored verification evidence; null keeps legacy rows on strict DNS comparison. */
+  verifiedAddresses?: unknown;
   signal?: AbortSignal;
 }>): Promise<GitEndpointResolution> {
+  if (input.verifiedAddresses !== undefined && input.verifiedAddresses !== null) {
+    if (input.signal?.aborted) throw new Error("GIT_OPERATION_ABORTED");
+    const addresses = input.verifiedAddresses;
+    if (!Array.isArray(addresses) || addresses.length === 0 || addresses.length > 256) {
+      return fail("GIT_NETWORK_CHANGED");
+    }
+    if (addresses.some((address) => typeof address === "string" && isMetadataAddress(address))) {
+      return fail("GIT_NETWORK_BLOCKED");
+    }
+    if (!input.allowPrivateNetwork
+      && addresses.some((address) => typeof address === "string" && isPrivateAddress(address))) {
+      return fail("GIT_NETWORK_BLOCKED");
+    }
+    const canonicalAddresses = addresses.map(canonicalIpAddress);
+    if (canonicalAddresses.some((address) => address === null)
+      || canonicalAddresses.some((address, index) => address !== addresses[index])) {
+      return fail("GIT_NETWORK_CHANGED");
+    }
+    const verified = canonicalAddresses as string[];
+    const sorted = [...verified].sort();
+    if (new Set(verified).size !== verified.length || verified.some((address, index) => address !== sorted[index])) {
+      return fail("GIT_NETWORK_CHANGED");
+    }
+    if (verified.some(isMetadataAddress)) return fail("GIT_NETWORK_BLOCKED");
+    if (!input.allowPrivateNetwork && verified.some(isPrivateAddress)) return fail("GIT_NETWORK_BLOCKED");
+    const url = new URL(input.baseUrl);
+    const fingerprint = endpointFingerprint(url, verified);
+    if (input.expectedFingerprint === null || !/^[0-9a-f]{64}$/u.test(input.expectedFingerprint)
+      || fingerprint !== input.expectedFingerprint) {
+      return fail("GIT_NETWORK_CHANGED");
+    }
+    return Object.freeze({ addresses: Object.freeze(verified), fingerprint });
+  }
   const resolved = await resolveGitEndpoint(input);
   if (input.expectedFingerprint !== null && resolved.fingerprint !== input.expectedFingerprint) {
     return fail("GIT_NETWORK_CHANGED");

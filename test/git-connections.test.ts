@@ -76,6 +76,8 @@ test("Git 运行器固定协议、关闭交互并且不启用 shell", async () =
   assert.match(runner, /shell:\s*false/u);
   assert.match(runner, /StrictHostKeyChecking=yes/u);
   assert.match(runner, /http\.curloptResolve=/u);
+  assert.match(runner, /http\.curloptResolve=\$\{input\.pinnedEndpoint\.hostname\}/u);
+  assert.doesNotMatch(runner, /http\.curloptResolve=\+/u);
   assert.match(runner, /http\.followRedirects=false/u);
   assert.match(runner, /HostKeyAlias=/u);
   assert.match(runner, /HostName=/u);

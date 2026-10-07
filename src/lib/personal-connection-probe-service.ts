@@ -54,6 +54,7 @@ export type PersonalConnectionProbeConfiguration = Readonly<{
 
 export type PersonalConnectionProbeOutcome = Readonly<{
   addressFingerprint: string | null;
+  verifiedAddresses?: readonly string[] | null;
   commitSha?: string | null;
   protocolVersion?: string | null;
   catalogFingerprint?: string | null;
@@ -88,6 +89,7 @@ type ProbeRow = Readonly<{
   targetRepositoryPath: string | null;
   targetTrackedRef: string | null;
   resolvedAddressFingerprint: string | null;
+  verifiedAddresses: unknown;
   resultCommitSha: string | null;
   protocolVersion: string | null;
   catalogFingerprint: string | null;
@@ -202,6 +204,15 @@ function publicView(row: ProbeRow, createRequestKey: string): PersonalConnection
   });
 }
 
+function proofVerifiedAddresses(value: unknown): readonly string[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 256
+    || value.some((address) => typeof address !== "string")) {
+    fail("PERSONAL_CONNECTION_PROBE_CONFIGURATION_CONFLICT");
+  }
+  return Object.freeze([...value]);
+}
+
 async function mutationContext(db: ProbeDb): Promise<void> {
   await db.$executeRaw`SELECT set_config('app.personal_connection_probe_mutation_context', 'service-v1', true)`;
 }
@@ -270,6 +281,8 @@ async function admit(
           credentialSecretFingerprint: secretDigest,
           targetRepositoryPath: input.targetRepositoryPath ?? null,
           targetTrackedRef: input.targetTrackedRef ?? null,
+          resolvedAddressFingerprint: null,
+          verifiedAddresses: Prisma.DbNull,
           status: "running",
           evidenceExpiresAt: null,
           consumedAt: null,
@@ -321,6 +334,9 @@ async function updateAttempt(
         status,
         safeErrorCode,
         resolvedAddressFingerprint: outcome?.addressFingerprint ?? null,
+        verifiedAddresses: outcome?.verifiedAddresses === undefined || outcome.verifiedAddresses === null
+          ? Prisma.DbNull
+          : [...outcome.verifiedAddresses] as Prisma.InputJsonValue,
         resultCommitSha: outcome?.commitSha ?? null,
         protocolVersion: outcome?.protocolVersion ?? null,
         catalogFingerprint: outcome?.catalogFingerprint ?? null,
@@ -350,6 +366,13 @@ export async function runPersonalConnectionProbe(
   if (!admission.terminal) {
     try {
       const outcome = await operation();
+      if (input.kind === "git" && outcome.addressFingerprint !== null
+        && !/^[0-9a-f]{64}$/u.test(outcome.addressFingerprint)) {
+        fail("PERSONAL_CONNECTION_PROBE_FAILED");
+      }
+      if (outcome.verifiedAddresses !== undefined && outcome.verifiedAddresses !== null) {
+        proofVerifiedAddresses(outcome.verifiedAddresses);
+      }
       await updateAttempt(admission.id, actor, "settled", outcome, null, db);
     } catch (error) {
       const safeErrorCode = error instanceof Error && "code" in error && typeof (error as { code?: unknown }).code === "string"
@@ -391,7 +414,7 @@ export async function consumePersonalConnectionProbe(
     // second time even though the one-use CAS already succeeded.
     if (input.action === "update") fail("PERSONAL_CONNECTION_PROBE_CONFIGURATION_CONFLICT");
     if (proof.consumedConnectionId === consumedConnectionId && proof.status === "settled" && proof.safeErrorCode === null) {
-      return { alreadyConsumedConnectionId: consumedConnectionId, outcome: { addressFingerprint: proof.resolvedAddressFingerprint, commitSha: proof.resultCommitSha, protocolVersion: proof.protocolVersion, catalogFingerprint: proof.catalogFingerprint, resultCount: proof.resultCount, resultSnapshot: proof.resultSnapshot } };
+      return { alreadyConsumedConnectionId: consumedConnectionId, outcome: { addressFingerprint: proof.resolvedAddressFingerprint, verifiedAddresses: proofVerifiedAddresses(proof.verifiedAddresses), commitSha: proof.resultCommitSha, protocolVersion: proof.protocolVersion, catalogFingerprint: proof.catalogFingerprint, resultCount: proof.resultCount, resultSnapshot: proof.resultSnapshot } };
     }
     // A proof can only replay the exact connection mutation it already
     // authorized.  Returning another connection id here would let a caller
@@ -412,7 +435,7 @@ export async function consumePersonalConnectionProbe(
   await tx.$executeRaw`SELECT set_config('app.personal_connection_probe_kind', ${proof.kind}, true)`;
   await tx.$executeRaw`SELECT set_config('app.personal_connection_probe_action', ${proof.action}, true)`;
   await tx.$executeRaw`SELECT set_config('app.personal_connection_probe_table', ${proof.kind === "git" ? "GitConnection" : "McpConnection"}, true)`;
-  return { alreadyConsumedConnectionId: null, outcome: { addressFingerprint: proof.resolvedAddressFingerprint, commitSha: proof.resultCommitSha, protocolVersion: proof.protocolVersion, catalogFingerprint: proof.catalogFingerprint, resultCount: proof.resultCount, resultSnapshot: proof.resultSnapshot } };
+  return { alreadyConsumedConnectionId: null, outcome: { addressFingerprint: proof.resolvedAddressFingerprint, verifiedAddresses: proofVerifiedAddresses(proof.verifiedAddresses), commitSha: proof.resultCommitSha, protocolVersion: proof.protocolVersion, catalogFingerprint: proof.catalogFingerprint, resultCount: proof.resultCount, resultSnapshot: proof.resultSnapshot } };
 }
 
 export function probeFailureCode(error: unknown): string {

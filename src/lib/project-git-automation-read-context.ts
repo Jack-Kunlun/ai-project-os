@@ -20,6 +20,7 @@ const contextSchema = z.object({
     tlsCaCertificate: z.string().nullable(),
     sshKnownHost: z.string().nullable(),
     resolvedAddressFingerprint: hex64,
+    verifiedAddresses: z.array(z.string().min(1).max(45)).max(256).nullable(),
     credentialId: uuid,
   }).strict(),
   credential: z.object({

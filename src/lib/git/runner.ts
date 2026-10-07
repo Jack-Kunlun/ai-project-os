@@ -216,7 +216,7 @@ async function configureWorkspace(input: Readonly<{
     return Object.freeze({
       env,
       gitConfigArgs: Object.freeze([
-        "-c", `http.curloptResolve=+${input.pinnedEndpoint.hostname}:${input.pinnedEndpoint.port}:${addresses}`,
+        "-c", `http.curloptResolve=${input.pinnedEndpoint.hostname}:${input.pinnedEndpoint.port}:${addresses}`,
         "-c", "http.followRedirects=false",
       ]),
     });

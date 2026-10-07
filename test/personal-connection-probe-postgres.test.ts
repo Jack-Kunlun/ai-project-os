@@ -1,7 +1,7 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -23,6 +23,12 @@ import {
 
 const shouldRun = process.env.PERSONAL_CONNECTION_PROBE_POSTGRES_GATE === "1";
 const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
+
+function probeClientRequestKeyHash(requestKey: string): string {
+  return createHash("sha256")
+    .update(`ai-project-os:personal-connection-probe:key:v1:${requestKey}`, "utf8")
+    .digest("hex");
+}
 
 function isCheckViolation(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -185,9 +191,16 @@ test("personal connection probe trigger binds table, actor, connection, expiry, 
       clientRequestKey: replayRequestKey,
       configuration: replayConfiguration,
       secret: null,
-    }, actor(ownerId), async () => ({ addressFingerprint: "a".repeat(64), commitSha: "d".repeat(40), resultSnapshot: {} }), db);
+    }, actor(ownerId), async () => ({ addressFingerprint: "a".repeat(64), verifiedAddresses: ["198.51.100.21", "2001:db8::1"], commitSha: "d".repeat(40), resultSnapshot: {} }), db);
     if (replayProbe.draftProbeId === null) throw new Error("PERSONAL_CONNECTION_PROBE_REPLAY_PROBE_MISSING");
     const replayProbeId = replayProbe.draftProbeId;
+    const persistedReplayProof = await db.personalConnectionProbeAttempt.findUniqueOrThrow({ where: { id: replayProbeId }, select: { resolvedAddressFingerprint: true, verifiedAddresses: true } });
+    assert.equal(persistedReplayProof.resolvedAddressFingerprint, "a".repeat(64));
+    assert.deepEqual(persistedReplayProof.verifiedAddresses, ["198.51.100.21", "2001:db8::1"]);
+    await assert.rejects(() => db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.personal_connection_probe_mutation_context', 'service-v1', true)`;
+      await tx.personalConnectionProbeAttempt.update({ where: { id: replayProbeId }, data: { verifiedAddresses: ["198.51.100.22"] } });
+    }), (error: unknown) => error instanceof Error && error.message.includes("endpoint evidence is immutable"));
     const replayFirstConnectionId = randomUUID();
     const replaySecondConnectionId = randomUUID();
     await db.$transaction((tx) => consumePersonalConnectionProbe({
@@ -196,6 +209,68 @@ test("personal connection probe trigger binds table, actor, connection, expiry, 
     await assert.rejects(() => db.$transaction((tx) => consumePersonalConnectionProbe({
       kind: "git", action: "create", connectionId: null, clientRequestKey: replayRequestKey, configuration: replayConfiguration, secret: null,
     }, actor(ownerId), replaySecondConnectionId, tx, replayProbeId)), (error: unknown) => error instanceof PersonalConnectionProbeError && error.code === "PERSONAL_CONNECTION_PROBE_CONFIGURATION_CONFLICT");
+
+    const mismatchRequestKey = randomUUID();
+    const mismatchConfiguration = { fixture: "address-proof-mismatch", suffix };
+    const mismatchProbe = await runPersonalConnectionProbe({
+      kind: "git", action: "create", connectionId: null, clientRequestKey: mismatchRequestKey,
+      configuration: mismatchConfiguration, secret: null,
+    }, actor(ownerId), async () => ({
+      addressFingerprint: "d".repeat(64), verifiedAddresses: ["198.51.100.31"], commitSha: "e".repeat(40),
+    }), db);
+    if (mismatchProbe.draftProbeId === null) throw new Error("PERSONAL_CONNECTION_PROBE_MISMATCH_PROBE_MISSING");
+    const mismatchConnectionId = randomUUID();
+    await assert.rejects(() => db.$transaction(async (tx) => {
+      await consumePersonalConnectionProbe({
+        kind: "git", action: "create", connectionId: null, clientRequestKey: mismatchRequestKey,
+        configuration: mismatchConfiguration, secret: null,
+      }, actor(ownerId), mismatchConnectionId, tx, mismatchProbe.draftProbeId!);
+      await tx.$executeRaw`SELECT set_config('app.personal_git_connection_create_context', 'service-v1', true)`;
+      await tx.gitConnection.create({ data: {
+        ...directGit,
+        id: mismatchConnectionId,
+        name: `Mismatched proof addresses ${suffix}`,
+        resolvedAddressFingerprint: "d".repeat(64),
+        verifiedAddresses: ["203.0.113.31"],
+      } });
+    }), isCheckViolation);
+    await assert.rejects(() => db.$transaction(async (tx) => {
+      await consumePersonalConnectionProbe({
+        kind: "git", action: "create", connectionId: null, clientRequestKey: mismatchRequestKey,
+        configuration: mismatchConfiguration, secret: null,
+      }, actor(ownerId), mismatchConnectionId, tx, mismatchProbe.draftProbeId!);
+      await tx.$executeRaw`SELECT set_config('app.personal_git_connection_create_context', 'service-v1', true)`;
+      await tx.gitConnection.create({ data: {
+        ...directGit,
+        id: mismatchConnectionId,
+        name: `Mismatched proof fingerprint ${suffix}`,
+        resolvedAddressFingerprint: "d".repeat(64),
+        verifiedAddresses: ["198.51.100.31"],
+      } });
+    }), isCheckViolation);
+
+    const unsortedRequestKey = randomUUID();
+    const unsortedProbe = await runPersonalConnectionProbe({
+      kind: "git", action: "create", connectionId: null, clientRequestKey: unsortedRequestKey,
+      configuration: { fixture: "unsorted-address-proof", suffix }, secret: null,
+    }, actor(ownerId), async () => ({
+      addressFingerprint: "f".repeat(64), verifiedAddresses: ["203.0.113.10", "198.51.100.10"],
+      commitSha: "f".repeat(40),
+    }), db);
+    assert.equal(unsortedProbe.status, "rejected");
+    assert.equal(unsortedProbe.draftProbeId, null);
+    const rejectedAddressProof = await db.personalConnectionProbeAttempt.findUniqueOrThrow({
+      where: {
+        actorId_clientRequestKeyHash: {
+          actorId: ownerId,
+          clientRequestKeyHash: probeClientRequestKeyHash(unsortedRequestKey),
+        },
+      },
+      select: { status: true, verifiedAddresses: true, resolvedAddressFingerprint: true },
+    });
+    assert.equal(rejectedAddressProof.status, "rejected");
+    assert.equal(rejectedAddressProof.verifiedAddresses, null);
+    assert.equal(rejectedAddressProof.resolvedAddressFingerprint, null);
 
     const updateRequestKey = randomUUID();
     const updateConfiguration = { fixture: "update", connectionId: git.id };
@@ -256,7 +331,7 @@ test("draft probes recheck revoked actor access before Git or MCP dispatch", { s
       await releaseGit.promise;
       const accepted = await options.onDispatchBoundary?.() ?? true;
       if (accepted) gitProcessCount += 1;
-      return { addressFingerprint: "a".repeat(64), commitSha: "b".repeat(40) };
+      return { addressFingerprint: "a".repeat(64), verifiedAddresses: ["198.51.100.15"], commitSha: "b".repeat(40) };
     },
   });
   await gitStarted.promise;

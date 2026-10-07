@@ -491,6 +491,7 @@ type AdmissionConnection = Readonly<{
   status: GitConnectionWithSecret["status"];
   configurationVersion: number;
   resolvedAddressFingerprint: string | null;
+  verifiedAddresses: GitConnectionWithSecret["verifiedAddresses"];
   credentialId: string | null;
   ownerUserId: string | null;
   ownerAccountAccessVersion: number | null;
@@ -761,6 +762,7 @@ async function loadAdmissionSnapshot(
           status: true,
           configurationVersion: true,
           resolvedAddressFingerprint: true,
+          verifiedAddresses: true,
           credentialId: true,
           ownerUserId: true,
           ownerAccountAccessVersion: true,
@@ -807,6 +809,7 @@ async function loadAdmissionSnapshot(
       baseUrl: connection.baseUrl,
       allowPrivateNetwork: connection.allowPrivateNetwork,
       expectedFingerprint: delegation.resolvedAddressFingerprint,
+      verifiedAddresses: connection.verifiedAddresses,
     });
   } catch (error) {
     if (error instanceof GitSafetyError && error.code === "GIT_NETWORK_CHANGED") return fail("PROJECT_GIT_MANUAL_NETWORK_CHANGED");
@@ -2197,6 +2200,7 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
       baseUrl: snapshot.connection.baseUrl,
       allowPrivateNetwork: snapshot.connection.allowPrivateNetwork,
       expectedFingerprint: snapshot.resolvedAddressFingerprint,
+      verifiedAddresses: snapshot.connection.verifiedAddresses,
     });
     if (postFetchResolution.fingerprint !== snapshot.resolvedAddressFingerprint) {
       const terminal = await terminalizeRun(admitted.id, snapshot, "failed", "PROJECT_GIT_MANUAL_NETWORK_CHANGED", db);

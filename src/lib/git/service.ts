@@ -334,6 +334,7 @@ type GitRepositoryReadConnection = Pick<GitConnectionWithSecret,
   | "baseUrl"
   | "allowPrivateNetwork"
   | "resolvedAddressFingerprint"
+  | "verifiedAddresses"
   | "transport"
   | "authKind"
   | "username"
@@ -516,12 +517,13 @@ async function probeRepository(
     credentialLoader?: () => Promise<GitCredentialPayload | null>;
     onDispatchBoundary?: () => Promise<boolean>;
   }>,
-): Promise<Readonly<{ commitSha: string; addressFingerprint: string }>> {
+): Promise<Readonly<{ commitSha: string; addressFingerprint: string; verifiedAddresses: readonly string[] }>> {
   const resolution = options.pinExistingAddress
     ? await assertPinnedGitEndpoint({
         baseUrl: connection.baseUrl,
         allowPrivateNetwork: connection.allowPrivateNetwork,
         expectedFingerprint: connection.resolvedAddressFingerprint,
+        verifiedAddresses: connection.verifiedAddresses,
       })
     : await resolveGitEndpoint({
         baseUrl: connection.baseUrl,
@@ -560,7 +562,7 @@ async function probeRepository(
   }
   const commitSha = output.trim().split(/\s+/u)[0] ?? "";
   if (!/^[0-9a-f]{40,64}$/u.test(commitSha)) return fail("GIT_REPOSITORY_NOT_FOUND");
-  return Object.freeze({ commitSha, addressFingerprint: resolution.fingerprint });
+  return Object.freeze({ commitSha, addressFingerprint: resolution.fingerprint, verifiedAddresses: resolution.addresses });
 }
 
 type GitDraftProbeDependencies = Readonly<{
@@ -735,6 +737,7 @@ async function readRepositoryFiles(input: GitRepositoryReadInput): Promise<GitRe
     baseUrl: input.connection.baseUrl,
     allowPrivateNetwork: input.connection.allowPrivateNetwork,
     expectedFingerprint: input.connection.resolvedAddressFingerprint,
+    verifiedAddresses: input.connection.verifiedAddresses,
     signal: input.signal,
   });
   throwIfGitReadAborted(input.signal, true);
@@ -789,6 +792,7 @@ async function readRepositoryFiles(input: GitRepositoryReadInput): Promise<GitRe
         baseUrl: input.connection.baseUrl,
         allowPrivateNetwork: input.connection.allowPrivateNetwork,
         expectedFingerprint: resolution.fingerprint,
+        verifiedAddresses: input.connection.verifiedAddresses,
         signal: input.signal,
       });
       throwIfGitReadAborted(input.signal);
@@ -1021,6 +1025,7 @@ function inMemoryGitProbeConnection(input: Readonly<{
     credentialId: null,
     credential: null,
     resolvedAddressFingerprint: null,
+    verifiedAddresses: null,
   } as unknown as GitConnectionWithSecret;
 }
 
@@ -1066,7 +1071,7 @@ export async function probeGitConnectionDraft(
       credentialOverride: credential,
       onDispatchBoundary: () => acceptPersonalConnectionProbeDispatchBoundary({ db, actor }),
     });
-    return { addressFingerprint: result.addressFingerprint, commitSha: result.commitSha };
+    return { addressFingerprint: result.addressFingerprint, verifiedAddresses: result.verifiedAddresses, commitSha: result.commitSha };
   }, db);
 }
 
@@ -1111,7 +1116,7 @@ export async function probeGitConnectionUpdate(
         pinExistingAddress: false, db, credentialOverride: credential,
         onDispatchBoundary: () => acceptGitProbeDispatchBoundary({ db, actor, connectionId, expectedUpdatedAt: connection.updatedAt, expectedCredentialFingerprint }),
       });
-      return { addressFingerprint: result.addressFingerprint, commitSha: result.commitSha };
+      return { addressFingerprint: result.addressFingerprint, verifiedAddresses: result.verifiedAddresses, commitSha: result.commitSha };
     }, db);
   }
   return runPersonalConnectionProbe({
@@ -1137,7 +1142,7 @@ export async function probeGitConnectionUpdate(
         expectedCredentialFingerprint,
       }),
     });
-    return { addressFingerprint: result.addressFingerprint, commitSha: result.commitSha };
+    return { addressFingerprint: result.addressFingerprint, verifiedAddresses: result.verifiedAddresses, commitSha: result.commitSha };
   }, db);
 }
 
@@ -1195,6 +1200,9 @@ export async function applyGitConnectionProbeUpdate(input: Readonly<{
     data: {
       status: "verified",
       resolvedAddressFingerprint: proof.outcome.addressFingerprint,
+      verifiedAddresses: proof.outcome.verifiedAddresses === null || proof.outcome.verifiedAddresses === undefined
+        ? Prisma.DbNull
+        : [...proof.outcome.verifiedAddresses] as Prisma.InputJsonValue,
       lastTestedAt: new Date(),
       lastErrorCode: null,
       disabledAt: null,
@@ -1280,6 +1288,9 @@ export async function createGitConnection(input: unknown, actor: GitConnectionAc
           ownershipState: "confirmed",
           status: "verified",
           resolvedAddressFingerprint: probe.outcome.addressFingerprint,
+          verifiedAddresses: probe.outcome.verifiedAddresses === null || probe.outcome.verifiedAddresses === undefined
+            ? Prisma.DbNull
+            : [...probe.outcome.verifiedAddresses] as Prisma.InputJsonValue,
           lastTestedAt: new Date(),
           lastErrorCode: null,
         },
@@ -1385,6 +1396,7 @@ export async function updateGitConnection(
           ...(sshKnownHost === undefined ? {} : { sshKnownHost }),
           ...(rotatesCredential ? { ownerAccountAccessVersion: currentOwner.accountAccessVersion } : {}),
           ...statusData,
+          ...(securityChanged ? { verifiedAddresses: Prisma.DbNull } : {}),
           ...(securityChanged && current.resolvedAddressFingerprint !== null
             ? { resolvedAddressFingerprint: null, lastTestedAt: null, lastErrorCode: null }
             : {}),
@@ -1564,6 +1576,7 @@ export async function testGitConnection(
         data: {
           status: "verified",
           resolvedAddressFingerprint: probe.addressFingerprint,
+          verifiedAddresses: [...probe.verifiedAddresses] as Prisma.InputJsonValue,
           lastTestedAt: new Date(),
           lastErrorCode: null,
           disabledAt: null,

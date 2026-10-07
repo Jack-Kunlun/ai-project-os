@@ -204,6 +204,7 @@ export async function runOneGitAutomationCycle(input: Readonly<{
       baseUrl: context.connection.baseUrl,
       allowPrivateNetwork: context.connection.allowPrivateNetwork,
       expectedFingerprint: context.connection.resolvedAddressFingerprint,
+      verifiedAddresses: context.connection.verifiedAddresses,
       signal: lease.signal,
     });
     live(lease.signal);

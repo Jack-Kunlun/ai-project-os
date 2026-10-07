@@ -165,6 +165,7 @@ test("delegated Git incremental sync reuses only verified path/blob text and tra
       tlsCaCertificate: null,
       sshKnownHost: null,
       resolvedAddressFingerprint: "",
+      verifiedAddresses: null,
     };
     const pinnedResolution = await assertPinnedGitEndpoint({
       baseUrl: connection.baseUrl,

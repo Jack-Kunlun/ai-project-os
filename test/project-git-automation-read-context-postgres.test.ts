@@ -77,7 +77,8 @@ async function createActiveGrant(): Promise<WorkerConnection> {
   const credentialId = randomUUID();
   const credentialSecret = "synthetic-git-private-key-for-postgres-gate";
   const credentialFingerprint = createHash("sha256").update(credentialSecret, "utf8").digest("hex");
-  const addressFingerprint = "b".repeat(64);
+  const verifiedAddresses = ["140.82.112.4"];
+  const addressFingerprint = createHash("sha256").update(`github.com:22:${verifiedAddresses.join(",")}`, "utf8").digest("hex");
   const connectionOwnerActor = { id: connectionOwnerId, role: "user" as const, accountAccessVersion: 1 };
   const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
   const credentialCiphertext = Buffer.alloc(128, 0x5a);
@@ -138,6 +139,7 @@ async function createActiveGrant(): Promise<WorkerConnection> {
     status: "verified",
     ownershipState: "confirmed",
     resolvedAddressFingerprint: addressFingerprint,
+    verifiedAddresses,
     createdById: connectionOwnerId,
     ownerUserId: connectionOwnerId,
     ownerAccountAccessVersion: 1,
@@ -330,7 +332,8 @@ test("lease-bound Git context returns only the SSH connection, sealed key and ma
       allowPrivateNetwork: false,
       tlsCaCertificate: null,
       sshKnownHost: "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItest-fixture",
-      resolvedAddressFingerprint: "b".repeat(64),
+      resolvedAddressFingerprint: createHash("sha256").update("github.com:22:140.82.112.4", "utf8").digest("hex"),
+      verifiedAddresses: ["140.82.112.4"],
       credentialId: fixture.credentialId,
     });
     assert.deepEqual(context.credential, {

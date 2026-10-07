@@ -1,6 +1,6 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
 import { executeGitConnectionMutation, previewGitConnectionMutation } from "../src/lib/git/connection-governance";
@@ -32,12 +32,14 @@ test("tested Git and MCP configuration edits consume exact proofs and invalidate
       repositoryPath: "owner/repository", trackedRef: "main",
     };
     const gitKey = randomUUID();
+    const testedGitAddresses = ["203.0.113.51"];
+    const testedGitFingerprint = createHash("sha256").update(`new-git.example.test:443:${testedGitAddresses.join(",")}`, "utf8").digest("hex");
     const gitProbe = await probeGitConnectionUpdate(git.id, {
       clientRequestKey: gitKey, expectedUpdatedAt: git.updatedAt.toISOString(),
       repositoryPath: gitCandidate.repositoryPath, trackedRef: gitCandidate.trackedRef, candidate: gitCandidate,
     }, actor, db, { probeRepository: async (_connection, _repositoryPath, _trackedRef, options) => {
       assert.equal(await options.onDispatchBoundary?.(), true);
-      return { commitSha: "b".repeat(40), addressFingerprint: "c".repeat(64) };
+      return { commitSha: "b".repeat(40), addressFingerprint: testedGitFingerprint, verifiedAddresses: testedGitAddresses };
     } });
     assert.equal(gitProbe.status, "settled");
     assert.ok(gitProbe.draftProbeId);
@@ -60,7 +62,8 @@ test("tested Git and MCP configuration edits consume exact proofs and invalidate
     assert.equal(changedGit.authKind, "token");
     assert.ok(changedGit.credentialId);
     assert.equal(changedGit.configurationVersion, git.configurationVersion + 1);
-    assert.equal(changedGit.resolvedAddressFingerprint, "c".repeat(64));
+    assert.equal(changedGit.resolvedAddressFingerprint, testedGitFingerprint);
+    assert.deepEqual(changedGit.verifiedAddresses, testedGitAddresses);
     assert.equal((await executeGitConnectionMutation(git.id, gitExecution, actor, db)).auditId, gitResult.auditId);
 
     const mcp = await createMcpConnectionFixture({

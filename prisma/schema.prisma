@@ -1930,6 +1930,7 @@ model GitConnection {
   tlsCaCertificate                String?                          @db.Text
   sshKnownHost                    String?                          @db.Text
   resolvedAddressFingerprint      String?                          @db.Char(64)
+  verifiedAddresses               Json?                            @db.JsonB
   status                          GitConnectionStatus              @default(configured)
   configurationVersion            Int                              @default(1)
   lastTestedAt                    DateTime?
@@ -5356,6 +5357,7 @@ model PersonalConnectionProbeAttempt {
   targetRepositoryPath        String?                       @db.VarChar(768)
   targetTrackedRef            String?                       @db.VarChar(255)
   resolvedAddressFingerprint  String?                       @db.Char(64)
+  verifiedAddresses           Json?                         @db.JsonB
   resultCommitSha             String?                       @db.VarChar(64)
   protocolVersion             String?                       @db.VarChar(32)
   catalogFingerprint          String?                       @db.Char(64)

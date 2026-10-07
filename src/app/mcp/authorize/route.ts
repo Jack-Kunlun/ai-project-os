@@ -7,6 +7,12 @@ import {
   McpExportOAuthError,
 } from "@/lib/mcp-export-oauth";
 import {
+  buildMcpExportOAuthCallbackLocation,
+  buildMcpExportOAuthManualCallbackResponse,
+  getMcpExportOAuthConsentCallbackPolicy,
+  MCP_EXPORT_OAUTH_CONSENT_CSP,
+} from "@/lib/mcp-export-oauth-consent-security";
+import {
   getMcpExportOAuthCsrfCookieName,
   getMcpExportPublicOrigin,
   isMcpExportOAuthEnabled,
@@ -22,7 +28,7 @@ const commonHeaders = {
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
-  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; script-src 'none'",
+  "content-security-policy": MCP_EXPORT_OAUTH_CONSENT_CSP,
 };
 
 function readCookie(request: Request, name: string): string | null {
@@ -40,10 +46,20 @@ function escapeHtml(value: string): string {
   })[character]!);
 }
 
-function html(status: number, content: string, referrerPolicy: "no-referrer" | "same-origin" = "no-referrer") {
+function html(
+  status: number,
+  content: string,
+  referrerPolicy: "no-referrer" | "same-origin" = "no-referrer",
+  contentSecurityPolicy = MCP_EXPORT_OAUTH_CONSENT_CSP,
+) {
   return new Response(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MCP 项目授权</title><body>${content}</body></html>`, {
     status,
-    headers: { ...commonHeaders, "content-type": "text/html; charset=utf-8", "referrer-policy": referrerPolicy },
+    headers: {
+      ...commonHeaders,
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": contentSecurityPolicy,
+      "referrer-policy": referrerPolicy,
+    },
   });
 }
 
@@ -83,15 +99,6 @@ async function readSmallForm(request: Request, maximumBytes: number): Promise<UR
   return new URLSearchParams(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8"));
 }
 
-function decideRedirect(result: Awaited<ReturnType<typeof decideMcpExportOAuthAuthorization>>): string {
-  const target = new URL(result.redirectUri);
-  if (result.code !== null) target.searchParams.set("code", result.code);
-  else target.searchParams.set("error", result.error ?? "access_denied");
-  target.searchParams.set("state", result.state);
-  target.searchParams.set("iss", result.issuer);
-  return target.toString();
-}
-
 export async function GET(request: Request) {
   if (!isMcpExportOAuthEnabled()) return new Response(null, { status: 404, headers: commonHeaders });
   const origin = getMcpExportPublicOrigin();
@@ -103,6 +110,7 @@ export async function GET(request: Request) {
   const requestId = requestIds[0]!;
   try {
     const authorizationRequest = await getMcpExportOAuthAuthorizationRequest(requestId);
+    const callbackPolicy = getMcpExportOAuthConsentCallbackPolicy(authorizationRequest.redirectUri);
     const csrfCookie = readCookie(request, getMcpExportOAuthCsrfCookieName(requestId));
     const sessionToken = readCookie(request, SESSION_COOKIE_NAME);
     const actor = await readSessionToken(sessionToken);
@@ -121,7 +129,7 @@ export async function GET(request: Request) {
     const form = projects.length === 0
       ? `<p>当前账号没有可授权的 Owner 项目。</p><form method="post"><input type="hidden" name="requestId" value="${escapeHtml(boundRequest.id)}"><button name="decision" value="deny">拒绝并返回客户端</button></form>`
       : `<form method="post"><input type="hidden" name="requestId" value="${escapeHtml(boundRequest.id)}"><label>授权项目 <select required name="projectId">${projectOptions}</select></label><p>授权范围：<code>${escapeHtml(boundRequest.scopes)}</code></p><button name="decision" value="approve">授权此项目</button> <button name="decision" value="deny" formnovalidate>拒绝</button></form>`;
-    return html(200, `<main><h1>授权外部 MCP 客户端</h1><p>客户端：<strong>${escapeHtml(authorizationRequest.clientName)}</strong></p><p>客户端标识：<code>${escapeHtml(authorizationRequest.clientId)}</code></p><p>回调地址：<code>${escapeHtml(authorizationRequest.redirectUri)}</code></p><p>回调主机名：<strong>${escapeHtml(callbackUrl.hostname)}</strong></p>${isLoopbackHttp ? `<p role="note">这是 localhost/loopback 本地回调。仅在你信任此客户端时继续；授权码将发往显示的本地主机。</p>` : ""}<p>资源：<code>${escapeHtml(authorizationRequest.resource)}</code></p><p>授权只允许读取项目内容；每次具体工具读取仍需 Owner 单独确认。</p>${form}</main>`, "same-origin");
+    return html(200, `<main><h1>授权外部 MCP 客户端</h1><p>客户端：<strong>${escapeHtml(authorizationRequest.clientName)}</strong></p><p>客户端标识：<code>${escapeHtml(authorizationRequest.clientId)}</code></p><p>回调地址：<code>${escapeHtml(authorizationRequest.redirectUri)}</code></p><p>回调主机名：<strong>${escapeHtml(callbackUrl.hostname)}</strong></p>${isLoopbackHttp ? `<p role="note">这是 localhost/loopback 本地回调。仅在你信任此客户端时继续；授权码将发往显示的本地主机。</p>` : ""}<p>资源：<code>${escapeHtml(authorizationRequest.resource)}</code></p><p>授权只允许读取项目内容；每次具体工具读取仍需 Owner 单独确认。</p>${form}</main>`, "same-origin", callbackPolicy.contentSecurityPolicy);
   } catch (error) {
     if (!(error instanceof McpExportOAuthError)) console.error("MCP OAuth consent page unavailable");
     return genericError(error instanceof McpExportOAuthError && error.code === "MCP_EXPORT_OAUTH_UNAUTHORIZED" ? 503 : 400);
@@ -144,13 +152,19 @@ export async function POST(request: Request) {
     const requestId = form.get("requestId");
     const decision = form.get("decision");
     if (requestId === null || (decision !== "approve" && decision !== "deny")) return genericError(400);
+    const pendingRequest = await getMcpExportOAuthAuthorizationRequest(requestId);
+    const callbackPolicy = getMcpExportOAuthConsentCallbackPolicy(pendingRequest.redirectUri);
     const csrfToken = readCookie(request, getMcpExportOAuthCsrfCookieName(requestId));
     const result = await decideMcpExportOAuthAuthorization(actor, {
       requestId, csrfToken, decision, projectId: form.get("projectId"),
     });
+    if (result.redirectUri !== callbackPolicy.redirectUri) return genericError(400);
+    if (callbackPolicy.mode === "manual") {
+      return buildMcpExportOAuthManualCallbackResponse(result, cookieDeletion(requestId));
+    }
     return new Response(null, { status: 303, headers: {
       ...commonHeaders,
-      location: decideRedirect(result),
+      location: buildMcpExportOAuthCallbackLocation(result),
       "set-cookie": cookieDeletion(requestId),
     } });
   } catch (error) {

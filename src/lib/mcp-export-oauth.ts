@@ -85,12 +85,14 @@ function canonicalClientId(value: unknown): string {
   return value;
 }
 
-function canonicalRedirectUri(value: unknown): string {
+export function canonicalRedirectUri(value: unknown): string {
   if (typeof value !== "string" || value.length < 8 || value.length > 2048 || value.trim() !== value
     || /[\u0000-\u0020\u007f]/u.test(value)) return fail("MCP_EXPORT_OAUTH_INVALID_CLIENT");
   let parsed: URL;
   try { parsed = new URL(value); } catch { return fail("MCP_EXPORT_OAUTH_INVALID_CLIENT"); }
-  if (parsed.username !== "" || parsed.password !== "" || parsed.hash !== "") return fail("MCP_EXPORT_OAUTH_INVALID_CLIENT");
+  if (parsed.username !== "" || parsed.password !== "" || parsed.hash !== "" || parsed.hostname.includes("*")) {
+    return fail("MCP_EXPORT_OAUTH_INVALID_CLIENT");
+  }
   if (parsed.protocol === "https:") return value;
   if (parsed.protocol === "http:") {
     const hostname = parsed.hostname.replace(/^\[|\]$/gu, "").toLowerCase();

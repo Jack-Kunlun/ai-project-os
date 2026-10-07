@@ -33,10 +33,12 @@ export const SECURITY_HEADERS = [
   { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
 ] as const;
 
-const SECURITY_HEADERS_WITHOUT_REFERRER_POLICY = SECURITY_HEADERS.filter(
-  ({ key }) => key !== "Referrer-Policy",
+const SECURITY_HEADERS_WITHOUT_OAUTH_ROUTE_POLICIES = SECURITY_HEADERS.filter(
+  ({ key }) => key !== "Content-Security-Policy" && key !== "Referrer-Policy",
 );
-const REFERRER_POLICY_HEADER = SECURITY_HEADERS.filter(({ key }) => key === "Referrer-Policy");
+const OAUTH_ROUTE_POLICIES = SECURITY_HEADERS.filter(
+  ({ key }) => key === "Content-Security-Policy" || key === "Referrer-Policy",
+);
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -46,12 +48,12 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        headers: SECURITY_HEADERS_WITHOUT_REFERRER_POLICY,
+        headers: SECURITY_HEADERS_WITHOUT_OAUTH_ROUTE_POLICIES,
       },
       {
-        // Next does not replace an existing response header with a Route Handler header.
+        // The consent handler sets per-request CSP and referrer policies; Next does not replace existing response headers.
         source: "/:path((?!mcp/authorize$).*)",
-        headers: REFERRER_POLICY_HEADER,
+        headers: OAUTH_ROUTE_POLICIES,
       },
     ];
   },

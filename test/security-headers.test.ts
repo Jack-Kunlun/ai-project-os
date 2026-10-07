@@ -4,6 +4,7 @@ import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import { sendResponse } from "next/dist/server/send-response";
 
 import nextConfig, { buildContentSecurityPolicy, SECURITY_HEADERS } from "../next.config";
+import { MCP_EXPORT_OAUTH_CONSENT_CSP } from "../src/lib/mcp-export-oauth-consent-security";
 
 type HeaderRule = {
   source: string;
@@ -20,7 +21,7 @@ function getGlobalHeadersForPath(rules: readonly HeaderRule[], pathname: string)
   return headers;
 }
 
-async function mergeNextRouteHeaders(globalHeaders: Map<string, string>, routeReferrerPolicy: string) {
+async function mergeNextRouteHeaders(globalHeaders: Map<string, string>, routeHeaders: Record<string, string>) {
   const responseHeaders = new Map(globalHeaders);
   const nodeResponse = {
     statusCode: 200,
@@ -37,7 +38,7 @@ async function mergeNextRouteHeaders(globalHeaders: Map<string, string>, routeRe
   await sendResponse(
     { method: "GET" } as unknown as Parameters<typeof sendResponse>[0],
     nodeResponse as unknown as Parameters<typeof sendResponse>[1],
-    new Response(null, { headers: { "Referrer-Policy": routeReferrerPolicy } }),
+    new Response(null, { headers: routeHeaders }),
   );
 
   return responseHeaders;
@@ -54,7 +55,7 @@ test("production CSP keeps executable and network sources local", () => {
   assert.doesNotMatch(policy, /https?:\/\//);
 });
 
-test("security header baseline preserves the consent route policy through Next header merging", async () => {
+test("security header baseline lets the consent route set its exact CSP and referrer policy", async () => {
   assert.equal(nextConfig.poweredByHeader, false);
   assert.ok(nextConfig.headers);
 
@@ -63,10 +64,13 @@ test("security header baseline preserves the consent route policy through Next h
   assert.equal(rules[0]?.source, "/:path*");
   assert.deepEqual(
     rules[0]?.headers,
-    SECURITY_HEADERS.filter(({ key }) => key !== "Referrer-Policy"),
+    SECURITY_HEADERS.filter(({ key }) => key !== "Content-Security-Policy" && key !== "Referrer-Policy"),
   );
   assert.equal(rules[1]?.source, "/:path((?!mcp/authorize$).*)");
-  assert.deepEqual(rules[1]?.headers, [{ key: "Referrer-Policy", value: "no-referrer" }]);
+  assert.deepEqual(
+    rules[1]?.headers,
+    SECURITY_HEADERS.filter(({ key }) => key === "Content-Security-Policy" || key === "Referrer-Policy"),
+  );
 
   const headers = new Map(SECURITY_HEADERS.map(({ key, value }) => [key, value]));
   assert.equal(headers.get("X-Content-Type-Options"), "nosniff");
@@ -75,18 +79,34 @@ test("security header baseline preserves the consent route policy through Next h
   assert.equal(headers.get("Permissions-Policy"), "camera=(), microphone=(), geolocation=()");
 
   const consentGlobalHeaders = getGlobalHeadersForPath(rules, "/mcp/authorize");
-  assert.equal(consentGlobalHeaders.get("content-security-policy"), SECURITY_HEADERS[0]?.value);
   assert.equal(consentGlobalHeaders.get("x-frame-options"), "DENY");
+  assert.equal(consentGlobalHeaders.has("content-security-policy"), false);
   assert.equal(consentGlobalHeaders.has("referrer-policy"), false);
-  assert.equal(getGlobalHeadersForPath(rules, "/mcp/authorize/").get("referrer-policy"), "no-referrer");
+  const trailingSlashGlobalHeaders = getGlobalHeadersForPath(rules, "/mcp/authorize/");
+  assert.equal(trailingSlashGlobalHeaders.get("content-security-policy"), SECURITY_HEADERS[0]?.value);
+  assert.equal(trailingSlashGlobalHeaders.get("referrer-policy"), "no-referrer");
 
   const dashboardGlobalHeaders = getGlobalHeadersForPath(rules, "/dashboard");
+  assert.equal(dashboardGlobalHeaders.get("content-security-policy"), SECURITY_HEADERS[0]?.value);
   assert.equal(dashboardGlobalHeaders.get("referrer-policy"), "no-referrer");
-  const ordinaryRouteResponse = await mergeNextRouteHeaders(dashboardGlobalHeaders, "same-origin");
+  const ordinaryRouteResponse = await mergeNextRouteHeaders(dashboardGlobalHeaders, {
+    "Content-Security-Policy": "default-src 'none'",
+    "Referrer-Policy": "same-origin",
+  });
   assert.equal(ordinaryRouteResponse.get("referrer-policy"), "no-referrer");
+  assert.equal(ordinaryRouteResponse.get("content-security-policy"), SECURITY_HEADERS[0]?.value);
 
-  const consentSuccessResponse = await mergeNextRouteHeaders(consentGlobalHeaders, "same-origin");
+  const callbackCsp = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://client.example:8443; frame-ancestors 'none'; base-uri 'none'; script-src 'none'";
+  const consentSuccessResponse = await mergeNextRouteHeaders(consentGlobalHeaders, {
+    "Content-Security-Policy": callbackCsp,
+    "Referrer-Policy": "same-origin",
+  });
   assert.equal(consentSuccessResponse.get("referrer-policy"), "same-origin");
-  const consentErrorResponse = await mergeNextRouteHeaders(consentGlobalHeaders, "no-referrer");
+  assert.equal(consentSuccessResponse.get("content-security-policy"), callbackCsp);
+  const consentErrorResponse = await mergeNextRouteHeaders(consentGlobalHeaders, {
+    "Content-Security-Policy": MCP_EXPORT_OAUTH_CONSENT_CSP,
+    "Referrer-Policy": "no-referrer",
+  });
   assert.equal(consentErrorResponse.get("referrer-policy"), "no-referrer");
+  assert.equal(consentErrorResponse.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
 });

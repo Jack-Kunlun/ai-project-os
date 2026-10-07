@@ -8,6 +8,7 @@ import { GET as getOAuthAuthorize } from "../src/app/oauth/authorize/route";
 import { POST as postOAuthToken } from "../src/app/oauth/token/route";
 import { getDb } from "../src/lib/db";
 import {
+  canonicalRedirectUri,
   isMcpExportOAuthRedirectUriRegistered,
   mcpExportOAuthClientAdmissionFingerprint,
   McpExportOAuthError,
@@ -16,6 +17,11 @@ import {
   parseMcpExportOAuthTokenRequest,
   withMcpExportOAuthCimdFetchSlot,
 } from "../src/lib/mcp-export-oauth";
+import {
+  buildMcpExportOAuthManualCallbackResponse,
+  getMcpExportOAuthConsentCallbackPolicy,
+  MCP_EXPORT_OAUTH_CONSENT_CSP,
+} from "../src/lib/mcp-export-oauth-consent-security";
 import {
   getMcpExportOAuthCsrfCookieName,
   hasMcpExportOAuthCsrfCookieCapacity,
@@ -117,6 +123,69 @@ test("OAuth admission fingerprints normalize client IDs and the consent cookie c
   assert.equal(hasMcpExportOAuthCsrfCookieCapacity(`${ids[0]}=secret; ${ids[0]}=another`), true);
 });
 
+test("consent callback policy binds exact CSP origins and falls back for unsupported IP hosts", () => {
+  for (const [redirectUri, origin] of [
+    ["https://client.example/oauth/callback", "https://client.example"],
+    ["https://localhost:8443/oauth/callback", "https://localhost:8443"],
+    ["http://localhost:49152/oauth/callback", "http://localhost:49152"],
+    ["http://127.0.0.1:49152/oauth/callback", "http://127.0.0.1:49152"],
+  ]) {
+    const policy = getMcpExportOAuthConsentCallbackPolicy(redirectUri);
+    assert.equal(policy.mode, "redirect");
+    assert.equal(policy.origin, origin);
+    assert.ok(policy.contentSecurityPolicy.includes(`form-action 'self' ${origin};`));
+  }
+
+  for (const redirectUri of [
+    "http://[::1]:49152/oauth/callback",
+    "https://192.0.2.25:8443/oauth/callback",
+    "https://client_name.example/oauth/callback",
+  ]) {
+    const policy = getMcpExportOAuthConsentCallbackPolicy(redirectUri);
+    assert.equal(policy.mode, "manual");
+    assert.equal(policy.contentSecurityPolicy, MCP_EXPORT_OAUTH_CONSENT_CSP);
+    assert.doesNotMatch(policy.contentSecurityPolicy, /192\.0\.2\.25|\[::1\]/u);
+  }
+
+  for (const unsafe of [
+    "ftp://client.example/oauth/callback",
+    "https://*.client.example/oauth/callback",
+    "https://client.example/oauth/callback\r\nX-Injected: yes",
+  ]) {
+    assert.throws(() => canonicalRedirectUri(unsafe),
+      (error: unknown) => error instanceof McpExportOAuthError && error.code === "MCP_EXPORT_OAUTH_INVALID_CLIENT");
+  }
+});
+
+test("manual callback fallback is no-store, no-referrer, static-CSP, escaped, and clears CSRF", async () => {
+  const csrfDeletion = "__Host-mcp-export-oauth-00000000-0000-4000-8000-000000000001=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
+  const approval = buildMcpExportOAuthManualCallbackResponse({
+    redirectUri: "http://[::1]:49152/oauth/callback",
+    state: "state</a><script>bad()</script>",
+    issuer: "https://mcp.example",
+    code: `apos_mcp_code_${"A".repeat(43)}`,
+    error: null,
+  }, csrfDeletion);
+  const approvalHtml = await approval.text();
+  assert.equal(approval.status, 200);
+  assert.equal(approval.headers.get("cache-control"), "no-store");
+  assert.equal(approval.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(approval.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
+  assert.equal(approval.headers.get("set-cookie"), csrfDeletion);
+  assert.match(approvalHtml, /rel="noreferrer" href="http:\/\/\[::1\]:49152\/oauth\/callback\?code=apos_mcp_code_/u);
+  assert.doesNotMatch(approvalHtml, /<script>/u);
+
+  const denial = buildMcpExportOAuthManualCallbackResponse({
+    redirectUri: "http://[::1]:49152/oauth/callback",
+    state: "denied-state",
+    issuer: "https://mcp.example",
+    code: null,
+    error: "access_denied",
+  }, csrfDeletion);
+  assert.match(await denial.text(), /error=access_denied/u);
+  assert.equal(denial.headers.get("set-cookie"), csrfDeletion);
+});
+
 test("CIMD fetch concurrency is capped per process and slots are released", async () => {
   const releases: Array<() => void> = [];
   const active = Array.from({ length: 8 }, () => withMcpExportOAuthCimdFetchSlot(() => new Promise<void>((resolve) => releases.push(resolve))));
@@ -158,6 +227,8 @@ test("OAuth metadata and MCP challenge are advertised only when the full chain i
     }));
     assert.equal(invalidConsentPage.status, 400);
     assert.equal(invalidConsentPage.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(invalidConsentPage.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
+    assert.equal(invalidConsentPage.headers.get("cache-control"), "no-store");
 
     for (const origin of ["null", "https://attacker.example"]) {
       const rejectedConsent = await postMcpOAuthConsent(new Request("https://mcp.example/mcp/authorize", {
@@ -167,6 +238,7 @@ test("OAuth metadata and MCP challenge are advertised only when the full chain i
       }));
       assert.equal(rejectedConsent.status, 403);
       assert.equal(rejectedConsent.headers.get("referrer-policy"), "no-referrer");
+      assert.equal(rejectedConsent.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
     }
 
     const invalidConsentContentType = await postMcpOAuthConsent(new Request("https://mcp.example/mcp/authorize", {
@@ -176,6 +248,7 @@ test("OAuth metadata and MCP challenge are advertised only when the full chain i
     }));
     assert.equal(invalidConsentContentType.status, 415);
     assert.equal(invalidConsentContentType.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(invalidConsentContentType.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
 
     const unauthenticatedConsentPost = await postMcpOAuthConsent(new Request("https://mcp.example/mcp/authorize", {
       method: "POST",
@@ -184,6 +257,7 @@ test("OAuth metadata and MCP challenge are advertised only when the full chain i
     }));
     assert.equal(unauthenticatedConsentPost.status, 400);
     assert.equal(unauthenticatedConsentPost.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(unauthenticatedConsentPost.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
 
     const authorizationResponse = await getAuthorizationServerMetadata(new Request("https://mcp.example/.well-known/oauth-authorization-server", {
       headers: { host: "mcp.example" },

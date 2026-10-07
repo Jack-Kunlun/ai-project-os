@@ -40,6 +40,10 @@ import {
   reserveMcpExportOAuthAuthorizationAttempt,
 } from "../src/lib/mcp-export-oauth";
 import { getMcpExportOAuthCsrfCookieName } from "../src/lib/mcp-export-oauth-config";
+import {
+  buildMcpExportOAuthManualCallbackResponse,
+  MCP_EXPORT_OAUTH_CONSENT_CSP,
+} from "../src/lib/mcp-export-oauth-consent-security";
 
 const shouldRun = process.env.MCP_EXPORT_POSTGRES_GATE === "1";
 
@@ -556,12 +560,13 @@ test("outbound MCP grant is project scoped and fails closed after revoke, expiry
 
     const secondOauthClientId = `https://client.example/oauth/${suffix}-second.json`;
     const secondOauthClientName = `${sharedClientNamePrefix} B`;
+    const secondOauthRedirectUri = "http://[::1]:49154/oauth/callback";
     const secondOauthMetadata = parseMcpExportOAuthClientMetadata(secondOauthClientId, {
-      client_id: secondOauthClientId, client_name: secondOauthClientName, redirect_uris: [oauthRedirectUri],
+      client_id: secondOauthClientId, client_name: secondOauthClientName, redirect_uris: [secondOauthRedirectUri],
       token_endpoint_auth_method: "none", grant_types: ["authorization_code"], response_types: ["code"],
     });
     const secondOauthParams = parseMcpExportOAuthAuthorizationParameters(new URLSearchParams({
-      response_type: "code", client_id: secondOauthClientId, redirect_uri: oauthRedirectUri,
+      response_type: "code", client_id: secondOauthClientId, redirect_uri: secondOauthRedirectUri,
       state: `state-${suffix}-second`, code_challenge: oauthChallenge, code_challenge_method: "S256",
       resource: "http://localhost/api/mcp", scope: "project:read",
     }));
@@ -577,11 +582,12 @@ test("outbound MCP grant is project scoped and fails closed after revoke, expiry
     ));
     assert.equal(consentPage.status, 200);
     assert.equal(consentPage.headers.get("referrer-policy"), "same-origin");
+    assert.equal(consentPage.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
     const consentHtml = await consentPage.text();
     assert.match(consentHtml, new RegExp(secondOauthClientName, "u"));
     assert.ok(consentHtml.includes(secondOauthClientId));
     assert.match(consentHtml, /回调主机名/u);
-    assert.match(consentHtml, /localhost/u);
+    assert.match(consentHtml, /\[::1\]/u);
 
     const deniedOauthClientId = `https://client.example/oauth/${suffix}-denied.json`;
     const deniedOauthState = `state-${suffix}-denied`;
@@ -622,13 +628,61 @@ test("outbound MCP grant is project scoped and fails closed after revoke, expiry
     assert.equal(deniedCallback.searchParams.get("error"), "access_denied");
     assert.equal(deniedCallback.searchParams.get("state"), deniedOauthState);
 
+    const manualDeniedClientId = `https://client.example/oauth/${suffix}-manual-denied.json`;
+    const manualDeniedRedirectUri = "http://[::1]:49155/oauth/callback";
+    const manualDeniedState = `state-${suffix}-manual-denied`;
+    const manualDeniedMetadata = parseMcpExportOAuthClientMetadata(manualDeniedClientId, {
+      client_id: manualDeniedClientId, client_name: "MCP manual denial fixture", redirect_uris: [manualDeniedRedirectUri],
+    });
+    const manualDeniedParams = parseMcpExportOAuthAuthorizationParameters(new URLSearchParams({
+      response_type: "code", client_id: manualDeniedClientId, redirect_uri: manualDeniedRedirectUri,
+      state: manualDeniedState, code_challenge: oauthChallenge, code_challenge_method: "S256",
+      resource: "http://localhost/api/mcp", scope: "project:read",
+    }));
+    const manualDeniedRequest = await createMcpExportOAuthAuthorizationRequest(manualDeniedParams, manualDeniedMetadata, db);
+    await bindMcpExportOAuthAuthorizationRequest(actor, manualDeniedRequest.requestId, manualDeniedRequest.csrfToken, db);
+    const manualDeniedCookie = `${getMcpExportOAuthCsrfCookieName(manualDeniedRequest.requestId)}=${manualDeniedRequest.csrfToken}; ${SESSION_COOKIE_NAME}=${oauthSession.token}`;
+    const manualDeniedConsentPage = await getOAuthConsent(new Request(
+      `http://localhost/mcp/authorize?requestId=${encodeURIComponent(manualDeniedRequest.requestId)}`,
+      { headers: { host: "localhost", cookie: manualDeniedCookie } },
+    ));
+    assert.equal(manualDeniedConsentPage.status, 200);
+    assert.equal(manualDeniedConsentPage.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
+    const manualDeniedDecision = await postOAuthConsent(new Request("http://localhost/mcp/authorize", {
+      method: "POST",
+      headers: { host: "localhost", origin: "http://localhost", "content-type": "application/x-www-form-urlencoded", cookie: manualDeniedCookie },
+      body: new URLSearchParams({ requestId: manualDeniedRequest.requestId, decision: "deny" }).toString(),
+    }));
+    assert.equal(manualDeniedDecision.status, 200);
+    assert.equal(manualDeniedDecision.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(manualDeniedDecision.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
+    assert.equal(manualDeniedDecision.headers.get("cache-control"), "no-store");
+    assert.equal(manualDeniedDecision.headers.get("set-cookie"), `${getMcpExportOAuthCsrfCookieName(manualDeniedRequest.requestId)}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+    assert.equal(manualDeniedDecision.headers.get("location"), null);
+    assert.match(await manualDeniedDecision.text(), /error=access_denied/u);
+
     const secondOauthDecision = await decideMcpExportOAuthAuthorization(actor, {
       requestId: secondOauthRequest.requestId, csrfToken: secondOauthRequest.csrfToken, decision: "approve", projectId,
     }, db, { fetchClientMetadata: async () => secondOauthMetadata });
     assert.ok(secondOauthDecision.code);
+    const manualApproval = buildMcpExportOAuthManualCallbackResponse(
+      secondOauthDecision,
+      `${getMcpExportOAuthCsrfCookieName(secondOauthRequest.requestId)}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`,
+    );
+    const manualApprovalHtml = await manualApproval.text();
+    assert.equal(manualApproval.status, 200);
+    assert.equal(manualApproval.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(manualApproval.headers.get("content-security-policy"), MCP_EXPORT_OAUTH_CONSENT_CSP);
+    assert.equal(manualApproval.headers.get("cache-control"), "no-store");
+    const callbackHref = manualApprovalHtml.match(/href="([^"]+)"/u)?.[1]?.replace(/&amp;/gu, "&");
+    assert.ok(callbackHref);
+    const manualApprovalCallback = new URL(callbackHref);
+    assert.equal(manualApprovalCallback.origin, new URL(secondOauthRedirectUri).origin);
+    assert.equal(manualApprovalCallback.searchParams.get("code"), secondOauthDecision.code);
+    assert.equal(manualApprovalCallback.searchParams.get("state"), secondOauthDecision.state);
     const secondOauthToken = await exchangeMcpExportOAuthAuthorizationCode(parseMcpExportOAuthTokenRequest(new URLSearchParams({
       grant_type: "authorization_code", code: secondOauthDecision.code!, client_id: secondOauthClientId,
-      redirect_uri: oauthRedirectUri, resource: "http://localhost/api/mcp", code_verifier: oauthVerifier,
+      redirect_uri: secondOauthRedirectUri, resource: "http://localhost/api/mcp", code_verifier: oauthVerifier,
     })), db);
     const secondOauthGrant = await db.mcpExportGrant.findFirstOrThrow({ where: {
       oauthClientId: secondOauthClientId, ownerUserId: userId,

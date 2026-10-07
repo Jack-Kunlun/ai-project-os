@@ -115,7 +115,7 @@ test(
       await disableUser();
       await createMcpConnectionFixture({
         id: connectionId, name: `MCP grant connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none",
-        credentialId: null, allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2026-07-28",
+        credentialId: null, allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2025-11-25",
         catalogFingerprint: "c".repeat(64), credentialFingerprint: NO_CREDENTIAL_FINGERPRINT, configurationRevision: 1,
         status: "verified", createdById: adminId, ownerUserId: adminId, ownerAccountAccessVersion: 1, ownershipState: "confirmed",
       }, db);

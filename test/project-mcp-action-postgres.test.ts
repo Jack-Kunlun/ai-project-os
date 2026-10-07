@@ -162,7 +162,7 @@ test(
       }
       await createMcpConnectionFixture({
         id: connectionId, name: `MCP action connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none", credentialId: null,
-        allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2026-07-28", catalogFingerprint: "c".repeat(64),
+        allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2025-11-25", catalogFingerprint: "c".repeat(64),
         credentialFingerprint: NO_CREDENTIAL_FINGERPRINT, configurationRevision: 1, status: "verified", createdById: ownerId, ownerUserId: ownerId, ownerAccountAccessVersion: 1, ownershipState: "confirmed",
       }, db);
       await db.mcpToolDefinition.create({ data: {
@@ -212,7 +212,7 @@ test(
         credentialId: bearerCredential.id,
         allowPrivateNetwork: false,
         resolvedAddressFingerprint: bearerNetworkFingerprint,
-        protocolVersion: "2026-07-28",
+        protocolVersion: "2025-11-25",
         catalogFingerprint: "d".repeat(64),
         credentialFingerprint: bearerCredentialSnapshot.secretFingerprint,
         configurationRevision: 1,

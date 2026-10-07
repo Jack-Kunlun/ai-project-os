@@ -553,7 +553,7 @@ test(
         credentialId: null,
         allowPrivateNetwork: false,
         resolvedAddressFingerprint: mcpNetworkFingerprint,
-        protocolVersion: "2026-07-28",
+        protocolVersion: "2025-11-25",
         catalogFingerprint: "f".repeat(64),
         credentialFingerprint: noCredentialFingerprint,
         configurationRevision: 1,

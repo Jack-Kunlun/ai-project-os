@@ -32,30 +32,55 @@ type FakeResponse = Readonly<{
   status: number;
   contentType: string;
   body: string | Buffer;
+  headers?: Readonly<Record<string, string>>;
 }> | "reset";
 
 async function runDetailedCase(
   responseFactory: (requestId: string) => FakeResponse,
-  options: Readonly<{ expectedFingerprint?: string; outputSchema?: unknown; rejectBoundary?: boolean }> = {},
-): Promise<Readonly<{ result: Awaited<ReturnType<typeof callMcpToolDetailed>>; postCount: number; boundaryCount: number }>> {
+  options: Readonly<{
+    expectedFingerprint?: string;
+    outputSchema?: unknown;
+    rejectBoundary?: boolean;
+    rejectBeforeToolCall?: boolean;
+    handshakeMode?: "unsupported-version" | "invalid-session" | "changed-session" | "notification-failure";
+  }> = {},
+): Promise<Readonly<{ result: Awaited<ReturnType<typeof callMcpToolDetailed>>; postCount: number; boundaryCount: number; methods: readonly string[] }>> {
   let postCount = 0;
   let boundaryCount = 0;
+  const methods: string[] = [];
+  const sessionId = options.handshakeMode === "invalid-session" ? "bad session" : "fixture-session";
   const server = createServer((request, response) => {
     if (request.method !== "POST") {
       response.writeHead(405).end();
       return;
     }
-    postCount += 1;
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string };
-      const fake = responseFactory(body.id);
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string };
+      methods.push(body.method);
+      if (body.method === "initialize") {
+        const negotiated = options.handshakeMode === "unsupported-version" ? "2025-06-18" : "2025-11-25";
+        response.writeHead(200, { "content-type": "application/json", "mcp-session-id": sessionId });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: negotiated, capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
+        return;
+      }
+      if (body.method === "notifications/initialized") {
+        const headers = options.handshakeMode === "changed-session"
+          ? { "mcp-session-id": "changed-session" }
+          : { "mcp-session-id": sessionId };
+        response.writeHead(options.handshakeMode === "notification-failure" ? 500 : 202, headers).end();
+        return;
+      }
+      assert.equal(body.method, "tools/call");
+      assert.equal(request.headers["mcp-session-id"], sessionId);
+      postCount += 1;
+      const fake = responseFactory(body.id ?? "");
       if (fake === "reset") {
         response.destroy();
         return;
       }
-      response.writeHead(fake.status, { "content-type": fake.contentType }).end(fake.body);
+      response.writeHead(fake.status, { "content-type": fake.contentType, "mcp-session-id": sessionId, ...fake.headers }).end(fake.body);
     });
   });
   const port = await listen(server);
@@ -76,8 +101,9 @@ async function runDetailedCase(
         boundaryCount += 1;
         return options.rejectBoundary === true ? false : undefined;
       },
+      onBeforeToolCall: () => options.rejectBeforeToolCall !== true,
     });
-    return Object.freeze({ result, postCount, boundaryCount });
+    return Object.freeze({ result, postCount, boundaryCount, methods: Object.freeze(methods) });
   } finally {
     await close(server);
   }
@@ -91,26 +117,42 @@ function jsonRpcResult(id: string, result: Record<string, unknown>, status = 200
   return { status, contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id, result }) };
 }
 
-test("detailed MCP dispatch sends one loopback POST with the persisted request id", async () => {
+test("detailed MCP dispatch sends one tools/call with the persisted request id", async () => {
   const requestId = randomUUID();
   let postCount = 0;
   let boundaryCount = 0;
+  const methods: string[] = [];
   let seenRequestId: string | undefined;
+  let seenParams: Record<string, unknown> | undefined;
   const server = createServer((request, response) => {
     if (request.method !== "POST") {
       response.writeHead(405).end();
       return;
     }
-    postCount += 1;
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string };
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string; params?: Record<string, unknown> };
+      methods.push(body.method);
+      if (body.method === "initialize") {
+        response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "detailed-session" }).end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
+        return;
+      }
+      if (body.method === "notifications/initialized") {
+        assert.equal(body.id, undefined);
+        assert.equal(request.headers["mcp-session-id"], "detailed-session");
+        response.writeHead(202, { "mcp-session-id": "detailed-session" }).end();
+        return;
+      }
+      assert.equal(body.method, "tools/call");
+      assert.equal(request.headers["mcp-session-id"], "detailed-session");
+      postCount += 1;
       seenRequestId = body.id;
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+      seenParams = body.params;
+      response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "detailed-session" }).end(JSON.stringify({
         jsonrpc: "2.0",
         id: body.id,
-        result: { resultType: "complete", content: [{ type: "text", text: "safe result" }] },
+        result: { content: [{ type: "text", text: "safe result" }] },
       }));
     });
   });
@@ -132,8 +174,11 @@ test("detailed MCP dispatch sends one loopback POST with the persisted request i
     assert.equal(result.outcome, "succeeded");
     assert.equal(result.requestId, requestId);
     assert.equal(seenRequestId, requestId);
-    assert.equal(boundaryCount, 1);
+    assert.equal(boundaryCount, 3);
     assert.equal(postCount, 1);
+    assert.deepEqual(methods, ["initialize", "notifications/initialized", "tools/call"]);
+    assert.equal(seenParams?.name, "read_safe_value");
+    assert.equal("_meta" in (seenParams ?? {}), false);
   } finally {
     await close(server);
   }
@@ -143,14 +188,23 @@ test("detailed dispatch accepts only a request-scoped SSE response", async () =>
   const requestId = randomUUID();
   let postCount = 0;
   const server = createServer((request, response) => {
-    postCount += 1;
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string };
-      response.writeHead(200, { "content-type": "text/event-stream" }).end([
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string };
+      if (body.method === "initialize") {
+        response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "sse-session" }).end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
+        return;
+      }
+      if (body.method === "notifications/initialized") {
+        response.writeHead(202, { "mcp-session-id": "sse-session" }).end();
+        return;
+      }
+      assert.equal(body.method, "tools/call");
+      postCount += 1;
+      response.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": "sse-session" }).end([
         "event: message",
-        `data: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { resultType: "complete", content: [{ type: "text", text: "sse result" }] } })}`,
+        `data: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "sse result" }] } })}`,
         "",
       ].join("\n"));
     });
@@ -210,41 +264,64 @@ test("pre-boundary input rejection is deterministic and sends no request", async
 test("matching JSON-RPC failures are failed after exactly one POST", async () => {
   const cases: readonly [string, (id: string) => FakeResponse, string][] = [
     ["rpc error", jsonRpcError, "MCP_TOOL_CALL_FAILED"],
-    ["isError", (id) => jsonRpcResult(id, { resultType: "complete", isError: true, content: [{ type: "text", text: "rejected" }] }), "MCP_TOOL_CALL_FAILED"],
-    ["input required", (id) => jsonRpcResult(id, { resultType: "input_required", content: [] }), "MCP_TOOL_INPUT_REQUIRED_UNSUPPORTED"],
+    ["isError", (id) => jsonRpcResult(id, { isError: true, content: [{ type: "text", text: "rejected" }] }), "MCP_TOOL_CALL_FAILED"],
+    ["missing content", (id) => jsonRpcResult(id, { isError: false }), "MCP_TOOL_CALL_FAILED"],
   ];
   for (const [name, responseFactory, errorCode] of cases) {
     const run = await runDetailedCase(responseFactory);
     assert.equal(run.result.outcome, "failed", name);
     assert.equal(run.result.safeErrorCode, errorCode, name);
     assert.equal(run.postCount, 1, name);
-    assert.equal(run.boundaryCount, 1, name);
+    assert.equal(run.boundaryCount, 3, name);
+    assert.deepEqual(run.methods, ["initialize", "notifications/initialized", "tools/call"], name);
   }
 });
 
 test("output schema rejection is failed and never retried", async () => {
   const outputSchema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false };
   const run = await runDetailedCase((id) => jsonRpcResult(id, {
-    resultType: "complete",
     content: [],
     structuredContent: { wrong: true },
   }), { outputSchema });
   assert.equal(run.result.outcome, "failed");
   assert.equal(run.result.safeErrorCode, "MCP_TOOL_OUTPUT_INVALID");
   assert.equal(run.postCount, 1);
-  assert.equal(run.boundaryCount, 1);
+  assert.equal(run.boundaryCount, 3);
 });
 
 test("missing structured output is rejected when an output schema is attested", async () => {
   const outputSchema = { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } }, additionalProperties: false };
   const run = await runDetailedCase((id) => jsonRpcResult(id, {
-    resultType: "complete",
     content: [],
   }), { outputSchema });
   assert.equal(run.result.outcome, "failed");
   assert.equal(run.result.safeErrorCode, "MCP_TOOL_OUTPUT_INVALID");
   assert.equal(run.postCount, 1);
-  assert.equal(run.boundaryCount, 1);
+  assert.equal(run.boundaryCount, 3);
+});
+
+test("post-handshake reservation revalidation blocks a revoked tools/call", async () => {
+  const run = await runDetailedCase((id) => jsonRpcResult(id, { content: [] }), { rejectBeforeToolCall: true });
+  assert.equal(run.result.outcome, "failed");
+  assert.equal(run.result.safeErrorCode, "MCP_CONNECTION_CONFLICT");
+  assert.equal(run.postCount, 0);
+  assert.deepEqual(run.methods, ["initialize", "notifications/initialized"]);
+});
+
+test("MCP handshake failures fail closed before tools/call without downgrade or retry", async () => {
+  const cases = [
+    ["unsupported version", "unsupported-version", "MCP_PROTOCOL_UNSUPPORTED", ["initialize"]],
+    ["invalid session id", "invalid-session", "MCP_RESPONSE_INVALID", ["initialize"]],
+    ["changed session id", "changed-session", "MCP_RESPONSE_INVALID", ["initialize", "notifications/initialized"]],
+    ["initialized notification failure", "notification-failure", "MCP_PROTOCOL_UNSUPPORTED", ["initialize", "notifications/initialized"]],
+  ] as const;
+  for (const [name, handshakeMode, safeErrorCode, methods] of cases) {
+    const run = await runDetailedCase((id) => jsonRpcResult(id, { content: [] }), { handshakeMode });
+    assert.equal(run.result.outcome, "failed", name);
+    assert.equal(run.result.safeErrorCode, safeErrorCode, name);
+    assert.equal(run.postCount, 0, name);
+    assert.deepEqual(run.methods, methods, name);
+  }
 });
 
 test("boundary callback rejection is pre-send failed and creates no POST", async () => {
@@ -280,10 +357,10 @@ test("boundary callback rejection is pre-send failed and creates no POST", async
   }
 });
 
-test("DB-owned stale boundary rejection is unknown and creates no POST", async () => {
+test("DB-owned boundary rejection before tools/call is failed and creates no tool request", async () => {
   const run = await runDetailedCase((id) => jsonRpcError(id), { rejectBoundary: true });
-  assert.equal(run.result.outcome, "unknown");
-  assert.equal(run.result.safeErrorCode, "MCP_DISPATCH_RESERVATION_STALE");
+  assert.equal(run.result.outcome, "failed");
+  assert.equal(run.result.safeErrorCode, "MCP_CONNECTION_CONFLICT");
   assert.equal(run.boundaryCount, 1);
   assert.equal(run.postCount, 0);
 });
@@ -293,10 +370,10 @@ test("post-boundary transport ambiguity is unknown with no retry", async () => {
     ["3xx", (id) => ({ status: 302, contentType: "application/json", body: JSON.stringify({ redirect: true, id }) })],
     ["4xx without matching RPC error", (id) => ({ status: 400, contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: `wrong-${id}`, result: {} }) })],
     ["5xx without matching RPC error", () => ({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "server failed" }) })],
-    ["wrong JSON-RPC id", (id) => ({ status: 200, contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: `wrong-${id}`, result: { resultType: "complete", content: [] } }) })],
+    ["wrong JSON-RPC id", (id) => ({ status: 200, contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: `wrong-${id}`, result: { content: [] } }) })],
     ["malformed JSON", () => ({ status: 200, contentType: "application/json", body: "{malformed" })],
     ["malformed SSE", () => ({ status: 200, contentType: "text/event-stream", body: "data: not-json\n\n" })],
-    ["request-scoped SSE id mismatch", (id) => ({ status: 200, contentType: "text/event-stream", body: `data: ${JSON.stringify({ jsonrpc: "2.0", id: `wrong-${id}`, result: { resultType: "complete", content: [] } })}\n\n` })],
+    ["request-scoped SSE id mismatch", (id) => ({ status: 200, contentType: "text/event-stream", body: `data: ${JSON.stringify({ jsonrpc: "2.0", id: `wrong-${id}`, result: { content: [] } })}\n\n` })],
     ["connection reset", () => "reset"],
     ["oversized body", () => ({ status: 200, contentType: "application/json", body: Buffer.alloc(512 * 1024 + 1, 0x78) })],
   ];
@@ -304,21 +381,20 @@ test("post-boundary transport ambiguity is unknown with no retry", async () => {
     const run = await runDetailedCase(responseFactory);
     assert.equal(run.result.outcome, "unknown", name);
     assert.equal(run.postCount, 1, name);
-    assert.equal(run.boundaryCount, 1, name);
+    assert.equal(run.boundaryCount, 3, name);
   }
 });
 
 test("pre-boundary network fingerprint mismatch sends no request", async () => {
   const run = await runDetailedCase((id) => jsonRpcError(id), { expectedFingerprint: "0".repeat(64) });
   assert.equal(run.result.outcome, "failed");
-  assert.equal(run.result.safeErrorCode, "WEB_SOURCE_NETWORK_CHANGED");
+  assert.equal(run.result.safeErrorCode, "MCP_NETWORK_CHANGED");
   assert.equal(run.postCount, 0);
   assert.equal(run.boundaryCount, 0);
 });
 
 test("successful output is bounded and sanitizes sensitive keys and text", async () => {
   const run = await runDetailedCase((id) => jsonRpcResult(id, {
-    resultType: "complete",
     content: [{ type: "text", text: "authorization: top-secret; bearer=hidden-token; Authorization: Bearer standalone-marker; Authorization=Bearer equals-bearer-marker; Authorization: Basic basic-marker; access_token: Bearer access-bearer-marker; Bearer standalone-token; access_key=access-marker; access token: access-token-marker; refresh_key=refresh-marker; refresh token: refresh-token-marker; client_secret=client-secret-marker; client key: client-key-marker; Authorization: Bearer \"quoted-authorization-marker with space\"; Bearer \"quoted-standalone-marker nested\"; token: \"quoted-token-marker with space\"\nAuthorization: Bearer \"unclosed-authorization-marker with space\nAuthorization: Basic 'unclosed-basic-marker with space\naccess_token=\"unclosed-token-marker with space" }],
     structuredContent: {
       apiKey: "secret-key",
@@ -330,7 +406,7 @@ test("successful output is bounded and sanitizes sensitive keys and text", async
   }));
   assert.equal(run.result.outcome, "succeeded");
   assert.equal(run.postCount, 1);
-  assert.equal(run.boundaryCount, 1);
+  assert.equal(run.boundaryCount, 3);
   assert.ok(run.result.result);
   assert.match(run.result.result.text ?? "", /\[REDACTED\]/u);
   assert.doesNotMatch(run.result.result.text ?? "", /top-secret|hidden-token|standalone-marker|equals-bearer-marker|basic-marker|access-bearer-marker|standalone-token|access-marker|access-token-marker|refresh-marker|refresh-token-marker|client-secret-marker|client-key-marker|quoted-authorization-marker|quoted-standalone-marker|quoted-token-marker|unclosed-authorization-marker|unclosed-basic-marker|unclosed-token-marker|with space|nested/u);
@@ -482,15 +558,15 @@ test("depth, node, and total-byte limits become unknown after the boundary", asy
     ["nodes", Array.from({ length: 257 }, () => "x")],
   ];
   for (const [name, structuredContent] of cases) {
-    const run = await runDetailedCase((id) => jsonRpcResult(id, { resultType: "complete", content: [], structuredContent }));
+    const run = await runDetailedCase((id) => jsonRpcResult(id, { content: [], structuredContent }));
     assert.equal(run.result.outcome, "unknown", name);
     assert.equal(run.postCount, 1, name);
-    assert.equal(run.boundaryCount, 1, name);
+    assert.equal(run.boundaryCount, 3, name);
   }
-  const bytes = await runDetailedCase((id) => jsonRpcResult(id, { resultType: "complete", content: [{ type: "text", text: "x".repeat(65536) }] }));
+  const bytes = await runDetailedCase((id) => jsonRpcResult(id, { content: [{ type: "text", text: "x".repeat(65536) }] }));
   assert.equal(bytes.result.outcome, "unknown");
   assert.equal(bytes.postCount, 1);
-  assert.equal(bytes.boundaryCount, 1);
+  assert.equal(bytes.boundaryCount, 3);
 });
 
 test("dispatch runtime requires explicit API opt-in and remains isolated from the legacy worker and write paths", async () => {

@@ -644,7 +644,13 @@ async function lockBoundaryIdentityRows(tx: Tx, projectId: string, seed: Boundar
   return projectRows.length === 1;
 }
 
-async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispatch, actor: Actor, db: PrismaClient): Promise<AcceptedDispatchBoundary | null> {
+async function checkDispatchBoundary(
+  reservation: Reservation,
+  ready: ReadyDispatch,
+  actor: Actor,
+  db: PrismaClient,
+  mode: "mark" | "revalidate",
+): Promise<AcceptedDispatchBoundary | null> {
   try {
     const actorId = parseActor(actor);
     return await withSerializableRetry(db, async (tx): Promise<AcceptedDispatchBoundary | null> => {
@@ -670,14 +676,35 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
       );
       const connection = await tx.mcpConnection.findUnique({
         where: { id: seed.action.connectionId },
-        select: { authKind: true, credentialId: true },
+        select: {
+          endpointUrl: true,
+          allowPrivateNetwork: true,
+          status: true,
+          configurationRevision: true,
+          resolvedAddressFingerprint: true,
+          authKind: true,
+          credentialId: true,
+          credential: { select: { kind: true, secretFingerprint: true } },
+        },
       });
-      if (connection === null || connection.authKind !== ready.authKind || connection.credentialId !== ready.credentialId) return null;
-      if (connection.credentialId !== null) {
-        const credentials = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-          SELECT "id" FROM "ExternalCredential" WHERE "id" = ${connection.credentialId}::uuid FOR UPDATE
+      if (connection === null
+        || connection.endpointUrl !== ready.endpointUrl
+        || connection.allowPrivateNetwork !== ready.allowPrivateNetwork
+        || connection.status !== "verified"
+        || connection.configurationRevision !== ready.action.connectionConfigurationRevision
+        || connection.resolvedAddressFingerprint !== ready.networkFingerprint
+        || connection.authKind !== ready.authKind
+        || connection.credentialId !== ready.credentialId) return null;
+      if (ready.authKind === "bearer") {
+        if (connection.credentialId === null
+          || connection.credential?.kind !== "mcp"
+          || connection.credential.secretFingerprint !== ready.credentialFingerprint) return null;
+        const credentials = await tx.$queryRaw<Array<{ id: string; secretFingerprint: string }>>(Prisma.sql`
+          SELECT "id", "secretFingerprint" FROM "ExternalCredential" WHERE "id" = ${connection.credentialId}::uuid FOR UPDATE
         `);
-        if (credentials.length !== 1) return null;
+        if (credentials.length !== 1 || credentials[0]?.secretFingerprint !== ready.credentialFingerprint) return null;
+      } else if (connection.credentialId !== null || connection.credential !== null) {
+        return null;
       }
 
       const action = await loadActionRow(tx, reservation.projectId, reservation.actionId);
@@ -686,16 +713,29 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
         || attempt.id !== reservation.attemptId
         || attempt.reservationTokenHash !== reservation.tokenHash
         || attempt.status !== "reserved"
-        || attempt.boundaryReachedAt !== null
+        || (mode === "mark" ? attempt.boundaryReachedAt !== null : attempt.boundaryReachedAt === null)
         || action.status !== "dispatchReserved"
         || action.stateVersion !== 3
         || action.lastActorId !== actorId
         || action.actionFingerprint !== ready.action.actionFingerprint
+        || action.definitionFingerprint !== ready.action.definitionFingerprint
+        || action.networkFingerprint !== ready.networkFingerprint
+        || action.credentialFingerprint !== ready.credentialFingerprint
+        || action.toolName !== ready.toolName
+        || attempt.actionFingerprint !== action.actionFingerprint
+        || attempt.definitionFingerprint !== action.definitionFingerprint
+        || attempt.networkFingerprint !== action.networkFingerprint
+        || attempt.credentialFingerprint !== action.credentialFingerprint
+        || attempt.connectionConfigurationRevision !== action.connectionConfigurationRevision
         || action.connectionOwnerId !== ready.action.connectionOwnerId
         || action.connectionOwnerAccountAccessVersion === null
         || action.connectionOwnerAccountAccessVersion !== ready.action.connectionOwnerAccountAccessVersion
         || attempt.connectionOwnerId !== action.connectionOwnerId
         || attempt.connectionOwnerAccountAccessVersion !== action.connectionOwnerAccountAccessVersion) return null;
+      const now = await databaseNow(tx);
+      if (attempt.reservationExpiresAt.getTime() <= now.getTime()
+        || action.approvalExpiresAt === null
+        || action.approvalExpiresAt.getTime() <= now.getTime()) return null;
       let membership: { id: string; userId: string; createdAt: Date };
       try {
         membership = (await ownerAdmission(tx, reservation.projectId, actorId, false, actor.accountAccessVersion)).membership;
@@ -712,17 +752,13 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
       }
       if (!sourceSnapshotMatchesAction(action, grant) || !await persistedActionHashesValid(tx, action)) return null;
 
-      const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        UPDATE "ProjectMcpActionDispatchAttempt" AS attempt
-        SET "boundaryReachedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
-        FROM "ProjectMcpAction" AS action
-        JOIN "Project" AS project ON project."id" = action."projectId"
-        WHERE attempt."id" = ${reservation.attemptId}::uuid
+      const fenceWhere = Prisma.sql`
+          attempt."id" = ${reservation.attemptId}::uuid
           AND attempt."projectId" = ${reservation.projectId}::uuid
           AND attempt."actionId" = ${reservation.actionId}::uuid
           AND attempt."reservationTokenHash" = ${reservation.tokenHash}
           AND attempt."status" = 'reserved'::"ProjectMcpActionDispatchAttemptStatus"
-          AND attempt."boundaryReachedAt" IS NULL
+          AND (attempt."boundaryReachedAt" IS NULL) = ${mode === "mark"}
           AND attempt."reservationExpiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
           AND action."id" = attempt."actionId"
           AND action."projectId" = attempt."projectId"
@@ -743,16 +779,34 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
           )
           AND project."id" = attempt."projectId"
           AND project."archivedAt" IS NULL
-        RETURNING attempt."id"
-      `);
-      if (updated.length !== 1) return null;
+      `;
+      if (mode === "mark") {
+        const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          UPDATE "ProjectMcpActionDispatchAttempt" AS attempt
+          SET "boundaryReachedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
+          FROM "ProjectMcpAction" AS action
+          JOIN "Project" AS project ON project."id" = action."projectId"
+          WHERE ${fenceWhere}
+          RETURNING attempt."id"
+        `);
+        if (updated.length !== 1) return null;
+      } else {
+        const valid = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT attempt."id"
+          FROM "ProjectMcpActionDispatchAttempt" AS attempt
+          JOIN "ProjectMcpAction" AS action ON action."id" = attempt."actionId" AND action."projectId" = attempt."projectId"
+          JOIN "Project" AS project ON project."id" = action."projectId"
+          WHERE ${fenceWhere}
+        `);
+        if (valid.length !== 1) return null;
+      }
 
-      // The durable final fence is committed only after the credential has
-      // been read inside the same transaction.  The row locks acquired above
-      // therefore prevent an account, owner, connection, or credential
-      // mutation from committing between the fence and secret decryption.
+      // The durable fence is committed only after the credential has been
+      // read inside the same transaction. The post-handshake path reuses the
+      // same locked snapshot checks but neither changes the marker nor reads
+      // the secret again.
       let bearerToken: string | null = null;
-      if (ready.authKind === "bearer") {
+      if (mode === "mark" && ready.authKind === "bearer") {
         if (connection.credentialId === null) throw new CredentialVaultError("CREDENTIAL_NOT_FOUND");
         bearerToken = await readCredentialSecret(connection.credentialId, "mcp", tx, { expectedSecretFingerprint: ready.credentialFingerprint });
       }
@@ -764,6 +818,14 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
     // created, and the caller terminalizes the consumed reservation unknown.
     return null;
   }
+}
+
+async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispatch, actor: Actor, db: PrismaClient): Promise<AcceptedDispatchBoundary | null> {
+  return checkDispatchBoundary(reservation, ready, actor, db, "mark");
+}
+
+async function revalidateDispatchBoundary(reservation: Reservation, ready: ReadyDispatch, actor: Actor, db: PrismaClient): Promise<boolean> {
+  return await checkDispatchBoundary(reservation, ready, actor, db, "revalidate") !== null;
 }
 
 async function dispatchReserved(reservation: Reservation, ready: ReadyDispatch, actor: Actor, db: PrismaClient): Promise<Readonly<Record<string, unknown>>> {
@@ -791,9 +853,11 @@ async function dispatchReserved(reservation: Reservation, ready: ReadyDispatch, 
       outputSchema: ready.outputSchema,
       arguments: ready.arguments,
       // The DB-owned boundary was accepted before any bearer secret was read.
-      // Keep the client callback as an immediate write gate without opening a
-      // second transaction after the secret has entered process memory.
+      // Handshake writes use an immediate local gate. Before tools/call the
+      // client revalidates the single-use reservation and its frozen sources.
       onDispatchBoundary: () => true,
+      onHandshakeDispatchBoundary: () => true,
+      onBeforeToolCall: () => revalidateDispatchBoundary(reservation, ready, actor, db),
     });
   } catch (error) {
     result = Object.freeze({ outcome: "unknown", requestId: reservation.rpcRequestId, safeErrorCode: safeErrorCode(error, "MCP_DISPATCH_UNKNOWN"), httpStatus: null });

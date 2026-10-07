@@ -13,7 +13,6 @@ import {
   callMcpTool,
   discoverMcpTools,
   initializeMcpSession,
-  MCP_PROTOCOL_VERSION,
   type McpToolCallResult,
 } from "./client";
 import { McpCapabilityError, failMcp } from "./errors";
@@ -914,8 +913,9 @@ export async function discoverMcpConnectionTools(
       expectedCredentialFingerprint,
     });
     let currentBearerToken: string | null = null;
-    const discovery = await discoverMcpTools({
-      endpointUrl: connection.endpointUrl,
+    const endpoint = await resolveMcpProbeEndpoint({ endpointUrl: connection.endpointUrl, allowPrivateNetwork: connection.allowPrivateNetwork });
+    const initialized = await initializeMcpSession({
+      endpointUrl: endpoint.url,
       allowPrivateNetwork: connection.allowPrivateNetwork,
       expectedAddressFingerprint: connection.resolvedAddressFingerprint,
       bearerToken: null,
@@ -925,6 +925,19 @@ export async function discoverMcpConnectionTools(
         return currentBearerToken;
       },
     });
+    const discovery = await discoverMcpTools({
+      endpointUrl: endpoint.url,
+      allowPrivateNetwork: connection.allowPrivateNetwork,
+      expectedAddressFingerprint: initialized.addressFingerprint,
+      bearerToken: null,
+      sessionId: initialized.sessionId,
+      onDispatchBoundary,
+      readBearerToken: async () => {
+        currentBearerToken = await bearerToken(connection, db, expectedCredentialFingerprint ?? noCredentialFingerprint());
+        return currentBearerToken;
+      },
+    });
+    if (discovery.addressFingerprint !== initialized.addressFingerprint) return failMcp("MCP_NETWORK_CHANGED");
     assertMcpToolCatalogSafe(discovery.tools, currentBearerToken);
     const now = new Date();
     const stored = await db.$transaction(async (tx) => {
@@ -970,7 +983,7 @@ export async function discoverMcpConnectionTools(
       const connection = await tx.mcpConnection.update({
         where: { id: connectionId },
         data: {
-          status: "verified", protocolVersion: MCP_PROTOCOL_VERSION, catalogFingerprint: discovery.catalogFingerprint,
+          status: "verified", protocolVersion: initialized.protocolVersion, catalogFingerprint: discovery.catalogFingerprint,
           resolvedAddressFingerprint: discovery.addressFingerprint, lastDiscoveredAt: now, lastErrorCode: null, disabledAt: null,
         },
         select: connectionSelect,

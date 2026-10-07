@@ -101,18 +101,26 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string; method: string; params: Record<string, unknown> };
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string; params: Record<string, unknown> };
       requests.push(body.method);
       if (request.headers.authorization !== `Bearer ${token}`) {
         response.writeHead(401, { "content-type": "application/json" }); response.end("{}"); return;
       }
-      response.writeHead(200, { "content-type": "application/json" });
+      if (body.method === "notifications/initialized") {
+        assert.equal(body.id, undefined);
+        assert.equal(request.headers["mcp-session-id"], "mcp-capability-session");
+        response.writeHead(202, { "mcp-session-id": "mcp-capability-session" }).end();
+        return;
+      }
       if (body.method === "initialize") {
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2026-07-28", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
+        response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "mcp-capability-session" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
         return;
       }
       if (body.method === "tools/list") {
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { resultType: "complete", tools: [{
+        assert.equal(request.headers["mcp-session-id"], "mcp-capability-session");
+        response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "mcp-capability-session" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools: [{
           name: "project.lookup", description: `Revision ${definitionRevision}`,
           inputSchema: { type: "object", properties: { query: { type: "string", minLength: 1 }, revision: { type: "integer", const: definitionRevision } }, required: ["query", "revision"], additionalProperties: false },
           outputSchema: { type: "object", properties: { found: { type: "boolean" } }, required: ["found"], additionalProperties: false },
@@ -120,7 +128,7 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
         }] } }));
         return;
       }
-      response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { resultType: "complete", content: [{ type: "text", text: "found" }], structuredContent: { found: true }, isError: false } }));
+      assert.fail(`unexpected MCP method ${body.method}`);
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -166,7 +174,7 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
     }, admin, db);
     connectionId = connection.id;
     credentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id }, select: { credentialId: true } })).credentialId;
-    assert.deepEqual(requests, ["initialize", "tools/list"]);
+    assert.deepEqual(requests, ["initialize", "notifications/initialized", "tools/list"]);
     await assert.rejects(
       () => previewMcpConnectionMutation(connection.id, {
         action: "enable",
@@ -251,7 +259,7 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
     }, admin, db);
     assert.equal(rediscover.canExecute, false);
     assert.equal(rediscover.blockers.includes("external_io_planned_not_dispatched"), true);
-    assert.deepEqual(requests, ["initialize", "tools/list"]);
+    assert.deepEqual(requests, ["initialize", "notifications/initialized", "tools/list"]);
     await assert.rejects(
       () => getProjectMcpToolCenter(projectId, admin, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",

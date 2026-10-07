@@ -243,9 +243,17 @@ test(
       mode: "success" as ServerMode,
       postCount: 0,
       discoveryCount: 0,
+      initializeCount: 0,
       requestIds: [] as string[],
+      methods: [] as string[],
+      holdMethod: null as "initialize" | "tools/call" | null,
       releaseHold: null as (() => void) | null,
       hold: null as Promise<void> | null,
+    };
+    const releaseServerHold = () => {
+      const release = serverState.releaseHold as (() => void) | null;
+      release?.();
+      serverState.releaseHold = null;
     };
     const server = createServer((request, response) => {
       if (request.method !== "POST") {
@@ -255,23 +263,40 @@ test(
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", async () => {
-        const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string; method?: string };
+        const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string };
+        serverState.methods.push(parsed.method);
         const authorization = request.headers.authorization;
         if (authorization !== undefined && authorization !== `Bearer ${activeBearerToken}`) {
           response.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: parsed.id, error: { code: -32001, message: "invalid bearer" } }));
           return;
         }
+        if (parsed.method === "initialize") {
+          serverState.initializeCount += 1;
+          if (serverState.mode === "hold" && serverState.holdMethod === "initialize" && serverState.hold !== null) await serverState.hold;
+          response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "dispatch-session" }).end(JSON.stringify({
+            jsonrpc: "2.0",
+            id: parsed.id,
+            result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "dispatch-fixture", version: "1" } },
+          }));
+          return;
+        }
+        if (parsed.method === "notifications/initialized") {
+          assert.equal(parsed.id, undefined);
+          assert.equal(request.headers["mcp-session-id"], "dispatch-session");
+          response.writeHead(202, { "mcp-session-id": "dispatch-session" }).end();
+          return;
+        }
         if (parsed.method === "tools/call") {
           serverState.postCount += 1;
-          serverState.requestIds.push(parsed.id);
+          assert.equal(request.headers["mcp-session-id"], "dispatch-session");
+          if (parsed.id !== undefined) serverState.requestIds.push(parsed.id);
         }
         if (parsed.method === "tools/list") {
           serverState.discoveryCount += 1;
-          response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+          response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "dispatch-session" }).end(JSON.stringify({
             jsonrpc: "2.0",
             id: parsed.id,
             result: {
-              resultType: "complete",
               tools: [{
                 name: "project.bearer.lookup",
                 title: "Bearer lookup",
@@ -284,7 +309,8 @@ test(
           }));
           return;
         }
-        if (serverState.mode === "hold" && serverState.hold !== null) await serverState.hold;
+        assert.equal(parsed.method, "tools/call");
+        if (serverState.mode === "hold" && serverState.holdMethod === "tools/call" && serverState.hold !== null) await serverState.hold;
         if (serverState.mode === "reset") {
           response.destroy();
           return;
@@ -292,13 +318,12 @@ test(
         const body = serverState.mode === "rpcError"
           ? { jsonrpc: "2.0", id: parsed.id, error: { code: -32001, message: "explicit remote rejection" } }
           : serverState.mode === "large"
-            ? { jsonrpc: "2.0", id: parsed.id, result: { resultType: "complete", content: [{ type: "text", text: "x".repeat(60_000) }], structuredContent: { ok: true } } }
+            ? { jsonrpc: "2.0", id: parsed.id, result: { content: [{ type: "text", text: "x".repeat(60_000) }], structuredContent: { ok: true } } }
             : serverState.mode === "sensitive"
               ? {
                 jsonrpc: "2.0",
                 id: parsed.id,
                 result: {
-                  resultType: "complete",
                   content: [{ type: "text", text: sensitiveResponseText }],
                   structuredContent: {
                     ok: true,
@@ -324,9 +349,9 @@ test(
                   },
                 },
               }
-              : { jsonrpc: "2.0", id: parsed.id, result: { resultType: "complete", content: [{ type: "text", text: "safe lookup" }], structuredContent: { ok: true } } };
+              : { jsonrpc: "2.0", id: parsed.id, result: { content: [{ type: "text", text: "safe lookup" }], structuredContent: { ok: true } } };
         await delay(25);
-        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+        response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "dispatch-session" }).end(JSON.stringify(body));
       });
     });
 
@@ -645,7 +670,7 @@ test(
         credentialId: null,
         allowPrivateNetwork: true,
         resolvedAddressFingerprint: resolved.fingerprint,
-        protocolVersion: "2026-07-28",
+        protocolVersion: "2025-11-25",
         catalogFingerprint: fingerprint("c"),
         credentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
         configurationRevision: 1,
@@ -721,7 +746,7 @@ test(
         credentialId: bearerCredential.id,
         allowPrivateNetwork: true,
         resolvedAddressFingerprint: resolved.fingerprint,
-        protocolVersion: "2026-07-28",
+        protocolVersion: "2025-11-25",
         catalogFingerprint: fingerprint("3"),
         credentialFingerprint: bearerCredentialSnapshot.secretFingerprint,
         configurationRevision: 1,
@@ -1281,6 +1306,7 @@ test(
       // valid. The later phase-B drift intentionally changes the connection
       // revision, so no new proposal may be attempted after that point.
       serverState.mode = "hold";
+      serverState.holdMethod = "tools/call";
       serverState.hold = new Promise<void>((resolve) => { serverState.releaseHold = resolve; });
       const reserved = await createApprovedAction("archive-block");
       const heldPostCount = serverState.postCount;
@@ -1320,8 +1346,8 @@ test(
       `), /PROJECT_MCP_ACTION_DISPATCH_ATTEMPT_IMMUTABLE/u);
       await assert.rejects(() => db.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } }), /PROJECT_MCP_ACTION_PENDING_ARCHIVE_FORBIDDEN/u);
       await assert.rejects(() => db.project.delete({ where: { id: projectId } }), /PROJECT_MCP_ACTION_PENDING/u);
-      serverState.releaseHold?.();
-      serverState.releaseHold = null;
+      releaseServerHold();
+      serverState.holdMethod = null;
       await heldDispatch;
       inFlight = null;
       assert.equal(serverState.postCount, heldPostCount + 1);
@@ -1492,7 +1518,72 @@ test(
         await setDelegationExpiryFixture(delegation.expiresAt);
       }
 
+      const expiredDuringHandshake = await createApprovedAction("reservation-expires-during-initialize");
+      serverState.mode = "hold";
+      serverState.holdMethod = "initialize";
+      serverState.hold = new Promise<void>((resolve) => { serverState.releaseHold = resolve; });
+      const initializeBeforeExpiry = serverState.initializeCount;
+      const postsBeforeExpiry = serverState.postCount;
+      const expiryDispatch = dispatchProjectMcpAction(
+        projectId,
+        expiredDuringHandshake.actionId,
+        { expectedStateVersion: 2, expectedActionRevision: expiredDuringHandshake.actionRevision, acknowledgeSingleUse: true },
+        dispatchActor,
+        shortReservationDatabase(db, 1_000, 0),
+      );
+      inFlight = expiryDispatch;
+      void expiryDispatch.catch(() => undefined);
+      await waitFor(
+        async () => serverState.initializeCount > initializeBeforeExpiry ? serverState.initializeCount : null,
+        () => true,
+      );
+      await delay(1_100);
+      releaseServerHold();
+      serverState.holdMethod = null;
+      serverState.mode = "success";
+      await expiryDispatch;
+      inFlight = null;
+      assert.equal(serverState.postCount, postsBeforeExpiry);
+      const expiredHandshakeAttempt = await db.projectMcpActionDispatchAttempt.findUniqueOrThrow({ where: { actionId: expiredDuringHandshake.actionId } });
+      const expiredHandshakeAction = await db.projectMcpAction.findUniqueOrThrow({ where: { id: expiredDuringHandshake.actionId }, select: { status: true } });
+      assert.equal(expiredHandshakeAction.status, "failed");
+      assert.equal(expiredHandshakeAttempt.status, "failed");
+      assert.ok(expiredHandshakeAttempt.boundaryReachedAt !== null);
+      assert.equal(expiredHandshakeAttempt.safeErrorCode, "MCP_CONNECTION_CONFLICT");
+
+      const revokedDuringHandshake = await createApprovedAction("grant-revoked-during-initialize");
+      serverState.mode = "hold";
+      serverState.holdMethod = "initialize";
+      serverState.hold = new Promise<void>((resolve) => { serverState.releaseHold = resolve; });
+      const initializeBeforeRevocation = serverState.initializeCount;
+      const postsBeforeRevocation = serverState.postCount;
+      const revocationDispatch = dispatchProjectMcpAction(
+        projectId,
+        revokedDuringHandshake.actionId,
+        { expectedStateVersion: 2, expectedActionRevision: revokedDuringHandshake.actionRevision, acknowledgeSingleUse: true },
+        dispatchActor,
+        db,
+      );
+      inFlight = revocationDispatch;
+      void revocationDispatch.catch(() => undefined);
+      await waitFor(
+        async () => serverState.initializeCount > initializeBeforeRevocation ? serverState.initializeCount : null,
+        () => true,
+      );
       await revokeProjectMcpToolGrantV2(projectId, grantId, { expectedGrantVersion: 1 }, actor, db);
+      releaseServerHold();
+      serverState.holdMethod = null;
+      serverState.mode = "success";
+      await revocationDispatch;
+      inFlight = null;
+      assert.equal(serverState.postCount, postsBeforeRevocation);
+      const revokedHandshakeAttempt = await db.projectMcpActionDispatchAttempt.findUniqueOrThrow({ where: { actionId: revokedDuringHandshake.actionId } });
+      const revokedHandshakeAction = await db.projectMcpAction.findUniqueOrThrow({ where: { id: revokedDuringHandshake.actionId }, select: { status: true } });
+      assert.equal(revokedHandshakeAction.status, "failed");
+      assert.equal(revokedHandshakeAttempt.status, "failed");
+      assert.ok(revokedHandshakeAttempt.boundaryReachedAt !== null);
+      assert.equal(revokedHandshakeAttempt.safeErrorCode, "MCP_CONNECTION_CONFLICT");
+
       const driftPostCount = serverState.postCount;
       await dispatchProjectMcpAction(projectId, preReservationDrift.actionId, { expectedStateVersion: 2, expectedActionRevision: preReservationDrift.actionRevision, acknowledgeSingleUse: true }, dispatchActor, db);
       assert.equal(serverState.postCount, driftPostCount);

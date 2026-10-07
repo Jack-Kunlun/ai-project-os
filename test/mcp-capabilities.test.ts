@@ -58,15 +58,21 @@ test("MCP 工具定义拒绝 Bearer 回显和凭据形状字段", () => {
 });
 
 test("MCP saved credential is read only after the DNS dispatch fence", async (context) => {
-  const requests: Array<{ authorization?: string }> = [];
+  const requests: Array<{ method: string; authorization?: string; sessionId?: string }> = [];
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      requests.push({ authorization: request.headers.authorization });
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string };
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string };
+      const sessionId = request.headers["mcp-session-id"];
+      requests.push({ method: body.method, authorization: request.headers.authorization, sessionId: typeof sessionId === "string" ? sessionId : undefined });
+      if (body.method === "notifications/initialized") {
+        response.writeHead(202, { "mcp-session-id": "late-bound" }).end();
+        return;
+      }
+      assert.equal(body.method, "initialize");
       response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "late-bound" });
-      response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2026-07-28", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -88,26 +94,51 @@ test("MCP saved credential is read only after the DNS dispatch fence", async (co
       return "late-bound-token";
     },
   });
-  assert.equal(initialized.protocolVersion, "2026-07-28");
-  assert.deepEqual(boundaryOrder, ["fence", "read"]);
+  assert.equal(initialized.protocolVersion, "2025-11-25");
+  assert.deepEqual(boundaryOrder, ["fence", "read", "fence", "read"]);
+  assert.deepEqual(requests.map(({ method }) => method), ["initialize", "notifications/initialized"]);
   assert.equal(requests[0]?.authorization, "Bearer late-bound-token");
+  assert.equal(requests[1]?.authorization, "Bearer late-bound-token");
+  assert.equal(requests[0]?.sessionId, undefined);
+  assert.equal(requests[1]?.sessionId, "late-bound");
 });
 
 test("远程 Streamable HTTP MCP 完成工具发现、固定请求头和 SSE 只读调用", async (context) => {
-  const requests: Array<{ method: string; headers: Record<string, string | string[] | undefined>; body: unknown }> = [];
+  const requests: Array<{ method: string; headers: Record<string, string | string[] | undefined>; body: { id?: string; method: string; params?: Record<string, unknown> } }> = [];
+  let sessionId: string | null = null;
+  let nextSession = 0;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string; method: string };
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string; params?: Record<string, unknown> };
       requests.push({ method: body.method, headers: request.headers, body });
-      if (body.method === "tools/list") {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { resultType: "complete", tools: [readOnlyTool] } }));
+      if (body.method === "initialize") {
+        sessionId = `fixture-session-${++nextSession}`;
+        response.writeHead(200, { "content-type": "application/json", "mcp-session-id": sessionId });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
         return;
       }
+      if (body.method === "notifications/initialized") {
+        assert.equal(body.id, undefined);
+        assert.equal(request.headers["mcp-session-id"], sessionId);
+        assert.notEqual(sessionId, null);
+        response.writeHead(202, { "mcp-session-id": sessionId! }).end();
+        return;
+      }
+      if (body.method === "tools/list") {
+        assert.equal(request.headers["mcp-session-id"], sessionId);
+        response.writeHead(200, { "content-type": "application/json" });
+        const cursor = body.params?.cursor;
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: cursor === undefined
+          ? { tools: [readOnlyTool], nextCursor: "page-2" }
+          : { tools: [{ ...readOnlyTool, name: "project.search.second" }] } }));
+        return;
+      }
+      assert.equal(body.method, "tools/call");
+      assert.equal(request.headers["mcp-session-id"], sessionId);
       response.writeHead(200, { "content-type": "text/event-stream" });
-      response.end(`data: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { resultType: "complete", content: [{ type: "text", text: "2 matches" }], structuredContent: { matches: 2 }, isError: false } })}\n\n`);
+      response.end(`data: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "2 matches" }], structuredContent: { matches: 2 }, isError: false } })}\n\n`);
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -115,43 +146,54 @@ test("远程 Streamable HTTP MCP 完成工具发现、固定请求头和 SSE 只
   const address = server.address();
   assert.ok(address && typeof address === "object");
   const endpointUrl = `http://127.0.0.1:${address.port}/mcp`;
-  const discovery = await discoverMcpTools({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: null, bearerToken: "test-token-1234" });
-  assert.equal(discovery.tools.length, 1);
-  assert.equal(discovery.tools[0]?.readOnlyEligible, true);
+  const initialized = await initializeMcpSession({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: null, bearerToken: "test-token-1234" });
+  const discovery = await discoverMcpTools({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: initialized.addressFingerprint, bearerToken: "test-token-1234", sessionId: initialized.sessionId });
+  assert.equal(discovery.tools.length, 2);
+  assert.equal(discovery.tools.find((tool) => tool.name === "project.search")?.readOnlyEligible, true);
   const result = await callMcpTool({
     endpointUrl,
     allowPrivateNetwork: true,
     expectedAddressFingerprint: discovery.addressFingerprint,
     bearerToken: "test-token-1234",
     toolName: "project.search",
-    inputSchema: discovery.tools[0]!.inputSchema,
+    inputSchema: discovery.tools.find((tool) => tool.name === "project.search")!.inputSchema,
     arguments: { query: "release", region: "cn-north" },
   });
   assert.equal(result.text, "2 matches");
   assert.deepEqual(result.structuredContent, { matches: 2 });
-  assert.equal(requests[0]?.headers["mcp-protocol-version"], "2026-07-28");
-  assert.equal(requests[0]?.headers["mcp-method"], "tools/list");
-  assert.equal(requests[1]?.headers["mcp-method"], "tools/call");
-  assert.equal(requests[1]?.headers["mcp-name"], "project.search");
-  assert.equal(requests[1]?.headers["mcp-param-region"], "cn-north");
-  assert.equal(requests[1]?.headers.authorization, "Bearer test-token-1234");
+  assert.deepEqual(requests.slice(0, 4).map(({ method }) => method), ["initialize", "notifications/initialized", "tools/list", "tools/list"]);
+  assert.deepEqual(requests.slice(4).map(({ method }) => method), ["initialize", "notifications/initialized", "tools/call"]);
+  assert.equal(requests[2]?.headers["mcp-protocol-version"], "2025-11-25");
+  assert.equal(requests[2]?.headers["mcp-method"], "tools/list");
+  assert.equal(requests[3]?.body.params?.cursor, "page-2");
+  assert.equal(requests[6]?.headers["mcp-protocol-version"], "2025-11-25");
+  assert.equal(requests[6]?.headers["mcp-method"], "tools/call");
+  assert.equal(requests[6]?.headers["mcp-session-id"], "fixture-session-2");
+  assert.equal(requests[6]?.headers["mcp-name"], "project.search");
+  assert.equal(requests[6]?.headers["mcp-param-region"], "cn-north");
+  assert.equal(requests[6]?.headers.authorization, "Bearer test-token-1234");
+  assert.equal(typeof requests[6]?.body.id, "string");
 });
 
-test("MCP 草稿测试只执行 initialize 和 tools/list，不调用远端工具", async (context) => {
+test("MCP 草稿测试只执行握手和 tools/list，不调用远端工具", async (context) => {
   const methods: string[] = [];
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string; method: string };
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string };
       methods.push(body.method);
+      if (body.method === "notifications/initialized") {
+        response.writeHead(202, { "mcp-session-id": "fixture-session" }).end();
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fixture-session" });
       response.end(JSON.stringify({
         jsonrpc: "2.0",
         id: body.id,
         result: body.method === "initialize"
-          ? { protocolVersion: "2026-07-28", capabilities: {}, serverInfo: { name: "fixture", version: "1" } }
-          : { resultType: "complete", tools: [readOnlyTool] },
+          ? { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } }
+          : { tools: [readOnlyTool] },
       }));
     });
   });
@@ -163,7 +205,41 @@ test("MCP 草稿测试只执行 initialize 和 tools/list，不调用远端工�
   const initialized = await initializeMcpSession({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: null, bearerToken: null });
   const discovery = await discoverMcpTools({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: initialized.addressFingerprint, bearerToken: null, sessionId: initialized.sessionId });
   assert.equal(discovery.tools.length, 1);
-  assert.deepEqual(methods, ["initialize", "tools/list"]);
+  assert.deepEqual(methods, ["initialize", "notifications/initialized", "tools/list"]);
+});
+
+test("MCP stateless 2025 handshake discovers standard tools without a session id", async (context) => {
+  const methods: string[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string };
+      methods.push(body.method);
+      if (body.method === "notifications/initialized") {
+        response.writeHead(202).end();
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: body.method === "initialize"
+          ? { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "stateless-fixture", version: "1" } }
+          : { tools: [readOnlyTool] },
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const endpointUrl = `http://127.0.0.1:${address.port}/mcp`;
+  const initialized = await initializeMcpSession({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: null, bearerToken: null });
+  assert.equal(initialized.sessionId, null);
+  const discovery = await discoverMcpTools({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: initialized.addressFingerprint, bearerToken: null, sessionId: initialized.sessionId });
+  assert.equal(discovery.tools.length, 1);
+  assert.deepEqual(methods, ["initialize", "notifications/initialized", "tools/list"]);
 });
 
 test("MCP 数据库迁移固定逐次审批、当前定义唯一和追加式审计", async () => {

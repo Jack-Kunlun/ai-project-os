@@ -41,8 +41,10 @@ test("project Git page uses bounded manual delegation while remote writes stay f
   assert.match(source, /manual-sync/u, `${path} must expose the bounded manual read action`);
   assert.match(source, /manualSyncAllowed:\s*true/u);
   assert.match(source, /automationAllowed:\s*false/u);
-  assert.match(source, /手动读取与自动读取分别授权；自动读取需双确认/u);
-  assert.match(source, /写入\/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准/u);
+  assert.match(source, /连接仍由个人持有；手动读取与自动读取分别授权，项目 Owner 和连接所有者需独立确认/u);
+  assert.match(source, /自动读取需另外完成双确认/u);
+  assert.match(source, /写入、提交和 Pull Request 保持关闭/u);
+  assert.match(source, /查看运行历史/u);
   assert.doesNotMatch(source, /api\/settings\/git-connections|api\/projects\/\$\{projectId\}\/git-connections/u);
   assert.doesNotMatch(source, /\/git-(?:push|commit)|\/pull-requests?/u, `${path} must not expose Git write operations`);
 });

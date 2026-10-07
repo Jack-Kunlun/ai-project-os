@@ -138,7 +138,10 @@ test("Git project repository routes pass the session actor to the service author
   assert.doesNotMatch(deleteRoute, /assertProjectActive/u);
   assert.match(deleteRoute, /disableProjectGitRepository\(projectId, idSchema\.parse\(params\.linkId\), user\)/u);
   assert.doesNotMatch(client, /api\/projects\/\$\{projectId\}\/git-connections/u);
-  assert.doesNotMatch(client, /api\/settings\/git-connections|api\/me\/git-connections|RepositoryForm/u);
+  assert.match(client, /api\/me\/git-connections/u);
+  assert.match(client, /import \{ ConnectionCreateDialog \} from "@\/app\/profile\/connections\/connection-create-dialog"/u);
+  assert.match(client, /import \{ GitCreateForm \} from "@\/app\/profile\/connections\/git\/git-connections-client"/u);
+  assert.doesNotMatch(client, /RepositoryForm/u);
   assert.match(client, /api\/projects\/\$\{projectId\}\/git-repository-delegations/u);
   assert.match(client, /manual-sync/u);
   assert.match(client, /manual-runs/u);
@@ -150,8 +153,10 @@ test("Git project repository routes pass the session actor to the service author
   assert.match(client, /acknowledgeReadOnlyCredentialUse:\s*true/u);
   assert.match(client, /acknowledgeRepositoryScope:\s*true/u);
   assert.match(client, /acknowledgeDataEgress:\s*true/u);
-  assert.match(client, /手动读取与自动读取分别授权；自动读取需双确认/u);
-  assert.match(client, /写入\/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准/u);
+  assert.match(client, /连接仍由个人持有；手动读取与自动读取分别授权，项目 Owner 和连接所有者需独立确认/u);
+  assert.match(client, /自动读取需另外完成双确认/u);
+  assert.match(client, /写入、提交和 Pull Request 保持关闭/u);
+  assert.match(client, /查看运行历史/u);
   assert.match(client, /不会写入、提交或创建 Pull Request/u);
   assert.match(client, /href="\/personal\/connections\/git"/u);
   assert.match(client, /资料已发布到项目/u);
@@ -578,7 +583,9 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   ]);
 
   assert.match(guide, /普通用户操作指南/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在“我的空间”配置/u);
+  assert.match(guide, /Git 仓库从“项目配置 → 代码仓库”接入/u);
+  assert.match(guide, /个人凭据和撤权在“我的空间 → 配置 → Git 授权管理”维护/u);
+  assert.match(guide, /MCP 个人连接在“我的空间”配置/u);
   assert.match(userDocs, /项目概览/u);
   assert.match(userDocs, /项目六个一级入口/u);
   assert.match(userDocs, /只有当前工作区 Owner\/Admin 可以创建项目/u);
@@ -612,7 +619,10 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(manual, /user-operation-guide\.md/u);
   assert.match(manual, /admin-operation-guide\.md/u);
   assert.doesNotMatch(repositories, /api\/projects\/\$\{projectId\}\/git-connections/u);
-  assert.doesNotMatch(repositories, /api\/settings\/git-connections|api\/me\/git-connections|RepositoryForm/u);
+  assert.match(repositories, /api\/me\/git-connections/u);
+  assert.match(repositories, /GitCreateForm/u);
+  assert.match(repositories, /ConnectionCreateDialog/u);
+  assert.doesNotMatch(repositories, /RepositoryForm/u);
   assert.match(repositories, /api\/projects\/\$\{projectId\}\/git-repository-delegations/u);
   assert.match(repositories, /manual-sync/u);
   assert.match(repositories, /manual-runs/u);
@@ -622,9 +632,13 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(repositories, /owner-confirmation/u);
   assert.match(repositories, /project-confirmation/u);
   assert.match(repositories, /不会写入、提交或创建 Pull Request/u);
-  assert.match(repositories, /手动读取与自动读取分别授权；自动读取需双确认/u);
-  assert.match(repositories, /写入\/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在“我的空间”配置/u);
+  assert.match(repositories, /连接仍由个人持有；手动读取与自动读取分别授权，项目 Owner 和连接所有者需独立确认/u);
+  assert.match(repositories, /自动读取需另外完成双确认/u);
+  assert.match(repositories, /写入、提交和 Pull Request 保持关闭/u);
+  assert.match(repositories, /查看运行历史/u);
+  assert.match(guide, /Git 仓库从“项目配置 → 代码仓库”接入/u);
+  assert.match(guide, /个人凭据和撤权在“我的空间 → 配置 → Git 授权管理”维护/u);
+  assert.match(guide, /MCP 个人连接在“我的空间”配置/u);
   assert.match(repositories, /href="\/personal\/connections\/git"/u);
   assert.match(repositories, /资料已发布到项目/u);
   assert.doesNotMatch(guide, /新增模型、Git 或 MCP 连接/u);

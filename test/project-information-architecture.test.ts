@@ -112,7 +112,7 @@ test("grounded extraction uses bounded scrolling and explicit batch operations",
   assert.match(memory, /for \(const candidate of batch\)/u);
 });
 
-test("project material operations return to their immediate parent", async () => {
+test("project material and repository pages return to their immediate parent", async () => {
   const [parentLink, assets, externalSources, repositories] = await Promise.all([
     readFile("src/components/project-parent-link.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/assets/project-assets-client.tsx", "utf8"),
@@ -124,7 +124,8 @@ test("project material operations return to their immediate parent", async () =>
   assert.match(parentLink, /返回项目资料/u);
   assert.match(assets, /ProjectMaterialsParentLink/u);
   assert.match(externalSources, /ProjectMaterialsParentLink/u);
-  assert.match(repositories, /ProjectMaterialsParentLink/u);
+  assert.match(repositories, /href=\{`\/projects\/\$\{projectId\}\/configuration`\}/u);
+  assert.match(repositories, /返回项目配置/u);
 });
 
 test("AI workbench spacing and project overview keep AI usage visible", async () => {

@@ -75,6 +75,13 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
     seedAdmin: true,
     setup: "principals",
   });
+  assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "mcp-client-acceptance"), {
+    id: "mcp-client-acceptance",
+    file: "test/mcp-client-acceptance-postgres.test.ts",
+    database: "ai_project_os_mcp_client_acceptance_test",
+    gateEnv: "MCP_CLIENT_ACCEPTANCE_POSTGRES_GATE",
+    setup: "migrate",
+  });
 });
 
 test("PostgreSQL gate admin URL is restricted to the fixed disposable loopback target", () => {

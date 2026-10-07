@@ -45,7 +45,6 @@ test("personal MCP page gives owners a minimal, project-name-free delegation que
 
 test("project Git page keeps payer semantics visible", async () => {
   const source = await readFile("src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "utf8");
-  assert.match(source, /费用承担者为连接所有者/u);
-  assert.match(source, /第三方费用由其与服务商约定/u);
+  assert.match(source, /费用由连接所有者与 Git 服务商约定/u);
   assert.match(source, /平台不代扣，也不计入项目平台额度/u);
 });

@@ -55,6 +55,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "configuration-deletion", file: "test/configuration-deletion-postgres.test.ts", database: "ai_project_os_configuration_deletion_test", gateEnv: "CONFIGURATION_DELETION_POSTGRES_GATE", setup: "migrate" },
   { id: "action-engine", file: "test/action-engine-postgres.test.ts", database: "ai_project_os_action_engine_test", gateEnv: "ACTION_ENGINE_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-capabilities", file: "test/mcp-capabilities-postgres.test.ts", database: "ai_project_os_mcp_capabilities_test", gateEnv: "MCP_CAPABILITIES_POSTGRES_GATE", setup: "migrate" },
+  { id: "mcp-client-acceptance", file: "test/mcp-client-acceptance-postgres.test.ts", database: "ai_project_os_mcp_client_acceptance_test", gateEnv: "MCP_CLIENT_ACCEPTANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-export-grants", file: "test/mcp-export-grants-postgres.test.ts", database: "ai_project_os_mcp_export_grants_test", gateEnv: "MCP_EXPORT_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-export-oauth-upgrade", file: "test/mcp-export-oauth-upgrade-postgres.test.ts", database: "ai_project_os_mcp_export_oauth_upgrade_test", gateEnv: "MCP_EXPORT_OAUTH_UPGRADE_POSTGRES_GATE", setup: "self" },
   { id: "connection-governance", file: "test/connection-governance-postgres.test.ts", database: "ai_project_os_connection_governance_test", gateEnv: "CONNECTION_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },

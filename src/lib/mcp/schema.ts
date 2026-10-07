@@ -8,6 +8,9 @@ type JsonObject = { [key: string]: JsonValue };
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/u;
 const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$/u;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/u;
+const DESCRIPTION_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
+const SCHEMA_TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
+const HEADER_BINDING_TYPES = new Set(["string", "integer", "boolean"]);
 const MAX_SCHEMA_BYTES = 32 * 1024;
 const MAX_ARGUMENT_BYTES = 64 * 1024;
 const MAX_SCHEMA_DEPTH = 8;
@@ -98,6 +101,24 @@ function shortText(value: unknown, maximum: number): string | null {
   return value;
 }
 
+function shortDescription(value: unknown, maximum: number): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || value.length > maximum || DESCRIPTION_CONTROL.test(value)) return failMcp("MCP_TOOL_CATALOG_INVALID");
+  return value;
+}
+
+function schemaTypeName(type: unknown): string | undefined {
+  if (type === undefined) return undefined;
+  if (typeof type === "string" && SCHEMA_TYPES.has(type)) return type;
+  if (Array.isArray(type) && type.length === 2 && type.includes("null")) {
+    const baseTypes = type.filter((entry) => entry !== "null");
+    if (baseTypes.length === 1 && typeof baseTypes[0] === "string" && SCHEMA_TYPES.has(baseTypes[0]) && baseTypes[0] !== "null") {
+      return baseTypes[0];
+    }
+  }
+  return failMcp("MCP_TOOL_CATALOG_INVALID");
+}
+
 function integerKeyword(value: unknown, minimum: number, maximum: number): void {
   if (value === undefined) return;
   if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) return failMcp("MCP_TOOL_CATALOG_INVALID");
@@ -114,13 +135,10 @@ function validateSchemaNode(value: unknown, state: { nodes: number }, depth: num
   if (state.nodes > MAX_SCHEMA_NODES) return failMcp("MCP_TOOL_CATALOG_INVALID");
   for (const key of Object.keys(value)) if (!ALLOWED_SCHEMA_KEYS.has(key)) return failMcp("MCP_TOOL_CATALOG_INVALID");
 
-  const type = value.type;
-  if (type !== undefined && !["object", "array", "string", "number", "integer", "boolean", "null"].includes(String(type))) {
-    return failMcp("MCP_TOOL_CATALOG_INVALID");
-  }
-  if (location === "root" && type !== "object") return failMcp("MCP_TOOL_CATALOG_INVALID");
+  const type = schemaTypeName(value.type);
+  if (location === "root" && value.type !== "object") return failMcp("MCP_TOOL_CATALOG_INVALID");
   if (value.title !== undefined) shortText(value.title, 200);
-  if (value.description !== undefined) shortText(value.description, 4000);
+  if (value.description !== undefined) shortDescription(value.description, 4000);
   if (value.examples !== undefined && !Array.isArray(value.examples)) return failMcp("MCP_TOOL_CATALOG_INVALID");
   if (value.enum !== undefined && (!Array.isArray(value.enum) || value.enum.length === 0 || value.enum.length > 128)) return failMcp("MCP_TOOL_CATALOG_INVALID");
 
@@ -159,7 +177,7 @@ function validateSchemaNode(value: unknown, state: { nodes: number }, depth: num
   if (type === "array" && value.items === undefined) return failMcp("MCP_TOOL_CATALOG_INVALID");
 
   if (value["x-mcp-header"] !== undefined) {
-    if (location !== "property" || !["string", "integer", "boolean"].includes(String(type)) || typeof value["x-mcp-header"] !== "string" || !HEADER_TOKEN.test(value["x-mcp-header"])) {
+    if (location !== "property" || typeof value.type !== "string" || !HEADER_BINDING_TYPES.has(value.type) || typeof value["x-mcp-header"] !== "string" || !HEADER_TOKEN.test(value["x-mcp-header"])) {
       return failMcp("MCP_TOOL_CATALOG_INVALID");
     }
   }
@@ -169,7 +187,7 @@ function validateSchemaNode(value: unknown, state: { nodes: number }, depth: num
 export function normalizeMcpToolDefinition(value: unknown): NormalizedMcpTool {
   if (!isObject(value) || typeof value.name !== "string" || !TOOL_NAME.test(value.name)) return failMcp("MCP_TOOL_CATALOG_INVALID");
   const title = shortText(value.title, 200);
-  const description = shortText(value.description, 4000);
+  const description = shortDescription(value.description, 4000);
   const inputSchema = validateSchemaNode(value.inputSchema, { nodes: 0 }, 0, "root");
   const outputSchema = value.outputSchema == null ? null : validateSchemaNode(value.outputSchema, { nodes: 0 }, 0, "root");
   const annotations = value.annotations == null ? {} : toJsonValue(value.annotations);
@@ -252,7 +270,9 @@ function validateValue(schema: JsonObject, value: JsonValue, depth: number): voi
   if (depth > 12) return failMcp("MCP_TOOL_INPUT_INVALID");
   if (Array.isArray(schema.enum) && !schema.enum.some((entry) => equalJson(entry, value))) return failMcp("MCP_TOOL_INPUT_INVALID");
   if (Object.prototype.hasOwnProperty.call(schema, "const") && !equalJson(schema.const!, value)) return failMcp("MCP_TOOL_INPUT_INVALID");
-  const type = schema.type;
+  const declaredType = schema.type;
+  if (Array.isArray(declaredType) && declaredType.includes("null") && value === null) return;
+  const type = schemaTypeName(declaredType);
   if (type === "null") { if (value !== null) return failMcp("MCP_TOOL_INPUT_INVALID"); return; }
   if (type === "string") {
     if (typeof value !== "string") return failMcp("MCP_TOOL_INPUT_INVALID");
@@ -438,13 +458,14 @@ export function mcpHeaderBindings(schemaInput: unknown): readonly McpHeaderBindi
       const child = childValue as JsonObject;
       const next = [...path, key];
       const header = child["x-mcp-header"];
+      const childType = schemaTypeName(child.type);
       if (typeof header === "string") {
         const normalized = header.toLowerCase();
         if (names.has(normalized)) return failMcp("MCP_TOOL_CATALOG_INVALID");
         names.add(normalized);
         bindings.push(Object.freeze({ headerName: `Mcp-Param-${header}`, path: Object.freeze(next), valueType: child.type as "string" | "integer" | "boolean" }));
       }
-      if (child.type === "object") visit(child, next);
+      if (childType === "object") visit(child, next);
     }
   }
   visit(schema, []);

@@ -7,7 +7,7 @@ import { ProjectItemRevisionAction } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { POST as postMcp } from "../src/app/api/mcp/route";
 import { POST as postOAuthToken } from "../src/app/oauth/token/route";
-import { GET as getOAuthConsent } from "../src/app/mcp/authorize/route";
+import { GET as getOAuthConsent, POST as postOAuthConsent } from "../src/app/mcp/authorize/route";
 import { GET as getSource } from "../src/app/api/projects/[projectId]/sources/[sourceId]/route";
 import { createSession, SESSION_COOKIE_NAME } from "../src/lib/auth";
 import { getDb } from "../src/lib/db";
@@ -576,11 +576,52 @@ test("outbound MCP grant is project scoped and fails closed after revoke, expiry
       } },
     ));
     assert.equal(consentPage.status, 200);
+    assert.equal(consentPage.headers.get("referrer-policy"), "same-origin");
     const consentHtml = await consentPage.text();
     assert.match(consentHtml, new RegExp(secondOauthClientName, "u"));
     assert.ok(consentHtml.includes(secondOauthClientId));
     assert.match(consentHtml, /回调主机名/u);
     assert.match(consentHtml, /localhost/u);
+
+    const deniedOauthClientId = `https://client.example/oauth/${suffix}-denied.json`;
+    const deniedOauthState = `state-${suffix}-denied`;
+    const deniedOauthMetadata = parseMcpExportOAuthClientMetadata(deniedOauthClientId, {
+      client_id: deniedOauthClientId, client_name: "MCP denial route fixture", redirect_uris: [oauthRedirectUri],
+      token_endpoint_auth_method: "none", grant_types: ["authorization_code"], response_types: ["code"],
+    });
+    const deniedOauthParams = parseMcpExportOAuthAuthorizationParameters(new URLSearchParams({
+      response_type: "code", client_id: deniedOauthClientId, redirect_uri: oauthRedirectUri,
+      state: deniedOauthState, code_challenge: oauthChallenge, code_challenge_method: "S256",
+      resource: "http://localhost/api/mcp", scope: "project:read",
+    }));
+    const deniedOauthRequest = await createMcpExportOAuthAuthorizationRequest(deniedOauthParams, deniedOauthMetadata, db);
+    await bindMcpExportOAuthAuthorizationRequest(actor, deniedOauthRequest.requestId, deniedOauthRequest.csrfToken, db);
+    const deniedCookie = `${getMcpExportOAuthCsrfCookieName(deniedOauthRequest.requestId)}=${deniedOauthRequest.csrfToken}; ${SESSION_COOKIE_NAME}=${oauthSession.token}`;
+    const deniedConsentPage = await getOAuthConsent(new Request(
+      `http://localhost/mcp/authorize?requestId=${encodeURIComponent(deniedOauthRequest.requestId)}`,
+      { headers: { host: "localhost", cookie: deniedCookie } },
+    ));
+    assert.equal(deniedConsentPage.status, 200);
+    assert.equal(deniedConsentPage.headers.get("referrer-policy"), "same-origin");
+    const nullOriginDecision = await postOAuthConsent(new Request("http://localhost/mcp/authorize", {
+      method: "POST",
+      headers: { host: "localhost", origin: "null", "content-type": "application/x-www-form-urlencoded", cookie: deniedCookie },
+      body: new URLSearchParams({ requestId: deniedOauthRequest.requestId, decision: "deny" }).toString(),
+    }));
+    assert.equal(nullOriginDecision.status, 403);
+    assert.equal(nullOriginDecision.headers.get("referrer-policy"), "no-referrer");
+    const deniedDecision = await postOAuthConsent(new Request("http://localhost/mcp/authorize", {
+      method: "POST",
+      headers: { host: "localhost", origin: "http://localhost", "content-type": "application/x-www-form-urlencoded", cookie: deniedCookie },
+      body: new URLSearchParams({ requestId: deniedOauthRequest.requestId, decision: "deny" }).toString(),
+    }));
+    assert.equal(deniedDecision.status, 303);
+    assert.equal(deniedDecision.headers.get("referrer-policy"), "no-referrer");
+    const deniedCallback = new URL(deniedDecision.headers.get("location") ?? "");
+    assert.equal(deniedCallback.origin, new URL(oauthRedirectUri).origin);
+    assert.equal(deniedCallback.searchParams.get("error"), "access_denied");
+    assert.equal(deniedCallback.searchParams.get("state"), deniedOauthState);
+
     const secondOauthDecision = await decideMcpExportOAuthAuthorization(actor, {
       requestId: secondOauthRequest.requestId, csrfToken: secondOauthRequest.csrfToken, decision: "approve", projectId,
     }, db, { fetchClientMetadata: async () => secondOauthMetadata });

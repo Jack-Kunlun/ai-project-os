@@ -40,10 +40,10 @@ function escapeHtml(value: string): string {
   })[character]!);
 }
 
-function html(status: number, content: string) {
+function html(status: number, content: string, referrerPolicy: "no-referrer" | "same-origin" = "no-referrer") {
   return new Response(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MCP 项目授权</title><body>${content}</body></html>`, {
     status,
-    headers: { ...commonHeaders, "content-type": "text/html; charset=utf-8" },
+    headers: { ...commonHeaders, "content-type": "text/html; charset=utf-8", "referrer-policy": referrerPolicy },
   });
 }
 
@@ -121,7 +121,7 @@ export async function GET(request: Request) {
     const form = projects.length === 0
       ? `<p>当前账号没有可授权的 Owner 项目。</p><form method="post"><input type="hidden" name="requestId" value="${escapeHtml(boundRequest.id)}"><button name="decision" value="deny">拒绝并返回客户端</button></form>`
       : `<form method="post"><input type="hidden" name="requestId" value="${escapeHtml(boundRequest.id)}"><label>授权项目 <select required name="projectId">${projectOptions}</select></label><p>授权范围：<code>${escapeHtml(boundRequest.scopes)}</code></p><button name="decision" value="approve">授权此项目</button> <button name="decision" value="deny" formnovalidate>拒绝</button></form>`;
-    return html(200, `<main><h1>授权外部 MCP 客户端</h1><p>客户端：<strong>${escapeHtml(authorizationRequest.clientName)}</strong></p><p>客户端标识：<code>${escapeHtml(authorizationRequest.clientId)}</code></p><p>回调地址：<code>${escapeHtml(authorizationRequest.redirectUri)}</code></p><p>回调主机名：<strong>${escapeHtml(callbackUrl.hostname)}</strong></p>${isLoopbackHttp ? `<p role="note">这是 localhost/loopback 本地回调。仅在你信任此客户端时继续；授权码将发往显示的本地主机。</p>` : ""}<p>资源：<code>${escapeHtml(authorizationRequest.resource)}</code></p><p>授权只允许读取项目内容；每次具体工具读取仍需 Owner 单独确认。</p>${form}</main>`);
+    return html(200, `<main><h1>授权外部 MCP 客户端</h1><p>客户端：<strong>${escapeHtml(authorizationRequest.clientName)}</strong></p><p>客户端标识：<code>${escapeHtml(authorizationRequest.clientId)}</code></p><p>回调地址：<code>${escapeHtml(authorizationRequest.redirectUri)}</code></p><p>回调主机名：<strong>${escapeHtml(callbackUrl.hostname)}</strong></p>${isLoopbackHttp ? `<p role="note">这是 localhost/loopback 本地回调。仅在你信任此客户端时继续；授权码将发往显示的本地主机。</p>` : ""}<p>资源：<code>${escapeHtml(authorizationRequest.resource)}</code></p><p>授权只允许读取项目内容；每次具体工具读取仍需 Owner 单独确认。</p>${form}</main>`, "same-origin");
   } catch (error) {
     if (!(error instanceof McpExportOAuthError)) console.error("MCP OAuth consent page unavailable");
     return genericError(error instanceof McpExportOAuthError && error.code === "MCP_EXPORT_OAUTH_UNAUTHORIZED" ? 503 : 400);

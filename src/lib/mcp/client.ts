@@ -319,6 +319,7 @@ export async function discoverMcpTools(input: Readonly<{
     cursor = nextCursor;
     if (page === MAX_PAGES - 1) return failMcp("MCP_TOOL_CATALOG_INVALID");
   }
+  if (definitions.size === 0 && rejectedCount > 0) return failMcp("MCP_TOOL_CATALOG_INVALID");
   const tools = [...definitions.values()].sort((left, right) => left.name.localeCompare(right.name));
   const catalogFingerprint = createHash("sha256")
     .update(tools.map((tool) => `${tool.name}:${tool.definitionFingerprint}`).join("\n"), "utf8")

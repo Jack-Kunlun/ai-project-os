@@ -3,6 +3,7 @@ import test from "node:test";
 import { GET as getAuthorizationServerMetadata } from "../src/app/.well-known/oauth-authorization-server/route";
 import { GET as getProtectedResourceMetadata } from "../src/app/.well-known/oauth-protected-resource/api/mcp/route";
 import { POST as postMcp } from "../src/app/api/mcp/route";
+import { GET as getMcpOAuthConsent, POST as postMcpOAuthConsent } from "../src/app/mcp/authorize/route";
 import { GET as getOAuthAuthorize } from "../src/app/oauth/authorize/route";
 import { POST as postOAuthToken } from "../src/app/oauth/token/route";
 import { getDb } from "../src/lib/db";
@@ -151,6 +152,39 @@ test("OAuth metadata and MCP challenge are advertised only when the full chain i
 
     process.env.AI_PROJECT_OS_MCP_EXPORT_ENABLED = "true";
     assert.equal(isMcpExportOAuthEnabled(), true);
+    process.env.DATABASE_URL = testDatabaseUrl;
+    const invalidConsentPage = await getMcpOAuthConsent(new Request("https://mcp.example/mcp/authorize?requestId=first&requestId=second", {
+      headers: { host: "mcp.example" },
+    }));
+    assert.equal(invalidConsentPage.status, 400);
+    assert.equal(invalidConsentPage.headers.get("referrer-policy"), "no-referrer");
+
+    for (const origin of ["null", "https://attacker.example"]) {
+      const rejectedConsent = await postMcpOAuthConsent(new Request("https://mcp.example/mcp/authorize", {
+        method: "POST",
+        headers: { host: "mcp.example", origin, "content-type": "application/x-www-form-urlencoded" },
+        body: "requestId=invalid&decision=deny",
+      }));
+      assert.equal(rejectedConsent.status, 403);
+      assert.equal(rejectedConsent.headers.get("referrer-policy"), "no-referrer");
+    }
+
+    const invalidConsentContentType = await postMcpOAuthConsent(new Request("https://mcp.example/mcp/authorize", {
+      method: "POST",
+      headers: { host: "mcp.example", origin: "https://mcp.example", "content-type": "application/json" },
+      body: "{}",
+    }));
+    assert.equal(invalidConsentContentType.status, 415);
+    assert.equal(invalidConsentContentType.headers.get("referrer-policy"), "no-referrer");
+
+    const unauthenticatedConsentPost = await postMcpOAuthConsent(new Request("https://mcp.example/mcp/authorize", {
+      method: "POST",
+      headers: { host: "mcp.example", origin: "https://mcp.example", "content-type": "application/x-www-form-urlencoded" },
+      body: "requestId=invalid&decision=deny",
+    }));
+    assert.equal(unauthenticatedConsentPost.status, 400);
+    assert.equal(unauthenticatedConsentPost.headers.get("referrer-policy"), "no-referrer");
+
     const authorizationResponse = await getAuthorizationServerMetadata(new Request("https://mcp.example/.well-known/oauth-authorization-server", {
       headers: { host: "mcp.example" },
     }));
@@ -182,7 +216,6 @@ test("OAuth metadata and MCP challenge are advertised only when the full chain i
     assert.equal(invalidToken.status, 400);
     assert.deepEqual(await invalidToken.json(), { error: "invalid_grant" });
 
-    process.env.DATABASE_URL = testDatabaseUrl;
     const challenged = await postMcp(new Request("https://mcp.example/api/mcp", {
       method: "POST", headers: { host: "mcp.example", "content-type": "application/json" }, body: "{}",
     }));

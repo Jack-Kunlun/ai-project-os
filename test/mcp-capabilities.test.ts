@@ -10,7 +10,9 @@ import {
   canonicalMcpToolArguments,
   discoverMcpTools,
   initializeMcpSession,
+  mcpHeaderBindings,
   normalizeMcpToolDefinition,
+  validateMcpToolOutput,
 } from "../src/lib/mcp";
 
 const readOnlyTool = {
@@ -55,6 +57,146 @@ test("MCP 工具定义拒绝 Bearer 回显和凭据形状字段", () => {
     () => assertMcpToolDefinitionSafe({ ...readOnlyTool, annotations: { bearerToken: "redacted" } }),
     (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID",
   );
+});
+
+test("Microsoft Learn 公开的三项工具目录保留原 schema 和稳定指纹", async () => {
+  type PublicTool = { name: string; inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | null };
+  const tools = JSON.parse(await readFile("test/fixtures/mcp-microsoft-tools.json", "utf8")) as PublicTool[];
+  assert.deepEqual(tools.map(({ name }) => name), ["microsoft_docs_search", "microsoft_code_sample_search", "microsoft_docs_fetch"]);
+
+  const normalized = tools.map((definition) => {
+    assert.doesNotThrow(() => assertMcpToolDefinitionSafe(definition));
+    const first = normalizeMcpToolDefinition(definition);
+    const second = normalizeMcpToolDefinition(JSON.parse(JSON.stringify(definition)) as PublicTool);
+    assert.deepEqual(first.inputSchema, definition.inputSchema);
+    assert.deepEqual(first.outputSchema, definition.outputSchema ?? null);
+    assert.equal(first.definitionFingerprint, second.definitionFingerprint);
+    assert.equal(first.remoteReadOnlyHint, true);
+    assert.equal(first.readOnlyEligible, true);
+    assert.deepEqual(mcpHeaderBindings(first.inputSchema), []);
+    return first;
+  });
+
+  const search = tools.find(({ name }) => name === "microsoft_docs_search");
+  assert.ok(search);
+  const searchProperties = search.inputSchema.properties as Record<string, { type: unknown }>;
+  assert.deepEqual(searchProperties.query?.type, ["string", "null"]);
+  assert.deepEqual(canonicalMcpToolArguments(search.inputSchema, { query: null }), { query: null });
+  assert.deepEqual(canonicalMcpToolArguments(search.inputSchema, { query: "Azure Functions" }), { query: "Azure Functions" });
+  assert.throws(() => canonicalMcpToolArguments(search.inputSchema, { query: 7 }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+
+  const codeSearch = tools.find(({ name }) => name === "microsoft_code_sample_search");
+  assert.ok(codeSearch);
+  assert.deepEqual(canonicalMcpToolArguments(codeSearch.inputSchema, { query: "storage sdk", language: null }), { language: null, query: "storage sdk" });
+  assert.throws(() => canonicalMcpToolArguments(codeSearch.inputSchema, { language: "typescript" }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+
+  const output = search.outputSchema;
+  assert.ok(output);
+  const validOutput = {
+    results: [{ id: null, title: "Azure Functions", content: null, contentUrl: "https://learn.microsoft.com/azure/azure-functions/", content_omitted: false, extensionData: null }],
+  };
+  assert.deepEqual(validateMcpToolOutput(output, validOutput), validOutput);
+  assert.throws(() => validateMcpToolOutput(output, {
+    results: [{ ...validOutput.results[0], id: false }],
+  }), (error) => mcpCode(error) === "MCP_TOOL_OUTPUT_INVALID");
+
+  const changedSchema = JSON.parse(JSON.stringify(search.inputSchema)) as { properties: Record<string, { type: unknown }> };
+  changedSchema.properties.query!.type = "string";
+  assert.notEqual(
+    normalizeMcpToolDefinition({ ...search, inputSchema: changedSchema }).definitionFingerprint,
+    normalized.find(({ name }) => name === search.name)?.definitionFingerprint,
+  );
+});
+
+test("MCP nullable unions仍执行 enum、const、required 和子结构约束", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      mode: { type: ["null", "string"], enum: [null, "ready"] },
+      fixed: { type: ["integer", "null"], const: null },
+      nested: {
+        type: ["object", "null"],
+        properties: { count: { type: "integer", minimum: 1 } },
+        required: ["count"],
+        additionalProperties: false,
+      },
+      values: { type: ["array", "null"], items: { type: ["boolean", "null"] }, minItems: 1, maxItems: 2 },
+    },
+    required: ["mode", "fixed", "nested", "values"],
+    additionalProperties: false,
+  };
+  const nullableArguments = { mode: null, fixed: null, nested: null, values: null };
+  assert.deepEqual(canonicalMcpToolArguments(schema, nullableArguments), nullableArguments);
+  assert.deepEqual(canonicalMcpToolArguments(schema, { mode: "ready", fixed: null, nested: { count: 2 }, values: [true, null] }), {
+    fixed: null,
+    mode: "ready",
+    nested: { count: 2 },
+    values: [true, null],
+  });
+  assert.throws(() => canonicalMcpToolArguments(schema, { ...nullableArguments, mode: "other" }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+  assert.throws(() => canonicalMcpToolArguments(schema, { ...nullableArguments, fixed: 1 }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+  assert.throws(() => canonicalMcpToolArguments(schema, { mode: null, fixed: null, nested: null }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+  assert.throws(() => canonicalMcpToolArguments(schema, { ...nullableArguments, nested: {} }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+  assert.throws(() => canonicalMcpToolArguments(schema, { ...nullableArguments, nested: { count: "2" } }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+  assert.throws(() => canonicalMcpToolArguments(schema, { ...nullableArguments, values: [] }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+
+  const enumGate = { type: "object", properties: { value: { type: ["string", "null"], enum: ["ready"] } }, additionalProperties: false };
+  const constGate = { type: "object", properties: { value: { type: ["string", "null"], const: "ready" } }, additionalProperties: false };
+  assert.throws(() => canonicalMcpToolArguments(enumGate, { value: null }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+  assert.throws(() => canonicalMcpToolArguments(constGate, { value: null }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
+
+  const nullableOutput = { type: "object", properties: { value: { type: ["null", "object"], properties: { count: { type: "integer" } }, required: ["count"], additionalProperties: false } }, additionalProperties: false };
+  assert.deepEqual(validateMcpToolOutput(nullableOutput, { value: null }), { value: null });
+  assert.deepEqual(validateMcpToolOutput(nullableOutput, { value: { count: 1 } }), { value: { count: 1 } });
+  assert.throws(() => validateMcpToolOutput(nullableOutput, { value: {} }), (error) => mcpCode(error) === "MCP_TOOL_OUTPUT_INVALID");
+});
+
+test("MCP schema 只接受受限 nullable type 数组和单一 scalar header binding", () => {
+  const invalidTypes: unknown[] = [
+    ["string", "null", "boolean"],
+    ["string", "string"],
+    ["string", "object"],
+    ["null", null],
+  ];
+  for (const type of invalidTypes) {
+    assert.throws(
+      () => normalizeMcpToolDefinition({ ...readOnlyTool, inputSchema: { type: "object", properties: { value: { type } } } }),
+      (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID",
+    );
+  }
+  for (const schema of [
+    { type: "object", anyOf: [] },
+    { type: "object", properties: { value: { $ref: "#/definitions/value" } } },
+    { type: ["object", "null"] },
+    { type: "object", properties: { value: { type: ["string", "null"], "x-mcp-header": "X-Value" } } },
+    { type: "object", properties: { value: { type: "string", "x-mcp-header": "Bad Header" } } },
+  ]) {
+    assert.throws(
+      () => normalizeMcpToolDefinition({ ...readOnlyTool, inputSchema: schema }),
+      (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID",
+    );
+  }
+  const scalarHeader = { type: "object", properties: { value: { type: "string", "x-mcp-header": "X-Value" } } };
+  assert.equal(mcpHeaderBindings(scalarHeader).length, 1);
+});
+
+test("MCP 描述允许常规换行但继续拒绝其他 controls 和严格字段中的 controls", () => {
+  const formatted = {
+    ...readOnlyTool,
+    description: "Search docs.\nReturns results.\r\n\tUsage follows.",
+    inputSchema: {
+      type: "object",
+      description: "Input.\nUse query.\t",
+      properties: { query: { type: "string", description: "A topic.\r\n\t" } },
+      additionalProperties: false,
+    },
+  };
+  assert.doesNotThrow(() => normalizeMcpToolDefinition(formatted));
+  assert.doesNotThrow(() => assertMcpToolDefinitionSafe(formatted));
+  assert.throws(() => normalizeMcpToolDefinition({ ...formatted, description: "bad\u000bcontrol" }), (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID");
+  assert.throws(() => normalizeMcpToolDefinition({ ...formatted, inputSchema: { ...formatted.inputSchema, description: "bad\u0085control" } }), (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID");
+  assert.throws(() => normalizeMcpToolDefinition({ ...formatted, title: "bad\ncontrol" }), (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID");
+  assert.throws(() => normalizeMcpToolDefinition({ ...formatted, inputSchema: { type: "object", properties: { "bad\nkey": { type: "string" } } } }), (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID");
 });
 
 test("MCP saved credential is read only after the DNS dispatch fence", async (context) => {
@@ -173,6 +315,50 @@ test("远程 Streamable HTTP MCP 完成工具发现、固定请求头和 SSE 只
   assert.equal(requests[6]?.headers["mcp-param-region"], "cn-north");
   assert.equal(requests[6]?.headers.authorization, "Bearer test-token-1234");
   assert.equal(typeof requests[6]?.body.id, "string");
+});
+
+test("MCP 全部工具定义被拒绝时失败关闭，真实空目录仍成功", async (context) => {
+  const catalogs: unknown[][] = [
+    [{ ...readOnlyTool, inputSchema: { type: "object", anyOf: [] } }],
+    [],
+  ];
+  let catalogIndex = 0;
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id?: string; method: string };
+      if (body.method === "notifications/initialized") {
+        response.writeHead(202, { "mcp-session-id": "fixture-session" }).end();
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fixture-session" });
+      response.end(JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: body.method === "initialize"
+          ? { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } }
+          : { tools: catalogs[catalogIndex++] ?? [] },
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const endpointUrl = `http://127.0.0.1:${address.port}/mcp`;
+  const initialized = await initializeMcpSession({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: null, bearerToken: null });
+  const discoveryInput = {
+    endpointUrl,
+    allowPrivateNetwork: true,
+    expectedAddressFingerprint: initialized.addressFingerprint,
+    bearerToken: null,
+    sessionId: initialized.sessionId,
+  };
+  await assert.rejects(discoverMcpTools(discoveryInput), (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID");
+  const empty = await discoverMcpTools(discoveryInput);
+  assert.equal(empty.tools.length, 0);
+  assert.equal(empty.rejectedCount, 0);
 });
 
 test("MCP 草稿测试只执行握手和 tools/list，不调用远端工具", async (context) => {

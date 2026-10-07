@@ -98,3 +98,33 @@ test("tested Git and MCP configuration edits consume exact proofs and invalidate
     await db.$disconnect();
   }
 });
+
+
+test("Git and MCP governance request keys match PostgreSQL privacy constraints", { skip: !shouldRun ? "CONNECTION_CONFIGURATION_EDIT_POSTGRES_GATE=1 is required" : false }, async () => {
+  const db = getDb();
+  const userId = randomUUID();
+  const actor = { id: userId, accountAccessVersion: 1 } as const;
+  try {
+    await db.appUser.create({ data: { id: userId, username: `request_key_${randomUUID().slice(0, 8)}`, accountAccessVersion: 1 } });
+    const git = await createGitConnectionFixture({ id: randomUUID(), name: "Request key Git", providerKind: "generic", transport: "https", baseUrl: "https://git.example.test", authKind: "none", createdById: userId, ownerUserId: userId, ownerAccountAccessVersion: 1, ownershipState: "confirmed" }, db);
+    const mcp = await createMcpConnectionFixture({ id: randomUUID(), name: "Request key MCP", endpointUrl: "https://mcp.example.test/mcp", authKind: "none", createdById: userId, ownerUserId: userId, ownerAccountAccessVersion: 1, ownershipState: "confirmed" }, db);
+    for (const [kind, connection, preview, code] of [
+      ["git", git, previewGitConnectionMutation, "GIT_CONNECTION_INVALID_INPUT"],
+      ["mcp", mcp, previewMcpConnectionMutation, "MCP_INVALID_INPUT"],
+    ] as const) {
+      const oldUiKey = `${kind}-${connection.id}-${Date.now()}-${randomUUID()}`;
+      const key = randomUUID();
+      const rows = await db.$queryRaw<Array<{ oldRejected: boolean; uuidRejected: boolean }>>`SELECT ${oldUiKey}::text ~ '[A-Za-z0-9_-]{40,128}' AS "oldRejected", ${key}::text ~ '[A-Za-z0-9_-]{40,128}' AS "uuidRejected"`;
+      assert.deepEqual(rows, [{ oldRejected: true, uuidRejected: false }]);
+      const intent = { action: "disable", reason: "request key regression", expectedUpdatedAt: connection.updatedAt.toISOString() };
+      await assert.rejects(() => preview(connection.id, { ...intent, requestKey: oldUiKey }, actor, db), { code });
+      const accepted = await preview(connection.id, { ...intent, requestKey: key }, actor, db);
+      assert.equal(accepted.canExecute, true);
+      assert.equal(accepted.requestKey, key);
+      assert.equal((await preview(connection.id, { ...intent, requestKey: key }, actor, db)).id, accepted.id);
+      assert.equal(kind === "git" ? await db.gitConnectionMutationPreview.count({ where: { actorId: userId, requestKey: oldUiKey } }) : await db.mcpConnectionMutationPreview.count({ where: { actorId: userId, requestKey: oldUiKey } }), 0);
+    }
+  } finally {
+    await db.$disconnect();
+  }
+});

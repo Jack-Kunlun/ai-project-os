@@ -349,7 +349,8 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
       setMessage({ tone: "error", text: "请先输入连接名称，才能生成删除预览。" });
       return;
     }
-    const requestKey = `${kind}-${connection.id}-${Date.now()}-${globalThis.crypto.randomUUID()}`;
+    // A UUID fits the database privacy guard and preserves idempotent replay.
+    const requestKey = globalThis.crypto.randomUUID();
     setPending("preview");
     setMessage(null);
     try {

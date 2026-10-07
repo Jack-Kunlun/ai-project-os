@@ -11,7 +11,9 @@ import { type McpCapabilityErrorCode, failMcp } from "./errors";
 
 const UUID = z.string().uuid();
 const FINGERPRINT = z.string().regex(/^[0-9a-f]{64}$/u);
-const REQUEST_KEY = z.string().trim().min(8).max(180).regex(/^[A-Za-z0-9._:-]+$/u);
+// Match the database privacy constraint before attempting a preview write.
+const REQUEST_KEY = z.string().trim().min(8).max(180).regex(/^[A-Za-z0-9._:-]+$/u)
+  .refine((value) => !/[A-Za-z0-9_-]{40,128}/u.test(value));
 const REASON = z.string().trim().min(1).max(500).refine((value) => !/[\u0000-\u001f\u007f-\u009f]/u.test(value));
 const ACTION = z.enum(["rotateCredential", "retrust", "rediscover", "disable", "enable", "delete"]);
 const PREVIEW_TTL_MS = 5 * 60 * 1000;

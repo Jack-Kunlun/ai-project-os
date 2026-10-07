@@ -1,0 +1,8 @@
+{
+  "client_id": "https://cdn.jsdelivr.net/gh/Jack-Kunlun/ai-project-os@main/test/fixtures/mcp-production-clients/client-b.json",
+  "client_name": "AI Project OS 验收模拟客户端 B",
+  "redirect_uris": ["http://127.0.0.1:49153/oauth/callback"],
+  "token_endpoint_auth_method": "none",
+  "grant_types": ["authorization_code"],
+  "response_types": ["code"]
+}

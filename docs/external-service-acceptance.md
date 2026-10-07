@@ -72,3 +72,19 @@ pnpm external:acceptance -- --expected model,personal-git-manual --max-age-hours
 - 完成发布计划规定的数据库迁移、浏览器、Compose、权限与独立安全审查门禁。
 
 如果真实第三方凭据或服务尚不可用，应明确记录“未做现场验证”；不可由本地、CI 或此数据库报告替代。
+
+## 生产 HTTPS 模拟客户端
+
+`scripts/run-mcp-production-acceptance.ts` 提供两个独立模拟客户端：A 使用 Fetch 与 `2025-11-25` 初始化流程，B 使用 Node HTTPS 与 `2026-07-28` 无握手发现流程。它们不是已认证的第三方产品客户端。测试元数据位于 `test/fixtures/mcp-production-clients/`，须先发布到仓库 `main`，再通过 [jsDelivr 的 GitHub HTTPS 地址](https://www.jsdelivr.com/?docs=gh)提供 CIMD。GitHub Raw 的 JSON 实际响应为 `text/plain`，不符合本系统严格的 JSON 内容类型要求，不能直接用于此流程；发布后还须逐份核对真实 HTTPS 响应类型、正文及指纹。
+
+先创建名称包含 `synthetic`、`合成`或`模拟`的空项目；不得选择业务项目。生产已启用受控 MCP 接口后，从可信本地终端执行：
+
+```bash
+node --import tsx scripts/run-mcp-production-acceptance.ts CONFIRM_PRODUCTION_SYNTHETIC_MCP_ACCEPTANCE --project <合成项目UUID>
+```
+
+按终端给出的两个 URL 在浏览器完成 OAuth 同意。回调仅监听 `127.0.0.1:49152` 与 `49153`；令牌只保存在进程内存，输出不含令牌、授权码或项目正文。每次读取前须在项目 Owner 页面准备并确认该客户端和操作的单次审批，再执行对应 `read` 命令。先只批准 A 的 `project_summary`，运行 `isolation A B project_summary CONFIRM_A_APPROVED_B_NOT_APPROVED`，证明 B 不能消费 A 的审批，再进行各自读取。
+
+两客户端分别读取 `project_summary`、`project_evidence`、`project_plan`，每次立即验证重放被拒绝；证据及计划必须保持空集合。完成后在页面撤销两份授权，分别运行 `revoke-check A CONFIRM_REVOKED_ACCESS_CHECK` 和 B 对应命令。可选 `peer-limit CONFIRM_SIX_OAUTH_AUTHORIZE_PROBE` 最多发送六次无效授权请求，变换伪造转发头并在首次 429 时停止，用于区分真实连接地址限流与应用限流。最后保存 `summary` 脱敏状态并执行 `quit`；进程退出后仍须撤销页面授权及归档合成项目。
+
+任何不确定工具结果均禁止自动重试。客户端检查通过、生产持久化审计和真实第三方客户端兼容分别记录；不能将模拟客户端结果改写为完整外部服务验收通过。

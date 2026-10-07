@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
-import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { ConnectionCreateDialog } from "@/app/profile/connections/connection-create-dialog";
+import { GitCreateForm } from "@/app/profile/connections/git/git-connections-client";
+import type { GitCatalogEntry } from "@/app/profile/connections/git/git-connections-state";
 
 type ConnectionOption = Readonly<{ id: string; name: string; providerKind: string; transport: string; status: string; ownershipState: string }>;
 type DelegationCapabilities = Readonly<{ canOwnerConfirm: boolean; canProjectConfirm: boolean; canReject: boolean; canRevoke: boolean; canManualSync: boolean }>;
@@ -33,6 +35,7 @@ type Delegation = Readonly<{
 type RunSummary = Readonly<{ id: string; projectId: string; delegationId: string; status: string; stage: string; dispatchState: string; failureCode: string | null; delegationVersion: number; frozenCommitSha: string | null; fileCount: number | null; decodedTextBytes: number | null; createdAt: string; startedAt: string | null; completedAt: string | null; acknowledged: boolean }>;
 type RunDetail = Readonly<{ run: RunSummary; acknowledgement: Readonly<{ acknowledgedAt: string }> | null; entries: readonly Readonly<{ ordinal: number; normalizedPath: string; contentBytes: number; lineCount: number; projectSourceId: string }>[]; capabilities: Readonly<{ canAcknowledge: boolean }> }>;
 type ListPayload = Readonly<{ capabilities: Readonly<{ canPropose: boolean }>; connections: readonly ConnectionOption[]; delegations: readonly Delegation[] }>;
+type GitConnectionCreateResult = Readonly<{ connectionId: string; repositoryPath: string; trackedRef: string }>;
 type RunListPayload = Readonly<{ runs: readonly RunSummary[]; nextCursor: string | null; capabilities: Readonly<{ canView: boolean; canAcknowledge: boolean }> }>;
 type AutomationGrant = Readonly<{
   id: string;
@@ -177,6 +180,18 @@ export function ProjectRepositoriesClient({ username, projectId, isSystemAdmin }
 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
 
+  const refreshProjectOptions = useCallback(async (): Promise<readonly ConnectionOption[] | null> => {
+    try {
+      const next = await requestJson<ListPayload>(`/api/projects/${projectId}/git-repository-delegations`);
+      setPayload((current) => current === null ? next : { ...current, capabilities: next.capabilities, connections: next.connections, delegations: next.delegations });
+      return next.connections;
+    } catch (error) {
+      const status = typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : null;
+      if (status !== null && [401, 403, 404].includes(status)) await load();
+      return null;
+    }
+  }, [load, projectId]);
+
   async function mutate(path: string, body: Record<string, unknown>, success: string) {
     try { await requestJson(`/api/projects/${projectId}/git-repository-delegations/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); setMessage(success); await load(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "操作失败，请刷新后重试"); await load(); }
@@ -238,7 +253,7 @@ export function ProjectRepositoriesClient({ username, projectId, isSystemAdmin }
   if (loading) return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10"><LoadingState /></div></main>;
   if (ownerSafetyMode) return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-3xl px-5 py-7 sm:px-8 lg:px-10"><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal Git authorization</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">个人连接授权回执</h1><p className="mt-4 text-sm leading-7 text-slate-300">当前账户无法读取此项目详情。此页面只显示个人连接授权的状态回执，不包含项目名称、仓库、分支或目录信息。</p></section>{message ? <p role="status" className="mt-5 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}<OwnerSafetyReceiptList receipts={ownerSafetyReceipts.filter((receipt) => receipt.projectId === projectId)} onRevoke={(receipt) => void revokeSafetyReceipt(receipt)} /></div></main>;
   if (payload === null) return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-3xl px-5 py-7 sm:px-8 lg:px-10"><section className="rounded-3xl border border-rose-100 bg-white p-6"><h1 className="text-xl font-semibold text-slate-900">项目 Git 信息暂不可用</h1><p role="alert" className="mt-3 text-sm leading-6 text-rose-700">{loadError ?? "请求未完成，请重试。"}</p><button type="button" onClick={() => void load()} className="mt-4 min-h-10 font-semibold text-indigo-700 underline">重试</button></section></div></main>;
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="repositories" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10"><div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-9"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div className="max-w-3xl"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Repository access</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">项目 Git 委托</h1><p className="mt-4 text-sm leading-7 text-slate-300">个人 Git 连接仍只属于你自己。完成连接所有者与项目 Owner 两次确认后，项目成员可以按已冻结范围发起一次性手动只读读取。</p></div><div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300 lg:max-w-xs"><p className="font-semibold text-white">边界说明</p><p className="mt-2 text-xs leading-5">手动读取与自动读取分别授权；自动读取需双确认。写入/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准。</p></div></div></section><p className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-950">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p>{message ? <p role="status" className="mt-5 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}{loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline">重试</button></div> : null}{loading ? <LoadingState /> : payload === null ? null : <><div className="mt-7 grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,.78fr)_minmax(0,1.22fr)]"><ProposalPanel projectId={projectId} enabled={payload.capabilities.canPropose} connections={payload.connections} onCreated={() => { setMessage("委托草稿已创建，请完成连接所有者确认。"); void load(); }} /><section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Delegations</p><h2 className="mt-2 text-2xl font-semibold">项目委托</h2><p className="mt-1 text-sm leading-6 text-slate-500">只展示安全摘要；连接地址、用户名、凭据与网络证据不会出现在项目页。</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{payload.delegations.length} 条</span></div>{payload.delegations.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">还没有项目 Git 委托</p><p className="mt-2 text-xs leading-5 text-slate-500">从左侧选择一条已验证的个人 Git 连接，提交仓库范围后再进行双确认。</p></div> : <div className="mt-6 space-y-4">{payload.delegations.map((delegation) => <DelegationCard key={delegation.id} projectId={projectId} delegation={delegation} onOwnerConfirm={() => void confirmOwner(delegation)} onProjectConfirm={() => void confirmProject(delegation)} onTerminal={(action) => void terminal(delegation, action)} onManualSync={() => manualSync(delegation)} />)}</div>}</section></div><AutomationGrantPanel projectId={projectId} canPropose={payload.capabilities.canPropose} delegations={payload.delegations} grants={automationGrants} onRefresh={load} onMessage={setMessage} /></>}</div></main>;
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="repositories" isSystemAdmin={isSystemAdmin} />{dialog}<div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10"><div className="mb-5"><Link href={`/projects/${projectId}/configuration`} className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-700"><span aria-hidden="true">←</span> 返回项目配置</Link></div><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-9"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div className="max-w-3xl"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Project code repository</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">代码仓库</h1><p className="mt-4 text-sm leading-7 text-slate-300">在项目中选择或创建个人 Git 连接，并明确提交仓库、分支和目录范围。连接仍由个人持有；手动读取与自动读取分别授权，项目 Owner 和连接所有者需独立确认。</p></div><div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300 lg:max-w-xs"><p className="font-semibold text-white">授权边界</p><p className="mt-2 text-xs leading-5">仅允许已验证的只读读取。自动读取需另外完成双确认；写入、提交和 Pull Request 保持关闭。</p></div></div></section><p className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-950">费用由连接所有者与 Git 服务商约定；平台不代扣，也不计入项目平台额度。</p>{message ? <p role="status" className="mt-5 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}{loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline">重试</button></div> : null}{loading ? <LoadingState /> : payload === null ? null : <><div className="mt-7 grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,.78fr)_minmax(0,1.22fr)]"><ProposalPanel projectId={projectId} enabled={payload.capabilities.canPropose} connections={payload.connections} onRefreshConnections={refreshProjectOptions} onCreated={() => { setMessage("委托提案已创建，等待连接所有者和项目 Owner 分别确认。"); void load(); }} /><section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Repository bindings</p><h2 className="mt-2 text-2xl font-semibold">仓库授权记录</h2><p className="mt-1 text-sm leading-6 text-slate-500">显示已提交的仓库范围与确认状态；个人连接详细资料和凭据只在连接所有者的授权管理中维护。</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{payload.delegations.length} 条</span></div>{payload.delegations.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">还没有仓库授权记录</p><p className="mt-2 text-xs leading-5 text-slate-500">先在左侧测试并保存个人 Git 连接，再选择连接和仓库范围提交提案。</p></div> : <div className="mt-6 space-y-4">{payload.delegations.map((delegation) => <DelegationCard key={delegation.id} projectId={projectId} delegation={delegation} onOwnerConfirm={() => void confirmOwner(delegation)} onProjectConfirm={() => void confirmProject(delegation)} onTerminal={(action) => void terminal(delegation, action)} onManualSync={() => manualSync(delegation)} />)}</div>}</section></div><AutomationGrantPanel projectId={projectId} canPropose={payload.capabilities.canPropose} delegations={payload.delegations} grants={automationGrants} onRefresh={load} onMessage={setMessage} /></>}</div></main>;
 }
 
 function AutomationGrantPanel({ projectId, canPropose, delegations, grants, onRefresh, onMessage }: { projectId: string; canPropose: boolean; delegations: readonly Delegation[]; grants: readonly AutomationGrant[]; onRefresh: () => Promise<void>; onMessage: (message: string | null) => void }) {
@@ -324,7 +339,13 @@ function OwnerSafetyReceiptList({ receipts, onRevoke }: { receipts: readonly Own
   return <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" aria-label="个人 Git 授权安全回执"><h2 className="text-lg font-semibold text-slate-900">连接所有者可管理的授权</h2><p className="mt-1 text-xs leading-5 text-slate-500">以下是最小安全回执。项目及仓库详情不会在此显示。</p>{receipts.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">当前没有可管理的授权回执。</p> : <div className="mt-4 space-y-3">{receipts.map((receipt) => <article key={receipt.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4"><div><p className="text-sm font-semibold text-slate-800">项目 Git 授权（详情隐藏）</p><p className="mt-1 text-xs text-slate-500">{automationStatusLabels[receipt.status] ?? receipt.status} · 截止 {formatTime(receipt.expiresAt)} · 版本 {receipt.version}</p></div><button type="button" onClick={() => onRevoke(receipt)} className={quietDangerClass}>撤销授权</button></article>)}</div>}</section>;
 }
 
-function ProposalPanel({ projectId, enabled, connections, onCreated }: { projectId: string; enabled: boolean; connections: readonly ConnectionOption[]; onCreated: () => void }) {
+function ProposalPanel({ projectId, enabled, connections, onRefreshConnections, onCreated }: {
+  projectId: string;
+  enabled: boolean;
+  connections: readonly ConnectionOption[];
+  onRefreshConnections: () => Promise<readonly ConnectionOption[] | null>;
+  onCreated: () => void;
+}) {
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
   const [repositoryPath, setRepositoryPath] = useState("");
   const [trackedRef, setTrackedRef] = useState("main");
@@ -335,20 +356,135 @@ function ProposalPanel({ projectId, enabled, connections, onCreated }: { project
   const [flags, setFlags] = useState({ requiredForProjectSnapshot: true, codeEnabled: true, metadataEnabled: true });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<readonly GitCatalogEntry[] | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [connectionsFresh, setConnectionsFresh] = useState(true);
+  const [connectionsRefreshing, setConnectionsRefreshing] = useState(false);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
+  const [pendingCreatedTarget, setPendingCreatedTarget] = useState<GitConnectionCreateResult | null>(null);
+
+  async function openConnectionForm() {
+    if (!enabled || !connectionsFresh || catalogLoading) return;
+    setCatalogLoading(true);
+    setCatalogError(null);
+    try {
+      const result = await requestJson<{ catalog: readonly GitCatalogEntry[] }>("/api/me/git-connections");
+      if (result.catalog.length === 0) throw new Error("当前没有可配置的 Git 服务类型，请稍后重试。");
+      setCatalog(result.catalog);
+      setCreateOpen(true);
+    } catch (catalogLoadError) {
+      setCatalogError(catalogLoadError instanceof Error ? catalogLoadError.message : "Git 服务目录加载失败，请重试。");
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
+
+  async function refreshCreatedConnection(target: GitConnectionCreateResult) {
+    setConnectionsRefreshing(true);
+    setConnectionsFresh(false);
+    setConnectionsError(null);
+    try {
+      const freshConnections = await onRefreshConnections();
+      if (freshConnections === null) {
+        setConnectionsError("个人 Git 连接已保存，但项目连接列表刷新失败。请重试核验后再提交提案。");
+        return;
+      }
+      if (!freshConnections.some((connection) => connection.id === target.connectionId)) {
+        setConnectionsError("个人 Git 连接已保存，但尚未出现在项目可用连接列表中。请重试核验后再提交提案。");
+        return;
+      }
+      setConnectionId(target.connectionId);
+      setRepositoryPath(target.repositoryPath);
+      setTrackedRef(target.trackedRef);
+      setPendingCreatedTarget(null);
+      setConnectionsFresh(true);
+    } catch {
+      setConnectionsError("个人 Git 连接已保存，但项目连接列表刷新失败。请重试核验后再提交提案。");
+    } finally {
+      setConnectionsRefreshing(false);
+    }
+  }
+
+  async function onProjectConnectionSaved(target: GitConnectionCreateResult) {
+    setPendingCreatedTarget(target);
+    try {
+      await refreshCreatedConnection(target);
+    } finally {
+      setCreateOpen(false);
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!enabled || connectionId === "") return;
-    const expiry = new Date(expiresAt); const now = currentTimeMillis();
-    if (!Number.isFinite(expiry.getTime()) || expiry.getTime() < now + 10 * 60 * 1000 || expiry.getTime() > now + 30 * 24 * 60 * 60 * 1000) { setError("有效期必须在 10 分钟到 30 天之间。"); return; }
-    setPending(true); setError(null);
-    try { await requestJson(`/api/projects/${projectId}/git-repository-delegations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gitConnectionId: selectedConnectionId, repositoryPath, trackedRef, includeRoots: includeRoots.split("\n").map((item) => item.trim()).filter(Boolean), softExcludePatterns: softExcludePatterns.split("\n").map((item) => item.trim()).filter(Boolean), role, requiredForProjectSnapshot: flags.requiredForProjectSnapshot, codeEnabled: flags.codeEnabled, metadataEnabled: flags.metadataEnabled, manualSyncAllowed: true, automationAllowed: false, expiresAt: expiry.toISOString() }) }); setRepositoryPath(""); onCreated(); }
-    catch (submitError) { setError(submitError instanceof Error ? submitError.message : "委托创建失败，请检查范围后重试"); }
-    finally { setPending(false); }
+    event.preventDefault();
+    if (!enabled || !connectionsFresh || selectedConnectionId === "") return;
+    const expiry = new Date(expiresAt);
+    const now = currentTimeMillis();
+    if (!Number.isFinite(expiry.getTime()) || expiry.getTime() < now + 10 * 60 * 1000 || expiry.getTime() > now + 30 * 24 * 60 * 60 * 1000) {
+      setError("有效期必须在 10 分钟到 30 天之间。");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      await requestJson(`/api/projects/${projectId}/git-repository-delegations`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          gitConnectionId: selectedConnectionId,
+          repositoryPath,
+          trackedRef,
+          includeRoots: includeRoots.split("\n").map((item) => item.trim()).filter(Boolean),
+          softExcludePatterns: softExcludePatterns.split("\n").map((item) => item.trim()).filter(Boolean),
+          role,
+          requiredForProjectSnapshot: flags.requiredForProjectSnapshot,
+          codeEnabled: flags.codeEnabled,
+          metadataEnabled: flags.metadataEnabled,
+          manualSyncAllowed: true,
+          automationAllowed: false,
+          expiresAt: expiry.toISOString(),
+        }),
+      });
+      onCreated();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "委托创建失败，请检查范围后重试");
+    } finally {
+      setPending(false);
+    }
   }
 
   const selectedConnectionId = connections.some((connection) => connection.id === connectionId) ? connectionId : (connections[0]?.id ?? "");
-  return <section className="h-fit min-w-0 rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5 shadow-sm sm:p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">New delegation</p><h2 className="mt-2 text-xl font-semibold">提案一次性只读范围</h2><p className="mt-2 text-xs leading-5 text-slate-600">只能选择当前账户已验证的个人连接。提交后仍需连接所有者和项目 Owner 独立确认。</p>{!enabled ? <p className="mt-4 rounded-xl bg-slate-100 px-3 py-3 text-xs leading-5 text-slate-600">当前账户没有明确的项目 Editor/Owner 权限，不能创建委托。</p> : connections.length === 0 ? <p className="mt-4 rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900">还没有可用的个人 Git 连接。请先在<Link href="/personal/connections/git" className="font-semibold underline">个人 Git 设置</Link>中完成验证。</p> : <form onSubmit={submit} className="mt-5 space-y-3"><Field label="个人 Git 连接"><select className={fieldClass} value={selectedConnectionId} onChange={(event) => setConnectionId(event.target.value)}>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name} · {connection.providerKind} · {connection.transport.toUpperCase()}</option>)}</select></Field><Field label="仓库路径"><input required className={fieldClass} value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="owner/repository" /></Field><Field label="分支"><input required className={fieldClass} value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" /></Field><Field label="包含目录（每行一个）"><textarea required className={`${fieldClass} min-h-20`} value={includeRoots} onChange={(event) => setIncludeRoots(event.target.value)} /></Field><Field label="软排除目录（每行一个）"><textarea className={`${fieldClass} min-h-20`} value={softExcludePatterns} onChange={(event) => setSoftExcludePatterns(event.target.value)} /></Field><div className="grid gap-3 sm:grid-cols-2"><Field label="用途"><select className={fieldClass} value={role} onChange={(event) => setRole(event.target.value)}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="有效期截止"><input required type="datetime-local" className={fieldClass} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></Field></div><div className="space-y-2 rounded-2xl border border-indigo-100 bg-white/70 p-3 text-xs text-slate-600"><p className="font-semibold text-slate-800">资料范围</p>{([ ["requiredForProjectSnapshot", "作为项目资料快照必需来源"], ["codeEnabled", "允许代码资料进入项目"], ["metadataEnabled", "允许元数据进入项目"] ] as const).map(([key, label]) => <label key={key} className="flex items-start gap-2"><input type="checkbox" checked={flags[key]} onChange={(event) => setFlags((current) => ({ ...current, [key]: event.target.checked }))} className="mt-0.5 h-4 w-4" /><span>{label}</span></label>)}</div><div className="rounded-2xl bg-slate-100 px-3 py-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-slate-800">本期固定规则</p><p className="mt-1">手动只读：开启；自动化：关闭；不会写入、提交或创建 Pull Request。</p></div>{error ? <p role="alert" className="text-xs leading-5 text-rose-700">{error}</p> : null}<button type="submit" disabled={pending} className="min-h-11 w-full rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "提交中…" : "提交委托提案"}</button></form>}</section>;
-}
 
+  return <>
+    <section className="h-fit min-w-0 rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5 shadow-sm sm:p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project repository</p>
+      <h2 className="mt-2 text-xl font-semibold">提交仓库范围提案</h2>
+      <p className="mt-2 text-xs leading-5 text-slate-600">使用当前账户已验证的 Git 连接。仓库和目录范围由项目单独确定；提案仍需连接所有者和项目 Owner 分别确认。</p>
+      {!enabled ? <p className="mt-4 rounded-xl bg-slate-100 px-3 py-3 text-xs leading-5 text-slate-600">当前账户没有明确的项目 Editor/Owner 权限，不能创建委托。</p> : <>
+        {connections.length > 0 ? <Field label="已验证的个人 Git 连接"><select className={fieldClass} value={selectedConnectionId} disabled={!connectionsFresh || connectionsRefreshing} onChange={(event) => setConnectionId(event.target.value)}>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name} · {connection.providerKind} · {connection.transport.toUpperCase()}</option>)}</select></Field> : <p className="mt-4 rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900">还没有已验证的个人 Git 连接。先添加连接并测试指定仓库和 ref，再回来提交范围提案。</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {connectionsFresh ? <button type="button" onClick={() => void openConnectionForm()} disabled={catalogLoading} className="min-h-10 rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">{catalogLoading ? "读取服务目录…" : "添加并验证 Git 服务"}</button> : null}
+          <Link href="/personal/connections/git" className="text-xs font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">管理个人 Git 授权</Link>
+        </div>
+        {catalogError ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{catalogError}</p> : null}
+        {!connectionsFresh ? <div role="alert" className="mt-3 rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-950"><p>{connectionsError ?? "正在从项目服务端核验可用连接…"}</p>{pendingCreatedTarget ? <button type="button" disabled={connectionsRefreshing} onClick={() => void refreshCreatedConnection(pendingCreatedTarget)} className="mt-2 font-semibold underline disabled:opacity-50">{connectionsRefreshing ? "核验中…" : "重新核验已保存连接"}</button> : null}</div> : null}
+        <form onSubmit={(event) => void submit(event)} className="mt-5 space-y-3">
+          <Field label="仓库路径"><input required disabled={!connectionsFresh} className={fieldClass} value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="owner/repository" /></Field>
+          <Field label="分支"><input required disabled={!connectionsFresh} className={fieldClass} value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" /></Field>
+          <Field label="包含目录（每行一个）"><textarea required disabled={!connectionsFresh} className={`${fieldClass} min-h-20`} value={includeRoots} onChange={(event) => setIncludeRoots(event.target.value)} /></Field>
+          <Field label="软排除目录（每行一个）"><textarea disabled={!connectionsFresh} className={`${fieldClass} min-h-20`} value={softExcludePatterns} onChange={(event) => setSoftExcludePatterns(event.target.value)} /></Field>
+          <div className="grid gap-3 sm:grid-cols-2"><Field label="用途"><select disabled={!connectionsFresh} className={fieldClass} value={role} onChange={(event) => setRole(event.target.value)}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="有效期截止"><input required type="datetime-local" disabled={!connectionsFresh} className={fieldClass} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></Field></div>
+          <div className="space-y-2 rounded-2xl border border-indigo-100 bg-white/70 p-3 text-xs text-slate-600"><p className="font-semibold text-slate-800">资料范围</p>{([ ["requiredForProjectSnapshot", "作为项目资料快照必需来源"], ["codeEnabled", "允许代码资料进入项目"], ["metadataEnabled", "允许元数据进入项目"] ] as const).map(([key, label]) => <label key={key} className="flex items-start gap-2"><input type="checkbox" checked={flags[key]} disabled={!connectionsFresh} onChange={(event) => setFlags((current) => ({ ...current, [key]: event.target.checked }))} className="mt-0.5 h-4 w-4" /><span>{label}</span></label>)}</div>
+          <div className="rounded-2xl bg-slate-100 px-3 py-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-slate-800">授权方式</p><p className="mt-1">手动只读：开启；自动读取：关闭。自动读取需要另行完成双方确认；不会写入、提交或创建 Pull Request。</p></div>
+          {error ? <p role="alert" className="text-xs leading-5 text-rose-700">{error}</p> : null}
+          <button type="submit" disabled={pending || !enabled || !connectionsFresh || selectedConnectionId === ""} className="min-h-11 w-full rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "提交中…" : "提交仓库范围提案"}</button>
+        </form>
+      </>}
+    </section>
+    {createOpen && catalog ? <ConnectionCreateDialog title="新增个人 Git 连接" onClose={() => setCreateOpen(false)}><GitCreateForm catalog={catalog} requireCredential initialRepositoryPath={repositoryPath} initialTrackedRef={trackedRef} onProjectSaved={onProjectConnectionSaved} /></ConnectionCreateDialog> : null}
+  </>;
+}
 function DelegationCard({ projectId, delegation, onOwnerConfirm, onProjectConfirm, onTerminal, onManualSync }: { projectId: string; delegation: Delegation; onOwnerConfirm: () => void; onProjectConfirm: () => void; onTerminal: (action: "rejection" | "revocation") => void; onManualSync: () => Promise<void> }) {
   const [expanded, setExpanded] = useState(false); const [runs, setRuns] = useState<RunSummary[]>([]); const [nextCursor, setNextCursor] = useState<string | null>(null); const [runsLoading, setRunsLoading] = useState(false); const [runsError, setRunsError] = useState<string | null>(null); const [detail, setDetail] = useState<RunDetail | null>(null); const [canAcknowledge, setCanAcknowledge] = useState(false);
   const { confirm: confirmRun, dialog: runDialog } = useAppConfirmDialog();

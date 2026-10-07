@@ -44,7 +44,7 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
 
         <section className="mt-7 grid gap-5 md:grid-cols-3">
           <ResourceCard href="/personal/models" eyebrow="AI resources" title="我的模型" description="维护个人模型连接、会员能力和连接状态。" status={modelStatus} verificationLabel="最近测试" />
-          <ResourceCard href="/personal/connections/git" eyebrow="Repository access" title="我的 Git 连接" description="维护个人 Git 凭据；项目使用前仍需完成项目内委托确认。" status={gitStatus} verificationLabel="最近测试" />
+          <ResourceCard href="/personal/connections/git" eyebrow="Git authorization" title="Git 授权管理" description="维护个人 Git 连接，查看关联项目并撤销项目授权。项目绑定从项目的代码仓库配置发起。" status={gitStatus} verificationLabel="最近测试" />
           <ResourceCard href="/personal/connections/mcp" eyebrow="Tool access" title="我的 MCP 连接" description="维护个人 MCP 连接与安全状态；项目授权仍在项目侧处理。" status={mcpStatus} verificationLabel="最近发现" />
         </section>
 

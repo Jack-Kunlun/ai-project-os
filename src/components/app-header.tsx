@@ -11,7 +11,8 @@ const primaryItems = [
   { key: "team", label: "团队与成员", href: "/team", icon: "users", adminOnly: false },
 ] as const;
 
-const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
+const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources"];
+const configurationSections: readonly ProjectSection[] = ["configuration", "repositories"];
 const overviewSections: readonly ProjectSection[] = ["overview"];
 const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
 
@@ -153,8 +154,8 @@ export function AppHeader({
               </Link>
               <Link
                 href={`/projects/${projectId}/configuration`}
-                aria-current={projectSection === "configuration" ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "configuration" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+                aria-current={projectSection && configurationSections.includes(projectSection) ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && configurationSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
                 <NavIcon name="settings" />
                 项目配置

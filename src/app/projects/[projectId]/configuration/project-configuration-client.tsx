@@ -668,7 +668,7 @@ export function ProjectConfigurationClient({ username, projectId, isSystemAdmin,
           <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">项目配置</h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里汇总当前项目读取到的模型路由、Git 委托、MCP 委托和工具授权。页面只展示安全摘要，具体管理仍回到原有页面。</p>
+              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里汇总当前项目的模型路由、代码仓库、MCP 连接和工具授权。页面展示安全摘要；代码仓库连接与读取范围可在项目内管理。</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-xs leading-5 text-slate-300 lg:max-w-xs">四个分区独立读取；更新时间可能不同，所有实际操作仍由原接口在提交前重新校验。</div>
           </div>
@@ -686,7 +686,7 @@ export function ProjectConfigurationClient({ username, projectId, isSystemAdmin,
           <SnapshotPanel eyebrow="Model routing" title="模型路由" description="显示 operation、当前选择来源、版本、能力标签与费用承担摘要，不展示个人连接名称或凭据。" state={ai} managementHref={buildProjectHref(projectId, "control")} managementLabel="前往项目 AI 工作台">
             <AiSnapshotView snapshot={ai.data as AiSnapshot} />
           </SnapshotPanel>
-          <SnapshotPanel eyebrow="Git delegation" title="Git 委托" description="显示委托状态、仓库读取范围、引用与到期时间；连接安全证据和凭据不会出现在这里。" state={git} managementHref={buildProjectHref(projectId, "repositories")} managementLabel="前往 Git 委托管理">
+          <SnapshotPanel eyebrow="Project code repository" title="代码仓库" description="管理本项目的 Git 连接选择、仓库读取范围与授权状态；个人凭据仍由连接所有者管理。" state={git} managementHref={buildProjectHref(projectId, "repositories")} managementLabel="管理代码仓库">
             <GitSnapshotView snapshot={git.data as GitSnapshot} />
           </SnapshotPanel>
           <SnapshotPanel eyebrow="MCP delegation" title="MCP 连接委托" description="显示连接委托的 effective 状态、原因和到期时间；远端工具动作仍保持冻结。" state={mcp} managementHref={buildProjectHref(projectId, "tools")} managementLabel="前往 MCP 工具管理">

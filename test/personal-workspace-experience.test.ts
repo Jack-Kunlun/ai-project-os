@@ -54,3 +54,14 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
   assert.doesNotMatch(profile, /<h2[^>]*>我的模型<\/h2>/u);
   assert.doesNotMatch(profile, /我的连接|\/profile\/connections/u);
 });
+
+
+test("代码仓库页面归入项目配置导航", async () => {
+  const header = await readFile("src/components/app-header.tsx", "utf8");
+  const materialSections = header.match(/const materialSections:[^;]+;/u)?.[0] ?? "";
+  const configurationSections = header.match(/const configurationSections:[^;]+;/u)?.[0] ?? "";
+  assert.doesNotMatch(materialSections, /"repositories"/u);
+  assert.match(configurationSections, /"configuration", "repositories"/u);
+  const configurationLink = header.slice(header.indexOf('href={`/projects/${projectId}/configuration`}'));
+  assert.match(configurationLink, /aria-current=\{projectSection && configurationSections.includes\(projectSection\)/u);
+});

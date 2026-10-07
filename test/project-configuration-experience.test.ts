@@ -17,7 +17,8 @@ test("项目配置是受保护的一级项目导航路由", async () => {
   assert.equal(parseProjectHref(projectId, href)?.route, "configuration");
   assert.match(navigation, /"configuration"/u);
   assert.match(navigation, /configuration: \{ suffix: "\/configuration"/u);
-  assert.match(header, /projectSection === "configuration"/u);
+  assert.match(header, /configurationSections: readonly ProjectSection\[\] = \["configuration", "repositories"\]/u);
+  assert.match(header, /configurationSections\.includes\(projectSection\)/u);
   assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/configuration`\}/u);
   assert.match(header, /项目配置/u);
   assert.match(page, /requirePageSession()/u);

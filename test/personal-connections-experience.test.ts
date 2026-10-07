@@ -72,11 +72,15 @@ test("personal Git and MCP clients use only owner APIs and preserve lifecycle sa
 });
 
 test("personal connection forms keep project automation boundary visible", async () => {
-  const [git, mcp, guide] = await Promise.all([
+  const [git, mcp, guide, repositories, personalConfiguration] = await Promise.all([
     readFile("src/app/profile/connections/git/git-connections-client.tsx", "utf8"),
     readFile("src/app/profile/connections/mcp/mcp-connections-client.tsx", "utf8"),
     readFile("src/app/guide/page.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "utf8"),
+    readFile("src/app/personal/configuration/page.tsx", "utf8"),
   ]);
+  assert.match(git, /Git 授权管理/u);
+  assert.match(git, /项目代码仓库从项目配置发起连接和范围提案/u);
   assert.match(git, /项目页支持一次性手动只读委托和单独的自动读取双确认授权/u);
   assert.match(git, /写入\/提交和旧 PAT 路径保持关闭/u);
   assert.match(git, /已完成 Git 仓库只读测试并加密保存。密钥输入框已清空；后续变更请在连接卡片中通过安全治理预览管理/u);
@@ -88,6 +92,28 @@ test("personal connection forms keep project automation boundary visible", async
   assert.doesNotMatch(mcp, /请在卡片中发现工具/u);
   assert.doesNotMatch(mcp, /当前不会发起网络请求，外部连通性仍未验证/u);
   assert.match(mcp, /api\/me\/mcp-delegations/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在“我的空间”配置/u);
+  assert.match(guide, /代码仓库接入和读取范围在“项目配置 → 代码仓库”管理/u);
+  assert.match(guide, /“我的空间 → 配置 → Git 授权管理”维护个人凭据/u);
   assert.doesNotMatch(guide, /普通用户不需要也不能配置平台凭据/u);
+  assert.match(personalConfiguration, /title="Git 授权管理"/u);
+  assert.match(personalConfiguration, /项目绑定从项目的代码仓库配置发起/u);
+  assert.match(repositories, /添加并验证 Git 服务/u);
+  assert.match(repositories, /GitCreateForm catalog=\{catalog\} requireCredential/u);
+  assert.match(git, /requireCredential && draft.authKind === "none"/u);
+  assert.match(repositories, /onProjectSaved=\{onProjectConnectionSaved\}/u);
+  assert.match(repositories, /const freshConnections = await onRefreshConnections()/u);
+  const refreshOptions = repositories.slice(repositories.indexOf("const refreshProjectOptions"), repositories.indexOf("async function mutate"));
+  assert.match(refreshOptions, /\[401, 403, 404\]\.includes\(status\)\) await load\(\)/u);
+  assert.match(repositories, /setConnectionId\(target\.connectionId\)/u);
+  assert.match(repositories, /setRepositoryPath\(target\.repositoryPath\)/u);
+  assert.match(repositories, /setTrackedRef\(target\.trackedRef\)/u);
+  assert.match(repositories, /!connectionsFresh || selectedConnectionId === ""/u);
+  const projectSaveCallback = git.slice(git.indexOf("const result = { connectionId: connection.id"), git.indexOf("setMessage({ tone: \"error\", text: \"Git 连接已保存"));
+  assert.match(projectSaveCallback, /repositoryPath: testedProbe\.repositoryPath/u);
+  assert.match(projectSaveCallback, /trackedRef: testedProbe\.trackedRef/u);
+  assert.doesNotMatch(projectSaveCallback, /secret|baseUrl|username|credential/u);
+  assert.match(repositories, /manualSyncAllowed: true/u);
+  assert.match(repositories, /automationAllowed: false/u);
+  const projectSavedHandler = repositories.slice(repositories.indexOf("async function onProjectConnectionSaved"), repositories.indexOf("async function submit", repositories.indexOf("async function onProjectConnectionSaved")));
+  assert.doesNotMatch(projectSavedHandler, /confirmOwner|owner-confirmation|project-confirmation|automation-grants/u);
 });

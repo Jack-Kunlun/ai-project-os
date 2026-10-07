@@ -185,28 +185,25 @@ function SchemaBlock({ label, value }: { label: string; value: JsonValue }) {
   </details>;
 }
 
-function CandidateCard({ candidate, selected, onSelect }: { candidate: McpCandidate; selected: boolean; onSelect: () => void }) {
-  return <article className={`rounded-2xl border bg-white transition ${selected ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className="w-full rounded-2xl px-4 py-4 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-950">{safeValue(candidate.tool.title) === "—" ? candidate.tool.name : candidate.tool.title}</p>
-          <p className="mt-1 truncate text-xs text-slate-500">{candidate.tool.name} · {safeValue(candidate.connection.name)}</p>
-        </div>
-        <StatusBadges candidate={candidate} />
-      </div>
-      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500">
-        <span>配置版本 {safeValue(candidate.snapshots.connectionConfigurationRevision)}</span>
-        <span>更新于 {formatDate(candidate.snapshots.connectionUpdatedAt)}</span>
-      </div>
-      {effectiveReason(candidate) ? <p className="mt-3 text-xs leading-5 text-rose-700">{effectiveReason(candidate)}</p> : null}
-    </button>
-  </article>;
+function CandidateTable({ candidates, onSelect }: { candidates: McpCandidate[]; onSelect: (id: string) => void }) {
+  return <div className="mt-5 overflow-x-auto">
+    <table className="w-full text-left text-sm">
+      <caption className="sr-only">MCP 工具审核列表</caption>
+      <thead className="border-y border-slate-100 bg-slate-50 text-xs text-slate-500">
+        <tr>{["工具", "所属连接", "审核状态", "风险", "更新时间", "操作"].map((label) => <th key={label} scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">{label}</th>)}</tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {candidates.map((candidate) => <tr key={candidate.tool.id} className="align-top hover:bg-slate-50/60">
+          <td className="min-w-56 px-4 py-4"><p className="font-semibold text-slate-950">{candidate.tool.title || candidate.tool.name}</p><p className="mt-1 break-all text-xs text-slate-500">{candidate.tool.name}</p></td>
+          <td className="min-w-48 max-w-80 break-words px-4 py-4 text-slate-600">{safeValue(candidate.connection.name)}</td>
+          <td className="min-w-40 px-4 py-4"><StatusBadges candidate={candidate} /></td>
+          <td className="whitespace-nowrap px-4 py-4 text-slate-600">{candidate.riskLevel ? riskLabels[candidate.riskLevel] : "待评估"}</td>
+          <td className="whitespace-nowrap px-4 py-4 text-xs leading-5 text-slate-500">{formatDate(candidate.snapshots.connectionUpdatedAt)}<p className="mt-1">配置版本 {safeValue(candidate.snapshots.connectionConfigurationRevision)}</p></td>
+          <td className="whitespace-nowrap px-4 py-4"><button type="button" onClick={() => onSelect(candidate.tool.id)} aria-label={`查看 ${candidate.tool.title || candidate.tool.name} 的详情`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">查看详情</button></td>
+        </tr>)}
+      </tbody>
+    </table>
+  </div>;
 }
 
 function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCompleted: (conclusion: ReviewConclusion) => void }) {
@@ -273,7 +270,7 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
     }
   }
 
-  return <form onSubmit={submit} className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5 sm:p-6" aria-labelledby="mcp-review-form-title">
+  return <form onSubmit={submit} className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5 sm:p-6" aria-labelledby="mcp-review-form-title">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Review decision</p>
@@ -326,6 +323,7 @@ export function McpReviewWorkbench() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
@@ -337,7 +335,7 @@ export function McpReviewWorkbench() {
       if (signal.aborted) return;
       setData(payload);
       setError(null);
-      setSelectedId((current) => payload.candidates.some((candidate) => candidate.tool.id === current) ? current : payload.candidates[0]?.tool.id ?? "");
+      setSelectedId((current) => payload.candidates.some((candidate) => candidate.tool.id === current) ? current : "");
     } catch (loadError) {
       if (loadError instanceof Error && loadError.name === "AbortError") return;
       if (!signal.aborted) setError(loadError instanceof Error ? loadError.message : "MCP 候选加载失败");
@@ -364,16 +362,18 @@ export function McpReviewWorkbench() {
     setData(null);
     setSelectedId("");
     setError(null);
+    setNotice(null);
   }
 
   function reviewCompleted(conclusion: ReviewConclusion) {
+    setNotice(conclusion === "read_only_verified" ? "只读审核已记录，可在已审核快照中查看。" : "审核结论已记录。当前工具仍可继续核对。");
     setRefreshToken((value) => value + 1);
     if (conclusion === "read_only_verified" && view === "eligible") setSelectedId("");
   }
 
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader title="MCP 工具安全审核" description="审核已经净化的工具快照；审核记录只表达受控结论，不开放远端工具操作。" meta="安全审核工作台" />
-    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+    {selectedId === "" ? <><div className="mt-4 grid gap-3 sm:grid-cols-2">
       <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-indigo-950">远端 Schema 与 annotations 属于不可信远端声明，仅供人工审核，不能替代平台安全判断。</div>
       <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</div>
     </div>
@@ -382,11 +382,14 @@ export function McpReviewWorkbench() {
       <div role="tablist" aria-label="MCP 审核候选状态" className="flex flex-wrap gap-2">
         {([ ["eligible", "待审核候选"], ["active", "已审核快照"] ] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={view === value} onClick={() => changeView(value)} className={`min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${view === value ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{label}</button>)}
       </div>
-      <p className="mt-3 text-xs leading-5 text-slate-500">当前列表只返回净化后的连接名称、工具结构和安全指纹；服务端会对每次读取再次执行管理员校验。</p>
+      <p className="mt-3 text-xs leading-5 text-slate-500">选择工具查看净化快照并记录审核结论；服务端会对每次读取再次执行管理员校验。</p>
     </div>
 
-    <div className="mt-6 grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,.78fr)_minmax(0,1.22fr)]">
-      <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-list-title">
+    </> : null}
+    {notice ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p> : null}
+    {selectedId !== "" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { setSelectedId(""); window.scrollTo(0, 0); }} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">← 返回审核列表</button><button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">刷新详情</button></div> : null}
+    <div className="mt-6 min-w-0">
+      {selectedId === "" ? <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-list-title">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Candidate queue</p>
@@ -395,25 +398,38 @@ export function McpReviewWorkbench() {
           </div>
           <button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">刷新</button>
         </div>
-        {loading ? <div className="mt-5 space-y-3" role="status" aria-label="正在加载 MCP 审核候选"><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /></div> : error ? <div role="alert" className="mt-5 rounded-2xl bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-700">{error}</div> : data?.candidates.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">当前没有候选记录</p><p className="mt-2 text-xs leading-5 text-slate-500">可切换另一状态或稍后刷新安全快照。</p></div> : <div className="mt-5 space-y-3">{data?.candidates.map((candidate) => <CandidateCard key={candidate.tool.id} candidate={candidate} selected={candidate.tool.id === selectedId} onSelect={() => setSelectedId(candidate.tool.id)} />)}</div>}
+        {loading ? <div className="mt-5 space-y-3" role="status" aria-label="正在加载 MCP 审核候选"><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /></div> : error ? <div role="alert" className="mt-5 rounded-2xl bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-700">{error}</div> : data?.candidates.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">当前没有候选记录</p><p className="mt-2 text-xs leading-5 text-slate-500">可切换另一状态或稍后刷新安全快照。</p></div> : <CandidateTable candidates={data?.candidates ?? []} onSelect={(id) => { setSelectedId(id); setNotice(null); window.scrollTo(0, 0); }} />}
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
           <button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">上一页</button>
           <span className="text-xs text-slate-500">第 {page} 页</span>
           <button type="button" onClick={() => setPage((value) => value + 1)} disabled={!hasNextPage || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">下一页</button>
         </div>
-      </section>
-
-      <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-detail-title">
-        {selectedCandidate ? <>
+      </section> : <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-detail-title">
+        {loading ? <p role="status" className="py-12 text-center text-sm text-slate-500">正在更新工具详情…</p> : error ? <p role="alert" className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">{error}</p> : selectedCandidate ? <>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Sanitized candidate detail</p>
-              <h2 id="mcp-candidate-detail-title" className="mt-2 truncate text-xl font-semibold text-slate-950">{safeValue(selectedCandidate.tool.title) === "—" ? selectedCandidate.tool.name : selectedCandidate.tool.title}</h2>
-              <p className="mt-1 truncate text-xs text-slate-500">{selectedCandidate.tool.name} · {safeValue(selectedCandidate.connection.name)}</p>
+              <h2 id="mcp-candidate-detail-title" className="mt-2 break-words text-xl font-semibold text-slate-950">{safeValue(selectedCandidate.tool.title) === "—" ? selectedCandidate.tool.name : selectedCandidate.tool.title}</h2>
+              <p className="mt-1 break-words text-xs text-slate-500">{selectedCandidate.tool.name} · {safeValue(selectedCandidate.connection.name)}</p>
             </div>
             <StatusBadges candidate={selectedCandidate} />
           </div>
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">Schema、annotations 和远端描述均为不可信远端声明，仅供审核。这里展示的是服务端已净化结构，不代表平台已经信任其内容。</div>
+          <div className="mt-5 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,.85fr)]">
+          <div className="min-w-0">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500">只读能力</p><p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.state === "active" ? "已进入 V2 只读审核流" : "工具声明为只读候选"}</p><p className="mt-1 text-xs leading-5 text-slate-500">仍需以当前审核结论和快照有效性为准。</p></div>
+            <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500">风险</p><p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.riskLevel ? riskLabels[selectedCandidate.riskLevel] : "尚无审核结论"}</p><p className="mt-1 text-xs leading-5 text-slate-500">{selectedCandidate.conclusion && selectedCandidate.conclusion in conclusionLabels ? conclusionLabels[selectedCandidate.conclusion as ReviewConclusion] : "等待管理员记录受控结论"}</p></div>
+          </div>
+          {selectedCandidate.tool.description ? <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-4"><p className="text-xs font-semibold text-slate-500">远端描述（不可信）</p><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{selectedCandidate.tool.description}</p></div> : null}
+          <div className="mt-5 space-y-3">
+            <SchemaBlock label="输入 Schema（已净化）" value={selectedCandidate.tool.inputSchema} />
+            <SchemaBlock label="输出 Schema（已净化）" value={selectedCandidate.tool.outputSchema} />
+            <SchemaBlock label="annotations（已净化）" value={selectedCandidate.tool.annotations} />
+          </div>
+          <details className="mt-5 rounded-2xl border border-slate-200">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">安全快照与技术指纹</summary>
+            <div className="px-4 pb-4">
           <dl className="mt-5 grid gap-3 sm:grid-cols-2">
             <SnapshotRow label="连接 ID" value={selectedCandidate.connection.id} />
             <SnapshotRow label="工具 ID" value={selectedCandidate.tool.id} />
@@ -424,22 +440,18 @@ export function McpReviewWorkbench() {
             <SnapshotRow label="连接更新时间" value={formatDate(selectedCandidate.snapshots.connectionUpdatedAt)} />
             <SnapshotRow label="所有者账号版本" value={selectedCandidate.snapshots.connectionOwnerAccountAccessVersion} />
           </dl>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500">只读能力</p><p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.state === "active" ? "已进入 V2 只读审核流" : "工具声明为只读候选"}</p><p className="mt-1 text-xs leading-5 text-slate-500">仍需以当前审核结论和快照有效性为准。</p></div>
-            <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500">风险</p><p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.riskLevel ? riskLabels[selectedCandidate.riskLevel] : "尚无审核结论"}</p><p className="mt-1 text-xs leading-5 text-slate-500">{selectedCandidate.conclusion && selectedCandidate.conclusion in conclusionLabels ? conclusionLabels[selectedCandidate.conclusion as ReviewConclusion] : "等待管理员记录受控结论"}</p></div>
-          </div>
-          {selectedCandidate.tool.description ? <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-4"><p className="text-xs font-semibold text-slate-500">远端描述（不可信）</p><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{selectedCandidate.tool.description}</p></div> : null}
-          <div className="mt-5 space-y-3">
-            <SchemaBlock label="输入 Schema（已净化）" value={selectedCandidate.tool.inputSchema} />
-            <SchemaBlock label="输出 Schema（已净化）" value={selectedCandidate.tool.outputSchema} />
-            <SchemaBlock label="annotations（已净化）" value={selectedCandidate.tool.annotations} />
-          </div>
+            </div>
+          </details>
           {effectiveReason(selectedCandidate) ? <p className="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700">当前安全状态：{effectiveReason(selectedCandidate)}。如需更新证据，请先确认旧证据的处理状态。</p> : null}
+          </div>
+          <div className="min-w-0">
           {selectedCandidate.reviewStatus === "approved"
             ? <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-xs leading-5 text-emerald-800" role="status">当前 tuple 已有不可变 APPROVED 审核；为避免打断现有项目授权，不能重复提交正向审核。若快照失效，请先按治理流程处理旧证据。</div>
             : <ReviewForm key={selectedCandidate.tool.id} candidate={selectedCandidate} onCompleted={reviewCompleted} />}
-        </> : <div className="flex min-h-80 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center"><div><p className="text-sm font-semibold text-slate-700">选择一条候选查看审核详情</p><p className="mt-2 text-xs leading-5 text-slate-500">详情只包含净化后的 Schema、annotations、指纹和版本信息。</p></div></div>}
-      </section>
+          </div>
+          </div>
+        </> : <div className="flex min-h-80 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center"><div><p className="text-sm font-semibold text-slate-700">当前工具已不在此列表中</p><p className="mt-2 text-xs leading-5 text-slate-500">请返回审核列表，重新选择当前可用的工具快照。</p></div></div>}
+      </section>}
     </div>
   </div>;
 }

@@ -46,7 +46,7 @@ test("MCP 审核工作台只消费净化候选 API，不暴露连接材料或动
 test("MCP 审核工作台的禁用按钮保持可读对比度", async () => {
   const workbench = await readFile("src/app/admin/connectors/mcp/mcp-review-workbench.tsx", "utf8");
   const disabledClassNames = [...workbench.matchAll(/className="([^"]*disabled:[^"]*)"/gu)].map((match) => match[1]);
-  assert.equal(disabledClassNames.length, 4);
+  assert.equal(disabledClassNames.length, 5);
   for (const className of disabledClassNames) {
     assert.match(className, /disabled:border-slate-400/u);
     assert.match(className, /disabled:bg-slate-200/u);

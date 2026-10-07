@@ -33,6 +33,11 @@ export const SECURITY_HEADERS = [
   { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
 ] as const;
 
+const SECURITY_HEADERS_WITHOUT_REFERRER_POLICY = SECURITY_HEADERS.filter(
+  ({ key }) => key !== "Referrer-Policy",
+);
+const REFERRER_POLICY_HEADER = SECURITY_HEADERS.filter(({ key }) => key === "Referrer-Policy");
+
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
@@ -41,7 +46,12 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        headers: [...SECURITY_HEADERS],
+        headers: SECURITY_HEADERS_WITHOUT_REFERRER_POLICY,
+      },
+      {
+        // Next does not replace an existing response header with a Route Handler header.
+        source: "/:path((?!mcp/authorize$).*)",
+        headers: REFERRER_POLICY_HEADER,
       },
     ];
   },

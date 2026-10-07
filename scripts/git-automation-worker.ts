@@ -4,6 +4,7 @@ import { getGitAutomationWorkerDb } from "@/lib/db";
 import { getEnvironment } from "@/lib/env";
 import { runOneGitAutomationCycle } from "@/lib/project-git-automation-execution-service";
 import { runOneGitAutomationMaterialCycle } from "@/lib/project-git-automation-material-execution-service";
+import type { GitAutomationDiagnosticObserver } from "@/lib/project-git-automation-diagnostics";
 
 const IDLE_WAIT_MS = 15_000;
 const GIT_AUTOMATION_WORKER_HEARTBEAT_PATH = "/tmp/ai-project-os-git-worker-heartbeat";
@@ -19,6 +20,12 @@ function log(event: string, details: Record<string, string> = {}): void {
     event,
     ...details,
   }));
+}
+
+function diagnosticObserver(executionClass: "code" | "material"): GitAutomationDiagnosticObserver {
+  return ({ stage, errorCode }) => {
+    log("worker.run_diagnostic", { class: executionClass, stage, errorCode });
+  };
 }
 
 async function waitOrStop(milliseconds: number): Promise<void> {
@@ -51,6 +58,7 @@ async function main(): Promise<void> {
           db,
           stopSignal: stop.signal,
           onHeartbeat: () => writeFile(GIT_AUTOMATION_WORKER_HEARTBEAT_PATH, new Date().toISOString(), { mode: 0o600 }),
+          onDiagnostic: diagnosticObserver("code"),
         });
         const materialOutcome = codeOutcome === "idle"
           ? await runOneGitAutomationMaterialCycle({
@@ -58,6 +66,7 @@ async function main(): Promise<void> {
             db,
             stopSignal: stop.signal,
             onHeartbeat: () => writeFile(GIT_AUTOMATION_WORKER_HEARTBEAT_PATH, new Date().toISOString(), { mode: 0o600 }),
+            onDiagnostic: diagnosticObserver("material"),
           })
           : "idle";
         const outcome = materialOutcome === "idle" ? codeOutcome : `material_${materialOutcome}`;
@@ -65,7 +74,11 @@ async function main(): Promise<void> {
         if (outcome !== "idle" && outcome !== "stopped") log("worker.run_settled", { outcome });
         if (outcome !== "succeeded" && outcome !== "unchanged") await waitOrStop(IDLE_WAIT_MS);
       } catch {
-        log("worker.cycle_failed", { errorCode: "GIT_AUTOMATION_CYCLE_FAILED" });
+        log("worker.cycle_failed", {
+          class: "worker",
+          stage: "worker_cycle",
+          errorCode: "WORKER_CYCLE_FAILED",
+        });
         await waitOrStop(IDLE_WAIT_MS);
       }
     }
@@ -80,7 +93,9 @@ void main().catch(() => {
     timestamp: new Date().toISOString(),
     component: "git-automation-worker",
     event: "worker.terminated",
-    errorCode: "GIT_AUTOMATION_WORKER_TERMINATED",
+    class: "worker",
+    stage: "worker_startup",
+    errorCode: "WORKER_TERMINATED",
   }));
   process.exitCode = 1;
 });

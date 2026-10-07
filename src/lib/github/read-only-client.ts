@@ -512,6 +512,7 @@ async function executeReadPlan(
   fetchImplementation: FetchImplementation,
   timeoutMs = plan.timeoutMs,
   absoluteDeadlineAtEpochMs: number | null = null,
+  verifiedRepositoryId: number | null = null,
 ): Promise<GitHubReadResponse> {
   // Check the absolute budget before invoking fetch.  This is deliberately a
   // separate branch from an AbortController timeout so callers can safely
@@ -577,7 +578,7 @@ async function executeReadPlan(
       await discardBody(response);
       return fail("GITHUB_REQUEST_FAILED", null, requestId);
     }
-    const nextPage = nextPageFromLink(response, plan);
+    const nextPage = nextPageFromLink(response, plan, verifiedRepositoryId);
     return Object.freeze({
       body: await readJsonWithinLimit(response, plan.maximumResponseBytes),
       nextPage,
@@ -608,7 +609,7 @@ function sortedQuery(url: URL): string {
     .join("&");
 }
 
-function nextPageFromLink(response: Response, plan: GitHubReadPlan): number | null {
+function nextPageFromLink(response: Response, plan: GitHubReadPlan, verifiedRepositoryId: number | null): number | null {
   const header = response.headers.get("link");
   if (header === null) return null;
   if (
@@ -654,13 +655,21 @@ function nextPageFromLink(response: Response, plan: GitHubReadPlan): number | nu
   }
   const expected = new URL(current);
   expected.searchParams.set("page", String(currentPage + 1));
+  // GitHub can return a numeric repository alias in Link headers. Accept it
+  // only after this client has verified that exact repository's identity.
+  // We extract only the next page number; requests still use the original
+  // owner/repository plan, never the remote Link URL.
+  const suffix = expected.pathname.match(/^\/repos\/[^/]+\/[^/]+(\/.*)$/u)?.[1];
+  const aliasPath = verifiedRepositoryId === null || suffix === undefined
+    ? null
+    : `/repositories/${verifiedRepositoryId}${suffix}`;
   if (
     candidatePage !== currentPage + 1 ||
     candidate.origin !== GITHUB_API_ORIGIN ||
     candidate.username !== "" ||
     candidate.password !== "" ||
     candidate.hash !== "" ||
-    candidate.pathname !== expected.pathname ||
+    (candidate.pathname !== expected.pathname && candidate.pathname !== aliasPath) ||
     sortedQuery(candidate) !== sortedQuery(expected)
   ) {
     return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
@@ -1065,6 +1074,9 @@ export function createGitHubReadOnlyClient(options: Readonly<{
 }>): GitHubMaterialReadOnlyClient {
   const token = resolveCredential(options.credential);
   const fetchImplementation = options.fetchImplementation ?? fetch;
+  const verifiedRepositoryIds = new Map<string, number>();
+  const repositoryKey = (owner: string, repository: string) =>
+    `${canonicalOwner(owner)}/${canonicalRepository(repository)}`.toLowerCase();
   const absoluteDeadlineAtEpochMs = options.absoluteDeadlineAt === undefined || options.absoluteDeadlineAt === null
     ? null
     : options.absoluteDeadlineAt instanceof Date
@@ -1081,18 +1093,21 @@ export function createGitHubReadOnlyClient(options: Readonly<{
         plan.timeoutMs,
         absoluteDeadlineAtEpochMs - Date.now() - GITHUB_REQUEST_DEADLINE_SAFETY_MS,
       );
-    return executeReadPlan(plan, token, fetchImplementation, timeoutMs, absoluteDeadlineAtEpochMs);
+    return executeReadPlan(plan, token, fetchImplementation, timeoutMs, absoluteDeadlineAtEpochMs,
+      verifiedRepositoryIds.get(repositoryKey(endpoint.owner, endpoint.repository)) ?? null);
   };
   const client: GitHubMaterialReadOnlyClient = {
     version: GITHUB_READ_ONLY_CLIENT_VERSION,
     async getRepository(input) {
       const owner = canonicalOwner(input.owner);
       const repository = canonicalRepository(input.repository);
-      return parseRepository(
+      const verified = parseRepository(
         (await request({ kind: "repository", owner, repository })).body,
         owner,
         repository,
       );
+      verifiedRepositoryIds.set(repositoryKey(owner, repository), verified.repositoryId);
+      return verified;
     },
     async getReference(input) {
       const trackedRef = canonicalTrackedRef(input.trackedRef);

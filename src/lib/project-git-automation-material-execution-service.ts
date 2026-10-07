@@ -17,6 +17,13 @@ import {
   loadGitAutomationMaterialReadContext,
   openGitAutomationMaterialCredential,
 } from "@/lib/project-git-automation-material-read-context";
+import {
+  gitAutomationDiagnosticErrorCode,
+  reportGitAutomationDiagnostic,
+  type GitAutomationDiagnosticErrorCode,
+  type GitAutomationDiagnosticObserver,
+  type GitAutomationDiagnosticStage,
+} from "@/lib/project-git-automation-diagnostics";
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const LEASE_DEADLINE_MARGIN_MS = 2_000;
@@ -42,6 +49,7 @@ class MaterialRunLease {
     private readonly db: PrismaClient,
     stopSignal: AbortSignal,
     private readonly onHeartbeat?: () => Promise<void>,
+    private readonly onDiagnostic?: GitAutomationDiagnosticObserver,
   ) {
     this.onStop = () => this.controller.abort();
     stopSignal.addEventListener("abort", this.onStop, { once: true });
@@ -72,9 +80,22 @@ class MaterialRunLease {
     this.deadlineTimer = setTimeout(() => this.controller.abort(), remaining);
   }
 
+  private failureDiagnosed = false;
+
+  reportFailure(errorCode: GitAutomationDiagnosticErrorCode): void {
+    if (this.failureDiagnosed) return;
+    this.failureDiagnosed = true;
+    reportGitAutomationDiagnostic(this.onDiagnostic, { stage: "lease", errorCode });
+  }
+
   async heartbeat(): Promise<boolean> {
     if (this.closed) return false;
-    live(this.signal);
+    try {
+      live(this.signal);
+    } catch {
+      this.reportFailure("LEASE_NOT_ACTIVE");
+      return false;
+    }
     if (this.renewal !== undefined) return this.renewal;
     const renewal = (async () => {
       try {
@@ -82,13 +103,17 @@ class MaterialRunLease {
           this.claim.id, this.claim.workerId, this.claim.leaseToken, this.db,
         );
         if (this.closed || result?.accepted !== true || result.status !== "dispatched" || result.leaseExpiresAt === undefined) {
+          this.reportFailure("LEASE_RENEWAL_REJECTED");
           this.controller.abort();
           return false;
         }
         this.setDeadline(result.leaseExpiresAt);
         await this.onHeartbeat?.();
-        return !this.signal.aborted;
-      } catch {
+        const active = !this.signal.aborted;
+        if (!active) this.reportFailure("LEASE_NOT_ACTIVE");
+        return active;
+      } catch (error) {
+        this.reportFailure(gitAutomationDiagnosticErrorCode(error));
         this.controller.abort();
         return false;
       }
@@ -158,26 +183,45 @@ export async function runOneGitAutomationMaterialCycle(input: Readonly<{
   db: PrismaClient;
   stopSignal: AbortSignal;
   onHeartbeat?: () => Promise<void>;
+  onDiagnostic?: GitAutomationDiagnosticObserver;
 }>): Promise<GitAutomationMaterialExecutionOutcome> {
   if (input.stopSignal.aborted) return "stopped";
-  const claim = await claimNextProjectGitAutomationMaterialRun(input.workerId, input.db);
+  let claim: ProjectGitAutomationMaterialRunClaim | null;
+  try {
+    claim = await claimNextProjectGitAutomationMaterialRun(input.workerId, input.db);
+  } catch (error) {
+    reportGitAutomationDiagnostic(input.onDiagnostic, {
+      stage: "claim",
+      errorCode: gitAutomationDiagnosticErrorCode(error),
+    });
+    throw error;
+  }
   if (claim === null) return "idle";
-  const lease = new MaterialRunLease(claim, input.db, input.stopSignal, input.onHeartbeat);
+  const lease = new MaterialRunLease(claim, input.db, input.stopSignal, input.onHeartbeat, input.onDiagnostic);
+  let stage: GitAutomationDiagnosticStage = "dispatch";
+  const deferred = (diagnosticStage: GitAutomationDiagnosticStage, errorCode: GitAutomationDiagnosticErrorCode) => {
+    reportGitAutomationDiagnostic(input.onDiagnostic, { stage: diagnosticStage, errorCode });
+    return "deferred" as const;
+  };
   try {
     live(lease.signal);
     const dispatched = await markProjectGitAutomationMaterialRunDispatched(
       claim.id, claim.workerId, claim.leaseToken, input.db,
     );
-    if (dispatched?.accepted !== true || dispatched.status !== "dispatched") return "deferred";
+    if (dispatched?.accepted !== true || dispatched.status !== "dispatched") {
+      return deferred("dispatch", "DISPATCH_NOT_ACCEPTED");
+    }
     lease.startRenewal();
     live(lease.signal);
+    stage = "context";
     const context = await loadGitAutomationMaterialReadContext({
       runId: claim.id,
       workerId: claim.workerId,
       leaseToken: claim.leaseToken,
     }, input.db);
-    if (context === null) return "deferred";
+    if (context === null) return deferred("context", "READ_CONTEXT_UNAVAILABLE");
     live(lease.signal);
+    stage = "credential";
     const token = await openGitAutomationMaterialCredential(context);
     const credential = createGitHubCredentialFromToken(token);
     const client = createGitHubReadOnlyClient({
@@ -185,17 +229,25 @@ export async function runOneGitAutomationMaterialCycle(input: Readonly<{
       fetchImplementation: githubOnlyFetch(lease),
       absoluteDeadlineAt: Date.now() + MAX_RUN_MS,
     });
+    stage = "scope";
     const { owner, repository } = repositoryParts(context.scope.repositoryPath);
     const trackedRef = trackedRefForGitHub(context.scope.trackedRef);
-    if (!await lease.requireHeartbeat()) return "deferred";
+    if (!await lease.requireHeartbeat()) {
+      lease.reportFailure("LEASE_NOT_ACTIVE");
+      return "deferred";
+    }
+    stage = "github_repository";
     const initialRepository = context.baseline === null
       ? await client.getRepository({ owner, repository })
       : null;
     live(lease.signal);
     const expectedRepositoryId = context.baseline?.repositoryId ?? initialRepository?.repositoryId;
     const expectedNodeId = context.baseline?.nodeId ?? initialRepository?.nodeId;
-    if (expectedRepositoryId === undefined || expectedNodeId === undefined) return "deferred";
+    if (expectedRepositoryId === undefined || expectedNodeId === undefined) {
+      return deferred("github_repository", "REPOSITORY_IDENTITY_UNAVAILABLE");
+    }
 
+    stage = "material_scan";
     const scan = await scanGitHubRepositoryMaterials({
       client,
       owner,
@@ -219,11 +271,16 @@ export async function runOneGitAutomationMaterialCycle(input: Readonly<{
       || scan.repository.nodeId !== expectedNodeId || scan.observedHeadCommitSha.length !== 40) {
       // A quarantined/incomplete class must not look like an empty remote list,
       // which would retire previously imported project sources.
+      return deferred("material_scan", "MATERIAL_SCAN_INCOMPLETE");
+    }
+    stage = "material_validation";
+    validateMaterialSourcesForClaim(claim, scan.sources);
+    if (!await lease.requireHeartbeat()) {
+      lease.reportFailure("LEASE_NOT_ACTIVE");
       return "deferred";
     }
-    validateMaterialSourcesForClaim(claim, scan.sources);
-    if (!await lease.requireHeartbeat()) return "deferred";
     live(lease.signal);
+    stage = "finalize";
     const finalized = await finalizeProjectGitAutomationMaterialRun({
       runId: claim.id,
       workerId: claim.workerId,
@@ -233,9 +290,17 @@ export async function runOneGitAutomationMaterialCycle(input: Readonly<{
       observedHeadCommitSha: scan.observedHeadCommitSha,
       sources: scan.sources,
     }, input.db);
-    if (!finalized?.accepted) return "deferred";
+    if (!finalized?.accepted) return deferred("finalize", "FINALIZE_NOT_ACCEPTED");
     return finalized.status === "unchanged" ? "unchanged" : "succeeded";
-  } catch {
+  } catch (error) {
+    if (lease.signal.aborted) {
+      lease.reportFailure("LEASE_NOT_ACTIVE");
+    } else {
+      reportGitAutomationDiagnostic(input.onDiagnostic, {
+        stage,
+        errorCode: gitAutomationDiagnosticErrorCode(error),
+      });
+    }
     return "deferred";
   } finally {
     lease.stop(input.stopSignal);

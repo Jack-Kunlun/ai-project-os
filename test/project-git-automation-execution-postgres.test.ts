@@ -448,10 +448,14 @@ test("automatic Git worker fetches and atomically publishes once, replays unchan
     await makeGrantDue(admin, fixture.grantId);
     let leaseExpired = false;
     let expiredRunId: string | null = null;
+    const leaseDiagnostics: Array<{ stage: string; errorCode: string }> = [];
     const thirdOutcome = await runOneGitAutomationCycle({
       workerId: "git-automation-execution-postgres",
       db: workerDb,
       stopSignal: new AbortController().signal,
+      onDiagnostic: (diagnostic) => {
+        leaseDiagnostics.push(diagnostic);
+      },
       onHeartbeat: async () => {
         if (leaseExpired) return;
         await withReplicatedAdmin(admin, async () => {
@@ -473,6 +477,7 @@ test("automatic Git worker fetches and atomically publishes once, replays unchan
     });
     assert.equal(leaseExpired, true);
     assert.equal(thirdOutcome, "deferred");
+    assert.deepEqual(leaseDiagnostics, [{ stage: "lease", errorCode: "LEASE_RENEWAL_REJECTED" }]);
     assert.deepEqual(await readGitTrace(traceFile), []);
 
     assert.ok(expiredRunId);

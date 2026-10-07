@@ -252,6 +252,76 @@ test("client validates paged Issues, pull request metadata/files, and Releases",
   assert.equal(responses.length, 0);
 });
 
+function repositoryIdentityResponse() {
+  return jsonResponse({
+    id: 1296269, node_id: "R_kg_SAFE", name: repository,
+    full_name: `${owner}/${repository}`, owner: { login: owner },
+    private: false, archived: false, disabled: false, default_branch: "main",
+  });
+}
+
+test("paged client accepts numeric aliases only for its verified repository and rebuilds requests", async () => {
+  const requests: string[] = [];
+  const client = createGitHubReadOnlyClient({
+    credential: await credential(),
+    fetchImplementation: async (input) => {
+      const url = new URL(input.toString());
+      requests.push(url.toString());
+      if (url.pathname === `/repos/${owner}/${repository}`) return repositoryIdentityResponse();
+      const next = new URL(url);
+      next.pathname = next.pathname.replace(`/repos/${owner}/${repository}`, "/repositories/1296269");
+      next.searchParams.set("page", "2");
+      return jsonResponse([], url.searchParams.get("page") === "1"
+        ? { headers: { link: `<${next}>; rel="next"` } } : {});
+    },
+  });
+  await client.getRepository({ owner, repository });
+  for (const read of [
+    (page: number) => client.getIssuesPage({ owner, repository, page }),
+    (page: number) => client.getPullRequestsPage({ owner, repository, page }),
+    (page: number) => client.getPullRequestFilesPage({ owner, repository, pullNumber: 2, page }),
+    (page: number) => client.getReleasesPage({ owner, repository, page }),
+  ]) {
+    assert.equal((await read(1)).nextPage, 2);
+    assert.equal((await read(2)).nextPage, null);
+  }
+  assert.equal(requests.length, 9);
+  assert.ok(requests.every((url) => new URL(url).pathname.startsWith(`/repos/${owner}/${repository}`)));
+});
+
+test("numeric pagination aliases reject unknown identities, foreign scopes and modified queries", async () => {
+  const suffix = "/pulls/2/files?per_page=100&page=2";
+  const targets = [
+    `${GITHUB_API_ORIGIN}/repositories/1296270${suffix}`,
+    `${GITHUB_API_ORIGIN}/repositories/1296269/pulls/3/files?per_page=100&page=2`,
+    `${GITHUB_API_ORIGIN}/repositories/1296269${suffix}&page=2`,
+    `${GITHUB_API_ORIGIN}/repositories/1296269${suffix}&extra=1`,
+    `${GITHUB_API_ORIGIN}/repositories/1296269${suffix}#fragment`,
+    `https://evil.example/repositories/1296269${suffix}`,
+    `https://user:password@api.github.com/repositories/1296269${suffix}`,
+    `${GITHUB_API_ORIGIN}/repositories/1296269/pulls/2/files?per_page=100&page=3`,
+  ];
+  for (const target of targets) {
+    const client = createGitHubReadOnlyClient({
+      credential: await credential(),
+      fetchImplementation: async (input) => new URL(input.toString()).pathname === `/repos/${owner}/${repository}`
+        ? repositoryIdentityResponse()
+        : jsonResponse([], { headers: { link: `<${target}>; rel="next"` } }),
+    });
+    await client.getRepository({ owner, repository });
+    await assert.rejects(() => client.getPullRequestFilesPage({ owner, repository, pullNumber: 2, page: 1 }),
+      assertCode("GITHUB_INVALID_RESPONSE"));
+  }
+  const unknownIdentity = createGitHubReadOnlyClient({
+    credential: await credential(),
+    fetchImplementation: async () => jsonResponse([], {
+      headers: { link: `<${GITHUB_API_ORIGIN}/repositories/1296269${suffix}>; rel="next"` },
+    }),
+  });
+  await assert.rejects(() => unknownIdentity.getPullRequestFilesPage({ owner, repository, pullNumber: 2, page: 1 }),
+    assertCode("GITHUB_INVALID_RESPONSE"));
+});
+
 test("paged client rejects foreign or non-sequential Link targets", async () => {
   const invalidTargets = [
     `https://evil.example/repos/${owner}/${repository}/issues?page=2`,

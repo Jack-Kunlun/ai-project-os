@@ -5,6 +5,7 @@ import { after, test } from "node:test";
 import { Client } from "pg";
 import { getDb, getGitAutomationWorkerDb } from "../src/lib/db";
 import { sealSecret } from "../src/lib/credential-vault";
+import { encodeGitCredential } from "../src/lib/git/credentials";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
@@ -111,7 +112,7 @@ async function createActiveGrant(reads: MaterialReads): Promise<Fixture> {
   const connectionId = randomUUID();
   const credentialId = randomUUID();
   const secret = `github_pat_${suffix}${"x".repeat(32)}`;
-  const sealed = sealSecret("git", secret, testMasterKey);
+  const sealed = sealSecret("git", encodeGitCredential("token", secret), testMasterKey);
   const connectionOwnerActor = { id: connectionOwnerId, role: "user" as const, accountAccessVersion: 1 };
   const projectOwnerActor = { id: ownerId, role: "user" as const, accountAccessVersion: 1 };
   const projectOwner = { id: ownerId, role: "user" as const, accountAccessVersion: 1 };

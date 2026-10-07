@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { openSealedSecret, readExistingMasterKey } from "@/lib/credential-vault";
 import { assertGitAutomationWorkerSession, isGitAutomationWorkerDatabase } from "@/lib/db";
+import { decodeGitCredential } from "@/lib/git/credentials";
 
 const uuid = z.string().uuid();
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -79,5 +80,11 @@ export async function openGitAutomationMaterialCredential(context: GitAutomation
   if (createHash("sha256").update(secret, "utf8").digest("hex") !== context.credential.secretFingerprint) {
     throw new Error("GIT_AUTOMATION_MATERIAL_CONTEXT_INVALID");
   }
-  return secret;
+  try {
+    const credential = decodeGitCredential(secret, "token");
+    if (credential.authKind !== "token") throw new Error("GIT_AUTOMATION_MATERIAL_CONTEXT_INVALID");
+    return credential.token;
+  } catch {
+    throw new Error("GIT_AUTOMATION_MATERIAL_CONTEXT_INVALID");
+  }
 }

@@ -15,18 +15,12 @@ export async function createPostgresWorkspaceFixture(
   const workspaceId = randomUUID();
 
   await db.$transaction(async (tx) => {
-    // Historical upgrade gates may predate later nullable account columns.
-    // Only return the existing identity needed to seed this fixture.
-    await tx.appUser.create({
-      select: { id: true },
-      data: {
-        id: ownerId,
-        username: `postgres_gate_workspace_owner_${suffix}`,
-        role: "user",
-        passwordHash: null,
-        passwordSalt: null,
-      },
-    });
+    // Freeze the identity columns shared by historical upgrade schemas. Prisma
+    // inserts current model defaults even when only the id is selected.
+    await tx.$executeRaw`
+      INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
+      VALUES (${ownerId}::uuid, ${`postgres_gate_workspace_owner_${suffix}`}, 'user', CURRENT_TIMESTAMP)
+    `;
     await tx.workspace.create({
       select: { id: true },
       data: {

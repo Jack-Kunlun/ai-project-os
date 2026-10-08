@@ -344,7 +344,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
     await page.getByRole("button", { name: "创建管理员并进入" }).click();
   } else if (landingPath === "/login") {
     await expectNoAccessibilityViolations(page, "login");
-    await page.getByLabel("用户名", { exact: true }).fill(adminUsername);
+    await page.getByLabel("用户名或手机号", { exact: true }).fill(adminUsername);
     await page.getByLabel("密码", { exact: true }).fill(adminPassword);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
   } else {
@@ -389,7 +389,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   const adminContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
   const adminPage = await adminContext.newPage();
   await adminPage.goto("/login");
-  await adminPage.getByLabel("用户名", { exact: true }).fill(adminUsername);
+  await adminPage.getByLabel("用户名或手机号", { exact: true }).fill(adminUsername);
   await adminPage.getByLabel("密码", { exact: true }).fill(adminPassword);
   await adminPage.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(adminPage).toHaveURL(/\/admin$/u);
@@ -397,7 +397,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.getByRole("button", { name: "退出", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/u);
-  await page.getByLabel("用户名", { exact: true }).fill(ownerUsername);
+  await page.getByLabel("用户名或手机号", { exact: true }).fill(ownerUsername);
   await page.getByLabel("密码", { exact: true }).fill(ownerPassword);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
@@ -456,16 +456,18 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expectNoAccessibilityViolations(page, "credits heatmap");
 
   await page.goto("/personal/connections/git");
-  await expect(page.getByRole("heading", { name: "我的 Git 连接", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Git 授权管理", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "添加服务", exact: true }).click();
   const gitDialog = page.getByRole("dialog", { name: "添加 Git 服务" });
   const addressHelp = gitDialog.getByRole("button", { name: "服务地址填写示例" });
+  await addressHelp.scrollIntoViewIfNeeded();
   await addressHelp.hover();
   const helpIcon = await addressHelp.boundingBox();
   const helpIconVisual = await addressHelp.locator("span").boundingBox();
   expect(helpIconVisual!.width).toBeLessThan(helpIcon!.width);
   await expect(page.getByRole("tooltip")).toContainText("HTTPS 示例");
   const caHelp = gitDialog.getByRole("button", { name: "自定义 CA（可选）填写示例" });
+  await caHelp.scrollIntoViewIfNeeded();
   await caHelp.hover();
   const helpPopup = page.getByRole("tooltip");
   await expect(helpPopup).toContainText("可信私有 CA");
@@ -491,10 +493,10 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(projectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   const projectId = projectHref!.split("/")[2]!;
   await page.goto(`${projectHref!}/repositories`);
-  await expect(page.getByRole("heading", { name: "项目 Git 委托", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "代码仓库", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "自动读取授权", exact: true })).toBeVisible();
   await expect(page.getByText("还没有 Git 自动读取授权记录。", { exact: true })).toBeVisible();
-  await expect(page.getByText("还没有可用的个人 Git 连接。")).toBeVisible();
+  await expect(page.getByText("还没有已验证的个人 Git 连接。先添加连接并测试指定仓库和 ref，再回来提交范围提案。", { exact: true })).toBeVisible();
   const projectRepositoryViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   const repositoryDimensions = await readOverflowMeasurement(page);
@@ -721,15 +723,15 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto("/personal/configuration");
   await expect(page.getByRole("heading", { name: "我的空间配置", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /我的 Git 连接/u })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Git 授权管理/u })).toBeVisible();
   await expect(page.getByRole("link", { name: /我的 MCP 连接/u })).toBeVisible();
   await expectNoAccessibilityViolations(page, "personal configuration");
 
-  await page.getByRole("link", { name: /我的 Git 连接/u }).click();
+  await page.getByRole("link", { name: /Git 授权管理/u }).click();
   await expect(page).toHaveURL(/\/personal\/connections\/git$/u);
-  await expect(page.getByRole("heading", { name: "我的 Git 连接", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Git 授权管理", exact: true })).toBeVisible();
   await expect(page.getByText(/项目页支持一次性手动只读委托和单独的自动读取双确认授权/u)).toBeVisible();
-  await expect(page.getByText(/授权生效后才会按计划只读/u)).toBeVisible();
+  await expect(page.getByText(/写入\/提交和旧 PAT 路径保持关闭/u)).toBeVisible();
   await expectNoAccessibilityViolations(page, "personal Git connections");
 
   await page.goto("/personal/connections/mcp");

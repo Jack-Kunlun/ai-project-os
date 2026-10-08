@@ -10,7 +10,7 @@ test("personal project search makes archived selection explicit and keeps all-ac
     "BrowserProjectSearch2026Password!",
   );
   await page.getByRole("button", { name: "退出", exact: true }).click();
-  await page.getByLabel("用户名", { exact: true }).fill(user.username);
+  await page.getByLabel("用户名或手机号", { exact: true }).fill(user.username);
   await page.getByLabel("密码", { exact: true }).fill(user.password);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);

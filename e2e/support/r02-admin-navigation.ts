@@ -48,7 +48,7 @@ export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
 export function expectedR02AdminNavigationLinkCount(pathname: string): number {
   if (pathname === "/admin") return 1;
   if (pathname === "/admin/users" || pathname.startsWith("/admin/users/") || pathname === "/admin/credits") return 4;
-  if (pathname.startsWith("/admin/models") || pathname === "/admin/operations/probes") return 3;
+  if (pathname.startsWith("/admin/models") || pathname.startsWith("/admin/sms") || pathname === "/admin/operations/probes") return 4;
   if (pathname.startsWith("/admin/connectors/mcp") || pathname.startsWith("/admin/audit")) return 3;
   if (pathname.startsWith("/admin/operations/")) return 3;
   return 1;
@@ -75,7 +75,7 @@ export function r02ProjectRoutes(projectId: string, projectName: string): readon
     { path: `/projects/${projectId}/control`, heading: projectName, terminal: { kind: "heading", name: "项目模型使用方式" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/assets`, heading: `${projectName} · 文件资料`, terminal: { kind: "text", name: "还没有文件。", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/external-sources`, heading: "外部资料入口", terminal: { kind: "text", name: "还没有网页来源", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
-    { path: `/projects/${projectId}/repositories`, heading: "项目 Git 委托", terminal: { kind: "text", name: "还没有项目 Git 委托" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/repositories`, heading: "代码仓库", terminal: { kind: "text", name: "还没有仓库授权记录" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/tools`, heading: "项目工具权限", terminal: { kind: "text", name: "当前没有可授权的 V2 工具。" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/world`, heading: `${projectName} · 状态治理`, terminal: { kind: "text", name: "尚无当前有效事实" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
   ];
@@ -103,7 +103,7 @@ export async function signInR02Admin(page: Page): Promise<void> {
     await page.getByLabel("再次输入密码", { exact: true }).fill(R02_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "创建管理员并进入", exact: true }).click();
   } else if (pathname === "/login") {
-    await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
+    await page.getByLabel("用户名或手机号", { exact: true }).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(R02_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
   }
@@ -113,7 +113,7 @@ export async function signInR02Admin(page: Page): Promise<void> {
 export async function signInR02PersonalUser(page: Page, user: BrowserPersonalUser): Promise<void> {
   await page.goto("/login");
   await expect(page).toHaveURL(/\/login$/u);
-  await page.getByLabel("用户名", { exact: true }).fill(user.username);
+  await page.getByLabel("用户名或手机号", { exact: true }).fill(user.username);
   await page.getByLabel("密码", { exact: true }).fill(user.password);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);

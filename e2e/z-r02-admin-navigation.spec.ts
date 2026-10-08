@@ -21,19 +21,6 @@ import {
   signInR02PersonalUser,
 } from "./support/r02-admin-navigation";
 
-/** Accept equivalent CSS Color 4 serializations emitted by different Chromium builds. */
-function isExpectedTranslucentScrollbarThumb(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  const rgbaMatch = normalized.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*\)$/u);
-  if (rgbaMatch !== null) {
-    return rgbaMatch[1] === "148" && rgbaMatch[2] === "163" && rgbaMatch[3] === "184" && Number(rgbaMatch[4]) > 0 && Number(rgbaMatch[4]) < 1;
-  }
-  const hexMatch = normalized.match(/^#([0-9a-f]{8})$/u);
-  if (hexMatch === null || hexMatch[1].slice(0, 6) !== "94a3b8") return false;
-  const alpha = Number.parseInt(hexMatch[1].slice(6), 16);
-  return alpha > 0 && alpha < 255;
-}
-
 const R02_ACTOR_PASSWORD = "R02Actor2026Password!";
 
 async function expectR02OverviewErrorState(page: Page): Promise<void> {
@@ -60,8 +47,8 @@ async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<vo
   const dialog = page.getByRole("dialog", { name: "新增供应商", exact: true });
   await expect(dialog).toBeVisible();
   /**
-   * Keep this contract relative to the overlay padding: the dialog may grow on
-   * tall screens, while only its form body may scroll and custom scrollbar
+   * Keep this contract relative to the overlay padding and the compact height
+   * cap: only the form body may scroll and custom scrollbar
    * styling must remain enabled for normal-color modal surfaces.
    */
   const geometry = await dialog.evaluate((element) => {
@@ -84,6 +71,7 @@ async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<vo
     return {
       height: dialogRect.height,
       availableHeight: window.innerHeight - paddingTop - paddingBottom,
+      compactMaxHeight: 44 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
       maxHeight,
       withinOverlayMargins: dialogRect.top >= paddingTop - 1 && dialogRect.bottom <= window.innerHeight - paddingBottom + 1,
       scrollable,
@@ -92,19 +80,21 @@ async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<vo
       footerStayed: Math.abs(footer.getBoundingClientRect().top - footerTop) < 1,
       hasDarkScrollbar: content.classList.contains("app-scrollbar-dark"),
       scrollbarThumb: contentStyle.getPropertyValue("--scrollbar-thumb").trim(),
+      scrollbarColor: contentStyle.scrollbarColor,
     };
   });
   expect(geometry.height).toBeLessThanOrEqual(geometry.availableHeight + 1);
   expect(geometry.maxHeight).toBeLessThanOrEqual(geometry.availableHeight + 1);
-  expect(Math.abs(geometry.maxHeight - geometry.availableHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.maxHeight - Math.min(geometry.compactMaxHeight, geometry.availableHeight))).toBeLessThanOrEqual(1);
   expect(geometry.withinOverlayMargins).toBe(true);
   if (page.viewportSize()?.width && page.viewportSize()!.width >= 1024) expect(geometry.maxHeight).toBeGreaterThan(544);
   expect(geometry.scrollable).toBe(true);
   expect(geometry.scrolled).toBe(true);
   expect(geometry.headerStayed).toBe(true);
   expect(geometry.footerStayed).toBe(true);
-  expect(geometry.hasDarkScrollbar).toBe(true);
-  expect(isExpectedTranslucentScrollbarThumb(geometry.scrollbarThumb)).toBe(true);
+  expect(geometry.hasDarkScrollbar).toBe(false);
+  expect(geometry.scrollbarThumb).toBe("#94a3b8");
+  expect(geometry.scrollbarColor).not.toBe("auto");
   await dialog.getByRole("button", { name: "关闭新增供应商" }).click();
   await expect(dialog).toHaveCount(0);
 }
@@ -237,7 +227,7 @@ async function seedR02DetailFixtures(projectId: string, actorId: string): Promis
 async function signInR02Actor(page: Parameters<typeof signInR02Admin>[0], actor: R02Actor, returnTo = "/profile"): Promise<void> {
   await page.goto(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   await expect(page).toHaveURL(/\/login(?:\?returnTo=.*)?$/u);
-  await page.getByLabel("用户名", { exact: true }).fill(actor.username);
+  await page.getByLabel("用户名或手机号", { exact: true }).fill(actor.username);
   await page.getByLabel("密码", { exact: true }).fill(actor.password);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect.poll(() => {
@@ -528,7 +518,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     await disableR02Actor(page, actors.disabled);
     await disabledPage.goto("/dashboard");
     await expect(disabledPage).toHaveURL(/\/login$/u);
-    await disabledPage.getByLabel("用户名", { exact: true }).fill(actors.disabled.username);
+    await disabledPage.getByLabel("用户名或手机号", { exact: true }).fill(actors.disabled.username);
     await disabledPage.getByLabel("密码", { exact: true }).fill(actors.disabled.password);
     await disabledPage.getByRole("button", { name: "登 录", exact: true }).click();
     await expect(disabledPage).toHaveURL(/\/login$/u);

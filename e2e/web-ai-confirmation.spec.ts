@@ -17,7 +17,7 @@ async function signInBrowserPersonalUser(page: Page): Promise<BrowserPersonalUse
     await page.getByLabel("再次输入密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "创建管理员并进入" }).click();
   } else if (landingPath === "/login") {
-    await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
+    await page.getByLabel("用户名或手机号", { exact: true }).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
   }
@@ -25,7 +25,7 @@ async function signInBrowserPersonalUser(page: Page): Promise<BrowserPersonalUse
   const personalUser = await seedBrowserPersonalUser(`browser-confirmation-${randomUUID().replaceAll("-", "").slice(0, 12)}`, "BrowserPersonal2026Password!");
   await page.getByRole("button", { name: "退出", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/u);
-  await page.getByLabel("用户名", { exact: true }).fill(personalUser.username);
+  await page.getByLabel("用户名或手机号", { exact: true }).fill(personalUser.username);
   await page.getByLabel("密码", { exact: true }).fill(personalUser.password);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);

@@ -22,7 +22,7 @@ async function signInBrowserAdmin(page: Page): Promise<void> {
     await page.getByLabel("再次输入密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "创建管理员并进入" }).click();
   } else if (landingPath === "/login") {
-    await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
+    await page.getByLabel("用户名或手机号", { exact: true }).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
   }
@@ -70,7 +70,7 @@ test("administrator can open the read-only failure inbox and non-admins remain b
   try {
     const origin = new URL(page.url()).origin;
     await ordinaryPage.goto(`${origin}/login?returnTo=%2Fadmin%2Foperations%2Ffailures`);
-    await ordinaryPage.getByLabel("用户名", { exact: true }).fill(fixture.username);
+    await ordinaryPage.getByLabel("用户名或手机号", { exact: true }).fill(fixture.username);
     await ordinaryPage.getByLabel("密码", { exact: true }).fill(BROWSER_FAILURE_USER_PASSWORD);
     await ordinaryPage.getByRole("button", { name: "登 录", exact: true }).click();
     await expect(ordinaryPage).toHaveURL(/\/dashboard$/u);

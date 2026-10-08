@@ -9,6 +9,12 @@ from pathlib import Path
 spec=importlib.util.spec_from_file_location('deploy','deploy/production/ai-project-os-v080-dev1-deploy.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 source='c8e341f39fbb77b44bc8a8f2a8483c3bd5ac2bd5';target='a'*40
+def fixture_lstat(real_lstat,fixture_root,path):
+ info=real_lstat(path)
+ try:Path(path).relative_to(fixture_root)
+ except ValueError:mode=stat.S_IFDIR|0o755
+ else:mode=info.st_mode
+ return types.SimpleNamespace(st_uid=0,st_gid=0,st_mode=mode)
 assert m.SOURCE_REVISION==source and m.TAG=='v0.8.0-dev.1'
 assert m.CONFIRMATION=='CONFIRM_V080_DEV1_WITH_BACKUP_AND_FULL_CI'
 m.ROOT=Path.cwd()
@@ -32,8 +38,7 @@ with tempfile.TemporaryDirectory() as tool_directory:
  m.ROOT=tool_root;m.BACKUP_TOOL=installed
  real_os_for_tool=m.os
  def root_uid_lstat_tool(path):
-  info=real_os_for_tool.lstat(path)
-  return types.SimpleNamespace(st_uid=0,st_gid=0,st_mode=info.st_mode)
+  return fixture_lstat(real_os_for_tool.lstat,tool_root,path)
  m.os=types.SimpleNamespace(lstat=root_uid_lstat_tool)
  calls=[]
  m.subprocess=types.SimpleNamespace(PIPE=-1,run=lambda *args,**kwargs:(calls.append((args,kwargs)) or types.SimpleNamespace(returncode=0,stdout='backup fixture')))
@@ -95,8 +100,7 @@ if True:
   path.chmod(mode)
  real_os_for_trust=m.os
  def root_uid_lstat(path):
-  info=real_os_for_trust.lstat(path)
-  return types.SimpleNamespace(st_uid=0,st_gid=0,st_mode=info.st_mode)
+  return fixture_lstat(real_os_for_trust.lstat,root,path)
  m.os=types.SimpleNamespace(lstat=root_uid_lstat)
  def expect_rejected(operation,code):
   try:operation();raise AssertionError('invalid trusted path accepted')
@@ -113,6 +117,9 @@ if True:
   expect_rejected(lambda:m.trusted(loose_directory,0o700,directory=True),'HOST_PATH_TYPE_OR_MODE_INVALID')
   linked=root/'linked-file';linked.symlink_to(loose_file)
   expect_rejected(lambda:m.trusted(linked,0o600),'HOST_SYMLINK_REJECTED')
+  writable_parent=root/'writable-parent';writable_parent.mkdir();writable_parent.chmod(0o770)
+  secure_child=writable_parent/'secure-child';secure_child.write_text('fixture');secure_child.chmod(0o600)
+  expect_rejected(lambda:m.trusted(secure_child,0o600),'HOST_PATH_UNTRUSTED')
  finally:m.os=real_os_for_trust
  source_ids=['1'*64,'2'*64,'3'*64];pg='9'*64
  m.trusted=lambda *args,**kwargs:None

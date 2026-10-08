@@ -16,8 +16,7 @@ import {
   confirmProjectGitRepositoryDelegationProject,
   proposeProjectGitRepositoryDelegation,
 } from "../src/lib/project-git-repository-delegation-service";
-import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
-import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
+import { seedPersonalConnectionProbeCreateContextPg } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.PROJECT_GIT_AUTOMATION_UPGRADE_POSTGRES_GATE === "1";
 const databaseName = "ai_project_os_project_git_automation_upgrade_test";
@@ -60,17 +59,33 @@ async function createActiveGrant(db: PrismaClient, admin: Client): Promise<Reado
   grantId: string;
 }>> {
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
-  const { workspaceId, ownerId: projectOwnerId } = await createPostgresWorkspaceFixture(db);
+  const workspaceId = randomUUID();
+  const projectOwnerId = randomUUID();
   const connectionOwnerId = randomUUID();
   const projectId = randomUUID();
   const connectionId = randomUUID();
   const credentialId = randomUUID();
   const connectionFingerprint = "a".repeat(64);
-  const addressFingerprint = "b".repeat(64);
+  const addressFingerprint = "a".repeat(64);
   const connectionOwnerActor = { id: connectionOwnerId, role: "user" as const, accountAccessVersion: 1 };
   const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
 
-  await db.appUser.create({ select: { id: true }, data: { id: connectionOwnerId, username: `automation_upgrade_owner_${suffix}`, role: "user" } });
+  // Prisma also supplies defaults for newly added non-null columns on INSERT.
+  // Freeze identities to schema 131 instead of relying on today's client model.
+  await admin.query(`
+    INSERT INTO public."AppUser" ("id", "username", "role", "updatedAt")
+    VALUES ($1::uuid, $2, 'user', CURRENT_TIMESTAMP), ($3::uuid, $4, 'user', CURRENT_TIMESTAMP)
+  `, [projectOwnerId, `automation_upgrade_project_owner_${suffix}`, connectionOwnerId, `automation_upgrade_owner_${suffix}`]);
+  await db.$transaction(async (tx) => {
+    await tx.workspace.create({ select: { id: true }, data: {
+      id: workspaceId, name: `Automation upgrade workspace ${suffix}`,
+      slug: `automation-upgrade-workspace-${suffix}`, createdById: projectOwnerId,
+    } });
+    await grantWorkspaceMembership(tx, {
+      workspaceId, userId: projectOwnerId, role: "owner", actorId: projectOwnerId,
+      reason: "git_automation_upgrade_project_owner",
+    });
+  });
   await db.project.create({
     data: { id: projectId, workspaceId, name: `Automation upgrade ${suffix}`, slug: `automation-upgrade-${suffix}` },
   });
@@ -94,21 +109,26 @@ async function createActiveGrant(db: PrismaClient, admin: Client): Promise<Reado
       maskedSuffix: "upgrade", secretFingerprint: connectionFingerprint,
     },
   });
-  await createGitConnectionFixture({
-    id: connectionId,
-    name: `Automation upgrade Git ${suffix}`,
-    providerKind: "github",
-    transport: "https",
-    baseUrl: "https://github.com",
-    authKind: "token",
-    status: "verified",
-    ownershipState: "confirmed",
-    resolvedAddressFingerprint: addressFingerprint,
-    createdById: connectionOwnerId,
-    ownerUserId: connectionOwnerId,
-    ownerAccountAccessVersion: 1,
-    credentialId,
-  }, db);
+  // Schema 131 predates verifiedAddresses. Keep this historical fixture on its
+  // original columns while retaining the consumed-probe connection guard.
+  await admin.query("BEGIN");
+  try {
+    await seedPersonalConnectionProbeCreateContextPg(admin, {
+      kind: "git", actorId: connectionOwnerId, connectionId,
+    });
+    await admin.query(`
+      INSERT INTO public."GitConnection" (
+        "id", "name", "providerKind", "transport", "baseUrl", "authKind", "status",
+        "ownershipState", "resolvedAddressFingerprint", "createdById", "ownerUserId",
+        "ownerAccountAccessVersion", "credentialId", "updatedAt"
+      ) VALUES ($1::uuid, $2, 'github', 'https', 'https://github.com', 'token', 'verified',
+        'confirmed', $3, $4::uuid, $4::uuid, 1, $5::uuid, CURRENT_TIMESTAMP)
+    `, [connectionId, `Automation upgrade Git ${suffix}`, addressFingerprint, connectionOwnerId, credentialId]);
+    await admin.query("COMMIT");
+  } catch (error) {
+    await admin.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  }
 
   const delegation = await proposeProjectGitRepositoryDelegation(projectId, {
     gitConnectionId: connectionId,

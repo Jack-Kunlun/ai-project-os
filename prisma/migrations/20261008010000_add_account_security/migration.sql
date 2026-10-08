@@ -369,10 +369,33 @@ END;
 $$;
 
 REVOKE ALL ON TABLE "AppUserSecurityAudit" FROM PUBLIC;
-GRANT SELECT ON TABLE "AppUserSecurityAudit" TO ai_project_os_runtime;
-GRANT SELECT, INSERT ON TABLE "AppUserSecurityAudit" TO ai_project_os_entitlement_writer;
-REVOKE UPDATE, DELETE, TRUNCATE ON TABLE "AppUserSecurityAudit" FROM ai_project_os_runtime, ai_project_os_entitlement_writer;
-REVOKE ALL ON FUNCTION "app_user_security_audit_insert_guard"() FROM PUBLIC, ai_project_os_runtime, ai_project_os_entitlement_writer;
-REVOKE ALL ON FUNCTION "app_user_security_audit_immutable_guard"() FROM PUBLIC, ai_project_os_runtime, ai_project_os_entitlement_writer;
-REVOKE ALL ON FUNCTION "app_user_security_audit_transition_guard"() FROM PUBLIC, ai_project_os_runtime, ai_project_os_entitlement_writer;
-REVOKE ALL ON FUNCTION "app_user_security_revision_guard"() FROM PUBLIC, ai_project_os_runtime, ai_project_os_entitlement_writer;
+REVOKE ALL ON FUNCTION "app_user_security_audit_insert_guard"() FROM PUBLIC;
+REVOKE ALL ON FUNCTION "app_user_security_audit_immutable_guard"() FROM PUBLIC;
+REVOKE ALL ON FUNCTION "app_user_security_audit_transition_guard"() FROM PUBLIC;
+REVOKE ALL ON FUNCTION "app_user_security_revision_guard"() FROM PUBLIC;
+
+-- Empty installations can apply the schema before principal bootstrap. Existing
+-- production roles receive these ACLs here; reconciliation also enforces them.
+DO $$
+DECLARE
+  role_name TEXT;
+  helper_name TEXT;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY['ai_project_os_runtime', 'ai_project_os_entitlement_writer'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = role_name) THEN
+      IF role_name = 'ai_project_os_runtime' THEN
+        EXECUTE pg_catalog.format('GRANT SELECT ON TABLE public."AppUserSecurityAudit" TO %I', role_name);
+      ELSE
+        EXECUTE pg_catalog.format('GRANT SELECT, INSERT ON TABLE public."AppUserSecurityAudit" TO %I', role_name);
+      END IF;
+      EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public."AppUserSecurityAudit" FROM %I', role_name);
+      FOREACH helper_name IN ARRAY ARRAY[
+        'app_user_security_audit_insert_guard', 'app_user_security_audit_immutable_guard',
+        'app_user_security_audit_transition_guard', 'app_user_security_revision_guard'
+      ] LOOP
+        EXECUTE pg_catalog.format('REVOKE ALL ON FUNCTION public.%I() FROM %I', helper_name, role_name);
+      END LOOP;
+    END IF;
+  END LOOP;
+END;
+$$;

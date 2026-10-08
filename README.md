@@ -4,7 +4,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-源码版本标识为 `0.7.18`，修复和升级入口见 [v0.7.18 说明](docs/releases/v0.7.18.md)。2026-10-08 最近核对生产运行 `0.7.17`，数据库与 Worker 健康；本补丁生产切换待执行。已收录 [Git 生产收尾验收](docs/releases/v0.7.17-git-acceptance.md) 与 [S1b 本地受控验收](docs/releases/v0.7.17-s1b-local-acceptance.md)，S1b 生产能力仍未启用。版本标签、GitHub Release 和生产部署是独立状态，实际线上版本以公网 `/api/health` 为准。历史人工功能验收见[生产功能验收记录](docs/releases/v0.7.3-production-acceptance.md)，开发和验收计划见 [开发与验收计划](docs/releases/v0.7.0-plan.md)。
+源码版本标识为 `0.8.0-dev.1`，账号恢复、手机号管理及迁移发布入口见 [版本说明](docs/releases/v0.8.0-dev.1.md)。2026-10-08 发布前核对生产运行 `0.7.18`，数据库与 Worker 健康。已收录 [Git 生产收尾验收](docs/releases/v0.7.17-git-acceptance.md) 与 [S1b 本地受控验收](docs/releases/v0.7.17-s1b-local-acceptance.md)，S1b 生产能力仍未启用。版本标签、GitHub Release 和生产部署是独立状态，实际线上版本以公网 `/api/health` 为准。历史人工功能验收见[生产功能验收记录](docs/releases/v0.7.3-production-acceptance.md)，开发和验收计划见 [开发与验收计划](docs/releases/v0.7.0-plan.md)。
 
 `v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
 
@@ -36,7 +36,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 手机号认证与账号注销
 
-`0.8.0-dev.1` 已补入账号找回、密码重设、手机号绑定与换绑的本地实现；范围与验收状态见 [0.8.x 账号安全](docs/0.8x-account-security.md)。本候选尚未发布或部署，不表示线上已提供这些能力。
+`0.8.0-dev.1` 已补入账号找回、密码重设、手机号绑定与换绑；范围与实际验收状态见 [0.8.x 账号安全](docs/0.8x-account-security.md)。真实短信与完整浏览器认证流程单独验收。
 
 已发布中国大陆 +86 短信验证注册、验证码登录、手机号与密码登录、后台短信配置和个人中心注销。提供阿里云个人短信认证 PNVS、阿里云企业标准短信 SendSms 和腾讯云短信 SendSms 适配，后台真实发送并核验测试短信后才允许保存加密配置。2026-10-06 已确认生产 PNVS 测试核验及保存启用通过；其他供应商、手机号注册、验证码登录和注销的真实流程仍须分别验收。注销后手机号可注册全新账号；旧账号永久停用、独占个人工作区封存，旧资料不会转移。启用步骤、现有限制及验证证据见 [手机号认证与注销](docs/phone-authentication.md)。
 
@@ -53,7 +53,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；近期版本说明见 [v0.7.18](docs/releases/v0.7.18.md)。
+- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；近期版本说明见 [v0.8.0-dev.1](docs/releases/v0.8.0-dev.1.md)。
 - V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
 - V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。

@@ -4,7 +4,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-源码版本标识为 `0.7.12`，本次修复和升级入口见 [v0.7.12 说明](docs/releases/v0.7.12.md)。2026-10-07 已核对生产运行 `0.7.11`，应用、数据库和 Worker 健康，Git 自动读取卡片间距实测为 24px；本次修复切换与双向 MCP 完整验收仍待完成。版本标签、GitHub Release 和生产部署是独立状态，实际线上版本以公网 `/api/health` 为准。历史人工功能验收见[生产功能验收记录](docs/releases/v0.7.3-production-acceptance.md)，开发和验收计划见 [开发与验收计划](docs/releases/v0.7.0-plan.md)。
+源码版本标识为 `0.7.18`，修复和升级入口见 [v0.7.18 说明](docs/releases/v0.7.18.md)。2026-10-08 最近核对生产运行 `0.7.17`，数据库与 Worker 健康；本补丁生产切换待执行。已收录 [Git 生产收尾验收](docs/releases/v0.7.17-git-acceptance.md) 与 [S1b 本地受控验收](docs/releases/v0.7.17-s1b-local-acceptance.md)，S1b 生产能力仍未启用。版本标签、GitHub Release 和生产部署是独立状态，实际线上版本以公网 `/api/health` 为准。历史人工功能验收见[生产功能验收记录](docs/releases/v0.7.3-production-acceptance.md)，开发和验收计划见 [开发与验收计划](docs/releases/v0.7.0-plan.md)。
 
 `v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
 
@@ -51,7 +51,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；近期版本说明见 [v0.7.12](docs/releases/v0.7.12.md)。
+- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；近期版本说明见 [v0.7.18](docs/releases/v0.7.18.md)。
 - V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
 - V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。

@@ -16,6 +16,7 @@ type FakeSessionDb = {
       role: "user";
       disabledAt: Date | null;
       accountAccessVersion: number;
+      securityRevision: number;
     }> | null>;
   };
   appSession: {
@@ -39,6 +40,7 @@ test("createSession opens one transaction even when its transaction client expos
         role: "user",
         disabledAt: null,
         accountAccessVersion: 7,
+        securityRevision: 3,
       }),
     },
     appSession: {
@@ -57,7 +59,9 @@ test("createSession opens one transaction even when its transaction client expos
 
   assert.equal(transactionCalls, 1);
   assert.equal(createdData[0]?.accountAccessVersion, 7);
+  assert.equal(createdData[0]?.securityRevision, 3);
   assert.equal(session.user.accountAccessVersion, 7);
+  assert.equal(session.user.securityRevision, 3);
 });
 
 test("createSession fails closed when a direct caller omits the account epoch", async () => {
@@ -162,7 +166,7 @@ test("account access lifecycle is a separate preview and detail PATCH surface", 
   assert.match(service, /confirmationUsername/u);
   assert.match(auth, /session\.accountAccessVersion !== session\.user\.accountAccessVersion/u);
   assert.doesNotMatch(auth, /accountAccessVersion\s*\?\?\s*1/u);
-  assert.match(auth, /accountAccessVersion,\s*tokenHash/u);
+  assert.match(auth, /accountAccessVersion,\s*securityRevision,\s*tokenHash/u);
   assert.match(auth, /accountAccessVersion:\s*session\.accountAccessVersion/u);
   assert.match(auth, /user:\s*\{\s*is:\s*\{[\s\S]*accountAccessVersion:\s*session\.user\.accountAccessVersion/u);
   assert.match(migration, /AppUser_account_access_guard/u);

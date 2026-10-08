@@ -39,7 +39,6 @@ export function LoginForm({
   const remember = true;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [helpVisible, setHelpVisible] = useState(false);
   const [smsSuccessNotice, setSmsSuccessNotice] = useState<string | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -110,7 +109,6 @@ export function LoginForm({
     if (nextMethod === "sms" && !smsLoginAvailable) return;
     setMethod(nextMethod);
     setError(null);
-    setHelpVisible(false);
     setSmsCode("");
     setSmsChallengeId(null);
   }
@@ -224,11 +222,10 @@ export function LoginForm({
 
             {method === "password" ? (
               <div className="mt-5 flex justify-end text-[12px]">
-                <button type="button" onClick={() => setHelpVisible((visible) => !visible)} className="font-semibold text-indigo-600 transition hover:text-indigo-500">忘记密码？</button>
+                <Link href="/recover" className="font-semibold text-indigo-600 transition hover:text-indigo-500">忘记账号或密码？</Link>
               </div>
             ) : null}
 
-            {helpVisible ? <p role="status" className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-700">当前部署不通过邮件重置密码。请联系工作区管理员恢复本地账户，或使用已绑定的 GitHub / 企业身份登录。</p> : null}
             {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeTone === "error" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{notice}</p> : null}
             {smsSuccessNotice ? <p role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{smsSuccessNotice}</p> : null}
             {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}

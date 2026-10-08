@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { ApiError } from "@/lib/api-errors";
 
-export type SmsCodePurpose = "register" | "login" | "close";
+export type SmsCodePurpose = "register" | "login" | "close" | "recover" | "bind" | "change-old" | "change-new";
 export function normalizeMainlandPhone(value: unknown): string {
   if (typeof value !== "string" || !/^(?:\+86)?1[3-9][0-9]{9}$/u.test(value)) {
     throw new ApiError(400, "PHONE_AUTH_INVALID_PHONE", "请输入有效的中国大陆手机号");

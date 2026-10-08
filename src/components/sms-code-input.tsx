@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { GraphicCaptchaDialog, type GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
 
-type SmsPurpose = "register" | "login" | "close";
+type SmsPurpose = "register" | "login" | "close" | "recover" | "bind" | "change-old" | "change-new";
 type SmsAvailability = "unavailable" | "available";
 
 export function normalizeMainlandPhoneInput(value: string): string {

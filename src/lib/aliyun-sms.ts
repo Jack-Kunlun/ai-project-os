@@ -10,7 +10,15 @@ const EMPTY_BODY_SHA256 = createHash("sha256").update("").digest("hex");
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAINLAND_E164_PATTERN = /^\+861[3-9][0-9]{9}$/u;
 
-export type SmsPurpose = "register" | "login" | "test" | "close";
+export type SmsPurpose = "register" | "login" | "test" | "close" | "recover" | "bind" | "change-old" | "change-new";
+
+export function smsPurposeSchemeSuffix(purpose: SmsPurpose): string {
+  switch (purpose) {
+    case "change-old": return "old";
+    case "change-new": return "new";
+    default: return purpose;
+  }
+}
 
 export type AliyunSmsConfig = Readonly<{
   accessKeyId: string;
@@ -50,7 +58,7 @@ function readConfigValues(values: Record<string, unknown>): AliyunSmsConfig {
   if (entries.some((value) => typeof value !== "string" || value.length === 0 || value !== value.trim())) throw notConfigured();
   if (
     !/^[A-Za-z0-9_-]{1,12}$/u.test(schemePrefix as string)
-    || ["register", "login", "test", "close"].some((purpose) => `${schemePrefix}-${purpose}`.length > 20)
+    || (["register", "login", "test", "close", "recover", "bind", "change-old", "change-new"] as const).some((purpose) => `${schemePrefix}-${smsPurposeSchemeSuffix(purpose)}`.length > 20)
     || !/^[A-Za-z0-9_-]{1,128}$/u.test(accessKeyId as string)
     || (accessKeySecret as string).length > 512
     || /[\u0000-\u001f\u007f]/u.test(accessKeySecret as string)
@@ -91,9 +99,9 @@ function validateConfig(config: AliyunSmsConfig): AliyunSmsConfig {
 }
 
 export function aliyunSmsScheme(purpose: SmsPurpose, config: AliyunSmsConfig = readAliyunSmsConfig()): string {
-  if (purpose !== "register" && purpose !== "login" && purpose !== "test" && purpose !== "close") throw notConfigured();
+  if (!["register", "login", "test", "close", "recover", "bind", "change-old", "change-new"].includes(purpose)) throw notConfigured();
   const normalized = validateConfig(config);
-  const schemeName = `${normalized.schemePrefix}-${purpose}`;
+  const schemeName = `${normalized.schemePrefix}-${smsPurposeSchemeSuffix(purpose)}`;
   if (schemeName.length > 20) throw notConfigured();
   return schemeName;
 }
@@ -102,7 +110,7 @@ function assertRequestInput(input: { phoneE164: string; purpose: SmsPurpose; cha
   if (!MAINLAND_E164_PATTERN.test(input.phoneE164) || !UUID_V4_PATTERN.test(input.challengeId)) {
     throw new ApiError(400, "SMS_REQUEST_INVALID", "短信验证请求无效。");
   }
-  if (input.purpose !== "register" && input.purpose !== "login" && input.purpose !== "test" && input.purpose !== "close") {
+  if (!["register", "login", "test", "close", "recover", "bind", "change-old", "change-new"].includes(input.purpose)) {
     throw new ApiError(400, "SMS_REQUEST_INVALID", "短信验证请求无效。");
   }
 }

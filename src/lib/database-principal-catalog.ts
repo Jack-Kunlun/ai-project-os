@@ -42,7 +42,7 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "ProjectScan", "ProjectSnapshot", "ProjectAiPolicyRevision", "ProjectAiPolicyOperationProfile",
   "ProjectAiPolicy", "ModelProcessingGrant", "ModelProcessingGrantSource", "ModelProcessingGrantOperation",
   "AiRun", "AiRunAttempt", "AiRunInputSource", "AiAuditEvent", "AiCandidateBatch", "AiCandidateClaim",
-  "AppUser", "PlatformBootstrap", "AppUserEmailVerificationAudit", "PersonalKnowledgeDocument", "PersonalKnowledgeRevision", "PersonalKnowledgeAudit", "PersonalKnowledgeIndexPointer", "PersonalKnowledgeRelation", "PersonalKnowledgeGraphSuggestion", "PersonalKnowledgeExtractionAttempt", "PersonalKnowledgeQaChallenge", "PersonalKnowledgeQaAudit", "PersonalKnowledgeSemanticIndexState", "PersonalKnowledgeSemanticGeneration", "PersonalKnowledgeSemanticEntry", "PersonalKnowledgeSemanticChallenge", "PersonalKnowledgeSemanticAudit", "PersonalConnectionProbeAttempt", "AccountAccessMutationPreview", "AccountAccessAudit",
+  "AppUser", "PlatformBootstrap", "AppUserEmailVerificationAudit", "AppUserSecurityAudit", "PersonalKnowledgeDocument", "PersonalKnowledgeRevision", "PersonalKnowledgeAudit", "PersonalKnowledgeIndexPointer", "PersonalKnowledgeRelation", "PersonalKnowledgeGraphSuggestion", "PersonalKnowledgeExtractionAttempt", "PersonalKnowledgeQaChallenge", "PersonalKnowledgeQaAudit", "PersonalKnowledgeSemanticIndexState", "PersonalKnowledgeSemanticGeneration", "PersonalKnowledgeSemanticEntry", "PersonalKnowledgeSemanticChallenge", "PersonalKnowledgeSemanticAudit", "PersonalConnectionProbeAttempt", "AccountAccessMutationPreview", "AccountAccessAudit",
   "MembershipSubscription", "MembershipMutationPreview", "MembershipSubscriptionAudit", "PlatformTokenGrant", "PlatformTokenGrantLegacyNullIssuerSnapshot",
   "MembershipApplication", "MembershipApplicationPreview", "MembershipApplicationAudit",
   "PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenLedgerEntry",
@@ -87,13 +87,14 @@ export const ENTITLEMENT_PROTECTED_RELATIONS = Object.freeze([
   "PlatformTokenGrantAudit",
   "LocalRegistrationBudget",
   "SmsAuthChallenge", "SmsProviderConfig", "SmsProviderProbe", "SmsProviderConfigAudit", "AccountClosureReceipt", "AccountClosureBudget",
-  "PhoneAuthBudget", "GraphicCaptchaChallenge", "GraphicCaptchaBudget",
+  "PhoneAuthBudget", "GraphicCaptchaChallenge", "GraphicCaptchaBudget", "AppUserSecurityAudit",
 ] as const);
 
 // Review decisions are written through the dedicated entitlement-writer
 // session. Runtime may read the immutable audit record, but cannot forge it.
 export const WRITER_APPEND_ONLY_RELATIONS = Object.freeze([
   "WebSourceReviewAudit",
+  "AppUserSecurityAudit",
 ] as const);
 
 // Runtime and entitlement-writer trigger paths share this tiny coordination
@@ -316,6 +317,11 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
  */
 export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
   triggerFunction("app_user_phone_auth_guard", "", "verified phone claims and closure release"),
+  triggerFunction("app_user_security_revision_guard", "", "account password and phone security revision audit guard"),
+  triggerFunction("app_user_security_audit_insert_guard", "", "account security audit proof binding"),
+  triggerFunction("app_user_security_audit_immutable_guard", "", "account security audit append-only guard"),
+  triggerFunction("app_user_security_audit_transition_guard", "", "account security audit final state guard"),
+  triggerFunction("app_session_account_access_guard", "", "account session access and security revision guard"),
   triggerFunction("sms_auth_expected_code_guard", "", "Immutable expected SMS code and verification match"),
   triggerFunction("sms_provider_config_version_guard", "", "SMS provider version compare-and-swap"),
   triggerFunction("sms_provider_probe_lifecycle_guard", "", "SMS provider real probe lifecycle"),

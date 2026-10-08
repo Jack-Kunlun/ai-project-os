@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { ApiError } from "@/lib/api-errors";
 import { phoneAuthSecret } from "@/lib/phone-auth-config";
@@ -37,5 +38,11 @@ export async function reserveSmsVerifyBudget(tx:Tx,phoneInput:string):Promise<{n
   const fingerprint=phoneFingerprint(normalizeMainlandPhone(phoneInput),phoneAuthSecret());
   await admission(tx);const now=await smsDatabaseClock(tx);
   await budget(tx,"verify_phone_hour",fingerprint,HOUR,30,now);await budget(tx,"verify_global_hour",ZERO,HOUR,500,now);
+  return {now,fingerprint};
+}
+export async function reserveAccountPasswordVerifyBudget(tx:Tx,userId:string):Promise<{now:Date;fingerprint:string}> {
+  const fingerprint=createHmac("sha256",phoneAuthSecret()).update("phone-auth:account-password:v1:").update(userId).digest("hex");
+  await admission(tx);const now=await smsDatabaseClock(tx);
+  await budget(tx,"verify_account_password_hour",fingerprint,HOUR,10,now);
   return {now,fingerprint};
 }

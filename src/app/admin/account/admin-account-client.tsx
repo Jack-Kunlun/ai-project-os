@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AdminPageHeader } from "@/components/admin-page-header";
+import { AccountPhonePanel } from "@/components/account-phone-panel";
 
 type AdminProfile = Readonly<{
   username: string;
@@ -10,6 +11,8 @@ type AdminProfile = Readonly<{
   email: string | null;
   emailVerifiedAt: string | null;
   hasLocalPassword: boolean;
+  phoneE164: string | null;
+  phoneAuthStatus: "disabled" | "unavailable" | "available";
   activeSessionCount: number;
   lastSeenAt: string | null;
 }>;
@@ -93,5 +96,6 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
         <button disabled={pending || profile === null} className="mt-5 min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">更新密码</button>
       </form>
     </div>
+    {profile ? <AccountPhonePanel key={profile.phoneE164 ?? "unbound"} phoneE164={profile.phoneE164} hasLocalPassword={profile.hasLocalPassword} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
   </div>;
 }

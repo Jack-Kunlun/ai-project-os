@@ -23,7 +23,14 @@ export type SmsTransport = {
   check: typeof checkSmsCode;
 };
 const transport: SmsTransport = { send: sendSmsCode, check: checkSmsCode };
+const ACTOR_PHONE_PURPOSES = new Set<SmsCodePurpose>(["bind", "change-old", "change-new"]);
+const SUBJECT_PHONE_PURPOSES = new Set<SmsCodePurpose>(["recover", "bind", "change-old", "change-new"]);
 function invalidCode(): ApiError { return new ApiError(400, "PHONE_AUTH_CODE_INVALID", "验证码无效或已过期，请重新获取"); }
+function requireActorSecurity(actor: SafeSessionUser, current: { accountAccessVersion: number; securityRevision: number }): void {
+  if (actor.accountAccessVersion !== current.accountAccessVersion || actor.securityRevision !== current.securityRevision) {
+    throw new ApiError(401, "AUTH_SESSION_STALE", "登录状态已失效，请重新登录后再试");
+  }
+}
 function requireSmsAutoRegistration(): void {
   if (!isLocalRegistrationEnabled()) throw new ApiError(503, "LOCAL_REGISTRATION_DISABLED", "该手机号尚未注册，当前暂未开放新账号注册。");
 }
@@ -46,16 +53,49 @@ export async function issueSmsChallenge(input: { phone: unknown; purpose: SmsCod
     await lockSmsConfiguration(tx);
     await assertSmsConfigVersion(tx, active.version);
     const { now } = await reserveSmsSendBudget(tx, phone);
-    if (input.purpose === "close") {
+    let subjectUserId: string | null = null;
+    let subjectAccountAccessVersion: number | null = null;
+    let subjectSecurityRevision: number | null = null;
+    let subjectPhoneFingerprint: string | null = null;
+    if (SUBJECT_PHONE_PURPOSES.has(input.purpose)) await lockPhoneIdentity(tx, phone);
+    if (input.purpose === "recover") {
+      const user = await tx.appUser.findUnique({ where: { phoneE164: phone }, select: { id: true, accountAccessVersion: true, securityRevision: true, disabledAt: true, closedAt: true, phoneVerifiedAt: true } });
+      if (user && !user.disabledAt && !user.closedAt && user.phoneVerifiedAt) {
+        subjectUserId = user.id;
+        subjectAccountAccessVersion = user.accountAccessVersion;
+        subjectSecurityRevision = user.securityRevision;
+        subjectPhoneFingerprint = fingerprint;
+      }
+    }
+    if (ACTOR_PHONE_PURPOSES.has(input.purpose) || input.purpose === "close") {
       if (!input.actor) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
       await lockActorAccess(tx, input.actor.id);
       await assertAccountAccessForActor(tx, input.actor);
-      const current = await tx.appUser.findUnique({ where: { id: input.actor.id }, select: { phoneE164: true, closedAt: true } });
-      if (!current || current.closedAt || current.phoneE164 !== phone) throw new ApiError(403, "PHONE_AUTH_FORBIDDEN", "只能验证当前账号绑定的手机号");
+      const current = await tx.appUser.findUnique({ where: { id: input.actor.id }, select: { id: true, phoneE164: true, phoneVerifiedAt: true, passwordHash: true, passwordSalt: true, accountAccessVersion: true, securityRevision: true, disabledAt: true, closedAt: true } });
+      if (!current || current.disabledAt || current.closedAt) throw new ApiError(403, "PHONE_AUTH_FORBIDDEN", "当前账号不能执行此操作");
+      requireActorSecurity(input.actor, current);
+      if (input.purpose === "close" && (current.phoneE164 !== phone || !current.phoneVerifiedAt)) throw new ApiError(403, "PHONE_AUTH_FORBIDDEN", "只能验证当前账号绑定的手机号");
+      if (input.purpose === "bind") {
+        if (current.phoneE164 || current.phoneVerifiedAt) throw new ApiError(409, "ACCOUNT_PHONE_ALREADY_BOUND", "账号已绑定手机号，请使用换绑流程");
+        if (!current.passwordHash || !current.passwordSalt) throw new ApiError(409, "ACCOUNT_LOCAL_PASSWORD_REQUIRED", "请先设置本地密码并重新登录，再绑定手机号");
+      }
+      if (input.purpose === "change-old" && (current.phoneE164 !== phone || !current.phoneVerifiedAt)) throw new ApiError(403, "PHONE_AUTH_FORBIDDEN", "只能验证当前账号绑定的手机号");
+      if (input.purpose === "change-new") {
+        if (!current.phoneE164 || !current.phoneVerifiedAt) throw new ApiError(409, "ACCOUNT_PHONE_NOT_BOUND", "账号尚未绑定手机号，请使用绑定流程");
+        if (current.phoneE164 === phone) throw new ApiError(409, "PHONE_AUTH_PHONE_UNCHANGED", "新手机号与当前绑定手机号相同");
+        const owner = await tx.appUser.findUnique({ where: { phoneE164: phone }, select: { id: true } });
+        if (owner && owner.id !== current.id) throw new ApiError(409, "PHONE_AUTH_PHONE_IN_USE", "该手机号已绑定其他账号");
+      }
+      if (ACTOR_PHONE_PURPOSES.has(input.purpose)) {
+        subjectUserId = current.id;
+        subjectAccountAccessVersion = current.accountAccessVersion;
+        subjectSecurityRevision = current.securityRevision;
+        subjectPhoneFingerprint = current.phoneE164 ? phoneFingerprint(current.phoneE164, phoneAuthSecret()) : null;
+      }
     }
     if ((await tx.appUser.count({ where: { role: "admin" } })) === 0) throw new ApiError(503, "PHONE_AUTH_UNAVAILABLE", "平台尚未完成初始化");
     await tx.smsAuthChallenge.updateMany({ where: { phoneFingerprint: fingerprint, purpose: input.purpose, status: { in: ["pending", "sent"] }, consumedAt: null }, data: { status: "superseded" } });
-    await tx.smsAuthChallenge.create({ data: { id, phoneE164: phone, phoneFingerprint: fingerprint, providerScheme: scheme, configVersion: active.version, expectedCodeDigest, purpose: input.purpose, createdAt: now, expiresAt: new Date(now.getTime() + 5 * MINUTE) } });
+    await tx.smsAuthChallenge.create({ data: { id, phoneE164: phone, phoneFingerprint: fingerprint, providerScheme: scheme, configVersion: active.version, expectedCodeDigest, purpose: input.purpose, subjectUserId, subjectAccountAccessVersion, subjectSecurityRevision, subjectPhoneFingerprint, createdAt: now, expiresAt: new Date(now.getTime() + 5 * MINUTE) } });
   });
   try {
     await sms.send({ phoneE164: phone, purpose: input.purpose, challengeId: id, code }, active.config);
@@ -74,7 +114,7 @@ export async function issueSmsChallenge(input: { phone: unknown; purpose: SmsCod
   return { challengeId: id, retryAfterSeconds: 60, expiresInSeconds: 300 };
 }
 
-export type PhoneAuthProof = { id: string; phone: string; fingerprint: string; purpose: SmsCodePurpose; digest: string; configVersion: number };
+export type PhoneAuthProof = { id: string; phone: string; fingerprint: string; purpose: SmsCodePurpose; digest: string; configVersion: number; subjectUserId: string | null; subjectAccountAccessVersion: number | null; subjectSecurityRevision: number | null; subjectPhoneFingerprint: string | null };
 export async function verifyPhoneChallenge(input: { phone: unknown; challengeId: string; code: string }, purpose: SmsCodePurpose, db: PrismaClient, sms: SmsTransport = transport): Promise<PhoneAuthProof> {
   const active = await loadActiveSmsConfig(db);
   const phone = normalizeMainlandPhone(input.phone);
@@ -122,23 +162,23 @@ export async function verifyPhoneChallenge(input: { phone: unknown; challengeId:
     });
     if (verified.count !== 1) throw invalidCode();
   }
-  return { id: ready.id, phone, fingerprint, purpose, digest, configVersion: active.version };
+  return { id: ready.id, phone, fingerprint, purpose, digest, configVersion: active.version, subjectUserId: ready.subjectUserId, subjectAccountAccessVersion: ready.subjectAccountAccessVersion, subjectSecurityRevision: ready.subjectSecurityRevision, subjectPhoneFingerprint: ready.subjectPhoneFingerprint };
 }
 
 export async function consumePhoneChallenge(tx: Tx, proof: PhoneAuthProof, userId: string, now: Date): Promise<void> {
   await assertSmsConfigVersion(tx, proof.configVersion);
   const rows = await tx.$queryRaw<SmsAuthChallenge[]>`SELECT * FROM "SmsAuthChallenge" WHERE "id"=${proof.id}::uuid FOR UPDATE`;
   const row = rows[0];
-  if (!row || row.phoneE164 !== proof.phone || row.phoneFingerprint !== proof.fingerprint || row.purpose !== proof.purpose || row.configVersion !== proof.configVersion || row.status !== "sent" || row.consumedAt || !row.verifiedAt || !row.codeDigest || !equalSmsDigest(row.codeDigest, proof.digest) || row.expiresAt <= now || row.attemptCount > 5) throw invalidCode();
+  if (!row || row.phoneE164 !== proof.phone || row.phoneFingerprint !== proof.fingerprint || row.purpose !== proof.purpose || row.configVersion !== proof.configVersion || row.subjectUserId !== proof.subjectUserId || row.subjectAccountAccessVersion !== proof.subjectAccountAccessVersion || row.subjectSecurityRevision !== proof.subjectSecurityRevision || row.subjectPhoneFingerprint !== proof.subjectPhoneFingerprint || row.status !== "sent" || row.consumedAt || !row.verifiedAt || !row.codeDigest || !equalSmsDigest(row.codeDigest, proof.digest) || row.expiresAt <= now || row.attemptCount > 5) throw invalidCode();
   await tx.smsAuthChallenge.update({ where: { id: proof.id }, data: { consumedAt: now, consumedByUserId: userId } });
   await tx.$executeRaw`SELECT set_config('app.phone_auth_challenge_id',${proof.id},true)`;
 }
-async function identityLock(tx: Tx, phone: string): Promise<void> {
+export async function lockPhoneIdentity(tx: Tx, phone: string): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`phone-auth-account:${phone}`},0))`;
 }
-async function checkPhoneAlias(tx: Tx, phone: string): Promise<void> {
+export async function assertPhoneAliasAvailable(tx: Tx, phone: string, allowedUserId?: string): Promise<void> {
   const collision = await tx.appUser.findUnique({ where: { username: phone.slice(3) }, select: { id: true } });
-  if (collision) throw new ApiError(409, "PHONE_AUTH_ACCOUNT_LINK_REQUIRED", "此手机号与已有登录名冲突，请使用原登录方式联系管理员处理");
+  if (collision && collision.id !== allowedUserId) throw new ApiError(409, "PHONE_AUTH_ACCOUNT_LINK_REQUIRED", "此手机号与已有登录名冲突，请使用原登录方式联系管理员处理");
 }
 export async function registerPhoneAccount(input: { username: unknown; password: unknown; phone: unknown; challengeId: string; code: string }, db = getEntitlementDb(), sms: SmsTransport = transport): Promise<CreatedSession> {
   requireLocalRegistrationEnabled();
@@ -152,11 +192,11 @@ export async function registerPhoneAccount(input: { username: unknown; password:
     await writer(tx, db);
     await lockSmsConfiguration(tx);
     await assertSmsConfigVersion(tx, proof.configVersion);
-    await identityLock(tx, proof.phone);
+    await lockPhoneIdentity(tx, proof.phone);
     const now = await smsDatabaseClock(tx);
     if ((await tx.appUser.count({ where: { role: "admin" } })) === 0) throw new ApiError(503, "PHONE_AUTH_UNAVAILABLE", "平台尚未完成初始化");
     if (await tx.appUser.findUnique({ where: { phoneE164: proof.phone }, select: { id: true } })) throw new ApiError(409, "PHONE_AUTH_ALREADY_REGISTERED", "该手机号已注册，请直接登录");
-    await checkPhoneAlias(tx, proof.phone);
+    await assertPhoneAliasAvailable(tx, proof.phone);
     const userId = randomUUID();
     await consumePhoneChallenge(tx, proof, userId, now);
     return createOrdinaryAccountInTransaction(tx, { id: userId, username, password, phoneE164: proof.phone }, now);
@@ -180,7 +220,7 @@ export async function loginWithSms(input: { phone: unknown; challengeId: string;
     await writer(tx, db);
     await lockSmsConfiguration(tx);
     await assertSmsConfigVersion(tx, proof.configVersion);
-    await identityLock(tx, proof.phone);
+    await lockPhoneIdentity(tx, proof.phone);
     const now = await smsDatabaseClock(tx);
     if ((await tx.appUser.count({ where: { role: "admin" } })) === 0) throw new ApiError(503, "PHONE_AUTH_UNAVAILABLE", "平台尚未完成初始化");
     const user = await tx.appUser.findUnique({ where: { phoneE164: proof.phone }, select: { id: true, disabledAt: true } });
@@ -191,7 +231,7 @@ export async function loginWithSms(input: { phone: unknown; challengeId: string;
       return { session: await createPhoneSessionInTransaction(tx, user.id, now), registered: false };
     }
     requireSmsAutoRegistration();
-    await checkPhoneAlias(tx, proof.phone);
+    await assertPhoneAliasAvailable(tx, proof.phone);
     const userId = randomUUID();
     await consumePhoneChallenge(tx, proof, userId, now);
     const username = `phone_${userId.replaceAll("-", "").slice(0, 20)}`;

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "@prisma/client";
 import { ApiError } from "@/lib/api-errors";
 import { getEntitlementDb } from "@/lib/db";
 import { openSmsConfig, phoneAuthSecret, sealSmsConfig } from "@/lib/phone-auth-config";
@@ -12,11 +14,12 @@ import { issueGraphicCaptchaFixture } from "./graphic-captcha-fixture";
 import { seedVerifiedSmsConfigFixture } from "./sms-provider-config-fixture";
 
 const enabled = process.env.PHONE_AUTH_POSTGRES_GATE === "1";
-function isolated(name: string) {
+function isolated(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error("ISOLATED_PROVIDER_DATABASE_REQUIRED");
   const u = new URL(value);
   if (!["postgresql:", "postgres:"].includes(u.protocol) || u.hostname !== "127.0.0.1" || u.port !== "56329" || u.pathname !== "/ai_project_os_phone_auth_test" || u.search || u.hash) throw new Error("ISOLATED_PROVIDER_DATABASE_REQUIRED");
+  return value;
 }
 const pnvs = { accessKeyId: "adapter-key", accessKeySecret: "isolated-adapter-secret", signName: "隔离测试", templateCode: "100001", schemePrefix: "adapter" };
 const aliyun = { provider: "aliyun-sms", accessKeyId: "adapter-enterprise-key", accessKeySecret: "isolated-enterprise-secret", signName: "隔离测试", templateCode: "SMS_123456", codeParamName: "otp", validityParamName: "ttl" } as const;
@@ -24,7 +27,8 @@ const tencent = { provider: "tencent-sms", secretId: "adapter-tencent-id", secre
 const invalidOtp = (e: unknown) => e instanceof ApiError && e.code === "PHONE_AUTH_CODE_INVALID";
 
 test("three SMS providers require verified configuration and standard OTPs are locally one-use", { skip: !enabled }, async (t) => {
-  isolated("PHONE_AUTH_TEST_DATABASE_URL"); isolated("PHONE_AUTH_TEST_OWNER_URL");
+  isolated("PHONE_AUTH_TEST_DATABASE_URL");
+  const owner = new PrismaClient({ adapter: new PrismaPg({ connectionString: isolated("PHONE_AUTH_TEST_OWNER_URL") }) });
   const db = getEntitlementDb();
   const actor = { id: randomUUID(), role: "admin", accountAccessVersion: 1 } as const;
   await db.appUser.create({ data: { id: actor.id, role: "admin", username: `adapter_admin_${actor.id.slice(0, 8)}` } });
@@ -133,7 +137,7 @@ test("three SMS providers require verified configuration and standard OTPs are l
       await assert.rejects(verifyPhoneChallenge(input, "login", db), invalidOtp);
       assert.equal((await db.smsAuthChallenge.findUniqueOrThrow({ where: { id: input.challengeId } })).attemptCount, 5);
       const expired = await issue();
-      await db.$executeRaw`UPDATE "SmsAuthChallenge" SET "createdAt"=CURRENT_TIMESTAMP-interval '6 minutes',"expiresAt"=CURRENT_TIMESTAMP-interval '1 minute' WHERE "id"=${expired.challengeId}::uuid`;
+      await owner.$executeRaw`UPDATE "SmsAuthChallenge" SET "createdAt"=CURRENT_TIMESTAMP-interval '6 minutes',"expiresAt"=CURRENT_TIMESTAMP-interval '1 minute' WHERE "id"=${expired.challengeId}::uuid`;
       await assert.rejects(verifyPhoneChallenge(expired, "login", db), invalidOtp);
     });
     await t.test("switch to Tencent invalidates verified unused challenges and candidate probes", async () => {
@@ -161,5 +165,6 @@ test("three SMS providers require verified configuration and standard OTPs are l
       await tx.smsProviderConfig.deleteMany();
       if (prior) await seedVerifiedSmsConfigFixture(tx, prior);
     });
+    await Promise.all([db.$disconnect(), owner.$disconnect()]);
   }
 });

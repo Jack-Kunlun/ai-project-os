@@ -13,28 +13,33 @@ import { newCaptchaAnswer, renderGraphicCaptcha } from "@/lib/graphic-captcha-im
 import { validCaptchaBrowserToken } from "@/lib/graphic-captcha-cookie";
 export const graphicCaptchaProofSchema=z.object({challengeId:z.string().uuid(),answer:z.string().regex(/^[A-Za-z0-9]{6}$/u)}).strict();
 export type GraphicCaptchaProof=z.infer<typeof graphicCaptchaProofSchema>;
-export type GraphicCaptchaPurpose="register"|"login"|"close"|"test";
-type Actor={id:string;role:string;accountAccessVersion?:number};
+export type GraphicCaptchaPurpose="register"|"login"|"close"|"test"|"recover"|"bind"|"change-old"|"change-new";
+type Actor={id:string;role:string;accountAccessVersion?:number;securityRevision?:number};
 type Input={phone:unknown;purpose:GraphicCaptchaPurpose;browserToken:string;actor?:Actor};
 type Tx=Prisma.TransactionClient;
 const WINDOW=600_000,TTL=180_000;
+const ACTOR_BOUND_PURPOSES=new Set<GraphicCaptchaPurpose>(["close","test","bind","change-old","change-new"]);
 function invalid():ApiError{return new ApiError(400,"GRAPHIC_CAPTCHA_INVALID","图形验证码错误或已失效，请换一张后重试");}
 function hash(domain:string,value:string):string{return createHmac("sha256",phoneAuthSecret()).update(`graphic-captcha-v1:${domain}:`).update(value).digest("hex");}
 function binding(input:Input){
- if(!validCaptchaBrowserToken(input.browserToken)||!["register","login","close","test"].includes(input.purpose))throw invalid();
- const phone=normalizeMainlandPhone(input.phone),actor=(input.purpose==="close"||input.purpose==="test")?input.actor:undefined;
- if((input.purpose==="close"||input.purpose==="test")&&(!actor||!z.string().uuid().safeParse(actor.id).success||!Number.isSafeInteger(actor.accountAccessVersion)||(actor.accountAccessVersion??0)<1))throw invalid();
- return {phone,phoneFingerprint:phoneFingerprint(phone,phoneAuthSecret()),browserFingerprint:hash("browser",input.browserToken),actorId:actor?.id??null,actorAccountAccessVersion:actor?.accountAccessVersion??null};
+ if(!validCaptchaBrowserToken(input.browserToken)||!["register","login","close","test","recover","bind","change-old","change-new"].includes(input.purpose))throw invalid();
+ const phone=normalizeMainlandPhone(input.phone),actor=ACTOR_BOUND_PURPOSES.has(input.purpose)?input.actor:undefined;
+ if(ACTOR_BOUND_PURPOSES.has(input.purpose)&&(!actor||!z.string().uuid().safeParse(actor.id).success||!Number.isSafeInteger(actor.accountAccessVersion)||(actor.accountAccessVersion??0)<1))throw invalid();
+ if(["bind","change-old","change-new"].includes(input.purpose)&&(!Number.isSafeInteger(actor?.securityRevision)||(actor?.securityRevision??0)<1))throw invalid();
+ return {phone,phoneFingerprint:phoneFingerprint(phone,phoneAuthSecret()),browserFingerprint:hash("browser",input.browserToken),actorId:actor?.id??null,actorAccountAccessVersion:actor?.accountAccessVersion??null,actorSecurityRevision:actor?.securityRevision??null};
 }
-function digest(id:string,b:ReturnType<typeof binding>,purpose:string,answer:string):string{return hash("answer",JSON.stringify([id,b.phoneFingerprint,b.browserFingerprint,purpose,b.actorId,b.actorAccountAccessVersion,answer.toUpperCase()]));}
+function digest(id:string,b:ReturnType<typeof binding>,purpose:string,answer:string):string{return hash("answer",JSON.stringify([id,b.phoneFingerprint,b.browserFingerprint,purpose,b.actorId,b.actorAccountAccessVersion,b.actorSecurityRevision,answer.toUpperCase()]));}
 async function writer(tx:Tx,db:PrismaClient){if(isEntitlementDatabase(db))await assertEntitlementWriterSession(tx);}
 async function actorAllowed(tx:Tx,input:Input,phone:string):Promise<boolean>{
- if(input.purpose!=="close"&&input.purpose!=="test")return true;
+ if(!ACTOR_BOUND_PURPOSES.has(input.purpose))return true;
  if(!input.actor)return false;
  await lockActorAccess(tx,input.actor.id);
  try{await assertAccountAccessForActor(tx,input.actor);}catch{return false;}
- const user=await tx.appUser.findUnique({where:{id:input.actor.id},select:{role:true,phoneE164:true,closedAt:true}});
- return !!user&&!user.closedAt&&(input.purpose==="test"?user.role==="admin"&&input.actor.role==="admin":user.phoneE164===phone);
+ const user=await tx.appUser.findUnique({where:{id:input.actor.id},select:{role:true,phoneE164:true,closedAt:true,securityRevision:true}});
+ if(!user||user.closedAt||(input.actor.securityRevision!==undefined&&user.securityRevision!==input.actor.securityRevision))return false;
+ if(input.purpose==="test")return user.role==="admin"&&input.actor.role==="admin";
+ if(input.purpose==="close"||input.purpose==="change-old")return user.phoneE164===phone;
+ return true;
 }
 async function budget(tx:Tx,scope:string,keyFingerprint:string,limit:number,now:Date){
  const where={scope_keyFingerprint:{scope,keyFingerprint}},old=await tx.graphicCaptchaBudget.findUnique({where});
@@ -54,7 +59,7 @@ export async function issueGraphicCaptcha(input:Input,db=getEntitlementDb(),rend
   await tx.graphicCaptchaChallenge.deleteMany({where:{expiresAt:{lt:now}}});
   await tx.graphicCaptchaBudget.deleteMany({where:{updatedAt:{lt:new Date(now.getTime()-WINDOW)}}});
   await budget(tx,"issue_browser",b.browserFingerprint,40,now);await budget(tx,"issue_phone",b.phoneFingerprint,20,now);await budget(tx,"issue_global","0".repeat(64),1000,now);
-  await tx.graphicCaptchaChallenge.create({data:{id,phoneFingerprint:b.phoneFingerprint,browserFingerprint:b.browserFingerprint,purpose:input.purpose,actorId:b.actorId,actorAccountAccessVersion:b.actorAccountAccessVersion,answerDigest:digest(id,b,input.purpose,answer),createdAt:now,expiresAt:new Date(now.getTime()+TTL)}});
+  await tx.graphicCaptchaChallenge.create({data:{id,phoneFingerprint:b.phoneFingerprint,browserFingerprint:b.browserFingerprint,purpose:input.purpose,actorId:b.actorId,actorAccountAccessVersion:b.actorAccountAccessVersion,actorSecurityRevision:b.actorSecurityRevision,answerDigest:digest(id,b,input.purpose,answer),createdAt:now,expiresAt:new Date(now.getTime()+TTL)}});
  });
  try{return {challengeId:id,image:`data:image/png;base64,${(await renderer(answer)).toString("base64")}`,expiresInSeconds:180 as const};}
  catch{await db.graphicCaptchaChallenge.deleteMany({where:{id}}).catch(()=>undefined);throw new ApiError(503,"GRAPHIC_CAPTCHA_UNAVAILABLE","图形验证码暂不可用，请稍后再试");}
@@ -71,7 +76,7 @@ export async function consumeGraphicCaptcha(input:Input&{captcha:unknown},db=get
   const now=await smsDatabaseClock(tx);
   if(!row||row.consumedAt)return false;
   await tx.graphicCaptchaChallenge.update({where:{id:row.id},data:{consumedAt:now}});
-  return allowed&&row.expiresAt>now&&row.phoneFingerprint===b.phoneFingerprint&&row.browserFingerprint===b.browserFingerprint&&row.purpose===input.purpose&&row.actorId===b.actorId&&row.actorAccountAccessVersion===b.actorAccountAccessVersion&&equalSmsDigest(row.answerDigest,digest(row.id,b,input.purpose,proof.answer));
+  return allowed&&row.expiresAt>now&&row.phoneFingerprint===b.phoneFingerprint&&row.browserFingerprint===b.browserFingerprint&&row.purpose===input.purpose&&row.actorId===b.actorId&&row.actorAccountAccessVersion===b.actorAccountAccessVersion&&row.actorSecurityRevision===b.actorSecurityRevision&&equalSmsDigest(row.answerDigest,digest(row.id,b,input.purpose,proof.answer));
  });
  if(!passed)throw invalid();
 }

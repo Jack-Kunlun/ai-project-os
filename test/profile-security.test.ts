@@ -46,12 +46,14 @@ test("read-only session authentication preserves validity checks without touchin
         expiresAt: new Date("2026-09-13T00:00:00.000Z"),
         lastSeenAt: new Date("2026-09-01T00:00:00.000Z"),
         accountAccessVersion: 1,
+        securityRevision: 1,
         user: {
           id: userId,
           username: "owner",
           role: "user" as const,
           disabledAt: null,
           accountAccessVersion: 1,
+          securityRevision: 1,
         },
       }),
       updateMany: async () => {
@@ -60,7 +62,7 @@ test("read-only session authentication preserves validity checks without touchin
       },
     },
     appUser: {
-      findUnique: async () => ({ id: userId, disabledAt: null, accountAccessVersion: 1 }),
+      findUnique: async () => ({ id: userId, disabledAt: null, accountAccessVersion: 1, securityRevision: 1 }),
     },
   } as unknown as PrismaClient;
   const token = "a".repeat(40);
@@ -80,23 +82,29 @@ test("read-only session authentication preserves validity checks without touchin
 
 test("password rotation verifies the current password, replaces the digest, and revokes all sessions", async () => {
   let password = await createPasswordRecord("CurrentPassword123");
+  let securityRevision = 1;
   let revokedSessions = 0;
+  const currentUser = () => ({ id: userId, ...password, passwordVersion: 1, securityRevision, disabledAt: null, closedAt: null });
   const tx = {
+    $executeRaw: async () => 1,
     appUser: {
-      updateMany: async ({ where, data }: { where: Record<string, unknown>; data: typeof password }) => {
-        const matches = where.id === userId && where.passwordHash === password.passwordHash && where.passwordSalt === password.passwordSalt;
+      findUnique: async () => currentUser(),
+      updateMany: async ({ where, data }: { where: Record<string, unknown>; data: typeof password & { securityRevision: { increment: number } } }) => {
+        const matches = where.id === userId && where.passwordHash === password.passwordHash && where.passwordSalt === password.passwordSalt && where.securityRevision === securityRevision;
         if (!matches) return { count: 0 };
-        password = data;
+        password = { passwordHash: data.passwordHash, passwordSalt: data.passwordSalt, passwordVersion: data.passwordVersion };
+        securityRevision += data.securityRevision.increment;
         return { count: 1 };
       },
     },
+    appUserSecurityAudit: { create: async () => ({}) },
     appSession: {
       updateMany: async () => { revokedSessions += 3; return { count: 3 }; },
     },
   };
   const db = {
     appUser: {
-      findUnique: async () => ({ id: userId, ...password }),
+      findUnique: async () => currentUser(),
     },
     $transaction: async (operation: (client: typeof tx) => Promise<void>) => operation(tx),
   } as unknown as PrismaClient;
@@ -105,6 +113,7 @@ test("password rotation verifies the current password, replaces the digest, and 
 
   assert.equal(await verifyPasswordRecord("CurrentPassword123", password), false);
   assert.equal(await verifyPasswordRecord("NextPassword456", password), true);
+  assert.equal(securityRevision, 2);
   assert.equal(revokedSessions, 3);
 });
 
@@ -112,7 +121,7 @@ test("password rotation rejects a wrong or unchanged password before mutating ac
   const password = await createPasswordRecord("CurrentPassword123");
   let mutationCount = 0;
   const db = {
-    appUser: { findUnique: async () => ({ id: userId, ...password }) },
+    appUser: { findUnique: async () => ({ id: userId, ...password, passwordVersion: 1, securityRevision: 1, disabledAt: null, closedAt: null }) },
     $transaction: async () => { mutationCount += 1; },
   } as unknown as PrismaClient;
 
@@ -131,15 +140,17 @@ test("username update applies the canonical login-name boundary", async () => {
   let storedUsername = "owner";
   const db = {
     appUser: {
-      update: async ({ data }: { data: { username: string } }) => {
+      update: async ({ data, select }: { data: { username: string }; select: { securityRevision?: boolean } }) => {
+        assert.equal(select.securityRevision, true);
         storedUsername = data.username;
-        return { id: userId, username: storedUsername, role: "admin" as const, accountAccessVersion: 1 };
+        return { id: userId, username: storedUsername, role: "admin" as const, accountAccessVersion: 1, securityRevision: 4 };
       },
     },
   } as unknown as PrismaClient;
 
   const updated = await updateAccountUsername(userId, "project.owner", db);
   assert.equal(updated.username, "project.owner");
+  assert.equal(updated.securityRevision, 4);
   await assert.rejects(updateAccountUsername(userId, " project.owner", db), authError("AUTH_INVALID_INPUT"));
   assert.equal(storedUsername, "project.owner");
 });

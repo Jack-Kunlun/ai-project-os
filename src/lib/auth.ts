@@ -9,6 +9,7 @@ import { findCurrentWorkspaceMembership, grantWorkspaceMembership } from "@/lib/
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
 import { normalizeMainlandPhone } from "@/lib/phone-auth-identity";
 import { createBootstrapSignupOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
+import { appendAccountSecurityAudit } from "@/lib/account-security-audit";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
@@ -49,6 +50,7 @@ export type SafeSessionUser = Readonly<{
   username: string;
   role: SystemRole;
   accountAccessVersion: number;
+  securityRevision: number;
 }>;
 
 export type SafeSessionContext = Readonly<{
@@ -200,6 +202,32 @@ async function passwordDigest(password: string, salt: Buffer): Promise<Buffer> {
   });
 }
 
+/**
+ * Password mutations participate in the SMS proof lock order even when SMS is
+ * disabled. The raw locks avoid a runtime dependency on phone-auth config or
+ * its secret and serialize code invalidation with challenge issuance/consume.
+ */
+async function lockPasswordSecurityContext(tx: Prisma.TransactionClient, userId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('sms-provider-configuration-v1',0))`;
+  const beforeLock = await tx.appUser.findUnique({ where: { id: userId }, select: { phoneE164: true } });
+  if (!beforeLock) return fail("AUTH_REQUIRED");
+  if (beforeLock.phoneE164) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`phone-auth-account:${beforeLock.phoneE164}`},0))`;
+  }
+  await lockActorAccess(tx, userId);
+  const current = await tx.appUser.findUnique({ where: { id: userId } });
+  if (!current || current.phoneE164 !== beforeLock.phoneE164) return fail("AUTH_REQUIRED");
+  return current;
+}
+
+async function invalidateOutstandingSmsProofs(tx: Prisma.TransactionClient, phoneE164: string | null): Promise<void> {
+  if (!phoneE164) return;
+  await tx.smsAuthChallenge.updateMany({
+    where: { phoneE164, status: { in: ["pending", "sent"] }, consumedAt: null },
+    data: { status: "superseded" },
+  });
+}
+
 export async function createPasswordRecord(passwordInput: unknown): Promise<Readonly<{
   passwordHash: string;
   passwordSalt: string;
@@ -240,8 +268,11 @@ export async function verifyPasswordRecord(
   return timingSafeEqual(actual, expected);
 }
 
-function safeUser(user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">>): SafeSessionUser {
+type SessionUserSnapshot = Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion" | "securityRevision">>;
+
+function safeUser(user: SessionUserSnapshot): SafeSessionUser {
   const accountAccessVersion = user.accountAccessVersion;
+  const securityRevision = user.securityRevision ?? 1;
   if (
     typeof accountAccessVersion !== "number"
     || !Number.isSafeInteger(accountAccessVersion)
@@ -249,7 +280,8 @@ function safeUser(user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick
   ) {
     return fail("AUTH_REQUIRED");
   }
-  return Object.freeze({ id: user.id, username: user.username, role: toSystemRole(user.role), accountAccessVersion });
+  if (!Number.isSafeInteger(securityRevision) || securityRevision < 1) return fail("AUTH_REQUIRED");
+  return Object.freeze({ id: user.id, username: user.username, role: toSystemRole(user.role), accountAccessVersion, securityRevision });
 }
 
 /**
@@ -262,12 +294,14 @@ function safeUser(user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick
  */
 export async function createSessionInTransaction(
   db: PrismaClient | Prisma.TransactionClient,
-  user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">>,
+  user: SessionUserSnapshot,
   now = new Date(),
 ): Promise<CreatedSession> {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_DAYS * 24 * 60 * 60 * 1_000);
-  let sessionUser: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">> = user;
+  let sessionUser: SessionUserSnapshot = user;
+  const observedAccessVersion = user.accountAccessVersion;
+  const observedSecurityRevision = user.securityRevision;
   const appUserDelegate = (db as unknown as {
     appUser?: {
       findUnique?: (args: unknown) => Promise<Readonly<{
@@ -276,19 +310,25 @@ export async function createSessionInTransaction(
         role: AppUser["role"];
         disabledAt: Date | null;
         accountAccessVersion: number;
+        securityRevision?: number;
       }> | null>;
     };
   }).appUser;
   if (typeof appUserDelegate?.findUnique === "function") {
     const current = await appUserDelegate.findUnique({
       where: { id: user.id },
-      select: { id: true, username: true, role: true, disabledAt: true, accountAccessVersion: true },
+      select: { id: true, username: true, role: true, disabledAt: true, accountAccessVersion: true, securityRevision: true },
     });
     if (current === null) return fail("AUTH_REQUIRED");
     if (current.disabledAt !== null) return fail("AUTH_ACCOUNT_DISABLED");
+    if ((observedAccessVersion !== undefined && current.accountAccessVersion !== observedAccessVersion)
+      || (observedSecurityRevision !== undefined && current.securityRevision !== observedSecurityRevision)) {
+      return fail("AUTH_INVALID_CREDENTIALS");
+    }
     sessionUser = current;
   }
   const accountAccessVersion = sessionUser.accountAccessVersion;
+  const securityRevision = sessionUser.securityRevision ?? 1;
   if (
     typeof accountAccessVersion !== "number"
     || !Number.isSafeInteger(accountAccessVersion)
@@ -296,6 +336,7 @@ export async function createSessionInTransaction(
   ) {
     return fail("AUTH_REQUIRED");
   }
+  if (!Number.isSafeInteger(securityRevision) || securityRevision < 1) return fail("AUTH_REQUIRED");
   // The migration installs a DB guard on AppSession. The context is scoped to
   // this transaction and is intentionally not exposed to request callers.
   const executeRaw = (db as unknown as { $executeRaw?: (query: Prisma.Sql) => Promise<unknown> }).$executeRaw;
@@ -303,11 +344,13 @@ export async function createSessionInTransaction(
     await executeRaw.call(db, Prisma.sql`SELECT set_config('app.account_session_context', '1', true)`);
     await executeRaw.call(db, Prisma.sql`SELECT set_config('app.account_session_user_id', ${sessionUser.id}, true)`);
     await executeRaw.call(db, Prisma.sql`SELECT set_config('app.account_session_version', ${accountAccessVersion.toString()}, true)`);
+    await executeRaw.call(db, Prisma.sql`SELECT set_config('app.account_security_revision', ${securityRevision.toString()}, true)`);
   }
   await db.appSession.create({
     data: {
       userId: sessionUser.id,
       accountAccessVersion,
+      securityRevision,
       tokenHash: tokenHash(token),
       expiresAt,
       lastSeenAt: now,
@@ -324,7 +367,7 @@ export async function createSessionInTransaction(
  */
 export async function createSession(
   db: PrismaClient | Prisma.TransactionClient,
-  user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">>,
+  user: SessionUserSnapshot,
   now = new Date(),
 ): Promise<CreatedSession> {
   const transaction = (db as unknown as {
@@ -510,7 +553,7 @@ export async function updateAccountUsername(
   const user = await db.appUser.update({
     where: { id: userId },
     data: { username },
-    select: { id: true, username: true, role: true, accountAccessVersion: true },
+    select: { id: true, username: true, role: true, accountAccessVersion: true, securityRevision: true },
   });
   return safeUser(user);
 }
@@ -555,12 +598,21 @@ export async function updateAccountProfile(
   });
 }
 
-export async function setLocalAccountPassword(userId: string, newPasswordInput: unknown, db: PrismaClient = getDb()): Promise<void> {
+export async function setLocalAccountPassword(userId: string, newPasswordInput: unknown, db: PrismaClient = getEntitlementDb()): Promise<void> {
   const nextPassword = await createPasswordRecord(newPasswordInput);
   await db.$transaction(async (tx) => {
-    const updated = await tx.appUser.updateMany({ where: { id: userId, passwordHash: null, passwordSalt: null }, data: nextPassword });
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
+    const current = await lockPasswordSecurityContext(tx, userId);
+    if (!current || current.disabledAt || current.closedAt) return fail("AUTH_REQUIRED");
+    if (current.passwordHash !== null || current.passwordSalt !== null) return fail("AUTH_LOCAL_PASSWORD_EXISTS");
+    await appendAccountSecurityAudit(tx, { userId, actorId: userId, action: "password_set", securityRevisionBefore: current.securityRevision });
+    const updated = await tx.appUser.updateMany({
+      where: { id: userId, passwordHash: null, passwordSalt: null, securityRevision: current.securityRevision },
+      data: { ...nextPassword, securityRevision: { increment: 1 } },
+    });
     if (updated.count !== 1) return fail("AUTH_LOCAL_PASSWORD_EXISTS");
     await tx.appSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    await invalidateOutstandingSmsProofs(tx, current.phoneE164);
   });
 }
 
@@ -568,7 +620,7 @@ export async function changeAccountPassword(
   userId: string,
   currentPasswordInput: unknown,
   newPasswordInput: unknown,
-  db: PrismaClient = getDb(),
+  db: PrismaClient = getEntitlementDb(),
 ): Promise<void> {
   const user = await db.appUser.findUnique({
     where: { id: userId },
@@ -577,9 +629,12 @@ export async function changeAccountPassword(
       passwordHash: true,
       passwordSalt: true,
       passwordVersion: true,
+      securityRevision: true,
+      disabledAt: true,
+      closedAt: true,
     },
   });
-  if (user === null) return fail("AUTH_REQUIRED");
+  if (user === null || user.disabledAt !== null || user.closedAt !== null) return fail("AUTH_REQUIRED");
   if (user.passwordHash === null || user.passwordSalt === null) return fail("AUTH_CURRENT_PASSWORD_INVALID");
   if (!(await verifyPasswordRecord(currentPasswordInput, user))) {
     return fail("AUTH_CURRENT_PASSWORD_INVALID");
@@ -591,20 +646,32 @@ export async function changeAccountPassword(
   const nextPassword = await createPasswordRecord(newPasswordInput);
   const revokedAt = new Date();
   await db.$transaction(async (tx) => {
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
+    const current = await lockPasswordSecurityContext(tx, userId);
+    if (
+      !current || current.disabledAt || current.closedAt
+      || current.passwordHash !== user.passwordHash
+      || current.passwordSalt !== user.passwordSalt
+      || current.passwordVersion !== user.passwordVersion
+      || current.securityRevision !== user.securityRevision
+    ) return fail("AUTH_CURRENT_PASSWORD_INVALID");
+    await appendAccountSecurityAudit(tx, { userId, actorId: userId, action: "password_changed", securityRevisionBefore: current.securityRevision });
     const update = await tx.appUser.updateMany({
       where: {
         id: userId,
-        passwordHash: user.passwordHash,
-        passwordSalt: user.passwordSalt,
-        passwordVersion: user.passwordVersion,
+        passwordHash: current.passwordHash,
+        passwordSalt: current.passwordSalt,
+        passwordVersion: current.passwordVersion,
+        securityRevision: current.securityRevision,
       },
-      data: nextPassword,
+      data: { ...nextPassword, securityRevision: { increment: 1 } },
     });
     if (update.count !== 1) return fail("AUTH_CURRENT_PASSWORD_INVALID");
     await tx.appSession.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt },
     });
+    await invalidateOutstandingSmsProofs(tx, current.phoneE164);
   });
 }
 
@@ -637,6 +704,7 @@ async function readSessionContextInternal(
     || session.expiresAt <= now
     || session.user.disabledAt !== null
     || session.accountAccessVersion !== session.user.accountAccessVersion
+    || session.securityRevision !== (session.user.securityRevision ?? 1)
   ) return null;
   if (touchLastSeen && now.getTime() - session.lastSeenAt.getTime() > 5 * 60 * 1_000) {
     await db.appSession.updateMany({
@@ -649,13 +717,14 @@ async function readSessionContextInternal(
           is: {
             disabledAt: null,
             accountAccessVersion: session.user.accountAccessVersion,
+            ...(session.user.securityRevision === undefined ? {} : { securityRevision: session.user.securityRevision }),
           },
         },
       },
       data: { lastSeenAt: now },
     });
   }
-  return Object.freeze({ user: safeUser(session.user), sessionId: session.id });
+  return Object.freeze({ user: safeUser({ ...session.user, securityRevision: session.user.securityRevision ?? 1 }), sessionId: session.id });
 }
 
 async function readSessionTokenInternal(

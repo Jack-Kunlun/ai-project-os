@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { modalNativeBackdropClassName, modalSurfaceClassName } from "./modal-styles";
 
-export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test";
+export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test" | "recover" | "bind" | "change-old" | "change-new";
 export type GraphicCaptchaProof = Readonly<{ challengeId: string; answer: string }>;
 
 type GraphicCaptchaDialogProps = {

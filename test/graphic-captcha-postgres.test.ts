@@ -113,7 +113,7 @@ test("graphic CAPTCHA is bound, single-use, and durably rate limited", { skip: !
 
     await t.test("expired, phone, purpose, and browser mismatches consume and reject the proof", async () => {
       const expired = await issueGraphicCaptchaFixture({ phone: phoneFor(3003), purpose: "login" }, db);
-      await owner.$executeRaw`UPDATE "GraphicCaptchaChallenge" SET "createdAt"=clock_timestamp()-interval '4 minutes',"expiresAt"=clock_timestamp()-interval '1 minute' WHERE "id"=${expired.captcha.challengeId}::uuid`;
+      await owner.$executeRaw`UPDATE "GraphicCaptchaChallenge" SET "createdAt"=CURRENT_TIMESTAMP-interval '4 minutes',"expiresAt"=CURRENT_TIMESTAMP-interval '1 minute' WHERE "id"=${expired.captcha.challengeId}::uuid`;
       await assert.rejects(consumeFixture(expired, phoneFor(3003), "login"), invalidCaptcha);
       assert.ok((await db.graphicCaptchaChallenge.findUniqueOrThrow({ where: { id: expired.captcha.challengeId } })).consumedAt);
 

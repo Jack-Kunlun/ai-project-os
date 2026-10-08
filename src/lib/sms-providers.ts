@@ -6,6 +6,7 @@ import {
   checkAliyunSmsCode,
   readAliyunSmsConfig,
   sendAliyunSmsCode,
+  smsPurposeSchemeSuffix,
   type AliyunSmsConfig,
   type SmsPurpose,
 } from "@/lib/aliyun-sms";
@@ -77,7 +78,7 @@ const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAINLAND_E164_PATTERN = /^\+861[3-9][0-9]{9}$/u;
-const VALID_PURPOSES = new Set<SmsPurpose>(["register", "login", "test", "close"]);
+const VALID_PURPOSES = new Set<SmsPurpose>(["register", "login", "test", "close", "recover", "bind", "change-old", "change-new"]);
 const TENCENT_REGIONS = new Set<TencentSmsRegion>(["ap-beijing", "ap-guangzhou", "ap-nanjing"]);
 
 type PlainRecord = Record<string, unknown>;
@@ -167,7 +168,7 @@ function normalizeAliyunSmsConfig(record: PlainRecord): AliyunSmsStandardConfig 
   if (
     record.provider !== "aliyun-sms"
     || (validityParamName !== "" && validityParamName === codeParamName)
-    || ["register", "login", "test", "close"].some((purpose) => `aliyun-sms-${purpose}`.length > 20)
+    || (["register", "login", "test", "close", "recover", "bind", "change-old", "change-new"] as const).some((purpose) => `aliyun-sms-${smsPurposeSchemeSuffix(purpose)}`.length > 20)
   ) {
     throw notConfigured();
   }
@@ -226,7 +227,7 @@ export function smsProviderScheme(purpose: SmsPurpose, config: SmsProviderConfig
   if (!VALID_PURPOSES.has(purpose)) throw requestInvalid();
   const normalized = normalizeSmsProviderConfig(config);
   if (!("provider" in normalized)) return aliyunSmsScheme(purpose, normalized);
-  const scheme = `${normalized.provider}-${purpose}`;
+  const scheme = `${normalized.provider}-${smsPurposeSchemeSuffix(purpose)}`;
   if (scheme.length > 20) throw notConfigured();
   return scheme;
 }

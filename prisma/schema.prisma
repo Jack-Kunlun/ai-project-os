@@ -5171,6 +5171,7 @@ model AppUser {
   passwordHash                                       String?                               @db.VarChar(128)
   passwordSalt                                       String?                               @db.VarChar(128)
   passwordVersion                                    Int                                   @default(1)
+  securityRevision                                   Int                                   @default(1)
   role                                               AppUserRole                           @default(user)
   disabledAt                                         DateTime?
   closedAt                                           DateTime?
@@ -5182,6 +5183,7 @@ model AppUser {
   disabledBy                                         AppUser?                              @relation("AppUserDisabledBy", fields: [disabledById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   disabledUsers                                      AppUser[]                             @relation("AppUserDisabledBy")
   sessions                                           AppSession[]
+  securityAudits                                     AppUserSecurityAudit[]
   oidcIdentityLinkAttempts                           OidcIdentityLinkAttempt[]
   mcpActionResultImports                             ProjectMcpActionResultImport[]        @relation("ProjectMcpActionResultImportedBy")
   mcpExportGrants                                    McpExportGrant[]
@@ -6321,6 +6323,7 @@ model AppSession {
   id                       String                    @id @default(uuid()) @db.Uuid
   userId                   String                    @db.Uuid
   accountAccessVersion     Int                       @default(1)
+  securityRevision         Int                       @default(1)
   tokenHash                String                    @unique @db.Char(64)
   expiresAt                DateTime
   lastSeenAt               DateTime                  @default(now())
@@ -9289,21 +9292,25 @@ model ProviderCallAudit {
 
 /// One-use SMS proofs; no plaintext verification codes or provider credentials.
 model SmsAuthChallenge {
-  id               String    @id @db.Uuid
-  phoneE164        String    @db.VarChar(14)
-  phoneFingerprint String    @db.Char(64)
-  purpose          String    @db.VarChar(16)
-  providerScheme   String    @db.VarChar(20)
-  configVersion    Int
-  expectedCodeDigest  String?   @db.Char(64)
-  codeDigest       String?   @db.Char(64)
-  verifiedAt       DateTime?
-  status           String    @default("pending") @db.VarChar(16)
-  attemptCount     Int       @default(0)
-  expiresAt        DateTime
-  consumedAt       DateTime?
-  consumedByUserId String?   @db.Uuid
-  createdAt        DateTime  @default(now())
+  id                         String    @id @db.Uuid
+  phoneE164                  String    @db.VarChar(14)
+  phoneFingerprint           String    @db.Char(64)
+  purpose                    String    @db.VarChar(16)
+  providerScheme             String    @db.VarChar(20)
+  configVersion              Int
+  expectedCodeDigest         String?   @db.Char(64)
+  codeDigest                 String?   @db.Char(64)
+  verifiedAt                 DateTime?
+  status                     String    @default("pending") @db.VarChar(16)
+  attemptCount               Int       @default(0)
+  expiresAt                  DateTime
+  consumedAt                 DateTime?
+  consumedByUserId           String?   @db.Uuid
+  subjectUserId              String?   @db.Uuid
+  subjectAccountAccessVersion Int?
+  subjectSecurityRevision    Int?
+  subjectPhoneFingerprint    String?   @db.Char(64)
+  createdAt                  DateTime  @default(now())
 
   @@index([phoneFingerprint, createdAt])
   @@index([expiresAt])
@@ -9389,14 +9396,34 @@ model AccountClosureBudget {
   updatedAt       DateTime @updatedAt
 }
 
+/// Append-only account security changes. Phone values and credentials are never stored.
+model AppUserSecurityAudit {
+  id                       String   @id @db.Uuid
+  userId                   String   @db.Uuid
+  actorId                  String?  @db.Uuid
+  action                   String   @db.VarChar(24)
+  securityRevisionBefore   Int
+  securityRevisionAfter    Int
+  phoneFingerprintBefore   String?  @db.Char(64)
+  phoneFingerprintAfter    String?  @db.Char(64)
+  proofChallengeId         String?  @db.Uuid
+  secondaryProofChallengeId String? @db.Uuid
+  transactionId            BigInt   @default(dbgenerated("txid_current()"))
+  createdAt                DateTime @default(now())
+  user                     AppUser  @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId, createdAt])
+}
+
 /// Short-lived, single-attempt graphic CAPTCHA; answers are keyed hashes only.
 model GraphicCaptchaChallenge {
   id String @id @db.Uuid
   phoneFingerprint String @db.Char(64)
   purpose String @db.VarChar(16)
   browserFingerprint String @db.Char(64)
-  actorId String? @db.Uuid
-  actorAccountAccessVersion Int?
+ actorId String? @db.Uuid
+ actorAccountAccessVersion Int?
+ actorSecurityRevision Int?
   answerDigest String @db.Char(64)
   createdAt DateTime @default(now())
   expiresAt DateTime

@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, changeAccountPassword, expiredSessionCookie, requireApiSession, setLocalAccountPassword, updateAccountProfile } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { getPhoneAuthStatus } from "@/lib/phone-auth-config";
 
 export const dynamic = "force-dynamic";
 
@@ -20,13 +21,13 @@ export async function GET(request: Request) {
     if (actor.role !== "admin") throw new ApiError(403, "AUTH_FORBIDDEN", "没有权限执行此操作");
     const db = getDb();
     const [user, activeSessionCount, latestSession] = await Promise.all([
-      db.appUser.findUnique({ where: { id: actor.id }, select: { username: true, displayName: true, email: true, emailVerifiedAt: true, passwordHash: true } }),
+      db.appUser.findUnique({ where: { id: actor.id }, select: { username: true, displayName: true, email: true, emailVerifiedAt: true, passwordHash: true, phoneE164: true } }),
       db.appSession.count({ where: { userId: actor.id, revokedAt: null, expiresAt: { gt: new Date() } } }),
       db.appSession.findFirst({ where: { userId: actor.id, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { lastSeenAt: "desc" }, select: { lastSeenAt: true } }),
     ]);
     if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
     const { passwordHash, ...profile } = user;
-    return NextResponse.json({ profile: { ...profile, hasLocalPassword: passwordHash !== null, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null } }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json({ profile: { ...profile, hasLocalPassword: passwordHash !== null, phoneAuthStatus: await getPhoneAuthStatus(db), activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null } }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

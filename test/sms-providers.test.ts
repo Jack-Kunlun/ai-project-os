@@ -63,6 +63,19 @@ test("normalizer keeps PNVS legacy JSON shape and strips an explicit legacy prov
   assert.equal(smsProviderScheme("register", legacy), "projectos-register");
 });
 
+test("account security purposes use short bounded PNVS schemes while legacy names stay stable", () => {
+  const longestValidLegacyPrefix = { ...pnvsConfig, schemePrefix: "p".repeat(11) };
+  assert.equal(smsProviderScheme("register", longestValidLegacyPrefix), `${longestValidLegacyPrefix.schemePrefix}-register`);
+  assert.equal(smsProviderScheme("close", longestValidLegacyPrefix), `${longestValidLegacyPrefix.schemePrefix}-close`);
+  assert.equal(smsProviderScheme("recover", longestValidLegacyPrefix), `${longestValidLegacyPrefix.schemePrefix}-recover`);
+  assert.equal(smsProviderScheme("bind", longestValidLegacyPrefix), `${longestValidLegacyPrefix.schemePrefix}-bind`);
+  assert.equal(smsProviderScheme("change-old", longestValidLegacyPrefix), `${longestValidLegacyPrefix.schemePrefix}-old`);
+  assert.equal(smsProviderScheme("change-new", longestValidLegacyPrefix), `${longestValidLegacyPrefix.schemePrefix}-new`);
+  for (const purpose of ["register", "login", "close", "recover", "bind", "change-old", "change-new"] as const) {
+    assert.ok(smsProviderScheme(purpose, longestValidLegacyPrefix).length <= 20);
+  }
+});
+
 test("normalizer rejects unknown fields, URL overrides, malformed credentials, and out-of-bound PNVS values", () => {
   const invalidConfigs: unknown[] = [
     { ...pnvsConfig, endpoint: "https://sms.example.invalid" },

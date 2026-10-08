@@ -46,7 +46,7 @@ try {
   if(Object.values(result.rows[0]).some(Boolean))throw new Error("PHONE_AUTH_RUNTIME_WRITE_ALLOWED");
  }
  const keydir=join(temporary,"keys");await mkdir(keydir,{mode:0o700});
- const files=["test/phone-auth-postgres.test.ts","test/sms-provider-admin-postgres.test.ts","test/sms-provider-adapters-postgres.test.ts","test/account-closure-postgres.test.ts","test/graphic-captcha-postgres.test.ts"];
+ const files=["test/phone-auth-postgres.test.ts","test/sms-provider-admin-postgres.test.ts","test/sms-provider-adapters-postgres.test.ts","test/account-closure-postgres.test.ts","test/graphic-captcha-postgres.test.ts","test/account-security-postgres.test.ts"];
  for(const file of files)await readFile(file);
  const output=await command(process.execPath,["--import","tsx","--test","--test-concurrency=1",...files],{
  ...process.env,PHONE_AUTH_POSTGRES_GATE:"1",PHONE_AUTH_TEST_DATABASE_URL:url("ai_project_os_entitlement_writer"),PHONE_AUTH_TEST_OWNER_URL:url("ai_project_os_migrator"),DATABASE_URL:url("ai_project_os_runtime"),ENTITLEMENT_DATABASE_URL:url("ai_project_os_entitlement_writer"),LOCAL_REGISTRATION_ENABLED:"true",PHONE_AUTH_ENABLED:"true",PHONE_AUTH_SECRET:randomBytes(32).toString("base64url"),AI_PROJECT_OS_MASTER_KEY_FILE:join(keydir,"master.key"),AI_PROJECT_OS_PUBLIC_ORIGIN:"https://phone-auth.example.com",

@@ -3,7 +3,7 @@ import { issueGraphicCaptcha, type GraphicCaptchaPurpose } from "@/lib/graphic-c
 import { normalizeMainlandPhone } from "@/lib/phone-auth-identity";
 
 type GraphicCaptchaDb = Parameters<typeof issueGraphicCaptcha>[1];
-type Actor = Readonly<{ id: string; role: string; accountAccessVersion?: number }>;
+type Actor = Readonly<{ id: string; role: string; accountAccessVersion?: number; securityRevision?: number }>;
 
 export type GraphicCaptchaFixture = Readonly<{
   browserToken: string;

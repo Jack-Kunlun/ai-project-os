@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { LogoutButton } from "@/app/logout-button";
 import { AccountClosurePanel } from "@/components/account-closure-panel";
+import { AccountPhonePanel } from "@/components/account-phone-panel";
 import { AppHeader } from "@/components/app-header";
 
 type Profile = {
@@ -176,6 +177,7 @@ export function ProfileClient({
           <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); }} />
           <PasswordForm hasLocalPassword={profile?.hasLocalPassword ?? true} />
         </section>
+        {profile ? <AccountPhonePanel key={profile.phoneE164 ?? "unbound"} hasLocalPassword={profile.hasLocalPassword} phoneE164={profile.phoneE164} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
         {profile ? <AccountClosurePanel hasLocalPassword={profile.hasLocalPassword} phoneE164={profile.phoneE164} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
 
       </div>

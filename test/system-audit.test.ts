@@ -223,7 +223,7 @@ function fakeDb(
   disabledAdmin = false,
   workspaceProjects: readonly FakeRow[] = [{ id: PROJECT_ID, workspaceId: WORKSPACE_ID }],
 ): PrismaClient {
-  const users = [{ id: ADMIN_ID, username: "admin", displayName: "平台管理员", disabledAt: disabledAdmin ? new Date("2026-09-08T00:00:00.000Z") : null, accountAccessVersion: 1, role }, { id: USER_ID, username: "member", displayName: "普通用户", disabledAt: null, accountAccessVersion: 1, role: "user" }];
+  const users = [{ id: ADMIN_ID, username: "admin", displayName: "平台管理员", disabledAt: disabledAdmin ? new Date("2026-09-08T00:00:00.000Z") : null, accountAccessVersion: 1, securityRevision: 1, role }, { id: USER_ID, username: "member", displayName: "普通用户", disabledAt: null, accountAccessVersion: 1, securityRevision: 1, role: "user" }];
   const appUser = {
     findUnique: async () => users[0],
     findMany: async ({ where }: { where?: FakeWhere }) => users.filter((user) => matches(where, user)),
@@ -234,7 +234,7 @@ function fakeDb(
       .slice(0, take ?? 1000),
   };
   const appSession = {
-    findUnique: async () => ({ id: "91111111-1111-4111-8111-111111111111", accountAccessVersion: 1, revokedAt: null, expiresAt: new Date("2030-01-01T00:00:00.000Z"), lastSeenAt: new Date("2026-09-09T00:00:00.000Z"), user: users[0] }),
+    findUnique: async () => ({ id: "91111111-1111-4111-8111-111111111111", accountAccessVersion: 1, securityRevision: 1, revokedAt: null, expiresAt: new Date("2030-01-01T00:00:00.000Z"), lastSeenAt: new Date("2026-09-09T00:00:00.000Z"), user: users[0] }),
     updateMany: async () => ({ count: 0 }),
   };
   return {

@@ -111,6 +111,7 @@ export const SPECIALIZED_POSTGRES_GATE_RUNNERS = Object.freeze([
       "test/sms-provider-adapters-postgres.test.ts",
       "test/account-closure-postgres.test.ts",
       "test/graphic-captcha-postgres.test.ts",
+      "test/account-security-postgres.test.ts",
     ] as const),
   }),
 ] as const);

@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("v0.7.18 cutover preserves production configuration and fails closed", () => {
   const output = execFileSync("python3", ["-B", "-c", `
-import hashlib,importlib.util,json,stat,tempfile,types
+import hashlib,importlib.util,json,shutil,stat,tempfile,types
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('deploy','deploy/production/ai-project-os-v0718-deploy.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
@@ -18,7 +18,12 @@ helper_source=Path(m.__file__).read_text()
 assert '0.7.10' not in helper_source and 'enabled_mcp_environment' not in helper_source
 assert 'target_env' not in helper_source and 'atomic_write(lib.ENV' not in helper_source
 assert "values.get(key) == value for key, value in MCP_SETTINGS.items()" in helper_source
-m.ROOT=Path.cwd()
+ledger_directory=tempfile.TemporaryDirectory()
+ledger_root=Path(ledger_directory.name)
+for migration in sorted((Path.cwd()/'prisma/migrations').iterdir()):
+ if migration.is_dir() and migration.name <= '20261007010000_persist_verified_git_addresses':
+  shutil.copytree(migration,ledger_root/'prisma/migrations'/migration.name)
+m.ROOT=ledger_root
 actual_manifest=m.target_manifest()
 assert len(actual_manifest)==141
 assert actual_manifest[-1][0]=='20261007010000_persist_verified_git_addresses'
@@ -27,14 +32,13 @@ directory=tempfile.TemporaryDirectory()
 root=Path(directory.name);m.ROOT=root
 (root/'deploy/production').mkdir(parents=True)
 # Exercise the real manifest function against the immutable repository ledger.
-import shutil
-shutil.copytree(Path.cwd()/'prisma/migrations',root/'prisma/migrations')
+shutil.copytree(ledger_root/'prisma/migrations',root/'prisma/migrations')
 assert m.target_manifest()==actual_manifest
 last_sql=root/'prisma/migrations'/actual_manifest[-1][0]/'migration.sql'
 last_sql.unlink();last_sql.parent.rmdir()
 try:m.target_manifest();raise AssertionError('missing migration accepted')
 except RuntimeError as error:assert str(error)=='V0718_TARGET_MANIFEST_INVALID'
-shutil.copytree(Path.cwd()/'prisma/migrations'/actual_manifest[-1][0],last_sql.parent)
+shutil.copytree(ledger_root/'prisma/migrations'/actual_manifest[-1][0],last_sql.parent)
 (root/'deploy/production/ai-project-os-v0718-deploy.py').write_bytes(Path(m.__file__).read_bytes())
 (root/'Dockerfile').write_text('LABEL org.opencontainers.image.version="0.7.18"')
 (root/'package.json').write_text(json.dumps({'version':'0.7.18'}))
@@ -158,6 +162,7 @@ try:m.main([target,'FAST']);raise AssertionError('implicit waiver allowed')
 except RuntimeError as error:assert str(error)=='V0718_ARGUMENTS_INVALID'
 print('V0718_OFFLINE_CUTOVER_OK')
 directory.cleanup()
+ledger_directory.cleanup()
 `], { encoding: "utf8" });
   assert.match(output, /V0718_OFFLINE_CUTOVER_OK/u);
 });

@@ -23,7 +23,7 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.doesNotMatch(form, />OS<\/span>/u);
   assert.doesNotMatch(form, /记住我/u);
   assert.match(form, /href="\/register"[\s\S]*创建账号/u);
-  assert.match(form, /忘记密码/u);
+  assert.match(form, /href="\/recover"[\s\S]*忘记账号或密码/u);
   assert.match(form, /使用 GitHub 登录/u);
   assert.match(form, /首次使用 GitHub 登录会自动创建普通用户账号/u);
   assert.match(form, /隐私政策/u);

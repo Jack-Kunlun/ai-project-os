@@ -69,13 +69,13 @@ function fakeSessionDb(user: Readonly<{ id: string; role: AppUserRole }>, bootst
       findUnique: async () => ({
         id: user.id,
         disabledAt: null,
-        accountAccessVersion: 1,
+        accountAccessVersion: 1, securityRevision: 1,
       }),
     },
     appSession: {
       findUnique: async () => ({
         id: "43a1baff-626a-4e3b-9c51-404ef8b19ed5",
-        accountAccessVersion: 1,
+        accountAccessVersion: 1, securityRevision: 1,
         revokedAt: null,
         expiresAt: new Date(now.getTime() + 60_000),
         lastSeenAt: now,
@@ -84,7 +84,7 @@ function fakeSessionDb(user: Readonly<{ id: string; role: AppUserRole }>, bootst
           username: "operator",
           role: user.role,
           disabledAt: null,
-          accountAccessVersion: 1,
+          accountAccessVersion: 1, securityRevision: 1,
         },
       }),
       updateMany: async () => ({ count: 0 }),

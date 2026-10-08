@@ -8,7 +8,7 @@ const source = readFileSync(path, "utf8");
 
 test("v0.7.4 deployment validates both main and tag full database CI and exact ledger", () => {
   const result = execFileSync("python3", ["-B", "-c", `
-import importlib.util
+import importlib.util,shutil,tempfile
 spec=importlib.util.spec_from_file_location('deploy', '${path}')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 sha='a'*40
@@ -37,7 +37,12 @@ for key,value in [('checksum','d'*64),('finished',False),('rolled_back',True),('
  row[key]=old
 try: m.ledger('id',[]);raise AssertionError('wrong count accepted')
 except RuntimeError as e: assert str(e)=='V074_MIGRATION_COUNT_INVALID'
-assert len(m.manifest(m.Path.cwd()))==140
+with tempfile.TemporaryDirectory() as directory:
+ historical=m.Path(directory)
+ for migration in sorted((m.Path.cwd()/'prisma/migrations').iterdir()):
+  if migration.is_dir() and migration.name <= '20261006014000_add_sms_provider_adapters':
+   shutil.copytree(migration,historical/'prisma/migrations'/migration.name)
+ assert len(m.manifest(historical))==140
 calls=[]
 pg='1'*64; migrate='2'*64; reconcile='3'*64; app='4'*64
 def recovery_docker(*args):

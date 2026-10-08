@@ -321,7 +321,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   }
   assert.match(gitAutomationMaterialMigration, /"ProjectGitRepositoryMaterialPublicationHead"[\s\S]*?project_git_material_head_guard/u);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "legacy_mcp_source_reference_guard"));
-  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 140/u);
+  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 142/u);
   assert.ok(DATABASE_PRINCIPAL_RELATIONS.includes("LocalRegistrationBudget"));
   assert.ok(ENTITLEMENT_PROTECTED_RELATIONS.includes("LocalRegistrationBudget"));
   assert.ok(!(RUNTIME_ONLY_CONTROL_PLANE_RELATIONS as readonly string[]).includes("LocalRegistrationBudget"));

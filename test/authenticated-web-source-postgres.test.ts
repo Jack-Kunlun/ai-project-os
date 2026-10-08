@@ -24,7 +24,7 @@ import {
   revokeBrowserWebSourceCredential,
   rotateBrowserWebSourceCredential,
 } from "../src/lib/browser-web-sources";
-import { callWebBrowserBroker } from "../src/lib/web-browser-broker-client";
+import { callWebBrowserBroker, cancelWebBrowserBrokerJobs } from "../src/lib/web-browser-broker-client";
 import { WebBrowserProxyError } from "../src/lib/web-browser-policy";
 import { getDb, getEntitlementDb } from "../src/lib/db";
 import { grantProjectMembership } from "../src/lib/membership-governance";
@@ -32,9 +32,11 @@ import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/projec
 import { buildAutomationScopePreview } from "../src/lib/automation-scope-preview";
 import { collectProjectMemoryInputs, WebMemoryIndexError } from "../src/lib/web-memory-index";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
+import { createS1bComposedBroker } from "./fixtures/s1b-composed-broker";
 import { listProjectWebSources, securePinnedHttpRequest, syncAllProjectWebSources, updateProjectWebSource, WebSourceError } from "../src/lib/web-sources";
 
 const shouldRun = process.env.AUTHENTICATED_WEB_SOURCE_POSTGRES_GATE === "1";
+const shouldRunS1bComposed = shouldRun && process.env.RUN_WEB_BROWSER_COMPOSED_TESTS === "1";
 const PAGE_URL = "https://docs.example.test/private/guide";
 const NETWORK_FINGERPRINT = createHash("sha256").update("fixture public endpoint", "utf8").digest("hex");
 
@@ -1867,6 +1869,163 @@ test(
       await rm(keyDirectory, { recursive: true, force: true });
       await db.$disconnect();
       await writerDb.$disconnect();
+    }
+  },
+);
+
+test(
+  "composed S1b path crosses PostgreSQL, TLS/HMAC broker, Chromium fixture, cancellation and cleanup",
+  { skip: !shouldRunS1bComposed ? "AUTHENTICATED_WEB_SOURCE_POSTGRES_GATE=1 and RUN_WEB_BROWSER_COMPOSED_TESTS=1 are required" : false, timeout: 120_000 },
+  async () => {
+    const db = getDb();
+    const writerDb = getEntitlementDb();
+    const composed = await createS1bComposedBroker(`registry.example.test/team/browser@sha256:${"a".repeat(64)}`);
+    const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-s1b-composed-db-"));
+    const previous = Object.fromEntries([
+      "AI_PROJECT_OS_MASTER_KEY_FILE",
+      "AI_PROJECT_OS_WEB_BROWSER_ENABLED",
+      "AI_PROJECT_OS_WEB_BROWSER_BROKER_URL",
+      "AI_PROJECT_OS_WEB_BROWSER_BROKER_KEY_FILE",
+      "AI_PROJECT_OS_WEB_BROWSER_IMAGE_DIGEST",
+      "AI_PROJECT_OS_WEB_BROWSER_BROKER_ALLOW_PRIVATE",
+    ].map((key) => [key, process.env[key]]));
+    const networkFingerprint = composed.sourceFingerprint;
+    const resolveBrowserNetwork = async (input: Readonly<{ url: string; allowPrivateNetwork: boolean }>) => {
+      assert.equal(input.allowPrivateNetwork, false);
+      return { url: input.url, fingerprint: networkFingerprint };
+    };
+    Object.assign(process.env, composed.environment);
+    process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
+    let cancelFetch: Promise<unknown> | undefined;
+
+    try {
+      const { workspaceId, ownerId } = await createPostgresWorkspaceFixture(db);
+      const suffix = randomUUID().slice(0, 8);
+      const projectId = randomUUID();
+      const editorId = randomUUID();
+      const viewerId = randomUUID();
+      const owner: Actor = { id: ownerId, role: "user", accountAccessVersion: 1 };
+      const editor: Actor = { id: editorId, role: "user", accountAccessVersion: 1 };
+      const viewer: Actor = { id: viewerId, role: "user", accountAccessVersion: 1 };
+      await db.appUser.create({ data: { id: editorId, username: `s1b_composed_editor_${suffix}`, role: "user" } });
+      await db.appUser.create({ data: { id: viewerId, username: `s1b_composed_viewer_${suffix}`, role: "user" } });
+      await db.project.create({ data: { id: projectId, workspaceId, name: `S1b composed ${suffix}`, slug: `s1b-composed-${suffix}` } });
+      await db.$transaction(async (tx) => {
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "s1b_composed_owner" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: ownerId, reason: "s1b_composed_editor" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: ownerId, reason: "s1b_composed_viewer" });
+      });
+
+      const broker: typeof callWebBrowserBroker = (configuration, onDispatch) =>
+        callWebBrowserBroker(configuration, onDispatch, composed.request);
+      const renderedUrl = "https://browser-source.example:8443/rendered-js";
+      const rendered = await createBrowserProjectWebSource(
+        projectId,
+        { name: "Composed rendered JavaScript", url: renderedUrl, mode: "rendered" },
+        owner,
+        db,
+        resolveBrowserNetwork,
+      );
+      const renderedPending = await fetchBrowserProjectWebSource(projectId, rendered.id, owner, db, broker);
+      assert.equal(renderedPending.status, "pendingReview");
+      const stagedRenderedText = (await db.webSourceRevision.findUniqueOrThrow({ where: { id: renderedPending.id }, select: { contentText: true } })).contentText;
+      assert(typeof stagedRenderedText === "string");
+      assert.match(stagedRenderedText, /S1B_COMPOSED_PUBLIC_JS_RENDERED/u);
+      const renderedReview = await getBrowserWebSourceReview(projectId, rendered.id, renderedPending.id, editor, db);
+      assert(typeof renderedReview.contentText === "string");
+      assert.match(renderedReview.contentText, /S1B_COMPOSED_PUBLIC_JS_RENDERED/u);
+      await decideBrowserWebSourceReview(projectId, rendered.id, renderedPending.id, { decision: "accepted" }, editor, writerDb);
+      const renderedPointer = await db.webSourcePointer.findUniqueOrThrow({
+        where: { projectId_webSourceId: { projectId, webSourceId: rendered.id } },
+        select: { webSourceRevisionId: true, revision: { select: { projectSourceId: true } } },
+      });
+      assert.equal(renderedPointer.webSourceRevisionId, renderedPending.id);
+      assert.ok(renderedPointer.revision.projectSourceId);
+      assert.equal(await db.projectSource.count({ where: { projectId, sourceIdentity: rendered.id, contentText: { contains: "S1B_COMPOSED_PUBLIC_JS_RENDERED" } } }), 1);
+      await composed.waitForOriginRequest("GET /rendered-js");
+      await composed.assertJobResourcesRemoved(renderedPending.id);
+
+      const siteForm = {
+        loginUrl: "https://browser-source.example:8443/login",
+        submitUrl: "https://browser-source.example:8443/login/submit",
+        usernameSelector: 'input[name="username"]',
+        passwordSelector: 'input[name="password"]',
+        submitSelector: 'button[type="submit"]',
+        successSelector: "#signed-in",
+        username: "s1b-owner-fixture",
+        password: "SyntheticPassword391",
+      };
+      const privateSource = await createBrowserProjectWebSource(
+        projectId,
+        { name: "Composed private page", url: "https://browser-source.example:8443/private-js", mode: "siteForm", siteForm },
+        owner,
+        db,
+        resolveBrowserNetwork,
+      );
+      const privatePreview = await fetchBrowserProjectWebSource(projectId, privateSource.id, owner, db, broker);
+      assert.equal(privatePreview.status, "pendingReview");
+      const privateOwnerPreview = await getBrowserWebSourceReview(projectId, privateSource.id, privatePreview.id, owner, db);
+      assert(typeof privateOwnerPreview.contentText === "string");
+      assert.match(privateOwnerPreview.contentText, /S1B_COMPOSED_PRIVATE_OWNER_PREVIEW/u);
+      await composed.waitForOriginRequest("GET /login");
+      await composed.waitForOriginRequest("POST /login/submit");
+      await composed.waitForOriginRequest("GET /private-js");
+      await composed.assertJobResourcesRemoved(privatePreview.id);
+      await assert.rejects(() => getBrowserWebSourceReview(projectId, privateSource.id, privatePreview.id, editor, db), WebAiAccessError);
+      await assert.rejects(() => getBrowserWebSourceReview(projectId, privateSource.id, privatePreview.id, viewer, db), WebAiAccessError);
+      await assert.rejects(
+        () => decideBrowserWebSourceReview(projectId, privateSource.id, privatePreview.id, { decision: "accepted" }, owner, writerDb),
+        (error: unknown) => error instanceof WebSourceError && error.code === "WEB_SOURCE_REVIEW_PUBLICATION_DISABLED",
+      );
+      assert.equal(await db.webSourcePointer.count({ where: { projectId, webSourceId: privateSource.id } }), 0);
+      assert.equal(await db.projectSource.count({ where: { projectId, sourceIdentity: privateSource.id } }), 0);
+
+      const cancelSource = await createBrowserProjectWebSource(
+        projectId,
+        { name: "Composed cancellation", url: "https://browser-source.example:8443/hold", mode: "rendered" },
+        owner,
+        db,
+        resolveBrowserNetwork,
+      );
+      const dispatched = deferred();
+      let cancelledJobId: string | null = null;
+      const cancellationFetchBroker: typeof callWebBrowserBroker = (configuration, onDispatch) =>
+        callWebBrowserBroker(configuration, async () => {
+          const request = await onDispatch();
+          cancelledJobId = request.jobId;
+          dispatched.resolve();
+          return request;
+        }, composed.request);
+      cancelFetch = fetchBrowserProjectWebSource(projectId, cancelSource.id, owner, db, cancellationFetchBroker)
+        .then(() => { throw new Error("cancelled browser job unexpectedly returned content"); }, (error: unknown) => error);
+      await dispatched.promise;
+      assert(cancelledJobId !== null);
+      await composed.waitForOriginRequest("GET /hold");
+      const cancellation = async (configuration: Parameters<typeof cancelWebBrowserBrokerJobs>[0], jobIds: readonly string[]) => {
+        await cancelWebBrowserBrokerJobs(configuration, jobIds, composed.request);
+      };
+      const disabled = await updateProjectWebSource(projectId, cancelSource.id, { enabled: false }, owner, db, resolveBrowserNetwork, cancellation);
+      assert.equal(disabled.status, "disabled");
+      const cancellationError = await cancelFetch;
+      assert(cancellationError instanceof WebSourceError, "the pending render must fail after broker cancellation");
+      await composed.assertJobResourcesRemoved(cancelledJobId);
+      const cancelledRevision = await db.webSourceRevision.findUniqueOrThrow({ where: { id: cancelledJobId } });
+      assert.equal(cancelledRevision.contentText, null);
+      assert.equal(await db.webSourcePointer.count({ where: { projectId, webSourceId: cancelSource.id } }), 0);
+      assert.equal(await db.projectSource.count({ where: { projectId, sourceIdentity: cancelSource.id } }), 0);
+    } finally {
+      try {
+        await composed.close();
+      } finally {
+        await cancelFetch?.catch(() => undefined);
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        await rm(keyDirectory, { recursive: true, force: true });
+        await db.$disconnect();
+        await writerDb.$disconnect();
+      }
     }
   },
 );

@@ -104,7 +104,9 @@ if True:
  m.os=types.SimpleNamespace(lstat=root_uid_lstat)
  def expect_rejected(operation,code):
   try:operation();raise AssertionError('invalid trusted path accepted')
-  except RuntimeError as error:assert str(error)=='V080_DEV1_'+code
+  except RuntimeError as error:
+   codes=(code,) if isinstance(code,str) else code
+   assert str(error) in tuple('V080_DEV1_'+item for item in codes)
  try:
   validated=m.validate_backup_receipt(backup_output)
   assert validated['backup_name']==backup_name and validated['source_quiesced']=='true'
@@ -116,7 +118,9 @@ if True:
   expect_rejected(lambda:m.trusted(loose_file,0o600),'HOST_PATH_TYPE_OR_MODE_INVALID')
   expect_rejected(lambda:m.trusted(loose_directory,0o700,directory=True),'HOST_PATH_TYPE_OR_MODE_INVALID')
   linked=root/'linked-file';linked.symlink_to(loose_file)
-  expect_rejected(lambda:m.trusted(linked,0o600),'HOST_SYMLINK_REJECTED')
+  # Linux symlinks are writable-mode entries, so the ownership/mode guard may
+  # reject them before the explicit symlink guard. Both must fail closed.
+  expect_rejected(lambda:m.trusted(linked,0o600),('HOST_SYMLINK_REJECTED','HOST_PATH_UNTRUSTED'))
   writable_parent=root/'writable-parent';writable_parent.mkdir();writable_parent.chmod(0o770)
   secure_child=writable_parent/'secure-child';secure_child.write_text('fixture');secure_child.chmod(0o600)
   expect_rejected(lambda:m.trusted(secure_child,0o600),'HOST_PATH_UNTRUSTED')

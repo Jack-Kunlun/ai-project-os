@@ -35,6 +35,24 @@ type BrokerJob = {
 };
 
 type Runner = (request: WebBrowserBrokerRequest, signal: AbortSignal) => Promise<WebBrowserBrokerResult>;
+
+// A failed render can still be safely cancelled; unverified resource cleanup
+// cannot. Keep this distinction inside the broker rather than in HTTP output.
+export class WebBrowserCleanupError extends Error {
+  constructor() {
+    super("runner-cleanup-unverified");
+    this.name = "WebBrowserCleanupError";
+  }
+}
+
+// Runner adapters may emit this only when their cleanup finally block has
+// succeeded. An unclassified rejection never proves the cleanup postcondition.
+export class WebBrowserJobFailedError extends Error {
+  constructor() {
+    super("runner-failed-after-cleanup");
+    this.name = "WebBrowserJobFailedError";
+  }
+}
 export type WebBrowserBrokerServer = HttpsServer & Readonly<{
   markReady(): void;
   shutdown(): Promise<void>;
@@ -188,11 +206,20 @@ function hostRunner(imageDigest: string): Runner {
   return async (request, signal) => {
     const resourceId = browserResourceIdForJob(request.jobId);
     try {
-      const raw = await runFixedRunner([], `${JSON.stringify({ jobId: request.jobId, url: request.url, expectedNetworkFingerprint: request.expectedNetworkFingerprint, ...(request.siteForm === undefined ? {} : { siteForm: request.siteForm }) })}\n`, imageDigest, signal);
-      const parsed: unknown = JSON.parse(raw);
-      return parseWebBrowserBrokerResult({ ...(parsed as object), jobId: request.jobId }, request.jobId, imageDigest);
+      try {
+        const raw = await runFixedRunner([], `${JSON.stringify({ jobId: request.jobId, url: request.url, expectedNetworkFingerprint: request.expectedNetworkFingerprint, ...(request.siteForm === undefined ? {} : { siteForm: request.siteForm }) })}\n`, imageDigest, signal);
+        const parsed: unknown = JSON.parse(raw);
+        return parseWebBrowserBrokerResult({ ...(parsed as object), jobId: request.jobId }, request.jobId, imageDigest);
+      } catch {
+        // Delivered only after the outer finally has verified cleanup.
+        throw new WebBrowserJobFailedError();
+      }
     } finally {
-      await runFixedRunner([`--cleanup-owned-job=${resourceId}`], null, imageDigest, undefined, 20_000);
+      try {
+        await runFixedRunner([`--cleanup-owned-job=${resourceId}`], null, imageDigest, undefined, 20_000);
+      } catch {
+        throw new WebBrowserCleanupError();
+      }
     }
   };
 }
@@ -208,6 +235,7 @@ export function createWebBrowserBrokerServer(input: Readonly<{
   const queue: BrokerJob[] = [];
   let active: BrokerJob | null = null;
   let ready = false;
+  let cleanupUnverified = false;
   let ledgerAdmission: Promise<void> = Promise.resolve();
 
   const drain = () => {
@@ -216,7 +244,18 @@ export function createWebBrowserBrokerServer(input: Readonly<{
     active = next;
     void input.runJob(next.request, next.controller.signal).then(
       (result) => next.controller.signal.aborted ? stableError(next.response, 503) : stableSuccess(next.response, result),
-      () => stableError(next.response, 502),
+      (error: unknown) => {
+        if (!(error instanceof WebBrowserJobFailedError)) {
+          cleanupUnverified = true;
+          ready = false;
+          for (const queued of queue.splice(0)) {
+            queued.controller.abort();
+            stableError(queued.response, 503);
+            queued.finish();
+          }
+        }
+        stableError(next.response, 502);
+      },
     ).finally(() => { active = null; next.finish(); drain(); });
   };
 
@@ -258,6 +297,7 @@ export function createWebBrowserBrokerServer(input: Readonly<{
           });
           ledgerAdmission = reservation.then(() => undefined, () => undefined);
           await (await reservation);
+          if (cleanupUnverified) return stableError(response, 503);
           if (!response.destroyed && !response.writableEnded) {
             response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
             response.end('{"cancelled":true}');
@@ -297,7 +337,8 @@ export function createWebBrowserBrokerServer(input: Readonly<{
   server.maxHeadersCount = 32;
   server.on("clientError", (_error, socket) => socket.destroy());
   return Object.assign(server, {
-    markReady: () => { ready = true; drain(); },
+    // Only a new broker instance, after startup orphan cleanup, can recover.
+    markReady: () => { if (!cleanupUnverified) { ready = true; drain(); } },
     shutdown: async () => {
       ready = false;
       active?.controller.abort();

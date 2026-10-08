@@ -69,6 +69,8 @@ The app checks Owner access and an unchanged source/credential/configuration sna
 
 ## Required production boundary before enabling S1b
 
+If the runner cannot verify cleanup, the broker rejects cancellation with 503, fails queued requests, and refuses new work. Its readiness method cannot clear that safety state. An operator must restore Docker access, verify cleanup, and restart the broker; startup orphan cleanup must succeed before the new process accepts traffic. An ordinary render failure is acknowledged as cancelled only after its runner cleanup has completed successfully.
+
 - Deploy the broker on a dedicated isolated host/daemon or VM, restrict inbound callers to the app, and keep Docker daemon authority away from Web and Worker. The Docker socket remains host-root-equivalent.
 - Build and review the exact browser image and its browser/runtime dependencies, pin its digest, and apply the deployed host's tested seccomp/AppArmor policy.
 - Verify HMAC key permissions, TLS trust, private ledger ownership, one active/four pending jobs, cancellation, crash recovery, and exact cleanup with an actual app-to-broker request.

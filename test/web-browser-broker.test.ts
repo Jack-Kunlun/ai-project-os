@@ -6,7 +6,7 @@ import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createWebBrowserBrokerServer } from "../scripts/web-browser-broker";
+import { createWebBrowserBrokerServer, WebBrowserCleanupError, WebBrowserJobFailedError } from "../scripts/web-browser-broker";
 import { createWebBrowserBrokerNonce, signWebBrowserBrokerRequest, type WebBrowserBrokerRequest } from "../src/lib/web-browser-broker-protocol";
 
 const CERTIFICATE = readFileSync(join(process.cwd(), "test/fixtures/web-browser-origin-test-cert.pem.fixture"));
@@ -82,7 +82,7 @@ test("broker cancellation waits for active cleanup and fences queued or late job
       started = true;
       await new Promise<void>((resolve) => signal.addEventListener("abort", () => setTimeout(resolve, 20), { once: true }));
       cleaned = true;
-      throw new Error(`cancelled ${request.jobId}`);
+      throw new WebBrowserJobFailedError();
     },
   });
   try {
@@ -113,6 +113,76 @@ test("broker cancellation waits for active cleanup and fences queued or late job
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+for (const [kind, failure] of [
+  ["cleanup failure", () => new WebBrowserCleanupError()],
+  ["unclassified runner failure", () => new Error("synthetic-runner-failure")],
+] as const) {
+  test(`broker rejects cancellation and further work after ${kind}`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aipos-broker-cleanup-failure-"));
+    const key = randomBytes(32);
+    let start!: () => void;
+    const started = new Promise<void>((resolve) => { start = resolve; });
+    let calls = 0;
+    const server = createWebBrowserBrokerServer({
+      certificate: CERTIFICATE, privateKey: PRIVATE_KEY, sharedKey: key,
+      ledgerDirectory: directory, imageDigest: IMAGE_DIGEST,
+      runJob: async (_request, signal) => {
+        calls += 1;
+        start();
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+        throw failure();
+      },
+    });
+    let stopped = false;
+    try {
+      await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+      server.markReady();
+      const address = server.address();
+      assert(address && typeof address !== "string");
+      const active = job();
+      const activeResponse = send(address.port, key, active);
+      await started;
+      const queuedResponse = send(address.port, key, job());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const cancellation = { jobIds: [active.jobId] };
+      const rejected = await send(address.port, key, cancellation, true, undefined, "/v1/cancel");
+      assert.equal(rejected.status, 503);
+      assert.equal(rejected.value.cancelled, undefined);
+      assert.equal((await activeResponse).status, 502);
+      assert.equal((await queuedResponse).status, 503);
+      assert.equal(calls, 1, "queued work must not run after uncertain cleanup");
+      assert.equal((await send(address.port, key, cancellation, true, undefined, "/v1/cancel")).status, 503);
+      assert.equal((await send(address.port, key, job())).status, 503);
+      server.markReady();
+      assert.equal((await send(address.port, key, job())).status, 503, "readiness must not clear the safety latch");
+      await server.shutdown();
+      stopped = true;
+
+      // A fresh instance can become ready after an operator's verified startup
+      // cleanup. Actual host orphan recovery is a separate production gate.
+      const recovered = createWebBrowserBrokerServer({
+        certificate: CERTIFICATE, privateKey: PRIVATE_KEY, sharedKey: key,
+        ledgerDirectory: directory, imageDigest: IMAGE_DIGEST,
+        runJob: async (request) => ({ jobId: request.jobId, url: request.url, text: "recovered", networkFingerprint: "b".repeat(64), imageDigest: IMAGE_DIGEST }),
+      });
+      try {
+        await new Promise<void>((resolve, reject) => { recovered.once("error", reject); recovered.listen(0, "127.0.0.1", resolve); });
+        const recoveredAddress = recovered.address();
+        assert(recoveredAddress && typeof recoveredAddress !== "string");
+        assert.equal((await send(recoveredAddress.port, key, job())).status, 503);
+        recovered.markReady();
+        assert.equal((await send(recoveredAddress.port, key, job())).status, 200);
+        assert.equal((await send(recoveredAddress.port, key, cancellation, true, undefined, "/v1/cancel")).status, 200);
+      } finally {
+        await recovered.shutdown();
+      }
+    } finally {
+      if (!stopped) await server.shutdown();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
 
 test("disconnecting a queued job preserves the next queued project", async () => {
   const directory = await mkdtemp(join(tmpdir(), "aipos-broker-disconnect-test-"));

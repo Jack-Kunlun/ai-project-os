@@ -170,7 +170,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
 
       </fieldset>
 
-      <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-900">本地注册不收集邮箱，暂不支持邮箱邀请、邮箱验证和邮件找回密码。{phoneVerificationRequired ? "忘记密码时可通过已验证手机号的验证码登录；修改原密码仍需验证当前密码或联系管理员。" : "请妥善保管用户名和密码；忘记密码时需联系管理员。"}</p>
+      <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-900">本地注册不收集邮箱，暂不支持邮箱邀请、邮箱验证和邮件找回密码。{phoneVerificationRequired ? "忘记账号或密码时，可通过已验证手机号的验证码找回账号并重设密码。" : "请妥善保管用户名和密码；绑定并验证手机号后可自助找回账号或重设密码，未绑定手机号的账号暂不支持自助找回。"}</p>
       {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <button type="submit" disabled={pending || (phoneVerificationRequired && phoneAuthStatus !== "available")} className="mx-auto mt-3 block h-11 w-full max-w-xs rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-center text-base font-semibold tracking-[0.16em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "正在创建账号…" : "创建账号"}</button>

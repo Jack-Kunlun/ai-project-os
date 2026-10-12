@@ -17,6 +17,10 @@ export default function HelpPage() {
         <p>进入 Dashboard 查看工作空间状态，再选择项目。项目内固定使用“项目概览、项目配置、项目计划、项目资料、AI 工作台、项目自动化”六个入口；任务记录和 AI 用量在项目概览中查看。</p>
         <div className="flex flex-wrap gap-3 pt-1"><Link href="/login" className="inline-flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500">前往登录</Link><Link href="/guide" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50">登录后查看完整指南</Link></div>
       </InfoSection>
+      <InfoSection title="联系作者">
+        <p>需要反馈使用问题或提出建议时，可以通过微信联系作者。</p>
+        <Link href="/contact" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50">查看微信联系方式</Link>
+      </InfoSection>
     </PublicInfoPage>
   );
 }

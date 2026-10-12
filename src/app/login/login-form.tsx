@@ -259,6 +259,8 @@ export function LoginForm({
         <Link href="/terms" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><TermsIcon />服务条款</Link>
         <span className="h-3 w-px bg-slate-300" />
         <Link href="/help" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><HelpIcon />帮助文档</Link>
+        <span className="h-3 w-px bg-slate-300" />
+        <Link href="/contact" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><ContactIcon />联系作者</Link>
       </footer>
     </main>
   );
@@ -278,3 +280,4 @@ function BoltIcon() { return <svg aria-hidden="true" width="25" height="25" view
 function SmallShieldIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 19 6v5c0 4.6-2.8 7.7-7 10-4.2-2.3-7-5.4-7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>; }
 function TermsIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 3.5h9l3 3V20H6z" /><path d="M15 3.5V7h3M9 11h6M9 14.5h6M9 18h4" /></svg>; }
 function HelpIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="9" /><path d="M9.7 9.3a2.5 2.5 0 1 1 3.7 2.2c-.9.45-1.4 1-1.4 2" /><path d="M12 17.5h.01" /></svg>; }
+function ContactIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z" /></svg>; }

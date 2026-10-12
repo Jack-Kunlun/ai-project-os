@@ -39,6 +39,7 @@ export function PublicInfoPage({
           <Link href="/privacy" className="hover:text-indigo-600">隐私政策</Link>
           <Link href="/terms" className="hover:text-indigo-600">服务条款</Link>
           <Link href="/help" className="hover:text-indigo-600">帮助文档</Link>
+          <Link href="/contact" className="hover:text-indigo-600">联系作者</Link>
         </nav>
       </div>
     </main>

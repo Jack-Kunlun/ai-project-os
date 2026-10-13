@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { GraphicCaptchaDialog, type GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
+import { readSmsSendResponse } from "@/lib/sms-send-response";
 
 type SmsPurpose = "register" | "login" | "close" | "recover" | "bind" | "change-old" | "change-new";
 type SmsAvailability = "unavailable" | "available";
@@ -23,8 +24,6 @@ type SmsCodeInputProps = {
   onCodeChange: Dispatch<SetStateAction<string>>;
   onChallengeIdChange: Dispatch<SetStateAction<string | null>>;
 };
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export function SmsCodeInput({
   id,
@@ -104,21 +103,7 @@ export function SmsCodeInput({
         body: JSON.stringify({ phone: request.phone, purpose: request.purpose, captcha: proof }),
         signal: controller.signal,
       });
-      const payload = await response.json().catch(() => null) as {
-        challengeId?: unknown;
-        retryAfterSeconds?: unknown;
-        error?: { message?: unknown };
-      } | null;
-      if (
-        !response.ok
-        || typeof payload?.challengeId !== "string"
-        || !UUID_PATTERN.test(payload.challengeId)
-      ) {
-        const serverMessage = typeof payload?.error?.message === "string" && payload.error.message.trim()
-          ? payload.error.message.trim().slice(0, 240)
-          : "验证码暂时无法发送，请稍后重试。";
-        throw new Error(serverMessage);
-      }
+      const result = await readSmsSendResponse(response);
       if (
         request.sequence !== requestSequence.current
         || currentPhone.current !== request.phone
@@ -126,13 +111,24 @@ export function SmsCodeInput({
         || controller.signal.aborted
       ) return;
 
-      const retryAfter = typeof payload.retryAfterSeconds === "number" && Number.isFinite(payload.retryAfterSeconds)
-        ? Math.min(300, Math.max(1, Math.floor(payload.retryAfterSeconds)))
-        : 60;
-      onChallengeIdChange(payload.challengeId);
+      if (result.kind === "rate-limited") {
+        onCodeChange("");
+        onChallengeIdChange(null);
+        const limitedAt = Date.now();
+        setNow(limitedAt);
+        setCooldown({ phone: request.phone, expiresAt: limitedAt + result.retryAfterSeconds * 1_000 });
+        setMessage({ phone: request.phone, purpose: request.purpose, text: result.message, tone: "error" });
+        flowLock.current = false;
+        setCaptchaRequest(null);
+        setPendingRequest(null);
+        return;
+      }
+      if (result.kind === "error") throw new Error(result.message);
+
+      onChallengeIdChange(result.challengeId);
       const sentAt = Date.now();
       setNow(sentAt);
-      setCooldown({ phone: request.phone, expiresAt: sentAt + retryAfter * 1_000 });
+      setCooldown({ phone: request.phone, expiresAt: sentAt + result.retryAfterSeconds * 1_000 });
       setMessage({ phone: request.phone, purpose: request.purpose, text: "验证码已发送，请在 5 分钟内输入。", tone: "info" });
       flowLock.current = false;
       setCaptchaRequest(null);

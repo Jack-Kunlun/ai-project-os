@@ -5,6 +5,24 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 original_command=${SSH_ORIGINAL_COMMAND-}
 
+# Reviewed email candidate and stable 1.0 path; never an arbitrary tag command.
+if [[ "$original_command" == v1-tooling-status ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-release-v1 --status
+fi
+if [[ "$original_command" =~ ^deploy-v1\ (v0\.8\.0-dev\.[34])\ (v0\.8\.0-dev\.4|v1\.0\.0)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V1_WITHOUT_BACKUP_OR_LEGACY_ACCEPTANCE)$ ]]; then
+  source_tag=${BASH_REMATCH[1]}
+  target_tag=${BASH_REMATCH[2]}
+  source_revision=${BASH_REMATCH[3]}
+  target_revision=${BASH_REMATCH[4]}
+  confirmation=${BASH_REMATCH[5]}
+  if [[ "$source_tag:$target_tag" != v0.8.0-dev.3:v0.8.0-dev.4 && "$source_tag:$target_tag" != v0.8.0-dev.4:v1.0.0 ]]; then
+    printf 'AI_PROJECT_OS_DEPLOY_COMMAND_DENIED\n' >&2
+    exit 64
+  fi
+  exec sudo -n /usr/local/sbin/ai-project-os-release-v1 \
+    "$source_tag" "$target_tag" "$source_revision" "$target_revision" "$confirmation"
+fi
+
 # The first 0.7 tooling install is performed by trusted host operations from
 # the verified 0.7 tag. The workflow requires this exact new gateway before
 # it can ask the root-owned updater to refresh 0.7 tooling.
@@ -63,6 +81,10 @@ fi
 
 if [[ "$original_command" == configure-github-oauth ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-configure-github-oauth
+fi
+
+if [[ "$original_command" == configure-email-auth ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-configure-email-auth
 fi
 
 printf 'AI_PROJECT_OS_DEPLOY_COMMAND_DENIED\n' >&2

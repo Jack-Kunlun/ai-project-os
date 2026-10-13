@@ -67,6 +67,8 @@ test("local release command is wired to CI without tag, push, or broad cleanup",
   ]);
   const packageJson = JSON.parse(packageJsonSource) as { scripts: Record<string, string> };
   assert.equal(packageJson.scripts["release:local"], "node --import tsx scripts/run-local-release.ts");
+  assert.match(runner, /env_file: !reset \[\]/u);
+  assert.match(runner, /AI_PROJECT_OS_EMAIL_AUTH_ENABLED: "false"/u);
   assert.match(workflow, /pnpm release:local/u);
   assert.match(runner, /LOCAL_RELEASE_WORKTREE_DIRTY/u);
   assert.match(runner, /restart", "postgres", "app", "worker", "git-worker/u);

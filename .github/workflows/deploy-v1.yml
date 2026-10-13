@@ -1,0 +1,174 @@
+name: Deploy email candidate and 1.0
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ai-project-os-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy verified email candidate or 1.0
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment:
+      name: production
+      url: https://ai-project-os.com
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve exact transition and require full main and tag CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$GH_REPOSITORY" = Jack-Kunlun/ai-project-os
+          target_tag="v$(node -p 'require("./package.json").version')"
+          health=$(curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://ai-project-os.com/api/health)
+          jq --exit-status '.status == "ok" and .database == "up" and .worker.status == "up" and .worker.consecutiveFailures == 0' <<<"$health" >/dev/null
+          source_tag="v$(jq --exit-status --raw-output '.version | strings' <<<"$health")"
+          case "$source_tag:$target_tag" in
+            v0.8.0-dev.3:v0.8.0-dev.4|v0.8.0-dev.4:v1.0.0) ;;
+            *) echo RELEASE_V1_TRANSITION_DENIED >&2; exit 64 ;;
+          esac
+          git fetch --no-tags origin "refs/tags/$source_tag:refs/tags/$source_tag" "refs/tags/$target_tag:refs/tags/$target_tag"
+          test "$(git cat-file -t "refs/tags/$source_tag")" = tag
+          test "$(git cat-file -t "refs/tags/$target_tag")" = tag
+          source_sha=$(git rev-parse "refs/tags/$source_tag^{}")
+          target_sha=$(git rev-parse "refs/tags/$target_tag^{}")
+          test "$target_sha" = "$(git rev-parse HEAD)"
+          test "$source_sha" != "$target_sha"
+          git merge-base --is-ancestor "$source_sha" "$target_sha"
+          if [[ "$source_tag" == v0.8.0-dev.3 ]]; then
+            test "$source_sha" = bc90bc9daf928a841889f54280e240fc55209afa
+          fi
+          runs=$(curl --fail --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$target_sha&per_page=100")
+          for branch in main "$target_tag"; do
+            run_id=$(jq --exit-status --raw-output --arg sha "$target_sha" --arg branch "$branch" \
+              '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == $branch and .event == "push" and .status == "completed" and .conclusion == "success")][0].id | numbers' <<<"$runs")
+            jobs=$(curl --fail --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GH_REPOSITORY/actions/runs/$run_id/jobs?per_page=100")
+            jq --exit-status '.jobs | any(.name == "Verify database and release candidate" and .conclusion == "success")' <<<"$jobs" >/dev/null
+          done
+          printf 'DEPLOY_SOURCE_TAG=%s\nDEPLOY_TAG=%s\nDEPLOY_SOURCE_SHA=%s\nDEPLOY_SHA=%s\n' "$source_tag" "$target_tag" "$source_sha" "$target_sha" >> "$GITHUB_ENV"
+
+      - name: Prepare restricted production SSH identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
+          test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
+          if [[ ! "$PRODUCTION_SSH_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "PRODUCTION_SSH_HOST_INVALID" >&2
+            exit 64
+          fi
+
+          install -d -m 700 "$RUNNER_TEMP/ai-project-os-ssh"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+
+          ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
+
+      - name: Require previously bootstrapped reviewed tooling
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" "v1-tooling-status" > "$RUNNER_TEMP/v1-tooling.json"
+          python3 - <<'PYCODE'
+          import hashlib,json,os
+          from pathlib import Path
+          data=json.loads((Path(os.environ['RUNNER_TEMP'])/'v1-tooling.json').read_text())
+          expected_revision=os.environ['DEPLOY_SHA'] if os.environ['DEPLOY_TAG']=='v0.8.0-dev.4' else os.environ['DEPLOY_SOURCE_SHA']
+          assert data.get('kind')=='RELEASE_V1_TOOLING_READY' and data.get('tag')=='v0.8.0-dev.4' and data.get('revision')==expected_revision, 'RELEASE_V1_TOOLING_STATE_INVALID'
+          pairs={
+              '/usr/local/sbin/ai-project-os-release-v1':'deploy/production/ai-project-os-release-v1.py',
+              '/usr/local/sbin/ai-project-os-configure-email-auth':'deploy/production/ai-project-os-configure-email-auth.py',
+              '/etc/sudoers.d/ai-project-os-deploy':'deploy/production/ai-project-os-deploy.sudoers',
+              '/usr/local/sbin/ai-project-os-actions-gateway':'deploy/production/ai-project-os-actions-gateway',
+          }
+          assert data.get('files')=={destination:hashlib.sha256(Path(source).read_bytes()).hexdigest() for destination,source in pairs.items()}, 'RELEASE_V1_TOOLING_CHECKSUM_INVALID'
+          print('RELEASE_V1_TOOLING_VERIFIED')
+          PYCODE
+
+      - name: Sync email authentication configuration through restricted stdin
+        env:
+          DM_ACCESS_KEY_ID: ${{ secrets.AI_PROJECT_OS_ALIYUN_DM_ACCESS_KEY_ID }}
+          DM_ACCESS_KEY_SECRET: ${{ secrets.AI_PROJECT_OS_ALIYUN_DM_ACCESS_KEY_SECRET }}
+          DM_REGION_ID: ${{ secrets.AI_PROJECT_OS_ALIYUN_DM_REGION_ID }}
+          DM_ACCOUNT_NAME: ${{ secrets.AI_PROJECT_OS_ALIYUN_DM_ACCOUNT_NAME }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          config_output=$(
+            python3 - <<'PY' | ssh \
+              -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+              -o ConnectTimeout=15 \
+              "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+              "configure-email-auth"
+          import json
+          import os
+          import sys
+
+          fields = {
+              "accessKeyId": "DM_ACCESS_KEY_ID",
+              "accessKeySecret": "DM_ACCESS_KEY_SECRET",
+              "regionId": "DM_REGION_ID",
+              "accountName": "DM_ACCOUNT_NAME",
+          }
+          payload = {name: os.environ.get(env, "") for name, env in fields.items()}
+          if any(not value for value in payload.values()):
+              sys.exit("PRODUCTION_EMAIL_AUTH_SECRETS_MISSING")
+          payload["schema"] = "AI_PROJECT_OS_EMAIL_AUTH_CONFIG_V1"
+          sys.stdout.write(json.dumps(payload, ensure_ascii=True))
+          PY
+          )
+          unset DM_ACCESS_KEY_ID DM_ACCESS_KEY_SECRET DM_REGION_ID DM_ACCOUNT_NAME
+
+          if [[ "$config_output" != PRODUCTION_EMAIL_AUTH_CONFIG_OK ]]; then
+            echo "PRODUCTION_EMAIL_AUTH_CONFIG_RESULT_INVALID" >&2
+            exit 66
+          fi
+          printf '%s\n' "$config_output"
+
+      - name: Build and cut over through the restricted release route
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=6 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "deploy-v1 $DEPLOY_SOURCE_TAG $DEPLOY_TAG $DEPLOY_SOURCE_SHA $DEPLOY_SHA CONFIRM_V1_WITHOUT_BACKUP_OR_LEGACY_ACCEPTANCE" | tee "$RUNNER_TEMP/release-v1.log"
+          grep --fixed-strings --line-regexp "RELEASE_V1_DEPLOY_OK tag=$DEPLOY_TAG revision=$DEPLOY_SHA migration_count=143" "$RUNNER_TEMP/release-v1.log"
+          health=$(curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://ai-project-os.com/api/health)
+          jq --exit-status --arg version "${DEPLOY_TAG#v}" '.version == $version and .status == "ok" and .database == "up" and .worker.status == "up" and .worker.consecutiveFailures == 0' <<<"$health" >/dev/null
+          printf 'Deployed `%s` at `%s`. Migration ledger: 143. Backup, restore and legacy-data acceptance remain user-waived. Real mailbox/browser acceptance is recorded separately.\n' "$DEPLOY_TAG" "$DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary SSH identity
+        if: ${{ always() }}
+        run: rm -f -- "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"

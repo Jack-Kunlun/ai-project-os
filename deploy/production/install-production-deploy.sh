@@ -110,6 +110,12 @@ install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-configure-github-oauth" \
   /usr/local/sbin/ai-project-os-configure-github-oauth
 install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai-project-os-configure-email-auth.py" \
+  /usr/local/sbin/ai-project-os-configure-email-auth
+install -o root -g root -m 0700 \
+  "$SOURCE_DIR/ai-project-os-release-v1.py" \
+  /usr/local/sbin/ai-project-os-release-v1
+install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-actions-gateway" \
   /usr/local/sbin/ai-project-os-actions-gateway
 install -o root -g root -m 0755 \
@@ -189,6 +195,7 @@ bash -n /usr/local/sbin/ai-project-os-v06-patch-deploy
 bash -n /usr/local/sbin/ai-project-os-v06-next-deploy
 bash -n /usr/local/sbin/ai-project-os-app-deploy
 bash -n /usr/local/sbin/ai-project-os-configure-github-oauth
+python3 -m py_compile /usr/local/sbin/ai-project-os-configure-email-auth
 bash -n /usr/local/sbin/ai-project-os-actions-gateway
 bash -n /usr/local/sbin/ai-project-os-restore
 bash -n /usr/local/sbin/ai-project-os-source-state

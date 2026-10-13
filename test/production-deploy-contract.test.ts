@@ -1004,6 +1004,8 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
   assert.deepEqual(sudoers.trim().split("\n"), [
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-preserve-deploy",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-email-auth",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-release-v1",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install-release-tooling",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-deploy",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-patch-deploy",

@@ -1,3 +1,8 @@
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+
+# Prisma 7.10 pins an older MySQL CLI driver. Keep the override limited to that
+# parent while using the same major's upstream authentication/decompression fixes.
+overrides:
+  'prisma@7.10.0>mysql2': 3.23.1

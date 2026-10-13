@@ -178,3 +178,10 @@ sudo deploy/production/install-production-deploy.sh \
 ## v0.7.6 无迁移补丁升级
 
 `deploy/production/ai-project-os-v076-deploy.py` 是从精确 v0.7.5 主分支提交 `bf280d715a94f91522d9c8f8bf614c1e860cc9e3` 到 v0.7.6 的人工升级入口，使用 `CONFIRM_V076_FAST_WITHOUT_BACKUP_OR_LEGACY_ACCEPTANCE`。它沿用经哈希固定的 v0.7.4 基础函数，核对源运行记录/镜像、带注释标签、140 条账本与配置哈希，提前构建三种写服务再切换，不运行 migrate/reconcile，不改生产环境。此前已人工启用的 `PHONE_AUTH_ENABLED=true` 将保留。开关开启但无可用供应商时，本地注册与短信登录暂不可用，这是用户已选择的部署状态，不能表述为短信服务已经验收。详见 [v0.7.6 说明](releases/v0.7.6.md)。
+# 邮箱候选与 1.0 的受限路径
+
+`Deploy email candidate and 1.0` 工作流只允许 `v0.8.0-dev.3 → v0.8.0-dev.4 → v1.0.0` 两个转换。它使用新的 root 管理 `ai-project-os-release-v1`，不调用历史 0.6/0.7 更新器。首次需要运维从已审查、精确哈希的入口执行一次 root bootstrap；bootstrap 只从同 SHA 主分支/带注释标签完整 CI 均成功的候选提交安装固定 allowlist，最后启用受限网关。后续正式 1.0 复用同一工具字节与配置桥接。
+
+邮箱候选应用唯一的新迁移并协调权限；先构建带精确 revision 引用的本地镜像，记录实际镜像 ID，再停写排空。切换使用捕获的不可变镜像 ID，并校验版本、服务健康、数据库账本和配置不变。新迁移尝试后失败时保持停写，状态记录到 `/var/lib/ai-project-os/release-v1.json`；不得直接运行旧版本恢复脚本。迁移前失败恢复源 checkout 与已捕获容器。正式 1.0 仅接受版本与发布说明差异、143 条账本不变，不运行 migrate/reconcile；切换失败可用捕获的源镜像 ID 重建原服务。
+
+本轮备份、恢复演练、旧数据验收沿用用户明确豁免，回执分别记录。精确主分支与标签完整 CI、发布身份、账本、权限、健康及本轮要求的真实邮箱验收仍需通过。普通 workflow、生产回执和用户实际收信不能互相替代。

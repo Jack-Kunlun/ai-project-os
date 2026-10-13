@@ -4,7 +4,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-源码版本标识为 `0.8.0-dev.3`，新增作者微信联系方式页面，见 [版本说明](docs/releases/v0.8.0-dev.3.md)。账号恢复与手机号管理见 [v0.8.0-dev.1](docs/releases/v0.8.0-dev.1.md)。2026-10-12 发布前核对生产运行 `0.8.0-dev.1`，数据库与 Worker 健康。已收录 [Git 生产收尾验收](docs/releases/v0.7.17-git-acceptance.md) 与 [S1b 本地受控验收](docs/releases/v0.7.17-s1b-local-acceptance.md)，S1b 生产能力仍未启用。版本标签、GitHub Release 和生产部署是独立状态，实际线上版本以公网 `/api/health` 为准。历史人工功能验收见[生产功能验收记录](docs/releases/v0.7.3-production-acceptance.md)，开发和验收计划见 [开发与验收计划](docs/releases/v0.7.0-plan.md)。
+源码版本标识为 `0.8.0-dev.4`，补入邮箱注册、已保存邮箱验证与改密邮件验证，见 [候选版本说明](docs/releases/v0.8.0-dev.4.md) 和 [邮箱认证配置](docs/email-authentication.md)。已验证邮箱的个人资料修改与移除已锁定，邮箱换绑与邮箱找回不在本轮范围。此版本仍是开发候选；真实收信、浏览器闭环和生产发布结果分别记录，实际线上版本以公网 `/api/health` 为准。已完成的短信绑定、找回、换绑以及合成资料 AI/Git 自动增量验收属于限定范围的现场证据，不代表所有外部供应商均已验收。S1b 生产能力仍未启用。
 
 `v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
 
@@ -53,7 +53,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；近期版本说明见 [v0.8.0-dev.3](docs/releases/v0.8.0-dev.3.md)。
+- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；近期版本说明见 [v0.8.0-dev.4](docs/releases/v0.8.0-dev.4.md)。
 - V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
 - V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。

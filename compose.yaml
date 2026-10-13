@@ -85,6 +85,12 @@ services:
     build:
       context: .
       target: runner
+    env_file:
+      # Written by the restricted production configurator. Raw values prevent
+      # interpolation of DirectMail credentials; an absent file disables email.
+      - path: /etc/ai-project-os/email-auth.env
+        required: false
+        format: raw
     depends_on:
       reconcile:
         condition: service_completed_successfully

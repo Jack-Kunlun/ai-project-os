@@ -4,12 +4,15 @@ import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { modalNativeBackdropClassName, modalSurfaceClassName } from "./modal-styles";
 
-export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test" | "recover" | "bind" | "change-old" | "change-new";
+export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test" | "recover" | "bind" | "change-old" | "change-new" | "verify" | "password";
 export type GraphicCaptchaProof = Readonly<{ challengeId: string; answer: string }>;
+export type GraphicCaptchaChannel = "sms" | "email";
 
 type GraphicCaptchaDialogProps = {
   open: boolean;
-  phone: string;
+  phone?: string;
+  email?: string;
+  channel?: GraphicCaptchaChannel;
   purpose: GraphicCaptchaPurpose;
   onVerified: (proof: GraphicCaptchaProof) => Promise<void>;
   onOpenChange: (open: boolean) => void;
@@ -29,7 +32,7 @@ async function readResponse(response: Response): Promise<unknown> {
   return response.json().catch(() => null) as Promise<unknown>;
 }
 
-export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenChange }: GraphicCaptchaDialogProps) {
+export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purpose, onVerified, onOpenChange }: GraphicCaptchaDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
   const onVerifiedRef = useRef(onVerified);
@@ -60,10 +63,10 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
     if (!preserveError) setError(null);
 
     try {
-      const response = await fetch("/api/auth/sms/captcha", {
+      const response = await fetch(channel === "email" ? "/api/auth/email/captcha" : "/api/auth/sms/captcha", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phone, purpose }),
+        body: JSON.stringify(channel === "email" ? { email, purpose } : { phone: phone ?? "", purpose }),
         cache: "no-store",
         signal: controller.signal,
       });
@@ -102,7 +105,7 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
         setLoading(false);
       }
     }
-  }, [phone, purpose]);
+  }, [channel, email, phone, purpose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -156,7 +159,7 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
       if (sequence !== submissionSequence.current) return;
       setError(submitError instanceof Error && submitError.message.trim()
         ? submitError.message.trim().slice(0, 240)
-        : "短信暂时无法发送，请稍后重试。");
+        : channel === "email" ? "邮件暂时无法发送，请稍后重试。" : "短信暂时无法发送，请稍后重试。");
       setChallenge(null);
       setAnswer("");
       submittingRef.current = false;
@@ -193,7 +196,7 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="graphic-captcha-title" className="text-lg font-semibold text-slate-950">安全验证</h2>
-              <p id="graphic-captcha-description" className="mt-1 text-sm leading-5 text-slate-600">发送短信前，请输入图片中的 6 位字母或数字。</p>
+              <p id="graphic-captcha-description" className="mt-1 text-sm leading-5 text-slate-600">{channel === "email" ? "发送邮件前，请输入图片中的 6 位字母或数字。" : "发送短信前，请输入图片中的 6 位字母或数字。"}</p>
             </div>
             <button
               type="button"
@@ -247,7 +250,7 @@ export function GraphicCaptchaDialog({ open, phone, purpose, onVerified, onOpenC
               disabled={loading || submitting || !challenge || !/^[A-Za-z0-9]{6}$/u.test(answer.trim())}
               className="flex-1 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting ? "验证并发送中…" : "验证并发送短信"}
+              {submitting ? "验证并发送中…" : channel === "email" ? "验证并发送邮件" : "验证并发送短信"}
             </button>
           </div>
         </section>

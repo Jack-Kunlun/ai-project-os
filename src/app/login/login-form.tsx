@@ -17,6 +17,7 @@ type LoginFormProps = {
   githubAvailability?: "notConfigured" | "configurationInvalid" | "bootstrapPending" | "available";
   phoneAuthStatus?: PhoneAuthStatus;
   phoneAutoRegistrationEnabled?: boolean;
+  emailAuthEnabled?: boolean;
 };
 
 export function LoginForm({
@@ -28,6 +29,7 @@ export function LoginForm({
   githubAvailability = githubLoginAvailable ? "available" : "notConfigured",
   phoneAuthStatus = "disabled",
   phoneAutoRegistrationEnabled = false,
+  emailAuthEnabled = false,
 }: LoginFormProps) {
   const router = useRouter();
   const [method, setMethod] = useState<"password" | "sms">("password");
@@ -168,10 +170,10 @@ export function LoginForm({
 
             {method === "password" ? (
               <>
-                <label className="mt-7 block text-sm font-semibold" htmlFor="login-username">用户名或手机号</label>
+                <label className="mt-7 block text-sm font-semibold" htmlFor="login-username">{emailAuthEnabled ? "用户名、手机号或已验证邮箱" : "用户名或手机号"}</label>
                 <div className="relative mt-2">
                   <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><UserIcon /></span>
-                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required placeholder="输入用户名或手机号" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={emailAuthEnabled ? 320 : 64} required placeholder={emailAuthEnabled ? "输入用户名、手机号或已验证邮箱" : "输入用户名或手机号"} className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
                 </div>
 
                 <label className="mt-5 block text-sm font-semibold" htmlFor="login-password">密码</label>

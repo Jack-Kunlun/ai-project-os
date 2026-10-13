@@ -216,6 +216,8 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
       runtime_direct: boolean;
       writer_execute: boolean;
       writer_direct: boolean;
+      git_worker_execute: boolean;
+      git_worker_direct: boolean;
       public_execute: boolean;
       owner: string | null;
       prosecdef: boolean;
@@ -223,7 +225,7 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
     }>(`
       SELECT p.oid::text AS oid,
              pg_get_function_identity_arguments(p.oid) AS identity_arguments,
-             has_function_privilege($1, $3, 'EXECUTE') AS runtime_execute,
+             has_function_privilege($1, p.oid, 'EXECUTE') AS runtime_execute,
              EXISTS (
                SELECT 1
                  FROM pg_proc acl_proc
@@ -232,7 +234,7 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
                   AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
                   AND privilege.privilege_type = 'EXECUTE'
              ) AS runtime_direct,
-             has_function_privilege($2, $3, 'EXECUTE') AS writer_execute,
+             has_function_privilege($2, p.oid, 'EXECUTE') AS writer_execute,
              EXISTS (
                SELECT 1
                  FROM pg_proc acl_proc
@@ -241,6 +243,15 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
                   AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
                   AND privilege.privilege_type = 'EXECUTE'
              ) AS writer_direct,
+             has_function_privilege($3, p.oid, 'EXECUTE') AS git_worker_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $3)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS git_worker_direct,
              EXISTS (
                SELECT 1
                  FROM pg_proc acl_proc
@@ -253,8 +264,8 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
              p.prosecdef,
              p.proconfig
         FROM pg_proc p
-       WHERE p.oid = pg_catalog.to_regprocedure($3)
-    `, [runtimeRole, writerRole, signature]);
+       WHERE p.oid = pg_catalog.to_regprocedure($4)
+    `, [runtimeRole, writerRole, gitAutomationWorkerRole, signature]);
     const row = result.rows[0];
     assert.ok(row, `missing guarded trigger function ${signature}`);
     expectedOids.add(row.oid);
@@ -267,6 +278,8 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
     assert.equal(row.runtime_direct, false, signature);
     assert.equal(row.writer_execute, false, signature);
     assert.equal(row.writer_direct, false, signature);
+    assert.equal(row.git_worker_execute, false, signature);
+    assert.equal(row.git_worker_direct, false, signature);
   }
   assert.ok(rows.rows.every((row) => expectedOids.has(row.oid)));
 }

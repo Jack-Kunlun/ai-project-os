@@ -42,7 +42,7 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "ProjectScan", "ProjectSnapshot", "ProjectAiPolicyRevision", "ProjectAiPolicyOperationProfile",
   "ProjectAiPolicy", "ModelProcessingGrant", "ModelProcessingGrantSource", "ModelProcessingGrantOperation",
   "AiRun", "AiRunAttempt", "AiRunInputSource", "AiAuditEvent", "AiCandidateBatch", "AiCandidateClaim",
-  "AppUser", "PlatformBootstrap", "AppUserEmailVerificationAudit", "AppUserSecurityAudit", "PersonalKnowledgeDocument", "PersonalKnowledgeRevision", "PersonalKnowledgeAudit", "PersonalKnowledgeIndexPointer", "PersonalKnowledgeRelation", "PersonalKnowledgeGraphSuggestion", "PersonalKnowledgeExtractionAttempt", "PersonalKnowledgeQaChallenge", "PersonalKnowledgeQaAudit", "PersonalKnowledgeSemanticIndexState", "PersonalKnowledgeSemanticGeneration", "PersonalKnowledgeSemanticEntry", "PersonalKnowledgeSemanticChallenge", "PersonalKnowledgeSemanticAudit", "PersonalConnectionProbeAttempt", "AccountAccessMutationPreview", "AccountAccessAudit",
+  "AppUser", "PlatformBootstrap", "AppUserEmailVerificationAudit", "AppUserSecurityAudit", "EmailAuthChallenge", "EmailAuthBudget", "EmailGraphicCaptchaChallenge", "EmailGraphicCaptchaBudget", "PersonalKnowledgeDocument", "PersonalKnowledgeRevision", "PersonalKnowledgeAudit", "PersonalKnowledgeIndexPointer", "PersonalKnowledgeRelation", "PersonalKnowledgeGraphSuggestion", "PersonalKnowledgeExtractionAttempt", "PersonalKnowledgeQaChallenge", "PersonalKnowledgeQaAudit", "PersonalKnowledgeSemanticIndexState", "PersonalKnowledgeSemanticGeneration", "PersonalKnowledgeSemanticEntry", "PersonalKnowledgeSemanticChallenge", "PersonalKnowledgeSemanticAudit", "PersonalConnectionProbeAttempt", "AccountAccessMutationPreview", "AccountAccessAudit",
   "MembershipSubscription", "MembershipMutationPreview", "MembershipSubscriptionAudit", "PlatformTokenGrant", "PlatformTokenGrantLegacyNullIssuerSnapshot",
   "MembershipApplication", "MembershipApplicationPreview", "MembershipApplicationAudit",
   "PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenLedgerEntry",
@@ -87,7 +87,9 @@ export const ENTITLEMENT_PROTECTED_RELATIONS = Object.freeze([
   "PlatformTokenGrantAudit",
   "LocalRegistrationBudget",
   "SmsAuthChallenge", "SmsProviderConfig", "SmsProviderProbe", "SmsProviderConfigAudit", "AccountClosureReceipt", "AccountClosureBudget",
-  "PhoneAuthBudget", "GraphicCaptchaChallenge", "GraphicCaptchaBudget", "AppUserSecurityAudit",
+  "PhoneAuthBudget", "GraphicCaptchaChallenge", "GraphicCaptchaBudget",
+  "EmailAuthChallenge", "EmailAuthBudget", "EmailGraphicCaptchaChallenge", "EmailGraphicCaptchaBudget",
+  "AppUserSecurityAudit",
 ] as const);
 
 // Review decisions are written through the dedicated entitlement-writer
@@ -317,6 +319,10 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
  */
 export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
   triggerFunction("app_user_phone_auth_guard", "", "verified phone claims and closure release"),
+  triggerFunction("app_user_email_revision_guard", "", "email identity revision and verification transition guard"),
+  triggerFunction("email_auth_challenge_binding_guard", "", "immutable email authentication proof binding"),
+  triggerFunction("email_graphic_captcha_binding_guard", "", "immutable email CAPTCHA binding"),
+  triggerFunction("app_user_email_auth_proof_guard", "", "trusted email verification proof enforcement"),
   triggerFunction("app_user_security_revision_guard", "", "account password and phone security revision audit guard"),
   triggerFunction("app_user_security_audit_insert_guard", "", "account security audit proof binding"),
   triggerFunction("app_user_security_audit_immutable_guard", "", "account security audit append-only guard"),

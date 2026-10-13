@@ -3,26 +3,36 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
+import { EmailCodeInput } from "@/components/email-code-input";
 
 type PhoneAuthStatus = "disabled" | "unavailable" | "available";
+type EmailAuthStatus = "disabled" | "unavailable" | "available";
 
 type RegisterFormProps = {
   localRegistrationEnabled: boolean;
   phoneAuthStatus?: PhoneAuthStatus;
+  emailAuthStatus?: EmailAuthStatus;
 };
 
-export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disabled" }: RegisterFormProps) {
+export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disabled", emailAuthStatus = "disabled" }: RegisterFormProps) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [smsCode, setSmsCode] = useState("");
   const [smsChallengeId, setSmsChallengeId] = useState<string | null>(null);
+  const [emailCode, setEmailCode] = useState("");
+  const [emailChallengeId, setEmailChallengeId] = useState<string | null>(null);
+  const [method, setMethod] = useState<"email" | "phone" | "legacy">(() => emailAuthStatus !== "disabled" ? "email" : phoneAuthStatus !== "disabled" ? "phone" : "legacy");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const phoneVerificationRequired = phoneAuthStatus !== "disabled";
+  const emailAvailable = emailAuthStatus !== "disabled";
+  const phoneAvailable = phoneAuthStatus !== "disabled";
+  const emailVerificationRequired = method === "email";
+  const phoneVerificationRequired = method === "phone";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -31,8 +41,16 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
       setError("两次输入的密码不一致。");
       return;
     }
+    if (emailVerificationRequired && emailAuthStatus !== "available") {
+      setError("邮箱验证暂不可用，请稍后重试或联系管理员。");
+      return;
+    }
     if (phoneVerificationRequired && phoneAuthStatus !== "available") {
       setError("手机号验证暂不可用，请稍后重试或联系管理员。");
+      return;
+    }
+    if (emailVerificationRequired && (!emailChallengeId || emailCode.length !== 6)) {
+      setError("请先获取并填写邮箱验证码。");
       return;
     }
     if (phoneVerificationRequired && (!smsChallengeId || smsCode.length !== 6)) {
@@ -49,6 +67,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
           username,
           password,
           remember,
+          ...(emailVerificationRequired && emailChallengeId ? { method: "email", email, challengeId: emailChallengeId, code: emailCode } : {}),
           ...(phoneE164 && smsChallengeId ? { phone: phoneE164, challengeId: smsChallengeId, code: smsCode } : {}),
         }),
       });
@@ -88,6 +107,17 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
       <p className="mt-1.5 text-xs leading-5 text-slate-500">3–64 位，支持字母、数字和 . _ -；统一为小写。</p>
 
         </div>
+      {emailAvailable && phoneAvailable ? <fieldset className="mt-3 flex gap-5 text-sm text-slate-700"><legend className="mb-2 font-semibold">注册验证方式</legend><label className="flex items-center gap-2"><input type="radio" name="registration-method" checked={method === "email"} onChange={() => { setMethod("email"); setEmailCode(""); setEmailChallengeId(null); setSmsCode(""); setSmsChallengeId(null); }} /> 邮箱</label><label className="flex items-center gap-2"><input type="radio" name="registration-method" checked={method === "phone"} onChange={() => { setMethod("phone"); setEmailCode(""); setEmailChallengeId(null); setSmsCode(""); setSmsChallengeId(null); }} /> 手机号</label></fieldset> : null}
+      {emailVerificationRequired ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="register-email" className="block text-sm font-semibold">邮箱</label>
+            <input id="register-email" type="email" value={email} onChange={(event) => { setEmail(event.target.value); setEmailCode(""); setEmailChallengeId(null); }} autoComplete="email" maxLength={320} required placeholder="输入常用邮箱" className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-4 text-base outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+            <p className="mt-1 text-xs leading-5 text-slate-500">验证码用于验证邮箱；系统不会提供邮件找回密码。</p>
+          </div>
+          <EmailCodeInput key={email} id="register-email-code" email={email} purpose="register" availability={emailAuthStatus === "available" ? "available" : "unavailable"} code={emailCode} onCodeChange={setEmailCode} onChallengeIdChange={setEmailChallengeId} />
+        </div>
+      ) : null}
       {phoneVerificationRequired ? (
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
@@ -170,10 +200,10 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
 
       </fieldset>
 
-      <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-900">本地注册不收集邮箱，暂不支持邮箱邀请、邮箱验证和邮件找回密码。{phoneVerificationRequired ? "忘记账号或密码时，可通过已验证手机号的验证码找回账号并重设密码。" : "请妥善保管用户名和密码；绑定并验证手机号后可自助找回账号或重设密码，未绑定手机号的账号暂不支持自助找回。"}</p>
+      <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-900">{emailVerificationRequired ? "注册邮箱将作为验证邮箱；验证后的邮箱可用于密码登录，修改密码时需要验证当前邮箱。" : phoneVerificationRequired ? "注册手机号验证后可用于账号安全操作。" : "请妥善保管用户名和密码；当前没有可用的邮箱或手机号验证通道。"}</p>
       {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
-      <button type="submit" disabled={pending || (phoneVerificationRequired && phoneAuthStatus !== "available")} className="mx-auto mt-3 block h-11 w-full max-w-xs rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-center text-base font-semibold tracking-[0.16em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "正在创建账号…" : "创建账号"}</button>
+      <button type="submit" disabled={pending || (emailVerificationRequired && emailAuthStatus !== "available") || (phoneVerificationRequired && phoneAuthStatus !== "available")} className="mx-auto mt-3 block h-11 w-full max-w-xs rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-center text-base font-semibold tracking-[0.16em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "正在创建账号…" : "创建账号"}</button>
       </form> : <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">本地用户名和密码注册暂未开放。请返回登录页使用其他可用方式，或联系管理员。</p>}
     </div>
   );

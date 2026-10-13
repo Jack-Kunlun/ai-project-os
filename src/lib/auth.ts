@@ -10,6 +10,11 @@ import { toSystemRole, type SystemRole } from "@/lib/system-role";
 import { normalizeMainlandPhone } from "@/lib/phone-auth-identity";
 import { createBootstrapSignupOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
 import { appendAccountSecurityAudit } from "@/lib/account-security-audit";
+import { ApiError } from "@/lib/api-errors";
+import { isEmailAuthEnabled, loadEmailAuthConfig } from "@/lib/email-auth-config";
+import { consumeEmailAuthProof, type EmailAuthProof } from "@/lib/email-auth-service";
+import { normalizeEmailAddress } from "@/lib/email-auth-identity";
+import { emailDatabaseClock } from "@/lib/email-auth-budget";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
@@ -65,6 +70,8 @@ export type CreatedSession = Readonly<{
   expiresAt: Date;
   user: SafeSessionUser;
 }>;
+
+export type EmailPasswordVerification = Readonly<{ proof: EmailAuthProof; browserToken: string }>;
 
 function fail(code: AuthErrorCode): never {
   throw new AuthError(code);
@@ -125,7 +132,7 @@ type EmailVerificationAuditInput = Readonly<{
   emailAfter: string | null;
   verifiedAtBefore: Date | null;
   verifiedAtAfter: Date | null;
-  source: "profile" | "github" | "oidc";
+  source: "profile" | "github" | "oidc" | "email";
   reason: string;
 }>;
 
@@ -175,6 +182,7 @@ export async function setVerifiedAccountEmail(
   const currentEmail = storedEmail?.trim().toLowerCase() ?? null;
   const currentVerifiedAt = current.emailVerifiedAt ?? null;
   if (currentEmail === email && currentVerifiedAt !== null) return current;
+  await db.$executeRaw`SELECT set_config('app.email_verified_source',${source},true)`;
   const updated = await db.appUser.update({
     where: { id: userId },
     data: { email, emailVerifiedAt: now },
@@ -226,6 +234,32 @@ async function invalidateOutstandingSmsProofs(tx: Prisma.TransactionClient, phon
     where: { phoneE164, status: { in: ["pending", "sent"] }, consumedAt: null },
     data: { status: "superseded" },
   });
+}
+
+async function passwordEmailProofContext(
+  userId: string,
+  verification: EmailPasswordVerification | undefined,
+  db: PrismaClient,
+  existing?: Pick<AppUser, "email" | "emailVerifiedAt" | "emailRevision"> | null,
+): Promise<Readonly<{
+  verification: EmailPasswordVerification | null;
+  config: Awaited<ReturnType<typeof loadEmailAuthConfig>> | null;
+  email: string | null;
+  rawEmail: string | null;
+  emailVerifiedAt: Date | null;
+  emailRevision: number;
+}> | null> {
+  if (!isEmailAuthEnabled()) return null;
+  const user = existing ?? await db.appUser.findUnique({ where: { id: userId }, select: { email: true, emailVerifiedAt: true, emailRevision: true } });
+  if (!user) return fail("AUTH_REQUIRED");
+  const email = user.email ? normalizeEmailAddress(user.email) : null;
+  const binding = { email, rawEmail: user.email, emailVerifiedAt: user.emailVerifiedAt, emailRevision: user.emailRevision };
+  if (!email) return { ...binding, verification: null, config: null };
+  if (!user.emailVerifiedAt) throw new ApiError(409, "EMAIL_AUTH_EMAIL_UNVERIFIED", "请先验证当前邮箱，再修改密码");
+  if (!verification || verification.proof.purpose !== "password") {
+    throw new ApiError(403, "EMAIL_AUTH_PROOF_REQUIRED", "请先完成当前邮箱验证码验证");
+  }
+  return { ...binding, verification, config: await loadEmailAuthConfig() };
 }
 
 export async function createPasswordRecord(passwordInput: unknown): Promise<Readonly<{
@@ -483,6 +517,8 @@ async function loginOrdinaryUser(
   input: Readonly<{ password: unknown }>,
   userId: string,
   db: PrismaClient,
+  emailAlias?: string,
+  emailRevision?: number,
 ): Promise<CreatedSession> {
   return db.$transaction(async (tx) => {
     if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
@@ -492,6 +528,13 @@ async function loginOrdinaryUser(
       current === null
       || current.role !== "user"
       || current.disabledAt !== null
+      || current.closedAt !== null
+      || (emailAlias !== undefined && (
+        current.emailVerifiedAt === null
+        || !current.email
+        || current.emailRevision !== emailRevision
+        || (() => { try { return normalizeEmailAddress(current.email) !== emailAlias; } catch { return true; } })()
+      ))
       || !(await verifyPasswordRecord(input.password, current))
     ) {
       return fail("AUTH_INVALID_CREDENTIALS");
@@ -512,14 +555,27 @@ export async function loginAdmin(
 ): Promise<CreatedSession> {
   let username: string | null = null;
   let phone: string | null = null;
+  let email: string | null = null;
+  const emailAuthEnabled = isEmailAuthEnabled();
   try { username = canonicalUsername(input.username); } catch { /* Phone aliases also accept +86. */ }
   try { phone = normalizeMainlandPhone(input.username); } catch { /* A non-phone username remains valid. */ }
-  if (username === null && phone === null) return fail("AUTH_INVALID_CREDENTIALS");
+  if (emailAuthEnabled) {
+    try { email = normalizeEmailAddress(input.username); } catch { /* Only verified email addresses are aliases. */ }
+  }
+  if (username === null && phone === null && email === null) return fail("AUTH_INVALID_CREDENTIALS");
   const byUsername = username === null ? null : await db.appUser.findUnique({ where: { username } });
   const byPhone = phone === null ? null : await db.appUser.findUnique({ where: { phoneE164: phone } });
+  const emailRows = email === null ? [] : await db.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AppUser"
+    WHERE lower(btrim("email")) = ${email} AND "emailVerifiedAt" IS NOT NULL
+    ORDER BY "id" LIMIT 2
+  `;
+  if (emailRows.length > 1) return fail("AUTH_INVALID_CREDENTIALS");
+  const byEmail = emailRows.length === 1 ? await db.appUser.findUnique({ where: { id: emailRows[0].id } }) : null;
   // Never choose between two different principals on an ambiguous legacy alias.
-  if (byUsername && byPhone && byUsername.id !== byPhone.id) return fail("AUTH_INVALID_CREDENTIALS");
-  const user = byPhone ?? byUsername;
+  const aliases = [byUsername, byPhone, byEmail].filter((candidate): candidate is AppUser => candidate !== null);
+  if (new Set(aliases.map((candidate) => candidate.id)).size > 1) return fail("AUTH_INVALID_CREDENTIALS");
+  const user = byEmail ?? byPhone ?? byUsername;
   if (
     user === null ||
     user.disabledAt !== null ||
@@ -527,7 +583,22 @@ export async function loginAdmin(
   ) {
     return fail("AUTH_INVALID_CREDENTIALS");
   }
-  if (user.role === "user") return loginOrdinaryUser(input, user.id, db);
+  if (user.role === "user") return loginOrdinaryUser(input, user.id, db, byEmail ? email ?? undefined : undefined, byEmail ? user.emailRevision : undefined);
+  if (byEmail) {
+    const emailAlias = email!;
+    return db.$transaction(async (tx) => {
+      if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
+      await lockActorAccess(tx, user.id);
+      const current = await tx.appUser.findUnique({ where: { id: user.id } });
+      let currentEmail: string | null = null;
+      try { if (current?.email) currentEmail = normalizeEmailAddress(current.email); } catch { /* Fail the alias revalidation below. */ }
+      if (!current || current.disabledAt || current.closedAt || current.emailRevision !== user.emailRevision || current.emailVerifiedAt === null || currentEmail !== emailAlias
+        || !(await verifyPasswordRecord(input.password, current))) return fail("AUTH_INVALID_CREDENTIALS");
+      const now = new Date();
+      await tx.appSession.updateMany({ where: { userId: current.id, expiresAt: { lte: now }, revokedAt: null }, data: { revokedAt: now } });
+      return createSessionInTransaction(tx, current, now);
+    });
+  }
   await db.appSession.updateMany({
     where: { userId: user.id, expiresAt: { lte: new Date() }, revokedAt: null },
     data: { revokedAt: new Date() },
@@ -575,11 +646,17 @@ export async function updateAccountProfile(
     const storedEmail = current.email ?? null;
     const currentEmail = storedEmail?.trim().toLowerCase() ?? null;
     const currentVerifiedAt = current.emailVerifiedAt ?? null;
+    const emailAuthEnabled = isEmailAuthEnabled();
+    const verifiedEmailLocked = emailAuthEnabled && currentVerifiedAt !== null && storedEmail !== null;
+    if (verifiedEmailLocked && email !== currentEmail) {
+      throw new ApiError(409, "EMAIL_AUTH_VERIFIED_EMAIL_LOCKED", "已验证邮箱目前不能修改或移除");
+    }
     const emailChanged = currentEmail !== email;
     const nextVerifiedAt = emailChanged ? null : currentVerifiedAt;
+    const nextEmail = verifiedEmailLocked ? storedEmail : email;
     const updated = await tx.appUser.update({
       where: { id: userId },
-      data: { displayName, email, emailVerifiedAt: nextVerifiedAt },
+      data: { displayName, email: nextEmail, emailVerifiedAt: nextVerifiedAt },
       select: { id: true, displayName: true, email: true, emailVerifiedAt: true },
     });
     if (emailChanged) {
@@ -587,7 +664,7 @@ export async function updateAccountProfile(
         userId,
         event: "unverified",
         emailBefore: storedEmail,
-        emailAfter: email,
+        emailAfter: nextEmail,
         verifiedAtBefore: currentVerifiedAt,
         verifiedAtAfter: null,
         source: "profile",
@@ -598,13 +675,78 @@ export async function updateAccountProfile(
   });
 }
 
-export async function setLocalAccountPassword(userId: string, newPasswordInput: unknown, db: PrismaClient = getEntitlementDb()): Promise<void> {
+export async function verifyAccountEmail(
+  actor: SafeSessionUser,
+  proof: EmailAuthProof,
+  browserToken: string,
+  db: PrismaClient = getEntitlementDb(),
+): Promise<Readonly<{ id: string; email: string; emailVerifiedAt: Date }>> {
+  if (proof.purpose !== "verify") throw new ApiError(400, "EMAIL_AUTH_CODE_INVALID", "邮箱验证码无效或已过期，请重新获取");
+  const config = await loadEmailAuthConfig();
+  return db.$transaction(async (tx) => {
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
+    await lockActorAccess(tx, actor.id);
+    const current = await tx.appUser.findUnique({
+      where: { id: actor.id },
+      select: { id: true, email: true, emailVerifiedAt: true, emailRevision: true, accountAccessVersion: true, securityRevision: true, disabledAt: true, closedAt: true },
+    });
+    if (!current || current.disabledAt || current.closedAt) return fail("AUTH_REQUIRED");
+    if (current.accountAccessVersion !== actor.accountAccessVersion || current.securityRevision !== actor.securityRevision) return fail("AUTH_REQUIRED");
+    if (!current.email || current.emailVerifiedAt) {
+      throw new ApiError(409, current.emailVerifiedAt ? "EMAIL_AUTH_ALREADY_VERIFIED" : "EMAIL_AUTH_FORBIDDEN", current.emailVerifiedAt ? "当前邮箱已经验证" : "当前账号没有可验证的邮箱");
+    }
+    const now = await emailDatabaseClock(tx);
+    await consumeEmailAuthProof(tx, proof, actor.id, browserToken, now, config);
+    const updated = await tx.appUser.updateMany({
+      where: {
+        id: actor.id,
+        email: current.email,
+        emailVerifiedAt: null,
+        emailRevision: current.emailRevision,
+        accountAccessVersion: current.accountAccessVersion,
+        securityRevision: current.securityRevision,
+        disabledAt: null,
+        closedAt: null,
+      },
+      data: { emailVerifiedAt: now },
+    });
+    if (updated.count !== 1) throw new ApiError(409, "EMAIL_AUTH_RECIPIENT_CHANGED", "当前绑定邮箱已变化，请重新获取验证码");
+    await appendEmailVerificationAudit(tx, {
+      userId: actor.id,
+      event: "verified",
+      emailBefore: current.email,
+      emailAfter: current.email,
+      verifiedAtBefore: null,
+      verifiedAtAfter: now,
+      source: "email",
+      reason: "email_one_time_code_verified",
+    });
+    return { id: actor.id, email: current.email, emailVerifiedAt: now };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+export async function setLocalAccountPassword(
+  userId: string,
+  newPasswordInput: unknown,
+  db: PrismaClient = getEntitlementDb(),
+  emailVerification?: EmailPasswordVerification,
+): Promise<void> {
+  const emailContext = await passwordEmailProofContext(userId, emailVerification, db);
   const nextPassword = await createPasswordRecord(newPasswordInput);
   await db.$transaction(async (tx) => {
     if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
     const current = await lockPasswordSecurityContext(tx, userId);
     if (!current || current.disabledAt || current.closedAt) return fail("AUTH_REQUIRED");
     if (current.passwordHash !== null || current.passwordSalt !== null) return fail("AUTH_LOCAL_PASSWORD_EXISTS");
+    if (emailContext && (
+      current.email !== emailContext.rawEmail
+      || current.emailRevision !== emailContext.emailRevision
+      || current.emailVerifiedAt?.getTime() !== emailContext.emailVerifiedAt?.getTime()
+    )) throw new ApiError(409, "EMAIL_AUTH_RECIPIENT_CHANGED", "当前邮箱信息已变化，请刷新后重试");
+    if (emailContext?.email) {
+      if (!emailContext.verification || !emailContext.config) throw new ApiError(403, "EMAIL_AUTH_PROOF_REQUIRED", "请先完成当前邮箱验证码验证");
+      await consumeEmailAuthProof(tx, emailContext.verification.proof, userId, emailContext.verification.browserToken, await emailDatabaseClock(tx), emailContext.config);
+    }
     await appendAccountSecurityAudit(tx, { userId, actorId: userId, action: "password_set", securityRevisionBefore: current.securityRevision });
     const updated = await tx.appUser.updateMany({
       where: { id: userId, passwordHash: null, passwordSalt: null, securityRevision: current.securityRevision },
@@ -621,6 +763,7 @@ export async function changeAccountPassword(
   currentPasswordInput: unknown,
   newPasswordInput: unknown,
   db: PrismaClient = getEntitlementDb(),
+  emailVerification?: EmailPasswordVerification,
 ): Promise<void> {
   const user = await db.appUser.findUnique({
     where: { id: userId },
@@ -630,11 +773,15 @@ export async function changeAccountPassword(
       passwordSalt: true,
       passwordVersion: true,
       securityRevision: true,
+      email: true,
+      emailVerifiedAt: true,
+      emailRevision: true,
       disabledAt: true,
       closedAt: true,
     },
   });
   if (user === null || user.disabledAt !== null || user.closedAt !== null) return fail("AUTH_REQUIRED");
+  const emailContext = await passwordEmailProofContext(userId, emailVerification, db, user);
   if (user.passwordHash === null || user.passwordSalt === null) return fail("AUTH_CURRENT_PASSWORD_INVALID");
   if (!(await verifyPasswordRecord(currentPasswordInput, user))) {
     return fail("AUTH_CURRENT_PASSWORD_INVALID");
@@ -654,7 +801,14 @@ export async function changeAccountPassword(
       || current.passwordSalt !== user.passwordSalt
       || current.passwordVersion !== user.passwordVersion
       || current.securityRevision !== user.securityRevision
+      || current.emailRevision !== user.emailRevision
+      || current.email !== user.email
+      || current.emailVerifiedAt?.getTime() !== user.emailVerifiedAt?.getTime()
     ) return fail("AUTH_CURRENT_PASSWORD_INVALID");
+    if (emailContext?.email) {
+      if (!emailContext.verification || !emailContext.config) throw new ApiError(403, "EMAIL_AUTH_PROOF_REQUIRED", "请先完成当前邮箱验证码验证");
+      await consumeEmailAuthProof(tx, emailContext.verification.proof, userId, emailContext.verification.browserToken, await emailDatabaseClock(tx), emailContext.config);
+    }
     await appendAccountSecurityAudit(tx, { userId, actorId: userId, action: "password_changed", securityRevisionBefore: current.securityRevision });
     const update = await tx.appUser.updateMany({
       where: {

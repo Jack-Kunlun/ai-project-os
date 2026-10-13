@@ -5166,6 +5166,7 @@ model AppUser {
   displayName                                        String?                               @db.VarChar(160)
   email                                              String?                               @unique @db.VarChar(320)
   emailVerifiedAt                                    DateTime?
+  emailRevision                                      Int                                   @default(1)
   phoneE164                                          String?                               @unique @db.VarChar(14)
   phoneVerifiedAt                                    DateTime?
   passwordHash                                       String?                               @db.VarChar(128)
@@ -9328,6 +9329,48 @@ model PhoneAuthBudget {
   @@index([updatedAt])
 }
 
+/// Short-lived email code proofs; recipient, browser, code and sender config
+/// are represented only by keyed fingerprints or digests.
+model EmailAuthChallenge {
+  id                          String    @id @db.Uuid
+  emailFingerprint            String    @db.Char(64)
+  browserFingerprint          String    @db.Char(64)
+  purpose                     String    @db.VarChar(16)
+  configFingerprint           String    @db.Char(64)
+  expectedCodeDigest          String    @db.Char(64)
+  codeDigest                  String?   @db.Char(64)
+  providerRequestId           String?   @db.VarChar(128)
+  providerEnvId               String?   @db.VarChar(128)
+  safeErrorCode               String?   @db.VarChar(64)
+  verifiedAt                  DateTime?
+  status                      String    @default("pending") @db.VarChar(16)
+  attemptCount                Int       @default(0)
+  expiresAt                   DateTime
+  consumedAt                  DateTime?
+  consumedByUserId            String?   @db.Uuid
+  subjectUserId               String?   @db.Uuid
+  subjectAccountAccessVersion Int?
+  subjectSecurityRevision     Int?
+  subjectEmailRevision        Int?
+  subjectEmailFingerprint     String?   @db.Char(64)
+  createdAt                   DateTime  @default(now())
+
+  @@index([emailFingerprint, purpose, createdAt])
+  @@index([expiresAt])
+}
+
+/// Durable deployment-wide and per-recipient email issue/verify limits.
+model EmailAuthBudget {
+  scope           String   @db.VarChar(32)
+  keyFingerprint  String   @db.Char(64)
+  windowStartedAt DateTime
+  attemptCount    Int
+  updatedAt       DateTime @updatedAt
+
+  @@id([scope, keyFingerprint])
+  @@index([updatedAt])
+}
+
 /// Active platform SMS provider. Ciphertext is never returned by admin APIs.
 model SmsProviderConfig {
   id                  String   @id @db.VarChar(16)
@@ -9436,6 +9479,38 @@ model GraphicCaptchaBudget {
   windowStartedAt DateTime
   attemptCount Int
   updatedAt DateTime @updatedAt
+  @@id([scope, keyFingerprint])
+  @@index([updatedAt])
+}
+
+/// Browser-bound email CAPTCHA proofs, independent from phone challenges.
+model EmailGraphicCaptchaChallenge {
+  id                        String    @id @db.Uuid
+  emailFingerprint          String    @db.Char(64)
+  purpose                   String    @db.VarChar(16)
+  browserFingerprint        String    @db.Char(64)
+  actorId                   String?   @db.Uuid
+  actorAccountAccessVersion Int?
+  actorSecurityRevision     Int?
+  actorEmailRevision        Int?
+  answerDigest              String    @db.Char(64)
+  createdAt                 DateTime  @default(now())
+  expiresAt                 DateTime
+  consumedAt                DateTime?
+
+  @@index([emailFingerprint, createdAt])
+  @@index([browserFingerprint, createdAt])
+  @@index([expiresAt])
+}
+
+/// Durable CAPTCHA issue and single-use consume budgets for email flows.
+model EmailGraphicCaptchaBudget {
+  scope           String   @db.VarChar(32)
+  keyFingerprint  String   @db.Char(64)
+  windowStartedAt DateTime
+  attemptCount    Int
+  updatedAt       DateTime @updatedAt
+
   @@id([scope, keyFingerprint])
   @@index([updatedAt])
 }

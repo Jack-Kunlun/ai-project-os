@@ -1,4 +1,5 @@
 import { getPhoneAuthStatus } from "@/lib/phone-auth-config";
+import { getEmailAuthStatus } from "@/lib/email-auth-config";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -14,20 +15,24 @@ import {
 } from "@/lib/auth";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { getDb } from "@/lib/db";
+import { getDb, getEntitlementDb } from "@/lib/db";
 import { listLinkableOidcProviders } from "@/lib/oidc";
 import { toSystemRole } from "@/lib/system-role";
+import { verifyEmailChallenge } from "@/lib/email-auth-service";
+import { readCaptchaBrowserToken } from "@/lib/graphic-captcha-cookie";
 
 export const dynamic = "force-dynamic";
 
 const profileUpdateSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("updateUsername"), username: z.string() }).strict(),
   z.object({ action: z.literal("updateProfile"), displayName: z.string().nullable(), email: z.string().nullable() }).strict(),
-  z.object({ action: z.literal("setLocalPassword"), newPassword: z.string() }).strict(),
+  z.object({ action: z.literal("setLocalPassword"), newPassword: z.string(), challengeId: z.string().uuid().optional(), code: z.string().regex(/^[0-9]{6}$/u).optional() }).strict(),
   z.object({
     action: z.literal("changePassword"),
     currentPassword: z.string(),
     newPassword: z.string(),
+    challengeId: z.string().uuid().optional(),
+    code: z.string().regex(/^[0-9]{6}$/u).optional(),
   }).strict(),
 ]);
 
@@ -78,7 +83,7 @@ export async function GET(request: Request) {
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     return NextResponse.json(
-      { profile: { ...profile, phoneAuthStatus: await getPhoneAuthStatus(db) } },
+      { profile: { ...profile, phoneAuthStatus: await getPhoneAuthStatus(db), emailAuthStatus: await getEmailAuthStatus() } },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
@@ -100,11 +105,13 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ user }, { headers: { "cache-control": "no-store" } });
     }
     if (input.action === "setLocalPassword") {
-      await setLocalAccountPassword(sessionUser.id, input.newPassword);
+      const emailVerification = await readPasswordEmailProof(request, sessionUser, input.challengeId, input.code);
+      await setLocalAccountPassword(sessionUser.id, input.newPassword, undefined, emailVerification);
       return NextResponse.json({ passwordChanged: true }, { headers: { "cache-control": "no-store", "set-cookie": expiredSessionCookie() } });
     }
 
-    await changeAccountPassword(sessionUser.id, input.currentPassword, input.newPassword);
+    const emailVerification = await readPasswordEmailProof(request, sessionUser, input.challengeId, input.code);
+    await changeAccountPassword(sessionUser.id, input.currentPassword, input.newPassword, undefined, emailVerification);
     return NextResponse.json(
       { passwordChanged: true },
       {
@@ -120,4 +127,18 @@ export async function PATCH(request: Request) {
     }
     return handleApiError(error);
   }
+}
+
+async function readPasswordEmailProof(
+  request: Request,
+  actor: Awaited<ReturnType<typeof requireApiSession>>,
+  challengeId?: string,
+  code?: string,
+) {
+  if ((challengeId === undefined) !== (code === undefined)) throw new ApiError(400, "EMAIL_AUTH_CODE_INVALID", "邮箱验证码无效或已过期，请重新获取");
+  if (!challengeId || !code) return undefined;
+  const browserToken = readCaptchaBrowserToken(request);
+  if (!browserToken) throw new ApiError(400, "EMAIL_AUTH_CODE_INVALID", "邮箱验证码无效或已过期，请重新获取");
+  const proof = await verifyEmailChallenge({ challengeId, code, purpose: "password", actor, browserToken }, getEntitlementDb());
+  return { proof, browserToken };
 }

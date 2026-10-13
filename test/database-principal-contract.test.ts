@@ -25,11 +25,13 @@ const reconcile = readFileSync("scripts/reconcile-database-principals.ts", "utf8
 const automationRunService = readFileSync("src/lib/project-git-automation-run-service.ts", "utf8");
 const postgresGate = readFileSync("test/database-principal-postgres.test.ts", "utf8");
 const principalGateRunner = readFileSync("scripts/run-database-principal-oid10-gate.ts", "utf8");
+const phoneAuthGateRunner = readFileSync("scripts/run-phone-auth-postgres.ts", "utf8");
 const migration = readFileSync("prisma/migrations/20260910050000_harden_account_entitlement_database_principals/migration.sql", "utf8");
 const connectionGovernanceMigration = readFileSync("prisma/migrations/20260912030000_add_connection_governance/migration.sql", "utf8");
 const gitManualRuntimeRecoveryMigration = readFileSync("prisma/migrations/20260914010000_harden_git_manual_final_fence_and_connection_recovery/migration.sql", "utf8");
 const mcpActionResultImportMigration = readFileSync("prisma/migrations/20260926090000_add_project_mcp_action_result_import/migration.sql", "utf8");
 const oidcIdentityLinkMigration = readFileSync("prisma/migrations/20260927010000_add_oidc_identity_link/migration.sql", "utf8");
+const emailAuthMigration = readFileSync("prisma/migrations/20261013010000_add_email_auth/migration.sql", "utf8");
 const authenticatedWebSourceMigration = readFileSync("prisma/migrations/20260927020100_add_authenticated_web_source_review/migration.sql", "utf8");
 const authenticatedWebSourceIdentityMigration = readFileSync("prisma/migrations/20260929010000_preserve_authenticated_web_source_identity/migration.sql", "utf8");
 const sharedGitPublicationMigration = readFileSync("prisma/migrations/20260929060000_add_git_shared_publication_head/migration.sql", "utf8");
@@ -65,7 +67,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
   assert.equal(DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.length, 7);
   assert.equal(DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX.length, 10);
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 108);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 112);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false
@@ -81,6 +83,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
     ["20261006014000_add_sms_provider_adapters", ["sms_auth_expected_code_guard"]],
     ["20261006011000_add_sms_provider_config", ["sms_provider_config_version_guard", "sms_provider_probe_lifecycle_guard", "sms_provider_config_audit_insert_guard", "sms_provider_config_audit_immutable_guard"]],
     ["20261006012000_add_account_closure", ["account_closure_receipt_guard", "workspace_account_closure_guard", "closed_workspace_write_guard", "account_closure_final_state_guard"]],
+    ["20261013010000_add_email_auth", ["app_user_email_revision_guard", "email_auth_challenge_binding_guard", "email_graphic_captcha_binding_guard", "app_user_email_auth_proof_guard"]],
   ] as const) {
     const sql = readFileSync(`prisma/migrations/${directory}/migration.sql`, "utf8");
     for (const name of names) {
@@ -321,7 +324,15 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   }
   assert.match(gitAutomationMaterialMigration, /"ProjectGitRepositoryMaterialPublicationHead"[\s\S]*?project_git_material_head_guard/u);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "legacy_mcp_source_reference_guard"));
-  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 142/u);
+  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 143/u);
+  for (const roleName of ["ai_project_os_runtime", "ai_project_os_entitlement_writer", "ai_project_os_git_automation_worker"]) {
+    assert.ok(emailAuthMigration.includes(`'${roleName}'`));
+  }
+  for (const functionName of ["app_user_email_revision_guard", "email_auth_challenge_binding_guard", "email_graphic_captcha_binding_guard", "app_user_email_auth_proof_guard"]) {
+    assert.match(emailAuthMigration, new RegExp(`REVOKE ALL ON FUNCTION "${functionName}"\\(\\) FROM PUBLIC`, "u"));
+  }
+  assert.match(phoneAuthGateRunner, /for\(const trigger of DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX\)[\s\S]*?REVOKE ALL ON FUNCTION public\./u);
+  assert.match(phoneAuthGateRunner, /PHONE_AUTH_EMAIL_TRIGGER_ACL_MISMATCH/u);
   assert.ok(DATABASE_PRINCIPAL_RELATIONS.includes("LocalRegistrationBudget"));
   assert.ok(ENTITLEMENT_PROTECTED_RELATIONS.includes("LocalRegistrationBudget"));
   assert.ok(!(RUNTIME_ONLY_CONTROL_PLANE_RELATIONS as readonly string[]).includes("LocalRegistrationBudget"));
@@ -583,6 +594,10 @@ test("the PostgreSQL gate exercises production reconcile and both real principal
   assert.match(postgresGate, /AI_SIGNUP_GRANT/u);
   assert.match(postgresGate, /DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX/u);
   assert.match(postgresGate, /assertInvokerHelperAcls/u);
+  assert.match(postgresGate, /has_function_privilege\(\$3, p\.oid, 'EXECUTE'\) AS git_worker_execute/u);
+  assert.match(postgresGate, /AS git_worker_direct/u);
+  assert.match(postgresGate, /assert\.equal\(row\.git_worker_execute, false, signature\)/u);
+  assert.match(postgresGate, /assert\.equal\(row\.git_worker_direct, false, signature\)/u);
   assert.match(postgresGate, /pg_get_function_identity_arguments/u);
   assert.match(postgresGate, /AccountEntitlementBackfillRun/u);
   assert.match(postgresGate, /DELETE FROM "PlatformTokenLedgerEntry"/u);

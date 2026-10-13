@@ -1,4 +1,5 @@
 import { getPhoneAuthStatus } from "@/lib/phone-auth-config";
+import { getEmailAuthStatus } from "@/lib/email-auth-config";
 import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { getPageSession, isApplicationInitialized } from "@/lib/auth";
@@ -22,7 +23,7 @@ export default async function RegisterPage() {
         <p className="mt-3 text-xs font-bold uppercase tracking-[0.27em] text-indigo-600">Create account</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">创建账号</h1>
         <p className="mt-2 text-sm leading-6 text-slate-500">注册后会创建一个只属于你的个人工作区，你将成为该工作区的 Owner。</p>
-        <RegisterForm phoneAuthStatus={await getPhoneAuthStatus()} localRegistrationEnabled={isLocalRegistrationEnabled()} />
+        <RegisterForm phoneAuthStatus={await getPhoneAuthStatus()} emailAuthStatus={await getEmailAuthStatus()} localRegistrationEnabled={isLocalRegistrationEnabled()} />
         <footer className="mt-3 text-center text-xs text-slate-400">已有账号？ <a href="/login" className="font-semibold text-indigo-600 hover:text-indigo-500">返回登录</a></footer>
       </section>
     </main>

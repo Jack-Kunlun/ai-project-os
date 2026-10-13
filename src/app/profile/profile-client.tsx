@@ -7,6 +7,7 @@ import { LogoutButton } from "@/app/logout-button";
 import { AccountClosurePanel } from "@/components/account-closure-panel";
 import { AccountPhonePanel } from "@/components/account-phone-panel";
 import { AppHeader } from "@/components/app-header";
+import { EmailCodeInput } from "@/components/email-code-input";
 
 type Profile = {
   id: string;
@@ -18,6 +19,7 @@ type Profile = {
   hasLocalPassword: boolean;
   phoneE164: string | null;
   phoneAuthStatus: "disabled" | "unavailable" | "available";
+  emailAuthStatus: "disabled" | "unavailable" | "available";
   workspaceMemberships: Array<{ role: "owner" | "admin" | "member" | "viewer"; workspace: { id: string; name: string } }>;
   oidcIdentities: Array<{ email: string | null; lastLoginAt: string; provider: { id: string; name: string } }>;
   oidcLinkableProviders: Array<{ id: string; name: string; workspace: { id: string; name: string } }>;
@@ -175,7 +177,8 @@ export function ProfileClient({
           </div>
           <ProfileDetailsForm key={`${profile?.displayName ?? ""}:${profile?.email ?? ""}:${profile?.emailVerifiedAt ?? ""}`} profile={profile} onUpdated={(details) => setProfile((current) => current ? { ...current, ...details } : current)} />
           <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); }} />
-          <PasswordForm hasLocalPassword={profile?.hasLocalPassword ?? true} />
+          {profile ? <EmailVerificationSection key={`${profile.email ?? ""}:${profile.emailVerifiedAt ?? ""}`} email={profile.email} emailVerifiedAt={profile.emailVerifiedAt} availability={profile.emailAuthStatus} onVerified={(verifiedAt) => setProfile((current) => current ? { ...current, emailVerifiedAt: verifiedAt } : current)} /> : null}
+          <PasswordForm key={`${profile?.email ?? ""}:${profile?.emailVerifiedAt ?? ""}:${profile?.emailAuthStatus ?? "disabled"}`} hasLocalPassword={profile?.hasLocalPassword ?? true} email={profile?.email ?? null} emailVerifiedAt={profile?.emailVerifiedAt ?? null} emailAuthStatus={profile?.emailAuthStatus ?? "disabled"} />
         </section>
         {profile ? <AccountPhonePanel key={profile.phoneE164 ?? "unbound"} hasLocalPassword={profile.hasLocalPassword} phoneE164={profile.phoneE164} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
         {profile ? <AccountClosurePanel hasLocalPassword={profile.hasLocalPassword} phoneE164={profile.phoneE164} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
@@ -240,6 +243,7 @@ function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; o
   const [email, setEmail] = useState(profile?.email ?? "");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const verifiedEmailLocked = Boolean(profile?.email && profile.emailVerifiedAt && profile.emailAuthStatus !== "disabled");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setMessage(null);
     try {
@@ -250,7 +254,7 @@ function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; o
     } catch (cause) { setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "个人资料更新失败" }); }
     finally { setPending(false); }
   }
-  return <section className="grid gap-5 border-t border-slate-100 px-6 py-6 sm:grid-cols-[0.72fr_1.28fr] sm:px-7"><div><h3 className="text-sm font-semibold text-slate-800">个人资料</h3><p className="mt-1.5 text-xs leading-5 text-slate-400">显示名称用于页面展示；邮箱用于邀请匹配与企业身份关联。</p><p className={`mt-2 text-xs leading-5 ${profile?.emailVerifiedAt ? "text-emerald-700" : "text-amber-700"}`}>{profile?.emailVerifiedAt ? "邮箱已验证，可接受定向工作区邀请。" : "邮箱未验证，不能消费工作区邀请；请通过 GitHub 或企业 OIDC 等可信身份重新确认。"}</p></div><form onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="显示名称" maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱" maxLength={320} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><div className="sm:col-span-2"><button disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : "保存个人资料"}</button>{message ? <Message {...message} /> : null}</div></form></section>;
+  return <section className="grid gap-5 border-t border-slate-100 px-6 py-6 sm:grid-cols-[0.72fr_1.28fr] sm:px-7"><div><h3 className="text-sm font-semibold text-slate-800">个人资料</h3><p className="mt-1.5 text-xs leading-5 text-slate-400">显示名称用于页面展示；修改邮箱后需要验证新地址。</p><p className={`mt-2 text-xs leading-5 ${verifiedEmailLocked ? "text-emerald-700" : profile?.emailVerifiedAt ? "text-emerald-700" : "text-amber-700"}`}>{verifiedEmailLocked ? "已验证邮箱目前不能修改或移除。" : profile?.emailVerifiedAt ? "邮箱已验证，可用于工作区邀请匹配。" : "邮箱未验证前不能用于工作区邀请；你可以在下方验证当前保存的邮箱。"}</p></div><form onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="显示名称" maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱" maxLength={320} readOnly={verifiedEmailLocked} className={`rounded-xl border border-slate-200 px-4 py-3 text-sm ${verifiedEmailLocked ? "cursor-not-allowed bg-slate-50 text-slate-500" : ""}`} /><div className="sm:col-span-2"><button disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : "保存个人资料"}</button>{message ? <Message {...message} /> : null}</div></form></section>;
 }
 
 function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null; loading: boolean; onUpdated: (username: string) => void }) {
@@ -293,11 +297,43 @@ function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null
   );
 }
 
-function PasswordForm({ hasLocalPassword }: { hasLocalPassword: boolean }) {
+function EmailVerificationSection({ email, emailVerifiedAt, availability, onVerified }: { email: string | null; emailVerifiedAt: string | null; availability: Profile["emailAuthStatus"]; onVerified: (value: string) => void }) {
+  const [code, setCode] = useState("");
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!challengeId || code.length !== 6 || !email) return;
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch("/api/auth/email/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ challengeId, code }),
+      });
+      if (!response.ok) throw new Error(await readError(response, "邮箱验证失败，请重新获取验证码。"));
+      const result = await response.json() as { user: { emailVerifiedAt: string } };
+      onVerified(result.user.emailVerifiedAt);
+      setCode(""); setChallengeId(null);
+      setMessage({ tone: "success", text: "当前邮箱已验证。" });
+    } catch (cause) {
+      setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "邮箱验证失败，请重新获取验证码。" });
+    } finally { setPending(false); }
+  }
+
+  if (!email || emailVerifiedAt || availability === "disabled") return null;
+  return <section className="grid gap-4 border-t border-slate-100 px-6 py-6 sm:grid-cols-[0.72fr_1.28fr] sm:px-7"><div><h3 className="text-sm font-semibold text-slate-800">验证邮箱</h3><p className="mt-1.5 text-xs leading-5 text-slate-500">验证码将发送到当前保存的邮箱 {email}。验证后可用于工作区邀请匹配和密码修改。</p></div><form onSubmit={submit} className="grid gap-3"><EmailCodeInput key={email} id="profile-email-verification-code" email={email} purpose="verify" availability={availability === "available" ? "available" : "unavailable"} code={code} onCodeChange={setCode} onChallengeIdChange={setChallengeId} /><button disabled={pending || !challengeId || code.length !== 6} className="w-fit rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "正在验证…" : "确认验证邮箱"}</button>{message ? <Message {...message} /> : null}</form></section>;
+}
+
+function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatus }: { hasLocalPassword: boolean; email: string | null; emailVerifiedAt: string | null; emailAuthStatus: Profile["emailAuthStatus"] }) {
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailChallengeId, setEmailChallengeId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -307,9 +343,19 @@ function PasswordForm({ hasLocalPassword }: { hasLocalPassword: boolean }) {
       setMessage({ tone: "error", text: "两次输入的新密码不一致" });
       return;
     }
+    const emailProofRequired = emailAuthStatus !== "disabled" && email !== null;
+    if (emailProofRequired && (!emailVerifiedAt || emailAuthStatus !== "available")) {
+      setMessage({ tone: "error", text: emailVerifiedAt ? "邮箱服务暂不可用，请稍后重试。" : "请先验证当前邮箱，再修改密码。" });
+      return;
+    }
+    if (emailProofRequired && (!emailChallengeId || emailCode.length !== 6)) {
+      setMessage({ tone: "error", text: "请先获取并填写邮箱验证码。" });
+      return;
+    }
     setPending(true); setMessage(null);
     try {
-      const response = await fetch("/api/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(hasLocalPassword ? { action: "changePassword", currentPassword, newPassword } : { action: "setLocalPassword", newPassword }) });
+      const emailProof = emailChallengeId && emailCode.length === 6 ? { challengeId: emailChallengeId, code: emailCode } : {};
+      const response = await fetch("/api/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(hasLocalPassword ? { action: "changePassword", currentPassword, newPassword, ...emailProof } : { action: "setLocalPassword", newPassword, ...emailProof }) });
       if (!response.ok) throw new Error(await readError(response, "密码更新失败"));
       router.replace("/login?password=updated");
       router.refresh();
@@ -338,8 +384,9 @@ function PasswordForm({ hasLocalPassword }: { hasLocalPassword: boolean }) {
           <PasswordField id="profile-confirm-password" label="再次输入新密码" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
         </div>
         <p className="text-xs text-slate-400">新密码至少 12 位，并同时包含字母和数字。</p>
+        {emailAuthStatus !== "disabled" && email ? <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="mb-3 text-xs leading-5 text-slate-600">{emailVerifiedAt ? `当前邮箱 ${email} 需要通过验证码确认后才能修改密码。` : "请先在上方验证当前邮箱。"}</p>{emailVerifiedAt ? <EmailCodeInput key={email} id="profile-password-email-code" email={email} purpose="password" availability={emailAuthStatus === "available" ? "available" : "unavailable"} code={emailCode} onCodeChange={setEmailCode} onChallengeIdChange={setEmailChallengeId} /> : null}</div> : null}
         {message ? <Message {...message} /> : null}
-        <div><button disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40">{pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"}</button></div>
+        <div><button disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword || (emailAuthStatus !== "disabled" && email !== null && (!emailVerifiedAt || emailAuthStatus !== "available" || !emailChallengeId || emailCode.length !== 6))} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40">{pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"}</button></div>
       </form>
     </details>
   );

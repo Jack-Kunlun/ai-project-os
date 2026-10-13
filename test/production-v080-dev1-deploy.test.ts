@@ -17,8 +17,16 @@ def fixture_lstat(real_lstat,fixture_root,path):
  return types.SimpleNamespace(st_uid=0,st_gid=0,st_mode=mode)
 assert m.SOURCE_REVISION==source and m.TAG=='v0.8.0-dev.1'
 assert m.CONFIRMATION=='CONFIRM_V080_DEV1_WITH_BACKUP_AND_FULL_CI'
-m.ROOT=Path.cwd()
-actual=m.target_manifest()
+# This historical deployer intentionally accepts only its original142 migrations.
+# Stage exact repository SQL bytes up to its boundary, excluding later features.
+with tempfile.TemporaryDirectory() as original_manifest_root:
+ m.ROOT=Path(original_manifest_root)
+ for path in sorted(Path('prisma/migrations').iterdir()):
+  if path.is_dir() and path.name <= m.MIGRATION:
+   destination=m.ROOT/'prisma/migrations'/path.name
+   destination.mkdir(parents=True)
+   shutil.copyfile(path/'migration.sql',destination/'migration.sql')
+ actual=m.target_manifest()
 assert len(actual)==142 and actual[-1][0]=='20261008010000_add_account_security'
 assert actual[140][0]=='20261007010000_persist_verified_git_addresses'
 assert all(len(checksum)==64 for _,checksum in actual)

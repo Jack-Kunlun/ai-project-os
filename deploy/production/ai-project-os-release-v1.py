@@ -296,7 +296,8 @@ def deploy(lib, args):
                     and 'org.opencontainers.image.version="' + target_tag[1:] + '"' in (ROOT / 'Dockerfile').read_text(),
                     'TARGET_VERSION_INVALID')
             compose(lib, extra, 'config', '--quiet')
-            compose(lib, extra, 'build', *services, capture=False, timeout=7200)
+            for service in services:
+                compose(lib, extra, 'build', service, capture=False, timeout=7200)
             images = target_images(lib, references, target_tag[1:])
             data['targetImages'] = images
             pg_after, writers_after = source_state(lib, source_tag, source_revision)

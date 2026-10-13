@@ -105,6 +105,8 @@ class ReleaseTests(unittest.TestCase):
                 calls.append(('compose', *args))
                 if args[0] == 'build' and failure == 'build':
                     raise RuntimeError('injected-build')
+                if args == ('build', 'worker') and failure == 'build-worker':
+                    raise RuntimeError('injected-build-worker')
                 if args[0] == 'up':
                     service = args[-1]
                     if service in ('migrate', 'reconcile') and failure == service:
@@ -187,17 +189,21 @@ class ReleaseTests(unittest.TestCase):
         build = next(index for index, call in enumerate(calls) if call[:2] == ('compose', 'build'))
         stop = next(index for index, call in enumerate(calls) if call[:2] == ('docker', 'stop'))
         self.assertLess(build, stop)
+        builds = [call for call in calls if call[:2] == ('compose', 'build')]
+        self.assertEqual([call[2:] for call in builds], [(service,) for service in ('migrate', 'reconcile', *release.WRITERS)])
         self.assertIn(('wait-service', 'migrate'), calls)
         self.assertIn(('wait-service', 'reconcile'), calls)
         self.assertIn(b'tag=v0.8.0-dev.4', result['receipt'])
         self.assertEqual(calls[-1], ('phase', 'completed'))
 
     def test_build_failure_preserves_source(self):
-        result = self.exercise(failure='build')
-        self.assertFalse(result['state']['stopped'])
-        self.assertEqual(result['state']['head'], 'a' * 40)
-        self.assertEqual(result['receipt'], b'old receipt')
-        self.assertFalse(any(call[:2] == ('docker', 'stop') for call in result['calls']))
+        for failure in ('build', 'build-worker'):
+            with self.subTest(failure=failure):
+                result = self.exercise(failure=failure)
+                self.assertFalse(result['state']['stopped'])
+                self.assertEqual(result['state']['head'], 'a' * 40)
+                self.assertEqual(result['receipt'], b'old receipt')
+                self.assertFalse(any(call[:2] == ('docker', 'stop') for call in result['calls']))
 
     def test_partial_stop_failure_restarts_captured_source(self):
         result = self.exercise(failure='partial-stop')

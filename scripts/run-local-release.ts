@@ -847,7 +847,10 @@ async function main(): Promise<void> {
     await runProcess("docker", [...composeArgs, "config", "--quiet"]);
     candidateTouched = true;
     console.log("[local-release] building app, worker, Git worker, principal bootstrap, migration, and reconcile images");
-    await runProcess("docker", [...composeArgs, "build"], { inherit: true });
+    // Explicit per-service commands also bound BuildKit/Bake concurrency.
+    for (const service of ["app", "worker", "git-worker", "principal-bootstrap", "migrate", "reconcile"]) {
+      await runProcess("docker", [...composeArgs, "build", service], { inherit: true });
+    }
     console.log("[local-release] starting isolated candidate");
     await runProcess("docker", [...composeArgs, "up", "--detach"], { inherit: true });
     await waitForCandidate(composeArgs);

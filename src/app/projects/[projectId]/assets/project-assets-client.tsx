@@ -8,6 +8,7 @@ import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
 import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
+import { initializeReviewDrafts } from "@/lib/project-asset-review-drafts";
 import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
 
 type AssetStatus = "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed" | "deleted";
@@ -198,11 +199,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
       if (assetsPayload.policy) setPolicy(assetsPayload.policy);
       if (assetsPayload.usage) setUsage(assetsPayload.usage);
       setEdits((current) => {
-        const next = { ...current };
-        for (const asset of assetsPayload.assets) {
-          for (const segment of asset.segments) next[segment.id] ??= segment.reviewedText ?? segment.contentText;
-        }
-        return next;
+        return initializeReviewDrafts(current, assetsPayload.assets);
       });
       setError(null);
     } catch (loadError) {

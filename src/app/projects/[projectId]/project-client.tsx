@@ -9,7 +9,7 @@ import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
-import { buildMaterialsReturnTo, isAddSourceView, parseMaterialKind, type MaterialKind } from "./materials/materials-navigation";
+import { buildMaterialsReturnTo, isAddSourceView, parseMaterialKind, parseProjectItemReviewStatus, type MaterialKind } from "./materials/materials-navigation";
 import { ProjectMaterialIntake } from "./project-material-intake";
 
 type ProjectItem = {
@@ -118,10 +118,10 @@ async function getProject(projectId: string): Promise<Project> {
   return payload.project;
 }
 
-async function getSources(projectId: string, input: { page: number; search: string; kind: string }): Promise<ProjectSourcePage> {
+async function getSources(projectId: string, input: { page: number; search: string; kind: string }, signal?: AbortSignal): Promise<ProjectSourcePage> {
   const query = new URLSearchParams({ page: String(input.page), pageSize: "20", kind: input.kind });
   if (input.search.trim()) query.set("search", input.search.trim());
-  const response = await fetch(`/api/projects/${projectId}/sources?${query}`, { cache: "no-store" });
+  const response = await fetch(`/api/projects/${projectId}/sources?${query}`, { cache: "no-store", signal });
   if (!response.ok) throw new Error(await readError(response, "项目资料加载失败"));
   const payload = (await response.json()) as Partial<ProjectSourcePage>;
   if (!payload.sources || !payload.pagination) throw new Error("项目资料加载响应无效");
@@ -136,10 +136,10 @@ async function getSource(projectId: string, sourceId: string): Promise<ProjectSo
   return payload.source;
 }
 
-async function getItems(projectId: string, input: { page: number; search: string; type: string; reviewStatus: string }): Promise<ProjectItemPage> {
+async function getItems(projectId: string, input: { page: number; search: string; type: string; reviewStatus: string }, signal?: AbortSignal): Promise<ProjectItemPage> {
   const query = new URLSearchParams({ page: String(input.page), pageSize: "20", type: input.type, reviewStatus: input.reviewStatus });
   if (input.search.trim()) query.set("search", input.search.trim());
-  const response = await fetch(`/api/projects/${projectId}/items?${query}`, { cache: "no-store" });
+  const response = await fetch(`/api/projects/${projectId}/items?${query}`, { cache: "no-store", signal });
   if (!response.ok) throw new Error(await readError(response, "项目条目加载失败"));
   const payload = (await response.json()) as Partial<ProjectItemPage>;
   if (!payload.items || !payload.pagination || !payload.counts) throw new Error("项目条目加载响应无效");
@@ -234,6 +234,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   const deferredSourceSearch = useDeferredValue(sourceSearch);
   const sourceKind: MaterialKind = queryMaterialKind;
   const sourcePage = navigation.page ?? 1;
+  const itemStatus = parseProjectItemReviewStatus(navigation.status);
   const [isSourceDetailLoading, setIsSourceDetailLoading] = useState(false);
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [itemCounts, setItemCounts] = useState<ItemCounts>({ candidate: 0, confirmed: 0, dismissed: 0, superseded: 0 });
@@ -241,7 +242,6 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   const [itemSearch, setItemSearch] = useState("");
   const deferredItemSearch = useDeferredValue(itemSearch);
   const [itemType, setItemType] = useState("all");
-  const [itemStatus, setItemStatus] = useState("all");
   const [itemPage, setItemPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -257,6 +257,10 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   const [itemDraftDirty, setItemDraftDirty] = useState(false);
   const focusRestoredRef = useRef<string | null>(null);
   const focusCancelledRef = useRef<string | null>(null);
+  const sourceRequestIdRef = useRef(0);
+  const sourceRequestControllerRef = useRef<AbortController | null>(null);
+  const itemRequestIdRef = useRef(0);
+  const itemRequestControllerRef = useRef<AbortController | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
   const [itemForm, setItemForm] = useState<ItemFormState>({
     type: "progress",
@@ -274,8 +278,9 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
       focusCancelledRef.current = null;
       return;
     }
-    const staticFocus = focusSourceId === "sources-heading";
-    if (isSourcesLoading || !project || focusRestoredRef.current === focusSourceId || focusCancelledRef.current === focusSourceId || (!staticFocus && !sources.some((source) => source.id === focusSourceId))) return;
+    const focusesItems = focusSourceId === "confirmed-facts" || focusSourceId === "items-heading";
+    const staticFocus = focusSourceId === "sources-heading" || focusesItems;
+    if ((focusesItems ? isItemsLoading : isSourcesLoading) || !project || focusRestoredRef.current === focusSourceId || focusCancelledRef.current === focusSourceId || (!staticFocus && !sources.some((source) => source.id === focusSourceId))) return;
     const sourceId = focusSourceId;
     const findTarget = () => document.getElementById(staticFocus ? sourceId : `source-link-${sourceId}`);
     const initialTarget = findTarget();
@@ -318,10 +323,12 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
       window.cancelAnimationFrame(secondFrame);
       removeFocusListeners();
     };
-  }, [focusSourceId, isSourcesLoading, project, sources]);
+  }, [focusSourceId, isItemsLoading, isSourcesLoading, project, sources]);
 
-  function replaceMaterialsQuery(input: { view?: "add" | null; search?: string; kind?: MaterialKind; page?: number }): void {
+  function replaceMaterialsQuery(input: { view?: "add" | null; status?: ReturnType<typeof parseProjectItemReviewStatus>; search?: string; kind?: MaterialKind; page?: number }): void {
+    const status = input.status ?? itemStatus;
     const href = buildProjectHref(projectId, "materials", {
+      status: status === "all" ? null : status,
       search: input.search ?? navigation.search,
       kind: input.kind ?? queryMaterialKind,
       page: input.page ?? navigation.page,
@@ -343,19 +350,36 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   }, [projectId]);
 
   const loadSources = useCallback(async () => {
+    const requestId = ++sourceRequestIdRef.current;
+    sourceRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    sourceRequestControllerRef.current = controller;
+    const isCurrentRequest = () => !controller.signal.aborted && sourceRequestIdRef.current === requestId;
     setIsSourcesLoading(true);
     try {
-      const loaded = await getSources(projectId, { page: sourcePage, search: deferredSourceSearch, kind: sourceKind });
+      const loaded = await getSources(projectId, { page: sourcePage, search: deferredSourceSearch, kind: sourceKind }, controller.signal);
+      if (!isCurrentRequest()) return;
       setSources(loaded.sources);
       setSourcePagination(loaded.pagination);
       setItemForm((current) => ({ ...current, sourceId: current.sourceId || loaded.sources[0]?.id || "" }));
       setSourceError(null);
     } catch (loadError) {
+      if (!isCurrentRequest()) return;
       setSourceError(loadError instanceof Error ? loadError.message : "项目资料加载失败");
     } finally {
-      setIsSourcesLoading(false);
+      if (isCurrentRequest()) {
+        sourceRequestControllerRef.current = null;
+        setIsSourcesLoading(false);
+      }
     }
   }, [deferredSourceSearch, projectId, sourceKind, sourcePage]);
+
+  const cancelSourceRequest = useCallback(() => {
+    sourceRequestIdRef.current += 1;
+    const controller = sourceRequestControllerRef.current;
+    sourceRequestControllerRef.current = null;
+    controller?.abort();
+  }, []);
 
   const loadSourceDetail = useCallback(async (sourceId: string): Promise<ProjectSource | null> => {
     const cached = sourceDetails[sourceId];
@@ -374,24 +398,53 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   }, [projectId, sourceDetails]);
 
   const loadItems = useCallback(async () => {
+    const requestId = ++itemRequestIdRef.current;
+    itemRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    itemRequestControllerRef.current = controller;
+    const isCurrentRequest = () => !controller.signal.aborted && itemRequestIdRef.current === requestId;
     setIsItemsLoading(true);
     try {
-      const loaded = await getItems(projectId, { page: itemPage, search: deferredItemSearch, type: itemType, reviewStatus: itemStatus });
+      const loaded = await getItems(projectId, { page: itemPage, search: deferredItemSearch, type: itemType, reviewStatus: itemStatus }, controller.signal);
+      if (!isCurrentRequest()) return;
       setItems(loaded.items);
       setItemCounts(loaded.counts);
       setItemPagination(loaded.pagination);
       if (itemPage > loaded.pagination.totalPages) setItemPage(loaded.pagination.totalPages);
       setItemError(null);
     } catch (loadError) {
+      if (!isCurrentRequest()) return;
       setItemError(loadError instanceof Error ? loadError.message : "项目条目加载失败");
     } finally {
-      setIsItemsLoading(false);
+      if (isCurrentRequest()) {
+        itemRequestControllerRef.current = null;
+        setIsItemsLoading(false);
+      }
     }
   }, [deferredItemSearch, itemPage, itemStatus, itemType, projectId]);
 
+  const cancelItemRequest = useCallback(() => {
+    itemRequestIdRef.current += 1;
+    const controller = itemRequestControllerRef.current;
+    itemRequestControllerRef.current = null;
+    controller?.abort();
+  }, []);
+
   useEffect(() => { const timer = window.setTimeout(() => void loadProject(), 0); return () => window.clearTimeout(timer); }, [loadProject]);
-  useEffect(() => { const timer = window.setTimeout(() => void loadSources(), 0); return () => window.clearTimeout(timer); }, [loadSources]);
-  useEffect(() => { const timer = window.setTimeout(() => void loadItems(), 0); return () => window.clearTimeout(timer); }, [loadItems]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadSources(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      cancelSourceRequest();
+    };
+  }, [cancelSourceRequest, loadSources]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadItems(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      cancelItemRequest();
+    };
+  }, [cancelItemRequest, loadItems]);
   useEffect(() => {
     if (!itemForm.sourceId || sourceDetails[itemForm.sourceId]) return;
     const timer = window.setTimeout(() => void loadSourceDetail(itemForm.sourceId), 0);
@@ -639,6 +692,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
     focus: "review-queue",
     from: "materials",
     returnTo: buildProjectHref(projectId, "materials", {
+      status: itemStatus === "all" ? null : itemStatus,
       search: sourceSearch,
       kind: sourceKind,
       page: sourcePage,
@@ -730,7 +784,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
                         <p className="mt-2 text-xs text-slate-500">{source.kind === "manual" ? "手工输入资料" : "外部来源已绑定"} · 最近接入于 {formatSourceDate(source.ingestedAt)}</p>
                       </div>
                       <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-                        <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">查看详情</Link>
+                        <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { status: itemStatus, search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">查看详情</Link>
                         <button
                           type="button"
                           onClick={() => void handleDeleteSource(source)}
@@ -751,11 +805,11 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
         </div>
       </section>
 
-      <section id="confirmed-facts" aria-labelledby="items-heading" className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      <section id="confirmed-facts" tabIndex={-1} aria-labelledby="items-heading" className="mt-10 scroll-mt-32 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Confirmed facts</p>
-            <h2 id="items-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">已确认事实</h2>
+            <h2 id="items-heading" tabIndex={-1} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">已确认事实</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">人工记录或审核项目事实，并通过精确原文摘录回溯到原始资料。只有已确认事实才可能进入后续 AI 可引用记忆流程。</p>
           </div>
           <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isItemsLoading ? "读取中…" : `${itemCounts.confirmed} 已确认 · ${itemCounts.candidate} 待确认`}</span>
@@ -908,7 +962,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
           <div className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]">
             <label><span className="sr-only">搜索项目条目</span><input value={itemSearch} onChange={(event) => { setItemSearch(event.target.value); setItemPage(1); }} placeholder="搜索标题、内容或证据摘录" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
             <label><span className="sr-only">按条目类型筛选</span><select value={itemType} onChange={(event) => { setItemType(event.target.value); setItemPage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部类型</option><option value="decision">决策</option><option value="progress">进展</option><option value="issue">问题</option><option value="risk">风险</option></select></label>
-            <label><span className="sr-only">按审核状态筛选</span><select value={itemStatus} onChange={(event) => { setItemStatus(event.target.value); setItemPage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部状态</option><option value="candidate">待确认</option><option value="confirmed">已确认</option><option value="dismissed">已驳回</option><option value="superseded">已替代</option></select></label>
+            <label><span className="sr-only">按审核状态筛选</span><select value={itemStatus} onChange={(event) => { replaceMaterialsQuery({ status: parseProjectItemReviewStatus(event.target.value) }); setItemPage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部状态</option><option value="candidate">待确认</option><option value="confirmed">已确认</option><option value="dismissed">已驳回</option><option value="superseded">已替代</option></select></label>
           </div>
 
           {isItemsLoading ? (

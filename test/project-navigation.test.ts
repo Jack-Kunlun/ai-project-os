@@ -52,6 +52,28 @@ test("project navigation preserves numbered pagination in a safe return", () => 
   assert.equal(safeProjectReturnTo(projectId, returnTo), returnTo);
 });
 
+test("materials links keep exact review filters, focus anchors, and overview return context", () => {
+  const overview = buildProjectHref(projectId, "overview", { focus: "current-state" });
+  const sourcesHref = buildProjectHref(projectId, "materials", { focus: "sources-heading", from: "overview", returnTo: overview });
+  const assetsHref = buildProjectHref(projectId, "assets", { from: "overview", returnTo: overview });
+  const href = buildProjectHref(projectId, "materials", {
+    status: "confirmed",
+    focus: "confirmed-facts",
+    from: "overview",
+    returnTo: overview,
+  });
+
+  assert.equal(href, `/projects/${projectId}/materials?status=confirmed&focus=confirmed-facts&from=overview&returnTo=${encodeURIComponent(overview)}`);
+  const parsed = parseProjectHref(projectId, href);
+  assert.equal(parsed?.status, "confirmed");
+  assert.equal(parsed?.focus, "confirmed-facts");
+  assert.equal(parsed?.returnTo, overview);
+  assert.equal(sourcesHref, `/projects/${projectId}/materials?focus=sources-heading&from=overview&returnTo=${encodeURIComponent(overview)}`);
+  assert.equal(assetsHref, `/projects/${projectId}/assets?from=overview&returnTo=${encodeURIComponent(overview)}`);
+  assert.equal(parseProjectPageState("overview", projectId, new URLSearchParams("focus=attention-details")).focus, "attention-details");
+  assert.equal(parseProjectHref(projectId, `/projects/${projectId}/materials?status=not-real`), null);
+});
+
 test("job navigation can carry task filters while returning to an earlier project source", () => {
   const overview = buildProjectHref(projectId, "overview", { focus: "current-state" });
   const job = buildProjectHref(projectId, "job", {

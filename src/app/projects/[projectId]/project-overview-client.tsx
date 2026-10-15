@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
+import { projectIndexReadinessDetail, projectIndexReadinessLabel, summarizeProjectOverview } from "@/lib/project-overview-metrics";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import type { SnapshotRecord } from "@/lib/project-snapshot";
 import { ProjectGovernanceSections } from "./governance/project-governance-client";
@@ -109,9 +110,10 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
   }, [load]);
 
   useEffect(() => {
-    if (navigation.focus !== "current-state" || loading || data === null) return;
+    if ((navigation.focus !== "current-state" && navigation.focus !== "attention-details") || loading || data === null) return;
+    const focusId = navigation.focus;
     const timer = window.setTimeout(() => {
-      const target = document.getElementById("current-state");
+      const target = document.getElementById(focusId);
       target?.scrollIntoView({ block: "start" });
       if (target instanceof HTMLElement) target.focus({ preventScroll: true });
     }, 0);
@@ -120,15 +122,20 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
 
   const summary = useMemo(() => {
     if (data === null) return null;
-    const confirmed = data.itemCounts.confirmed;
-    const candidates = data.itemCounts.candidate;
-    const snapshotStale = data.snapshotStale;
-    const githubIssues = data.governance.github.partial + data.governance.github.rateLimited + data.governance.github.unknown;
-    const taskIssues = data.governance.jobs.failed + data.governance.jobs.reconciliationRequired;
-    const pendingContent = Math.max(data.governance.pendingReviews.total, candidates);
-    const attentionTotal = data.governance.attentionTotal - data.governance.pendingReviews.total + pendingContent;
-    return { confirmed, candidates, snapshotStale, githubIssues, taskIssues, pendingContent, attentionTotal };
+    return summarizeProjectOverview(data);
   }, [data]);
+
+  const overviewReturnTo = buildProjectHref(projectId, "overview", { focus: "current-state" });
+  const projectCandidateHref = buildProjectHref(projectId, "materials", { status: "candidate", focus: "items-heading", from: "overview", returnTo: overviewReturnTo });
+  const aiReviewHref = buildProjectHref(projectId, "materialsReview", { focus: "review-queue", from: "overview", returnTo: overviewReturnTo });
+  const candidateCount = summary?.candidates ?? 0;
+  const aiReviewCount = data?.governance.pendingReviews.total ?? 0;
+  const pendingUsesProjectCandidates = candidateCount > aiReviewCount;
+  const pendingDetailHref = pendingUsesProjectCandidates ? projectCandidateHref : aiReviewHref;
+  const pendingRelatedHref = candidateCount > 0 && aiReviewCount > 0
+    ? (pendingUsesProjectCandidates ? aiReviewHref : projectCandidateHref)
+    : null;
+  const pendingDetail = `项目候选 ${candidateCount} 条 · AI 待审核 ${aiReviewCount} 条（按较大值计入汇总）`;
 
   async function generateSnapshot() {
     if (data === null || summary === null || summary.confirmed === 0 || snapshotPending) return;
@@ -154,7 +161,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
     if (data === null || summary === null) return null;
     const returnTo = buildProjectHref(projectId, "overview", { focus: "current-state" });
     if (data.project._count.sources === 0 && data.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo }), action: "添加资料" };
-    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "核对原始资料后，只有人工确认的内容才会进入已确认事实。", href: buildProjectHref(projectId, "materialsReview", { focus: "review-queue", from: "overview", returnTo }), action: "开始审核" };
+    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "核对原始资料后，只有人工确认的内容才会进入已确认事实。", href: pendingDetailHref, action: "开始审核" };
     if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "把已确认内容建立为可检索、可引用的语义索引。", href: buildProjectHref(projectId, "memory", { from: "overview", returnTo }), action: "管理记忆" };
     return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: buildProjectHref(projectId, "intelligence", { focus: "agent-investigation", from: "overview", returnTo }), action: "打开 AI 工作台" };
   })();
@@ -195,10 +202,10 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
             {message ? <p role="status" className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">{message}</p> : null}
 
             <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="项目关键指标">
-              <MetricCard label="资料来源" value={data.project._count.sources} detail="文本、网页与仓库来源" tone="indigo" />
-              <MetricCard label="文件" value={data.project._count.assets} detail="图片、文档与文件夹内容" tone="cyan" />
-              <MetricCard label="已确认事实" value={summary.confirmed} detail={`全部条目 ${data.project._count.items}`} tone="emerald" />
-              <MetricCard label="待处理" value={summary.attentionTotal} detail="审核、异常与人工收口" tone={summary.attentionTotal > 0 ? "rose" : "slate"} />
+              <MetricCard label="资料来源" value={data.project._count.sources} detail="文本、网页与仓库来源" tone="indigo" href={buildProjectHref(projectId, "materials", { focus: "sources-heading", from: "overview", returnTo: overviewReturnTo })} />
+              <MetricCard label="文件" value={data.project._count.assets} detail="图片、文档与文件夹内容" tone="cyan" href={buildProjectHref(projectId, "assets", { from: "overview", returnTo: overviewReturnTo })} />
+              <MetricCard label="已确认事实" value={summary.confirmed} detail={`全部条目 ${data.project._count.items}`} tone="emerald" href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "overview", returnTo: overviewReturnTo })} />
+              <MetricCard label="待处理" value={summary.attentionTotal} detail="审核、任务、仓库与记忆索引" tone={summary.attentionTotal > 0 ? "rose" : "slate"} href={buildProjectHref(projectId, "overview", { focus: "attention-details", from: "overview", returnTo: overviewReturnTo })} />
             </section>
 
             <section className="mt-6 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
@@ -213,14 +220,33 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                 <div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed === 0 || data.project.archivedAt !== null} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{snapshotPending ? "更新中…" : data.snapshot ? "更新状态快照" : "生成状态快照"}</button><Link href={`/projects/${projectId}/world`} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">高级状态治理</Link></div>
               </article>
 
-              <article className="flex flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+              <article id="attention-details" tabIndex={-1} className="scroll-mt-36 flex flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-7">
                 <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Attention</p><h2 className="mt-2 text-xl font-semibold">需要关注</h2></div>
                 <div className="mt-5 divide-y divide-slate-100">
-                  <AttentionRow label="待审核内容" value={summary.pendingContent} href={buildProjectHref(projectId, "materialsReview", { focus: "review-queue", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
-                  <AttentionRow label="任务异常" value={summary.taskIssues} href={buildProjectHref(projectId, "overview", { status: "failed", focus: "task-runs", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
-                  <AttentionRow label="仓库同步风险" value={summary.githubIssues} href={`/projects/${projectId}/repositories`} />
+                  <AttentionRow
+                    label="待确认内容"
+                    value={summary.pendingContent}
+                    detail={pendingDetail}
+                    href={pendingDetailHref}
+                    relatedHref={pendingRelatedHref ?? undefined}
+                    relatedLabel={pendingUsesProjectCandidates ? "打开 AI 审核队列" : "查看项目候选"}
+                  />
+                  <AttentionRow label="失败任务" value={summary.failedJobs} detail="查看失败运行记录并按需重试或处理。" href={buildProjectHref(projectId, "overview", { status: "failed", focus: "task-runs", from: "overview", returnTo: overviewReturnTo })} />
+                  <AttentionRow label="待核对任务" value={summary.reconciliationRequired} detail="任务状态不确定，需要人工核对并收口。" href={buildProjectHref(projectId, "overview", { status: "unknown", focus: "task-runs", from: "overview", returnTo: overviewReturnTo })} />
+                  <AttentionRow
+                    label="仓库同步风险"
+                    value={summary.githubIssues}
+                    detail={`部分成功 ${summary.githubPartial} · 受限 ${summary.githubRateLimited} · 状态未知 ${summary.githubUnknown}`}
+                    href={buildProjectHref(projectId, "repositories", { from: "overview", returnTo: overviewReturnTo })}
+                  />
+                  <AttentionRow
+                    label={`项目记忆索引 · ${projectIndexReadinessLabel(data.governance.index.readiness)}`}
+                    value={summary.indexRisk}
+                    detail={projectIndexReadinessDetail(data.governance.index.readiness)}
+                    href={buildProjectHref(projectId, "memory", { from: "overview", returnTo: overviewReturnTo })}
+                  />
                 </div>
-                <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview" })} className="mt-auto inline-flex min-h-10 items-center pt-5 text-xs font-semibold text-indigo-600">查看任务运行记录 →</Link>
+                <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview", returnTo: overviewReturnTo })} className="mt-auto inline-flex min-h-10 items-center pt-5 text-xs font-semibold text-indigo-600">查看全部任务运行记录 →</Link>
               </article>
             </section>
 
@@ -234,15 +260,15 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
   );
 }
 
-function MetricCard({ label, value, detail, tone }: { label: string; value: number; detail: string; tone: "indigo" | "cyan" | "emerald" | "rose" | "slate" }) {
+function MetricCard({ label, value, detail, tone, href }: { label: string; value: number; detail: string; tone: "indigo" | "cyan" | "emerald" | "rose" | "slate"; href: string }) {
   const tones = { indigo: "bg-indigo-50 text-indigo-700", cyan: "bg-cyan-50 text-cyan-700", emerald: "bg-emerald-50 text-emerald-700", rose: "bg-rose-50 text-rose-700", slate: "bg-slate-100 text-slate-600" } as const;
-  return <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="flex items-start justify-between"><div><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p></div><span aria-hidden="true" className={`flex h-10 w-10 items-center justify-center rounded-xl ${tones[tone]}`}><span className="h-2.5 w-2.5 rounded-full bg-current" /></span></div><p className="mt-4 text-xs text-slate-500">{detail}</p></article>;
+  return <Link href={href} className="group block min-w-0 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-200"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p></div><span aria-hidden="true" className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tones[tone]}`}><span className="h-2.5 w-2.5 rounded-full bg-current" /></span></div><p className="mt-4 text-xs text-slate-500">{detail}</p><span aria-hidden="true" className="mt-3 inline-flex text-xs font-semibold text-indigo-600 transition group-hover:translate-x-0.5">查看详情 →</span></Link>;
 }
 
 function StateCount({ label, value }: { label: string; value: number }) {
   return <div className="rounded-2xl bg-slate-50 px-4 py-4 text-center"><strong className="text-2xl font-semibold">{value}</strong><span className="mt-1 block text-xs text-slate-500">{label}</span></div>;
 }
 
-function AttentionRow({ label, value, href }: { label: string; value: number; href: string }) {
-  return <Link href={href} className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"><span className="text-sm font-medium text-slate-700">{label}</span><span className={`rounded-full px-3 py-1 text-xs font-semibold ${value > 0 ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{value > 0 ? value : "正常"}</span></Link>;
+function AttentionRow({ label, value, detail, href, relatedHref, relatedLabel }: { label: string; value: number; detail: string; href: string; relatedHref?: string; relatedLabel?: string }) {
+  return <div className="py-4 first:pt-0 last:pb-0"><Link href={href} className="flex min-w-0 items-start justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span className="min-w-0"><span className="block text-sm font-medium text-slate-700">{label}</span><span className="mt-1 block break-words text-xs leading-5 text-slate-500">{detail}</span></span><span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${value > 0 ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{value > 0 ? value : "正常"}</span></Link>{relatedHref && relatedLabel ? <Link href={relatedHref} className="mt-2 inline-flex min-h-8 items-center text-xs font-semibold text-indigo-600 hover:text-indigo-800 focus-visible:outline-2 focus-visible:outline-indigo-500">{relatedLabel} →</Link> : null}</div>;
 }

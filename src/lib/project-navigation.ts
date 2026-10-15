@@ -52,6 +52,9 @@ export type ProjectJobStatus = typeof PROJECT_JOB_STATUS_VALUES[number];
 export const PROJECT_PLAN_STATUS_VALUES = ["proposed", "planned", "inProgress", "blocked", "completed", "cancelled"] as const;
 export type ProjectPlanStatus = typeof PROJECT_PLAN_STATUS_VALUES[number];
 
+export const PROJECT_ITEM_REVIEW_STATUS_VALUES = ["all", "candidate", "confirmed", "dismissed", "superseded"] as const;
+export type ProjectItemReviewStatus = typeof PROJECT_ITEM_REVIEW_STATUS_VALUES[number];
+
 const SOURCE_VALUES: readonly ProjectNavigationSource[] = [
   "dashboard",
   "overview",
@@ -71,6 +74,7 @@ const ASSET_STATUS_VALUES = ["all", "uploaded", "parsing", "waitingVision", "awa
 const REVIEW_TYPE_VALUES = ["all", "decision", "progress", "issue", "risk"] as const;
 const FOCUS_ANCHORS = new Set([
   "current-state",
+  "attention-details",
   "task-runs",
   "ai-usage",
   "agent-investigation",
@@ -80,6 +84,7 @@ const FOCUS_ANCHORS = new Set([
   "review-queue",
   "impact-signals",
   "sources-heading",
+  "confirmed-facts",
   "items-heading",
   "project-item-form",
 ]);
@@ -111,7 +116,7 @@ const ROUTE_DEFINITIONS: Readonly<Record<ProjectNavigationRoute, RouteDefinition
   overview: { suffix: "", queryKeys: ["status", "kind", "search", "cursor", "focus", "from", "returnTo"] },
   configuration: { suffix: "/configuration", queryKeys: ["from", "returnTo"] },
   plan: { suffix: "/plan", queryKeys: ["status", "focus", "from", "returnTo"] },
-  materials: { suffix: "/materials", queryKeys: ["view", "search", "kind", "page", "focus", "from", "returnTo"] },
+  materials: { suffix: "/materials", queryKeys: ["status", "view", "search", "kind", "page", "focus", "from", "returnTo"] },
   materialsReview: { suffix: "/materials/review", queryKeys: ["search", "filter", "cursor", "focus", "from", "returnTo"] },
   governance: { suffix: "/governance", queryKeys: ["status", "kind", "search", "cursor", "focus", "from", "returnTo"] },
   assets: { suffix: "/assets", queryKeys: ["status", "kind", "search", "page", "focus", "from", "returnTo"] },
@@ -185,6 +190,7 @@ function isNonEmptySearch(value: string | null | undefined): value is string {
 function isAllowedStatus(route: ProjectNavigationRoute, value: string | null | undefined): value is string {
   if (value === null || value === undefined) return false;
   if (route === "plan") return PROJECT_PLAN_STATUS_VALUES.includes(value as ProjectPlanStatus);
+  if (route === "materials") return PROJECT_ITEM_REVIEW_STATUS_VALUES.includes(value as ProjectItemReviewStatus);
   if (route === "overview" || route === "governance" || route === "job") return PROJECT_JOB_STATUS_VALUES.includes(value as ProjectJobStatus);
   if (route === "assets") return ASSET_STATUS_VALUES.includes(value as (typeof ASSET_STATUS_VALUES)[number]);
   if (route === "actions") return value === "pending" || value === "approved" || value === "rejected" || value === "cancelled" || value === "completed";

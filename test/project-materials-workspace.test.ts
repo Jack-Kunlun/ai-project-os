@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildMaterialsReturnTo,
   parseMaterialKind,
+  parseProjectItemReviewStatus,
   parseMaterialsPage,
   safeMaterialsReturnTo,
 } from "../src/app/projects/[projectId]/materials/materials-navigation";
@@ -16,6 +17,16 @@ test("materials return context keeps the source list state and focus", () => {
   assert.equal(href, `/projects/${projectId}/materials?search=roadmap&kind=document&page=3&focus=${sourceId}`);
   assert.equal(safeMaterialsReturnTo(projectId, href), href);
   assert.equal(safeMaterialsReturnTo(projectId, "/projects/11111111-1111-4111-8111-111111111111/materials?search=roadmap&kind=document&page=3&focus=not-a-uuid"), null);
+});
+
+test("materials return context preserves the confirmed or candidate filter", () => {
+  const href = buildMaterialsReturnTo(projectId, { status: "confirmed", focus: "confirmed-facts" });
+  assert.equal(href, `/projects/${projectId}/materials?status=confirmed&kind=all&focus=confirmed-facts`);
+  assert.equal(safeMaterialsReturnTo(projectId, href), href);
+  assert.equal(safeMaterialsReturnTo(projectId, `/projects/${projectId}/materials?status=unexpected`), null);
+  assert.equal(safeMaterialsReturnTo(projectId, `/projects/${projectId}/materials?focus=not-a-real-anchor`), null);
+  assert.equal(parseProjectItemReviewStatus("candidate"), "candidate");
+  assert.equal(parseProjectItemReviewStatus("unexpected"), "all");
 });
 
 test("materials return context rejects open redirects and unknown query state", () => {
@@ -39,6 +50,10 @@ test("materials workspace has separate source, intake dialog, and AI review rout
   assert.match(materials, /原始资料来源库/u);
   assert.match(materials, /id="add-source-trigger"/u);
   assert.match(materials, /buildMaterialsReturnTo/u);
+  assert.match(materials, /parseProjectItemReviewStatus\(navigation\.status\)/u);
+  assert.match(materials, /reviewStatus: itemStatus/u);
+  assert.match(materials, /id="confirmed-facts" tabIndex=\{-1\}/u);
+  assert.match(materials, /focusesItems \? isItemsLoading : isSourcesLoading/u);
   assert.doesNotMatch(materials, /<ProjectMaterialReviewQueue/u);
   assert.match(intake, /role="dialog"/u);
   assert.match(intake, /aria-modal="true"/u);

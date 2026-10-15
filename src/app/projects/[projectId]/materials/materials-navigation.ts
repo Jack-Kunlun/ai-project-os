@@ -1,3 +1,5 @@
+import { PROJECT_ITEM_REVIEW_STATUS_VALUES, type ProjectItemReviewStatus } from "@/lib/project-navigation";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export const MATERIAL_KIND_VALUES = ["all", "document", "screenshot", "github", "git", "web", "manual"] as const;
@@ -6,7 +8,16 @@ export type MaterialKind = (typeof MATERIAL_KIND_VALUES)[number];
 export const REVIEW_TYPE_VALUES = ["all", "decision", "progress", "issue", "risk"] as const;
 export type ReviewType = (typeof REVIEW_TYPE_VALUES)[number];
 
-const MATERIALS_QUERY_KEYS = new Set(["search", "kind", "page", "focus"]);
+const MATERIALS_QUERY_KEYS = new Set(["status", "search", "kind", "page", "focus"]);
+const MATERIALS_FOCUS_ANCHORS = new Set(["sources-heading", "confirmed-facts", "items-heading"]);
+
+export function isProjectItemReviewStatus(value: string | null | undefined): value is ProjectItemReviewStatus {
+  return value !== null && value !== undefined && PROJECT_ITEM_REVIEW_STATUS_VALUES.includes(value as ProjectItemReviewStatus);
+}
+
+export function parseProjectItemReviewStatus(value: string | null | undefined): ProjectItemReviewStatus {
+  return isProjectItemReviewStatus(value) ? value : "all";
+}
 
 export function isMaterialKind(value: string | null | undefined): value is MaterialKind {
   return value !== null && value !== undefined && MATERIAL_KIND_VALUES.includes(value as MaterialKind);
@@ -30,16 +41,22 @@ export function parseMaterialsPage(value: string | null | undefined): number {
   return Number.isSafeInteger(page) && page > 0 ? page : 1;
 }
 
+function isMaterialsFocus(value: string): boolean {
+  return UUID_PATTERN.test(value) || MATERIALS_FOCUS_ANCHORS.has(value);
+}
+
 export function buildMaterialsReturnTo(
   projectId: string,
-  input: { search?: string; kind?: MaterialKind; page?: number; focus?: string },
+  input: { status?: ProjectItemReviewStatus; search?: string; kind?: MaterialKind; page?: number; focus?: string },
 ): string {
   const params = new URLSearchParams();
+  const status = parseProjectItemReviewStatus(input.status);
+  if (status !== "all") params.set("status", status);
   const search = input.search?.trim();
   if (search) params.set("search", search.slice(0, 200));
   params.set("kind", parseMaterialKind(input.kind));
   if (input.page && Number.isSafeInteger(input.page) && input.page > 1) params.set("page", String(input.page));
-  if (input.focus && UUID_PATTERN.test(input.focus)) params.set("focus", input.focus);
+  if (input.focus && isMaterialsFocus(input.focus)) params.set("focus", input.focus);
   const query = params.toString();
   return `/projects/${encodeURIComponent(projectId)}/materials${query ? `?${query}` : ""}`;
 }
@@ -69,13 +86,17 @@ export function safeMaterialsReturnTo(projectId: string, value: string | null | 
 
   const kind = parseMaterialKind(parsed.searchParams.get("kind"));
   if (parsed.searchParams.has("kind") && parsed.searchParams.get("kind") !== kind) return null;
+  const statusValue = parsed.searchParams.get("status");
+  const status = parseProjectItemReviewStatus(statusValue);
+  if (statusValue !== null && statusValue !== status) return null;
   const pageValue = parsed.searchParams.get("page");
   const page = parseMaterialsPage(pageValue);
   if (pageValue !== null && pageValue !== String(page)) return null;
   const focus = parsed.searchParams.get("focus");
-  if (focus !== null && !UUID_PATTERN.test(focus)) return null;
+  if (focus !== null && !isMaterialsFocus(focus)) return null;
 
   return buildMaterialsReturnTo(projectId, {
+    status,
     search: parsed.searchParams.get("search") ?? undefined,
     kind,
     page,

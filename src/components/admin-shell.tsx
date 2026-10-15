@@ -65,7 +65,7 @@ const moduleGroups: ReadonlyArray<Readonly<{
     matches: (pathname) => pathname.startsWith("/admin/operations"),
     links: [
       { label: "失败收件箱", href: "/admin/operations/failures", exact: true },
-      { label: "备份状态", href: "/admin/operations/backups", exact: true },
+      { label: "资源与备份", href: "/admin/operations/backups", exact: true },
     ],
   },
 ];

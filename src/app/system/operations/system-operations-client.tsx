@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/app-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { ParentPageLink } from "@/components/parent-page-link";
+import { ServerResourcesPanel } from "@/components/server-resources-panel";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import type {
   BackupOperationsSnapshot,
@@ -134,6 +135,7 @@ export function SystemOperationsClient({
     <OperationsFrame adminMode={adminMode} username={username}>
       <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
         {!adminMode ? <div className="mb-4"><ParentPageLink href="/profile" label="返回个人中心" /></div> : null}
+        <ServerResourcesPanel />
         <AdminPageHeader title="生产备份与 COS 同步" description="查看每日、手动和部署前备份的脱敏执行状态；页面不能启动、删除或恢复备份，也不能访问 COS 密钥、age 私钥、Docker 或 systemd。" actions={<button type="button" onClick={() => void refresh()} disabled={refreshing} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60">{refreshing ? "刷新中…" : "刷新状态"}</button>} />
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700">仅初始超级管理员</span><span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-600">只读</span></div>
 

@@ -12,7 +12,7 @@ test(".10 to .11 migration route is exact, backup-first, and isolated", async ()
   const [gateway, deployer, workflow, preflight, sudoers] = await Promise.all([
     readFile(gatewayPath, "utf8"),
     readFile(deployerPath, "utf8"),
-    readFile(path.join(root, ".github/workflows/deploy-v06-default-memory-migration.yml"), "utf8"),
+    readFile(path.join(root, "test/fixtures/legacy-workflows/deploy-v06-default-memory-migration.yml"), "utf8"),
     readFile(path.join(root, "scripts/production-v06-default-memory-upgrade-preflight.ts"), "utf8"),
     readFile(path.join(root, "deploy/production/ai-project-os-deploy.sudoers"), "utf8"),
   ]);
@@ -64,7 +64,7 @@ test("the previous .10 tooling updater accepts retained gateway and sudoers cont
     readFile(path.join(root, "deploy/production/ai-project-os-install-release-tooling"), "utf8"),
     readFile(gatewayPath, "utf8"),
     readFile(path.join(root, "deploy/production/ai-project-os-deploy.sudoers"), "utf8"),
-    readFile(path.join(root, ".github/workflows/deploy-v06-default-memory-migration.yml"), "utf8"),
+    readFile(path.join(root, "test/fixtures/legacy-workflows/deploy-v06-default-memory-migration.yml"), "utf8"),
   ]);
 
   assert.doesNotMatch(oldUpdater, /ai-project-os-v06-default-memory-deploy/u);

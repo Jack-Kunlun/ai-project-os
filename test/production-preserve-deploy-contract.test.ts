@@ -13,7 +13,7 @@ const sudoersPath = path.join(root, "deploy/production/ai-project-os-deploy.sudo
 const installerPath = path.join(root, "deploy/production/install-production-deploy.sh");
 const backupPath = path.join(root, "deploy/production/ai-project-os-backup");
 const restorePath = path.join(root, "deploy/production/ai-project-os-restore");
-const workflowPath = path.join(root, ".github/workflows/deploy-production.yml");
+const workflowPath = path.join(root, "test/fixtures/legacy-workflows/deploy-production.yml");
 const ciWorkflowPath = path.join(root, ".github/workflows/ci.yml");
 
 async function read(pathname: string): Promise<string> {

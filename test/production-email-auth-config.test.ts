@@ -42,7 +42,7 @@ test("email configuration is app-only and raw; restricted gateway has no caller 
 });
 
 test("production workflow sends the four environment secrets only over stdin and prints a fixed receipt", async () => {
-  const workflow = await readFile(path.join(root, ".github/workflows/deploy-v1.yml"), "utf8");
+  const workflow = await readFile(path.join(root, "test/fixtures/legacy-workflows/deploy-v1.yml"), "utf8");
   assert.match(workflow, /^    environment:\n      name: production\n/mu);
   const step = workflow.match(/^      - name: Sync email authentication configuration through restricted stdin\n([\s\S]*?)(?=^      - name:)/mu)?.[1];
   assert.ok(step);
@@ -75,7 +75,7 @@ test("public email endpoints have source and body limits in production and the e
 test("workflow executes a byte-preserving stdin handoff without putting secrets in SSH arguments or output", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "email-workflow-fixture-"));
   try {
-    const workflow = await readFile(path.join(root, ".github/workflows/deploy-v1.yml"), "utf8");
+    const workflow = await readFile(path.join(root, "test/fixtures/legacy-workflows/deploy-v1.yml"), "utf8");
     const step = workflow.match(/^      - name: Sync email authentication configuration through restricted stdin\n([\s\S]*?)(?=^      - name:)/mu)?.[1];
     assert.ok(step);
     const run = step.split("        run: |\n")[1].split("\n").map((line) => line.replace(/^          /u, "")).join("\n");

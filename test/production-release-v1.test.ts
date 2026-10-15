@@ -10,7 +10,7 @@ test("bounded release path preserves source before cutover and enforces migratio
 });
 
 test("release workflow shell blocks are valid and secrets remain in the protected stdin handoff", () => {
-  const text = readFileSync(".github/workflows/deploy-v1.yml", "utf8");
+  const text = readFileSync("test/fixtures/legacy-workflows/deploy-v1.yml", "utf8");
   assert.match(text, /environment:\n      name: production/u);
   assert.match(text, /group: ai-project-os-production/u);
   assert.match(text, /full main and tag CI/u);

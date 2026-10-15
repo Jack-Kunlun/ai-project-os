@@ -9,7 +9,7 @@ test("0.6 next migration route is exact, backup-first, and fail-closed after mut
   const [gateway, deployer, workflow, preflight, sudoers] = await Promise.all([
     readFile(path.join(root, "deploy/production/ai-project-os-actions-gateway"), "utf8"),
     readFile(path.join(root, "deploy/production/ai-project-os-v06-next-deploy"), "utf8"),
-    readFile(path.join(root, ".github/workflows/deploy-production.yml"), "utf8"),
+    readFile(path.join(root, "test/fixtures/legacy-workflows/deploy-production.yml"), "utf8"),
     readFile(path.join(root, "scripts/production-v06-next-upgrade-preflight.ts"), "utf8"),
     readFile(path.join(root, "deploy/production/ai-project-os-deploy.sudoers"), "utf8"),
   ]);

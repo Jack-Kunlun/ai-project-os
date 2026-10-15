@@ -12,7 +12,7 @@ test("application release requires exact no-migration evidence at both boundarie
   const [deployer, preflight, workflow, updater, backup] = await Promise.all([
     readFile(appDeployerPath, "utf8"),
     readFile("scripts/production-app-upgrade-preflight.ts", "utf8"),
-    readFile(".github/workflows/deploy-application.yml", "utf8"),
+    readFile("test/fixtures/legacy-workflows/deploy-application.yml", "utf8"),
     readFile("deploy/production/ai-project-os-install-release-tooling", "utf8"),
     readFile("deploy/production/ai-project-os-backup", "utf8"),
   ]);

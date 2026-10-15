@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 const repositoryRoot = process.cwd();
-const workflowPath = path.join(repositoryRoot, ".github/workflows/deploy-production.yml");
+const workflowPath = path.join(repositoryRoot, "test/fixtures/legacy-workflows/deploy-production.yml");
 const deploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-deploy");
 const v06DeploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-v06-deploy");
 const v06NextDeploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-v06-next-deploy");

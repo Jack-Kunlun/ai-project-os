@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+
+test("only CI and the manual stable release remain executable workflows", () => {
+  const workflows = readdirSync(".github/workflows")
+    .filter((name) => /\.ya?ml$/u.test(name))
+    .sort();
+  assert.deepEqual(workflows, ["ci.yml", "release-stable.yml"]);
+  const release = readFileSync(".github/workflows/release-stable.yml", "utf8");
+  assert.match(release, /^on:\n  workflow_dispatch:\s*\n\npermissions:/mu);
+});
 
 test("stable deploy gate preserves its recovery boundary", () => {
   const result = spawnSync("python3", ["-B", "test/production-stable-deploy.py"], {

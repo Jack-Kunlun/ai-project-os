@@ -2,6 +2,8 @@
 
 当前源码的正式发布入口为 GitHub Actions 中的 **发布正式版本**（[release-stable.yml](../.github/workflows/release-stable.yml)）。由用户点击 Run workflow 发起；提交代码和 CI 通过只产生验证结果，不自动发布生产。
 
+工作流目录仅保留 `CI` 和 **发布正式版本**。旧版专用发布配置已移至[历史合同夹具](../test/fixtures/legacy-workflows/README.md)，不再执行。为移除旧 Actions 侧栏条目，五个旧工作流的运行元数据、日志及可用产物先导出至本地归档，再删除其 GitHub 运行记录；版本标签、GitHub Releases、CI 和正式发布工作流的运行记录保留。
+
 ## 日常发布
 
 1. 将待发布代码、递增的正式版本号及对应版本说明合入 `main`。`package.json`、公开版本标识、OCI 镜像标签和版本说明必须一致，使用不含预发布后缀的 `MAJOR.MINOR.PATCH`。

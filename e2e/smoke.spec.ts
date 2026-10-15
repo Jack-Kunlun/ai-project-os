@@ -569,9 +569,44 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(restoredSourceLink).toBeFocused();
 
   const browserSmokeFixtures = await seedBrowserSmokeFixtures(projectId, ownerUsername);
+  const candidateResponse = await page.request.post(`/api/projects/${projectId}/items`, {
+    headers: { origin: new URL(page.url()).origin },
+    data: { type: "progress", sourceId: returnedSourceId, title: "待核对的项目记录", content: sourceText, sourceExcerpt: sourceText },
+  });
+  expect(candidateResponse.status()).toBe(201);
 
   await page.goto(`/projects/${projectId}`);
-  const failedTasksLink = page.getByRole("link", { name: /任务异常/u });
+  await page.getByRole("link", { name: "开始审核 →", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]status=candidate(?:&|$)/u);
+  await expect(page.getByRole("combobox", { name: "按审核状态筛选", exact: true })).toHaveValue("candidate");
+  await expect(page.getByText("待核对的项目记录", { exact: true })).toBeVisible();
+  await page.goto(`/projects/${projectId}`);
+  const overviewMetrics = page.getByRole("region", { name: "项目关键指标", exact: true });
+  await expect(overviewMetrics.getByRole("link")).toHaveCount(4);
+  await overviewMetrics.getByRole("link", { name: /^资料来源/u }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?.*focus=sources-heading`, "u"));
+  await expect(page.locator("#sources-heading")).toBeFocused();
+  await page.goto(`/projects/${projectId}`);
+  await overviewMetrics.getByRole("link", { name: /^文件/u }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/assets\\?`, "u"));
+  await expect(page.getByRole("heading", { name: "已上传文件", exact: true })).toBeVisible();
+  await page.goto(`/projects/${projectId}`);
+  await overviewMetrics.getByRole("link", { name: /^已确认事实/u }).click();
+  await expect(page).toHaveURL(/[?&]status=confirmed(?:&|$)/u);
+  await expect(page.getByRole("combobox", { name: "按审核状态筛选", exact: true })).toHaveValue("confirmed");
+  await expect(page.locator("#confirmed-facts")).toBeFocused();
+  await page.goto(`/projects/${projectId}`);
+  const pendingMetric = overviewMetrics.getByRole("link", { name: /^待处理/u });
+  await pendingMetric.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#attention-details")).toBeFocused();
+  await expect(page.locator("#attention-details").getByRole("link", { name: /^项目记忆索引/u })).toBeVisible();
+  const metricViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectNoAccessibilityViolations(page, "project overview metric shortcuts mobile");
+  if (metricViewport !== null) await page.setViewportSize(metricViewport);
+  const failedTasksLink = page.getByRole("link", { name: /失败任务/u });
   await expect(failedTasksLink).toBeVisible();
   await failedTasksLink.click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?status=failed&focus=task-runs&from=overview&returnTo=`, "u"));
@@ -855,6 +890,20 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(initialPendingActions.getByText("待处理", { exact: true })).toHaveCount(3);
   await expect(initialPendingActions.getByText("未取得", { exact: true })).toHaveCount(0);
   await expectNoAccessibilityViolations(adminPage, "admin overview");
+
+  await adminPage.goto("/admin/operations/backups");
+  const resources = adminPage.getByRole("region", { name: "服务器资源", exact: true });
+  await expect(resources).toBeVisible();
+  await expect(resources.getByText(/^采集于/u)).toBeVisible();
+  await expect(resources.getByText("Linux 内核报告内存", { exact: true })).toBeVisible();
+  await expect(resources.getByText("应用部署目录所属文件系统", { exact: true })).toBeVisible();
+  await resources.getByRole("button", { name: "刷新资源", exact: true }).click();
+  await expect(resources.getByRole("button", { name: "刷新资源", exact: true })).toBeEnabled();
+  const resourceViewport = adminPage.viewportSize();
+  await adminPage.setViewportSize({ width: 390, height: 844 });
+  expect(await adminPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectNoAccessibilityViolations(adminPage, "server resources mobile");
+  if (resourceViewport !== null) await adminPage.setViewportSize(resourceViewport);
 
   await adminPage.goto("/admin/connectors/mcp");
   await expect(adminPage.getByRole("heading", { name: "MCP 工具安全审核", exact: true })).toBeVisible();

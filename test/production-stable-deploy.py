@@ -585,14 +585,15 @@ class GitManifestTests(unittest.TestCase):
             DEPLOYER.validate_manifest_delta(source, target)
 
         self.assertEqual(len(source), 143)
-        self.assertEqual(len(target), 145)
+        self.assertEqual(len(target), 146)
         self.assertEqual(working_tree, target)
         self.assertEqual(target[:len(source)], source)
         self.assertEqual([name for name, _ in target], sorted(name for name, _ in target))
 
     def test_actual_worktree_release_identity_passes_target_preflight(self):
+        candidate_tag = 'v' + json.loads((ROOT / 'package.json').read_text())['version']
         worktree_paths = {
-            'package.json', 'src/lib/version.ts', 'Dockerfile', 'docs/releases/v1.0.2.md',
+            'package.json', 'src/lib/version.ts', 'Dockerfile', f'docs/releases/{candidate_tag}.md',
             'deploy/production/ai-project-os-release-stable.py',
             'deploy/production/ai-project-os-backup',
             'deploy/production/ai_project_os_backup_artifact.py',
@@ -611,9 +612,9 @@ class GitManifestTests(unittest.TestCase):
                 patch.object(DEPLOYER, 'git_blob', side_effect=candidate_blob), \
                 patch.object(DEPLOYER, 'validate_tooling_bytes'):
             source = DEPLOYER.git_manifest(DEPLOYER.INITIAL_SOURCE_REVISION)
-            target, files = DEPLOYER.validate_target_tree('HEAD', source, TARGET_TAG)
+            target, files = DEPLOYER.validate_target_tree('HEAD', source, candidate_tag)
 
-        self.assertEqual(len(target), 145)
+        self.assertEqual(len(target), 146)
         self.assertIn('v[1-9][0-9]*', files['backup'].decode('utf-8'))
         self.assertIn('ai-project-os-release-stable.py', files['deployer'].decode('utf-8'))
 

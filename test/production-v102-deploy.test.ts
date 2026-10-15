@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-test("fixed v1.0.0 to v1.0.1 deploy gate preserves its recovery boundary", () => {
-  const result = spawnSync("python3", ["-B", "test/production-v101-deploy.py"], {
+test("fixed v1.0.0 to v1.0.2 deploy gate preserves its recovery boundary", () => {
+  const result = spawnSync("python3", ["-B", "test/production-v102-deploy.py"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
@@ -14,24 +14,24 @@ test("fixed v1.0.0 to v1.0.1 deploy gate preserves its recovery boundary", () =>
   assert.match(output, /OK/u);
 });
 
-test("forced gateway exposes only fixed v1.0.1 status and deploy syntax", () => {
+test("forced gateway exposes only fixed v1.0.2 status and deploy syntax", () => {
   const gatewayPath = "deploy/production/ai-project-os-actions-gateway";
   const gateway = readFileSync(gatewayPath, "utf8");
   const sudoers = readFileSync("deploy/production/ai-project-os-deploy.sudoers", "utf8");
   const syntax = spawnSync("bash", ["-n", gatewayPath], { encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
-  assert.match(gateway, /original_command.*== v101-tooling-status/u);
-  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-v101-deploy --status/u);
-  assert.match(gateway, /\^deploy-v101\\ \(\[0-9a-f\]\{40\}\)\\ \(CONFIRM_V101_WITH_BACKUP_AND_FULL_CI\)\$/u);
-  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-v101-deploy/u);
-  assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-v101-deploy$/mu);
+  assert.match(gateway, /original_command.*== v102-tooling-status/u);
+  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-v102-deploy --status/u);
+  assert.match(gateway, /\^deploy-v102\\ \(\[0-9a-f\]\{40\}\)\\ \(CONFIRM_V102_WITH_BACKUP_AND_FULL_CI\)\$/u);
+  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-v102-deploy/u);
+  assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-v102-deploy$/mu);
 
   const sha = "a".repeat(40);
   for (const command of [
-    `deploy-v101 v1.0.1 ${sha} CONFIRM_V101_WITH_BACKUP_AND_FULL_CI`,
-    `deploy-v101 ${sha} CONFIRM_V101_WITH_BACKUP_AND_FULL_CI; id`,
-    `deploy-v101 ${sha} CONFIRM_V101_WITH_BACKUP_AND_FULL_CI extra`,
-    `deploy-v101 ${"a".repeat(39)} CONFIRM_V101_WITH_BACKUP_AND_FULL_CI`,
+    `deploy-v102 v1.0.2 ${sha} CONFIRM_V102_WITH_BACKUP_AND_FULL_CI`,
+    `deploy-v102 ${sha} CONFIRM_V102_WITH_BACKUP_AND_FULL_CI; id`,
+    `deploy-v102 ${sha} CONFIRM_V102_WITH_BACKUP_AND_FULL_CI extra`,
+    `deploy-v102 ${"a".repeat(39)} CONFIRM_V102_WITH_BACKUP_AND_FULL_CI`,
   ]) {
     const result = spawnSync("bash", [gatewayPath], {
       encoding: "utf8",
@@ -42,8 +42,8 @@ test("forced gateway exposes only fixed v1.0.1 status and deploy syntax", () => 
   }
 });
 
-test("v1.0.1 workflow verifies full CI and tooling hashes before fixed deploy and health receipt", () => {
-  const path = ".github/workflows/deploy-v101.yml";
+test("v1.0.2 workflow verifies full CI and tooling hashes before fixed deploy and health receipt", () => {
+  const path = ".github/workflows/deploy-v102.yml";
   const workflow = readFileSync(path, "utf8");
   assert.match(workflow, /group: ai-project-os-production/u);
   assert.match(workflow, /name: production/u);
@@ -52,9 +52,10 @@ test("v1.0.1 workflow verifies full CI and tooling hashes before fixed deploy an
   assert.match(workflow, /refs\/tags\/\$target_tag\^\{\}/u);
   assert.match(workflow, /refs\/remotes\/origin\/main/u);
   assert.match(workflow, /Verify database and release candidate/u);
-  assert.match(workflow, /v101-tooling-status/u);
-  assert.match(workflow, /V101_TOOLING_READY/u);
-  assert.match(workflow, /deploy-v101 \$DEPLOY_SHA CONFIRM_V101_WITH_BACKUP_AND_FULL_CI/u);
+  assert.match(workflow, /v102-tooling-status/u);
+  assert.match(workflow, /V102_TOOLING_READY/u);
+  assert.match(workflow, /deploy-v102 \$DEPLOY_SHA CONFIRM_V102_WITH_BACKUP_AND_FULL_CI/u);
+  assert.ok(workflow.includes("V102_DEPLOY_OK tag=v1\\\\.0\\\\.2"));
   assert.match(workflow, /migration_count=145/u);
   assert.match(workflow, /restore=143-to-145/u);
   assert.match(workflow, /https:\/\/ai-project-os\.com\/api\/health/u);

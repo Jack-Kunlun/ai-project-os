@@ -4,7 +4,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-源码版本标识为 `1.0.1`，见 [v1.0.1 版本说明](docs/releases/v1.0.1.md)。本版本调整认证与赠送额度，并改进个人知识库编辑和语义检索；相对 `v1.0.0` 新增两条数据库迁移。源码、同 SHA 的主分支与标签 CI、生产部署分别验收；实际线上状态以公网 `/api/health` 和生产发布回执为准。邮箱注册和改密已完成真实收信验收；邮箱换绑、邮箱找回、收费、真实 MCP/OIDC 联调和独立浏览器 broker 不在本轮范围。历史正式版说明见 [v1.0.0](docs/releases/v1.0.0.md)。
+源码版本标识为 `1.0.2`，见 [v1.0.2 版本说明](docs/releases/v1.0.2.md)。本版本调整认证与赠送额度，并改进个人知识库编辑和语义检索；相对 `v1.0.0` 新增两条数据库迁移。源码、同 SHA 的主分支与标签 CI、生产部署分别验收；实际线上状态以公网 `/api/health` 和生产发布回执为准。邮箱注册和改密已完成真实收信验收；邮箱换绑、邮箱找回、收费、真实 MCP/OIDC 联调和独立浏览器 broker 不在本轮范围。历史正式版说明见 [v1.0.0](docs/releases/v1.0.0.md)。
 
 `v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
 
@@ -53,7 +53,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；当前版本说明见 [v1.0.1](docs/releases/v1.0.1.md)，上一正式版记录见 [v1.0.0](docs/releases/v1.0.0.md)，邮箱候选记录见 [v0.8.0-dev.4](docs/releases/v0.8.0-dev.4.md)。
+- 历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)；当前版本说明见 [v1.0.2](docs/releases/v1.0.2.md)，上一正式版记录见 [v1.0.0](docs/releases/v1.0.0.md)，邮箱候选记录见 [v0.8.0-dev.4](docs/releases/v0.8.0-dev.4.md)。
 - V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
 - V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
@@ -87,9 +87,9 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前能力
 
-下表描述 `1.0.1` 当前源码能力与启用条件，不表示每个外部服务或供应商都已现场验收。既有现场验收记录见 [v1.0.0 版本说明](docs/releases/v1.0.0.md)；本版本新增行为、迁移和发布验收要求见 [v1.0.1 版本说明](docs/releases/v1.0.1.md)。历史生产记录仍保留在 [0.7.3 验收记录](docs/releases/v0.7.3-production-acceptance.md)。
+下表描述 `1.0.2` 当前源码能力与启用条件，不表示每个外部服务或供应商都已现场验收。既有现场验收记录见 [v1.0.0 版本说明](docs/releases/v1.0.0.md)；本版本新增行为、迁移和发布验收要求见 [v1.0.2 版本说明](docs/releases/v1.0.2.md)。历史生产记录仍保留在 [0.7.3 验收记录](docs/releases/v0.7.3-production-acceptance.md)。
 
-| 能力 | 1.0.1 源码能力与启用边界 |
+| 能力 | 1.0.2 源码能力与启用边界 |
 | --- | --- |
 | Dashboard | 汇总跨项目世界状态、配置就绪度、计划风险、运营提醒、推荐下一步和最近任务；项目入口位于“我的空间”内 |
 | 账号安全 | +86 短信绑定、找回与换绑；邮箱注册、已保存邮箱验证及改密邮件验证；短信发送前校验图形验证码；密码长度为 8–128 位且保留字母和数字要求；已验证邮箱密码登录、邮箱修改/移除锁定和改密后会话撤销；经验证的本地新注册按当前启用策略激活赠送权益 |

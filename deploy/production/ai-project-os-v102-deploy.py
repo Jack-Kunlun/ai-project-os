@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Root-only, single-transition v1.0.0 -> v1.0.1 release and recovery gate."""
+"""Root-only, single-transition v1.0.0 -> v1.0.2 release and recovery gate."""
 from __future__ import annotations
 
 import fcntl
@@ -24,25 +24,25 @@ ENV = Path('/etc/ai-project-os/production.env')
 OVERRIDE = Path('/etc/ai-project-os/compose.operations.yaml')
 EMAIL_ENV = Path('/etc/ai-project-os/email-auth.env')
 RESULT = Path('/var/lib/ai-project-os/last-deployment')
-STATE = Path('/etc/ai-project-os/release-tooling-v101.json')
+STATE = Path('/etc/ai-project-os/release-tooling-v102.json')
 NGINX = Path('/etc/nginx/sites-available/ai-project-os.conf')
 NGINX_ENABLED = Path('/etc/nginx/sites-enabled/ai-project-os.conf')
 NGINX_SNIPPET = Path('/etc/nginx/snippets/ai-project-os-proxy.conf')
 BACKUP = Path('/usr/local/sbin/ai-project-os-backup')
 ARTIFACT_HELPER = Path('/usr/local/libexec/ai-project-os/backup-artifact.py')
-DEPLOYER = Path('/usr/local/sbin/ai-project-os-v101-deploy')
+DEPLOYER = Path('/usr/local/sbin/ai-project-os-v102-deploy')
 GATEWAY = Path('/usr/local/sbin/ai-project-os-actions-gateway')
 SUDOERS = Path('/etc/sudoers.d/ai-project-os-deploy')
 BACKUP_SOURCE = 'deploy/production/ai-project-os-backup'
 ARTIFACT_SOURCE = 'deploy/production/ai_project_os_backup_artifact.py'
-DEPLOYER_SOURCE = 'deploy/production/ai-project-os-v101-deploy.py'
+DEPLOYER_SOURCE = 'deploy/production/ai-project-os-v102-deploy.py'
 GATEWAY_SOURCE = 'deploy/production/ai-project-os-actions-gateway'
 SUDOERS_SOURCE = 'deploy/production/ai-project-os-deploy.sudoers'
 HELPER_SOURCE = 'deploy/production/ai-project-os-v074-deploy.py'
 SOURCE_TAG = 'v1.0.0'
 SOURCE_REVISION = 'f57d050fffa445a6ef9eb3d7e692e6df06fac98d'
-TARGET_TAG = 'v1.0.1'
-TARGET_VERSION = '1.0.1'
+TARGET_TAG = 'v1.0.2'
+TARGET_VERSION = '1.0.2'
 TARGET_MIGRATIONS = (
     '20261015010000_add_local_registration_entitlement_source',
     '20261015020000_bind_personal_semantic_token_reservations',
@@ -72,7 +72,7 @@ BACKUP_REQUIRED_FILES = {
     'postgres.dump', 'secrets.tar.gz', 'uploads.tar.gz', 'host-config.tar.gz',
     'backup-metadata.env', 'SHA256SUMS', '.cos-upload-verified',
 }
-BACKUP_NAME = re.compile(r'^[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v1\.0\.1\.[A-Za-z0-9]{6}$')
+BACKUP_NAME = re.compile(r'^[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v1\.0\.2\.[A-Za-z0-9]{6}$')
 HEX64 = re.compile(r'^[a-f0-9]{64}$')
 HEX40 = re.compile(r'^[a-f0-9]{40}$')
 HELPER = None
@@ -80,7 +80,7 @@ HELPER = None
 
 def require(condition: bool, code: str) -> None:
     if not condition:
-        raise RuntimeError('V101_' + code)
+        raise RuntimeError('V102_' + code)
 
 
 def sha256(data: bytes) -> str:
@@ -180,12 +180,16 @@ def trusted(path, mode=None):
 def load_helper():
     global HELPER
     path = ROOT / HELPER_SOURCE
-    trusted(path, 0o644)
+    trusted(path)
+    info = path.stat()
+    require(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) in (0o600, 0o644),
+            'PINNED_HELPER_MODE_INVALID')
     content = path.read_bytes()
     require(sha256(content) == HELPER_SHA256, 'PINNED_HELPER_HASH_INVALID')
     spec = importlib.util.spec_from_file_location('ai_project_os_v074_pinned_helper', path)
     require(spec is not None and spec.loader is not None, 'PINNED_HELPER_LOAD_FAILED')
     module = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True
     spec.loader.exec_module(module)
     HELPER = module
     return module
@@ -303,17 +307,50 @@ def source_manifest(root=ROOT):
     return result
 
 
-def git_manifest(revision):
-    raw = git(['ls-tree', '--name-only', revision + ':prisma/migrations'])
-    names = raw.splitlines()
-    require(all(re.fullmatch(r'\d{14}_[a-z0-9_]+', name) for name in names),
-            'MIGRATION_NAME_INVALID')
+def git_tree_entries(revision_path):
+    raw = git_raw(['ls-tree', '-z', revision_path])
     entries = []
-    for name in names:
-        path = 'prisma/migrations/' + name + '/migration.sql'
-        content = git_raw(['show', revision + ':' + path])
-        entries.append((name, sha256(content)))
+    for record in raw.split(b'\0'):
+        if not record:
+            continue
+        metadata, separator, raw_name = record.partition(b'\t')
+        require(bool(separator), 'MIGRATION_TREE_ENTRY_INVALID')
+        try:
+            mode, object_type, object_id = metadata.decode('ascii').split(' ')
+            name = raw_name.decode('utf-8')
+        except (UnicodeDecodeError, ValueError):
+            require(False, 'MIGRATION_TREE_ENTRY_INVALID')
+        require(re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', object_id) is not None,
+                'MIGRATION_TREE_ENTRY_INVALID')
+        entries.append((mode, object_type, object_id, name))
     return entries
+
+
+def git_manifest(revision):
+    root_path = revision + ':prisma/migrations'
+    entries = git_tree_entries(root_path)
+    lock_entries = [entry for entry in entries if entry[3] == 'migration_lock.toml']
+    require(len(lock_entries) == 1 and lock_entries[0][:2] == ('100644', 'blob'),
+            'MIGRATION_LOCK_INVALID')
+    lock_content = git_raw(['cat-file', 'blob', lock_entries[0][2]])
+    source_lock = git_raw(['show', SOURCE_REVISION + ':prisma/migrations/migration_lock.toml'])
+    require(lock_content == source_lock and sha256(lock_content) == sha256(source_lock),
+            'MIGRATION_LOCK_INVALID')
+
+    migrations = []
+    for mode, object_type, _object_id, name in entries:
+        if name == 'migration_lock.toml':
+            continue
+        require(re.fullmatch(r'\d{14}_[a-z0-9_]+', name) is not None, 'MIGRATION_NAME_INVALID')
+        require(mode == '040000' and object_type == 'tree', 'MIGRATION_ENTRY_TYPE_INVALID')
+        children = git_tree_entries(root_path + '/' + name)
+        require(len(children) == 1 and children[0][0] == '100644'
+                and children[0][1] == 'blob' and children[0][3] == 'migration.sql',
+                'MIGRATION_SQL_LAYOUT_INVALID')
+        content = git_raw(['cat-file', 'blob', children[0][2]])
+        migrations.append((name, sha256(content)))
+    require(bool(lock_entries), 'MIGRATION_LOCK_INVALID')
+    return migrations
 
 
 def git_blob(revision, path):
@@ -324,13 +361,13 @@ def validate_target_tree(revision, source):
     package = json.loads(git_blob(revision, 'package.json'))
     version_source = git_blob(revision, 'src/lib/version.ts').decode('utf-8')
     dockerfile = git_blob(revision, 'Dockerfile').decode('utf-8')
-    release_notes = git_blob(revision, 'docs/releases/v1.0.1.md').decode('utf-8')
+    release_notes = git_blob(revision, 'docs/releases/v1.0.2.md').decode('utf-8')
     require(package.get('version') == TARGET_VERSION, 'PACKAGE_VERSION_INVALID')
-    require(re.search(r'APP_VERSION\s*=\s*"1\.0\.1"', version_source) is not None,
+    require(re.search(r'APP_VERSION\s*=\s*"1\.0\.2"', version_source) is not None,
             'APP_VERSION_INVALID')
-    require(len(re.findall(r'org\.opencontainers\.image\.version="1\.0\.1"', dockerfile)) == 1,
+    require(len(re.findall(r'org\.opencontainers\.image\.version="1\.0\.2"', dockerfile)) == 1,
             'OCI_VERSION_INVALID')
-    require(release_notes.startswith('# v1.0.1 — 账号与个人知识修复'), 'RELEASE_NOTES_INVALID')
+    require(release_notes.startswith('# v1.0.2 — 账号与个人知识修复'), 'RELEASE_NOTES_INVALID')
     target = git_manifest(revision)
     validate_manifest_delta(source, target)
     helper = git_blob(revision, HELPER_SOURCE)
@@ -342,7 +379,7 @@ def validate_target_tree(revision, source):
     gateway = git_blob(revision, GATEWAY_SOURCE)
     sudoers = git_blob(revision, SUDOERS_SOURCE)
     validate_tooling_bytes(gateway, sudoers)
-    require(b'v1.0.1' in backup and b'email-auth.env' in backup,
+    require(b'v1.0.2' in backup and b'email-auth.env' in backup,
             'TARGET_BACKUP_CONTRACT_INVALID')
     compile(artifact, ARTIFACT_SOURCE, 'exec')
     nginx = git_blob(revision, 'deploy/production/nginx/ai-project-os.conf')
@@ -361,7 +398,7 @@ def validate_tooling_bytes(gateway, sudoers):
     require(result.returncode == 0, 'BOOTSTRAP_GATEWAY_INVALID')
     directory = STATE.parent
     HELPER.trusted(directory)
-    with tempfile.TemporaryDirectory(prefix='.v101-sudoers-validate-', dir=directory) as temporary:
+    with tempfile.TemporaryDirectory(prefix='.v102-sudoers-validate-', dir=directory) as temporary:
         path = Path(temporary) / 'sudoers'
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as stream:
@@ -540,9 +577,10 @@ def source_runtime_state(require_checkout=True):
 
 def read_backup_artifact_helper():
     HELPER.trusted(ARTIFACT_HELPER, 0o755)
-    spec = importlib.util.spec_from_file_location('ai_project_os_backup_artifact_v101', ARTIFACT_HELPER)
+    spec = importlib.util.spec_from_file_location('ai_project_os_backup_artifact_v102', ARTIFACT_HELPER)
     require(spec is not None and spec.loader is not None, 'BACKUP_ARTIFACT_HELPER_LOAD_FAILED')
     module = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True
     spec.loader.exec_module(module)
     return module
 
@@ -556,7 +594,7 @@ def verify_backup_output(stdout):
         key, value = token.split('=', 1)
         require(key not in fields, 'BACKUP_RECEIPT_INVALID')
         fields[key] = value
-    require(fields.get('reason') == 'pre-deploy-to-v1.0.1'
+    require(fields.get('reason') == 'pre-deploy-to-v1.0.2'
             and fields.get('retention_removed') == '0'
             and fields.get('source_quiesced') == 'true', 'BACKUP_RECEIPT_INVALID')
     source = Path(fields.get('source', ''))
@@ -598,7 +636,7 @@ def validate_local_backup(backup, current_email_bytes):
     for name, digest in sums.items():
         require(hash_file(path / name) == digest, 'BACKUP_FILE_SHA_MISMATCH')
     metadata = parse_record(path / 'backup-metadata.env')
-    require(metadata.get('format_version') == '2' and metadata.get('reason') == 'pre-deploy-to-v1.0.1'
+    require(metadata.get('format_version') == '2' and metadata.get('reason') == 'pre-deploy-to-v1.0.2'
             and metadata.get('compose_project') == PROJECT and metadata.get('app_version') == '1.0.0'
             and metadata.get('writers_quiesced') == 'true' and metadata.get('source_quiesced') == 'true'
             and metadata.get('backup_name') == backup['name'], 'BACKUP_METADATA_INVALID')
@@ -730,7 +768,7 @@ class HostDeployment:
             require(inspected.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.version')
                     == TARGET_VERSION, 'TARGET_IMAGE_VERSION_INVALID')
             images[service] = image_id
-        pin_path = Path('/var/lib/ai-project-os/.v101-images-' + secrets.token_hex(12) + '.yaml')
+        pin_path = Path('/var/lib/ai-project-os/.v102-images-' + secrets.token_hex(12) + '.yaml')
         self.pin_file = pin_path
         text = 'services:\n'
         for service, image_id in images.items():
@@ -784,11 +822,11 @@ class HostDeployment:
     def restore_drill(self, source, backup, images):
         self.restore_token = secrets.token_hex(16)
         suffix = self.restore_token
-        owner_key = 'ai-project-os.v101-restore-owner'
+        owner_key = 'ai-project-os.v102-restore-owner'
         owner_value = suffix
-        network_name = 'ai-project-os-v101-net-' + suffix
-        volume_name = 'ai-project-os-v101-vol-' + suffix
-        pg_name = 'ai-project-os-v101-pg-' + suffix
+        network_name = 'ai-project-os-v102-net-' + suffix
+        volume_name = 'ai-project-os-v102-vol-' + suffix
+        pg_name = 'ai-project-os-v102-pg-' + suffix
         self.restore_network = network_name
         self.restore_network_id = docker('network', 'create', '--internal',
                                          '--label', owner_key + '=' + owner_value,
@@ -825,10 +863,10 @@ class HostDeployment:
                                 'scripts/reconcile-database-principals.ts', '--bootstrap-if-needed'])
         self._verify_restore_roles(pg_id)
         dump_path = backup['path'] / 'postgres.dump'
-        docker('cp', str(dump_path), pg_id + ':/tmp/ai-project-os-v101-postgres.dump')
+        docker('cp', str(dump_path), pg_id + ':/tmp/ai-project-os-v102-postgres.dump')
         docker('exec', pg_id, 'pg_restore', '--clean', '--if-exists', '--no-privileges',
                '--exit-on-error', '-U', 'ai_project_os_cluster_admin', '-d', 'ai_project_os',
-               '/tmp/ai-project-os-v101-postgres.dump', timeout=3600)
+               '/tmp/ai-project-os-v102-postgres.dump', timeout=3600)
         migration_ledger(pg_id, source['source_manifest'])
         counts_before = readonly_database_snapshot(pg_id)
         migrate_env = dict(env)
@@ -864,7 +902,7 @@ class HostDeployment:
         }
 
     def _run_restore_image(self, image_id, network, owner_key, owner_value, env, command, timeout=1800):
-        name = 'ai-project-os-v101-job-' + secrets.token_hex(12)
+        name = 'ai-project-os-v102-job-' + secrets.token_hex(12)
         args = ['create', '--name', name, '--network', network, '--label', owner_key + '=' + owner_value]
         for key, value in env.items():
             args.extend(['--env', key + '=' + value])
@@ -886,9 +924,9 @@ class HostDeployment:
             if state.get('Health', {}).get('Status') == 'healthy':
                 return
             if state.get('Status') == 'exited':
-                raise RuntimeError('V101_RESTORE_POSTGRES_FAILED')
+                raise RuntimeError('V102_RESTORE_POSTGRES_FAILED')
             time.sleep(1)
-        raise RuntimeError('V101_RESTORE_POSTGRES_TIMEOUT')
+        raise RuntimeError('V102_RESTORE_POSTGRES_TIMEOUT')
 
     def _private_trigger_acl_closed(self, postgres_id):
         sql = '''SELECT to_json(count(*) = 1 AND bool_and(
@@ -966,7 +1004,7 @@ class HostDeployment:
             except (RuntimeError, OSError, ValueError):
                 time.sleep(2)
         else:
-            raise RuntimeError('V101_TARGET_HEALTH_TIMEOUT')
+            raise RuntimeError('V102_TARGET_HEALTH_TIMEOUT')
         self.target_health = {'local': local_health, 'public': public_health}
         require(container('postgres')['Id'] == source['postgres_id'], 'PRODUCTION_POSTGRES_REPLACED')
         migration_ledger(source['postgres_id'], self.target_manifest)
@@ -1003,7 +1041,7 @@ class HostDeployment:
             for key, value in record.items()
         )
         HELPER.atomic_write(RESULT, text.encode('utf-8'), 0o600)
-        print('V101_DEPLOY_OK tag=' + TARGET_TAG + ' revision=' + self.target_revision
+        print('V102_DEPLOY_OK tag=' + TARGET_TAG + ' revision=' + self.target_revision
               + ' migration_count=145 backup=' + backup['name'] + ' restore=143-to-145', flush=True)
 
     def restore_exact_source(self, source):
@@ -1043,7 +1081,7 @@ class HostDeployment:
                     except (RuntimeError, OSError, ValueError):
                         time.sleep(2)
                 else:
-                    raise RuntimeError('V101_SOURCE_HEALTH_RESTORE_FAILED')
+                    raise RuntimeError('V102_SOURCE_HEALTH_RESTORE_FAILED')
         except BaseException:
             failures.append('writers')
         try:
@@ -1062,10 +1100,10 @@ class HostDeployment:
             migration_ledger(source['postgres_id'], source['source_manifest'])
         except BaseException:
             failures.append('database')
-        print('V101_PRE_MIGRATION_SOURCE_RESTORED=' + ('false' if failures else 'true'),
+        print('V102_PRE_MIGRATION_SOURCE_RESTORED=' + ('false' if failures else 'true'),
               file=sys.stderr, flush=True)
         if failures:
-            raise RuntimeError('V101_PRE_MIGRATION_RECOVERY_INCOMPLETE')
+            raise RuntimeError('V102_PRE_MIGRATION_RECOVERY_INCOMPLETE')
 
     def quiesce_for_manual_recovery(self, source):
         try:
@@ -1084,15 +1122,15 @@ class HostDeployment:
             if to_stop:
                 docker('stop', *to_stop)
             HELPER.stopped(source['postgres_id'])
-            print('V101_MIGRATION_RECOVERY_REQUIRED writers_stopped=true nginx_stopped=true',
+            print('V102_MIGRATION_RECOVERY_REQUIRED writers_stopped=true nginx_stopped=true',
                   file=sys.stderr, flush=True)
         except BaseException as error:
-            raise RuntimeError('V101_MANUAL_RECOVERY_QUIESCE_FAILED') from error
+            raise RuntimeError('V102_MANUAL_RECOVERY_QUIESCE_FAILED') from error
 
     def cleanup_restore_drill(self):
         if self.restore_token is None:
             return
-        owner_key = 'ai-project-os.v101-restore-owner'
+        owner_key = 'ai-project-os.v102-restore-owner'
         owner_value = self.restore_token
         failures = []
         for identifier in list(reversed(self.restore_container_ids)):
@@ -1151,7 +1189,7 @@ class HostDeployment:
             except BaseException:
                 failures.append('network')
         if failures:
-            raise RuntimeError('V101_RESTORE_RESOURCE_CLEANUP_FAILED')
+            raise RuntimeError('V102_RESTORE_RESOURCE_CLEANUP_FAILED')
         self.restore_token = None
         self.restore_container_ids = []
         self.restore_volume = None
@@ -1168,7 +1206,7 @@ class HostDeployment:
                 require(not self.pin_file.exists(), 'TARGET_IMAGE_PIN_FILE_REMAINS')
             self.pin_file = None
         except BaseException as error:
-            raise RuntimeError('V101_TARGET_IMAGE_PIN_FILE_CLEANUP_FAILED') from error
+            raise RuntimeError('V102_TARGET_IMAGE_PIN_FILE_CLEANUP_FAILED') from error
 
 
 def secure_lock():
@@ -1193,7 +1231,7 @@ def atomic_install(path, data, mode):
                 and current.st_nlink == 1, 'TOOLING_DESTINATION_INVALID')
     except FileNotFoundError:
         pass
-    temporary = path.parent / ('.v101-' + secrets.token_hex(12))
+    temporary = path.parent / ('.v102-' + secrets.token_hex(12))
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
     try:
         os.fchown(fd, 0, 0)
@@ -1252,7 +1290,7 @@ def install_bootstrap(target_revision):
                 and existing['files']['sudoers'] == sha256(files['sudoers'])
                 and existing['files']['gateway'] == sha256(files['gateway']),
                 'TOOLING_STATE_CONFLICT')
-        print('V101_TOOLING_ALREADY_READY tag=' + TARGET_TAG + ' revision=' + target_revision)
+        print('V102_TOOLING_ALREADY_READY tag=' + TARGET_TAG + ' revision=' + target_revision)
         return
     except FileNotFoundError:
         pass
@@ -1309,12 +1347,12 @@ def install_bootstrap(target_revision):
         except BaseException:
             pass
         raise
-    print('V101_TOOLING_INSTALLED tag=' + TARGET_TAG + ' revision=' + target_revision
+    print('V102_TOOLING_INSTALLED tag=' + TARGET_TAG + ' revision=' + target_revision
           + ' files=5 gateway_promoted_last=true', flush=True)
 
 
 def interrupted(_signum, _frame):
-    raise RuntimeError('V101_INTERRUPTED')
+    raise RuntimeError('V102_INTERRUPTED')
 
 
 def main(args):
@@ -1323,7 +1361,7 @@ def main(args):
     HELPER.trusted('/root'); HELPER.trusted('/usr/bin'); HELPER.trusted('/usr/sbin')
     if args == ['--status']:
         state = validate_state_file()
-        output = {'kind': 'V101_TOOLING_READY', 'tag': state['tag'],
+        output = {'kind': 'V102_TOOLING_READY', 'tag': state['tag'],
                   'revision': state['revision'], 'files': state['files']}
         print(json.dumps(output, sort_keys=True, separators=(',', ':')))
         return
@@ -1333,10 +1371,10 @@ def main(args):
     signal.signal(signal.SIGTERM, interrupted)
     try:
         if command == 'bootstrap':
-            require(confirmation == 'CONFIRM_INSTALL_V101_TOOLING', 'BOOTSTRAP_CONFIRMATION_INVALID')
+            require(confirmation == 'CONFIRM_INSTALL_V102_TOOLING', 'BOOTSTRAP_CONFIRMATION_INVALID')
             install_bootstrap(revision)
             return
-        require(command == 'deploy' and confirmation == 'CONFIRM_V101_WITH_BACKUP_AND_FULL_CI',
+        require(command == 'deploy' and confirmation == 'CONFIRM_V102_WITH_BACKUP_AND_FULL_CI',
                 'DEPLOY_CONFIRMATION_INVALID')
         state = validate_state_file(revision)
         require(sha256(Path(__file__).read_bytes()) == state['files']['deployer'], 'INSTALLED_TOOL_HASH_INVALID')
@@ -1353,6 +1391,6 @@ if __name__ == '__main__':
         HELPER = load_helper()
         main(sys.argv[1:])
     except BaseException as error:
-        message = str(error) if isinstance(error, RuntimeError) and re.fullmatch(r'V101_[A-Z0-9_]+', str(error)) else 'V101_UNEXPECTED_FAILURE'
+        message = str(error) if isinstance(error, RuntimeError) and re.fullmatch(r'V102_[A-Z0-9_]+', str(error)) else 'V102_UNEXPECTED_FAILURE'
         print(message, file=sys.stderr)
         sys.exit(1)

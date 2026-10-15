@@ -1,4 +1,4 @@
-name: Deploy v1.0.1
+name: Deploy v1.0.2
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy fixed v1.0.0 to v1.0.1 transition
+    name: Deploy fixed v1.0.0 to v1.0.2 transition
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -37,9 +37,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$GH_REPOSITORY" = Jack-Kunlun/ai-project-os
-          test "$(node -p 'require("./package.json").version')" = 1.0.1
+          test "$(node -p 'require("./package.json").version')" = 1.0.2
 
-          target_tag=v1.0.1
+          target_tag=v1.0.2
           source_tag=v1.0.0
           source_sha=f57d050fffa445a6ef9eb3d7e692e6df06fac98d
           health=$(curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://ai-project-os.com/api/health)
@@ -109,15 +109,15 @@ jobs:
           set -euo pipefail
           ssh -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
-            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" "v101-tooling-status" \
-            > "$RUNNER_TEMP/v101-tooling.json"
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" "v102-tooling-status" \
+            > "$RUNNER_TEMP/v102-tooling.json"
           python3 - <<'PYCODE'
           import hashlib, json, os
           from pathlib import Path
 
-          data = json.loads((Path(os.environ['RUNNER_TEMP']) / 'v101-tooling.json').read_text())
+          data = json.loads((Path(os.environ['RUNNER_TEMP']) / 'v102-tooling.json').read_text())
           expected = {
-              'deployer': 'deploy/production/ai-project-os-v101-deploy.py',
+              'deployer': 'deploy/production/ai-project-os-v102-deploy.py',
               'backup': 'deploy/production/ai-project-os-backup',
               'artifact_helper': 'deploy/production/ai_project_os_backup_artifact.py',
               'sudoers': 'deploy/production/ai-project-os-deploy.sudoers',
@@ -126,27 +126,27 @@ jobs:
           expected_files = {name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
                             for name, path in expected.items()}
           assert data == {
-              'kind': 'V101_TOOLING_READY', 'tag': 'v1.0.1',
+              'kind': 'V102_TOOLING_READY', 'tag': 'v1.0.2',
               'revision': os.environ['DEPLOY_SHA'], 'files': expected_files,
-          }, 'V101_TOOLING_STATE_INVALID'
-          print('V101_TOOLING_VERIFIED')
+          }, 'V102_TOOLING_STATE_INVALID'
+          print('V102_TOOLING_VERIFIED')
           PYCODE
 
       - name: Deploy through the fixed source-to-target gateway
         run: |
           set -euo pipefail
-          output="$RUNNER_TEMP/v101-deploy.log"
+          output="$RUNNER_TEMP/v102-deploy.log"
           ssh -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
             -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=6 \
             "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
-            "deploy-v101 $DEPLOY_SHA CONFIRM_V101_WITH_BACKUP_AND_FULL_CI" | tee "$output"
+            "deploy-v102 $DEPLOY_SHA CONFIRM_V102_WITH_BACKUP_AND_FULL_CI" | tee "$output"
           grep -E --line-regexp \
-            "V101_DEPLOY_OK tag=v1\\.0\\.1 revision=$DEPLOY_SHA migration_count=145 backup=[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v1\\.0\\.1\\.[A-Za-z0-9]{6} restore=143-to-145" \
+            "V102_DEPLOY_OK tag=v1\\.0\\.2 revision=$DEPLOY_SHA migration_count=145 backup=[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v1\\.0\\.2\\.[A-Za-z0-9]{6} restore=143-to-145" \
             "$output"
           health=$(curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://ai-project-os.com/api/health)
           jq --exit-status \
-            '.version == "1.0.1" and .status == "ok" and .database == "up" and .worker.status == "up" and .worker.consecutiveFailures == 0' \
+            '.version == "1.0.2" and .status == "ok" and .database == "up" and .worker.status == "up" and .worker.consecutiveFailures == 0' \
             <<<"$health" >/dev/null
           printf 'Verified `%s` at `%s` with a 145-entry migration receipt and public health.\n' \
             "$DEPLOY_TAG" "$DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"

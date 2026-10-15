@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
-"""Offline contract tests for the fixed v1.0.0 -> v1.0.1 cutover."""
+"""Offline contract tests for the fixed v1.0.0 -> v1.0.2 cutover."""
 from __future__ import annotations
 
 import importlib.util
 import io
 import hashlib
 import json
+import os
 from pathlib import Path
 from contextlib import redirect_stdout
+import subprocess
+import sys
 import tarfile
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / 'deploy/production/ai-project-os-v101-deploy.py'
-SPEC = importlib.util.spec_from_file_location('v101_deployer_under_test', SCRIPT)
+SCRIPT = ROOT / 'deploy/production/ai-project-os-v102-deploy.py'
+SPEC = importlib.util.spec_from_file_location('v102_deployer_under_test', SCRIPT)
 DEPLOYER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DEPLOYER)
 ARTIFACT_PATH = ROOT / 'deploy/production/ai_project_os_backup_artifact.py'
-ARTIFACT_SPEC = importlib.util.spec_from_file_location('v101_artifact_under_test', ARTIFACT_PATH)
+ARTIFACT_SPEC = importlib.util.spec_from_file_location('v102_artifact_under_test', ARTIFACT_PATH)
 ARTIFACT = importlib.util.module_from_spec(ARTIFACT_SPEC)
 ARTIFACT_SPEC.loader.exec_module(ARTIFACT)
 
@@ -84,7 +88,7 @@ class DeploymentMethodTests(unittest.TestCase):
             snapshot = dict(valid)
             snapshot['activeOffers'] = offers if isinstance(offers, list) else [offers]
             with self.subTest(offers=offers), self.assertRaisesRegex(
-                RuntimeError, 'V101_ACTIVE_SIGNUP_POLICY_INVALID',
+                RuntimeError, 'V102_ACTIVE_SIGNUP_POLICY_INVALID',
             ):
                 DEPLOYER.validate_default_signup_policy(snapshot)
 
@@ -106,7 +110,7 @@ class DeploymentMethodTests(unittest.TestCase):
             if args[:2] == ('image', 'inspect') and args[2] == '--format':
                 return ids[reverse_images[args[4]]]
             if args[:2] == ('image', 'inspect'):
-                return json.dumps([{'Config': {'Labels': {'org.opencontainers.image.version': '1.0.1'}}}])
+                return json.dumps([{'Config': {'Labels': {'org.opencontainers.image.version': '1.0.2'}}}])
             self.fail('unexpected docker call: ' + repr(args))
 
         class FixtureHelper:
@@ -245,7 +249,7 @@ class DeploymentMethodTests(unittest.TestCase):
         self.assertEqual(host.target_writer_ids, {
             'app': 'app-target-id', 'worker': 'worker-target-id', 'git-worker': 'git-worker-target-id',
         })
-        self.assertEqual(host.target_health['local']['version'], '1.0.1')
+        self.assertEqual(host.target_health['local']['version'], '1.0.2')
         self.assertFalse(host.nginx_stopped)
         self.assertIn(['systemctl', 'reload', 'nginx'], helper.run_calls)
 
@@ -263,7 +267,7 @@ class DeploymentMethodTests(unittest.TestCase):
             'database_snapshot': self.signup_snapshot(),
         }
         backup = {
-            'name': '20261015T010203Z-pre-deploy-to-v1.0.1.ABC123',
+            'name': '20261015T010203Z-pre-deploy-to-v1.0.2.ABC123',
             'object': 'cos://backup/archive', 'verified_manifest': 'cos://backup/manifest',
             'sha256': 'e' * 64,
         }
@@ -294,8 +298,49 @@ class DeploymentMethodTests(unittest.TestCase):
 
 
 class BackupValidationTests(unittest.TestCase):
+    def test_backup_receipt_accepts_only_quiesced_v102_backup_in_expected_root(self):
+        backup_name = '20261015T043210Z-pre-deploy-to-v1.0.2.a1B2c3'
+        object_path = (
+            'cos://ai-project-os-backup-17/backups/2026/10/15/'
+            + backup_name + '/' + backup_name + '.tar.age'
+        )
+        fields = {
+            'reason': 'pre-deploy-to-v1.0.2',
+            'retention_removed': '0',
+            'source_quiesced': 'true',
+            'source': '/var/backups/ai-project-os/' + backup_name,
+            'object': object_path,
+            'verified_manifest': object_path.removesuffix('.tar.age') + '.manifest.json',
+            'manifest': 'cos://ai-project-os-backup-17/manifests/latest.json',
+            'sha256': 'a' * 64,
+        }
+
+        def receipt(**overrides):
+            complete = {**fields, **overrides}
+            return 'BACKUP_OK ' + ' '.join(
+                key + '=' + value for key, value in complete.items()
+            )
+
+        accepted = DEPLOYER.verify_backup_output(receipt())
+        self.assertEqual(accepted['name'], backup_name)
+        self.assertEqual(accepted['object'], object_path)
+
+        old_name = backup_name.replace('v1.0.2', 'v1.0.1')
+        with self.assertRaisesRegex(RuntimeError, 'V102_BACKUP_SOURCE_INVALID'):
+            DEPLOYER.verify_backup_output(receipt(
+                source='/var/backups/ai-project-os/' + old_name,
+            ))
+        with self.assertRaisesRegex(RuntimeError, 'V102_BACKUP_OBJECT_INVALID'):
+            DEPLOYER.verify_backup_output(receipt(object='https://example.invalid/archive.tar.age'))
+        with self.assertRaisesRegex(RuntimeError, 'V102_BACKUP_SOURCE_INVALID'):
+            DEPLOYER.verify_backup_output(receipt(
+                source='/tmp/' + backup_name,
+            ))
+        with self.assertRaisesRegex(RuntimeError, 'V102_BACKUP_RECEIPT_INVALID'):
+            DEPLOYER.verify_backup_output(receipt(source_quiesced='false'))
+
     def test_local_backup_accepts_dot_slash_email_member_and_streams_large_hashes(self):
-        backup_name = '20261015T010203Z-pre-deploy-to-v1.0.1.ABC123'
+        backup_name = '20261015T010203Z-pre-deploy-to-v1.0.2.ABC123'
         object_path = (
             'cos://ai-project-os-backup-1/backups/2026/10/15/'
             + backup_name + '/' + backup_name + '.tar.age'
@@ -331,7 +376,7 @@ class BackupValidationTests(unittest.TestCase):
             host_config.chmod(0o600)
 
             metadata = {
-                'format_version': '2', 'reason': 'pre-deploy-to-v1.0.1',
+                'format_version': '2', 'reason': 'pre-deploy-to-v1.0.2',
                 'compose_project': 'ai-project-os', 'app_version': '1.0.0',
                 'writers_quiesced': 'true', 'source_quiesced': 'true',
                 'backup_name': backup_name,
@@ -381,16 +426,197 @@ class BackupValidationTests(unittest.TestCase):
             self.assertEqual(DEPLOYER.hash_file(path / 'postgres.dump'), expected.hexdigest())
 
 
+class GitManifestTests(unittest.TestCase):
+    class FixtureHelper:
+        @staticmethod
+        def trusted(_path, _mode=None):
+            return None
+
+    def git(self, repository, *args, input_bytes=None, env=None):
+        result = subprocess.run(
+            [DEPLOYER.BINARIES['git'], '-C', str(repository), *args],
+            input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
+        return result.stdout.decode('utf-8').rstrip('\n')
+
+    def fixture_revision(self, repository, root_entries, lock_mode='100644', lock_type='blob'):
+        source_lock = self.git(
+            repository, 'show', DEPLOYER.SOURCE_REVISION + ':prisma/migrations/migration_lock.toml',
+        ).encode('utf-8') + b'\n'
+        lock_id = self.git(repository, 'hash-object', '-w', '--stdin', input_bytes=source_lock)
+        root_entries = [(lock_mode, lock_type, lock_id, 'migration_lock.toml'), *root_entries]
+        migration_tree = self.git(repository, 'mktree', input_bytes=b''.join(
+            f'{mode} {kind} {object_id}\t{name}\n'.encode()
+            for mode, kind, object_id, name in root_entries
+        ))
+        prisma_tree = self.git(repository, 'mktree', input_bytes=(
+            f'040000 tree {migration_tree}\tmigrations\n'.encode()
+        ))
+        root_tree = self.git(repository, 'mktree', input_bytes=(
+            f'040000 tree {prisma_tree}\tprisma\n'.encode()
+        ))
+        return root_tree
+
+    def test_actual_source_and_candidate_git_manifests_include_lock_blob_and_exact_delta(self):
+        with patch.object(DEPLOYER, 'ROOT', ROOT), patch.object(DEPLOYER, 'HELPER', self.FixtureHelper()):
+            source = DEPLOYER.git_manifest(DEPLOYER.SOURCE_REVISION)
+            target = DEPLOYER.git_manifest('HEAD')
+            working_tree = DEPLOYER.source_manifest(ROOT)
+            DEPLOYER.validate_manifest_delta(source, target)
+
+        self.assertEqual(len(source), 143)
+        self.assertEqual(len(target), 145)
+        self.assertEqual(working_tree, target)
+        self.assertEqual(tuple(name for name, _ in target[-2:]), DEPLOYER.TARGET_MIGRATIONS)
+
+    def test_actual_worktree_release_identity_passes_target_preflight(self):
+        worktree_paths = {
+            'package.json', 'src/lib/version.ts', 'Dockerfile', 'docs/releases/v1.0.2.md',
+            'deploy/production/ai-project-os-v102-deploy.py',
+            'deploy/production/ai-project-os-backup',
+            'deploy/production/ai_project_os_backup_artifact.py',
+            'deploy/production/ai-project-os-actions-gateway',
+            'deploy/production/ai-project-os-deploy.sudoers',
+        }
+        original_git_blob = DEPLOYER.git_blob
+
+        def candidate_blob(revision, path):
+            if revision == 'HEAD' and path in worktree_paths:
+                return (ROOT / path).read_bytes()
+            return original_git_blob(revision, path)
+
+        with patch.object(DEPLOYER, 'ROOT', ROOT), \
+                patch.object(DEPLOYER, 'HELPER', self.FixtureHelper()), \
+                patch.object(DEPLOYER, 'git_blob', side_effect=candidate_blob), \
+                patch.object(DEPLOYER, 'validate_tooling_bytes'):
+            source = DEPLOYER.git_manifest(DEPLOYER.SOURCE_REVISION)
+            target, files = DEPLOYER.validate_target_tree('HEAD', source)
+
+        self.assertEqual(len(target), 145)
+        self.assertIn('v1.0.2', files['backup'].decode('utf-8'))
+        self.assertIn('ai-project-os-v102-deploy.py', files['deployer'].decode('utf-8'))
+
+    def test_git_manifest_rejects_unexpected_blob_symlink_and_missing_migration_sql(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / 'repo'
+            repository.mkdir()
+            self.git(repository, 'init', '-q')
+            self.git(repository, 'fetch', '--quiet', str(ROOT), DEPLOYER.SOURCE_REVISION)
+            with patch.object(DEPLOYER, 'ROOT', repository), \
+                    patch.object(DEPLOYER, 'HELPER', self.FixtureHelper()):
+                unexpected = self.git(repository, 'hash-object', '-w', '--stdin', input_bytes=b'other')
+                bad_blob_revision = self.fixture_revision(repository, [
+                    ('100644', 'blob', unexpected, 'unexpected.txt'),
+                ])
+                with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_NAME_INVALID'):
+                    DEPLOYER.git_manifest(bad_blob_revision)
+
+                symlink_revision = self.fixture_revision(repository, [
+                    ('120000', 'blob', unexpected, '20261015030000_symlink'),
+                ])
+                with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_ENTRY_TYPE_INVALID'):
+                    DEPLOYER.git_manifest(symlink_revision)
+
+                wrong_lock_type_revision = self.fixture_revision(
+                    repository, [], lock_mode='120000',
+                )
+                with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_LOCK_INVALID'):
+                    DEPLOYER.git_manifest(wrong_lock_type_revision)
+
+                other_sql = self.git(repository, 'hash-object', '-w', '--stdin', input_bytes=b'-- no migration')
+                directory_tree = self.git(repository, 'mktree', input_bytes=(
+                    f'100644 blob {other_sql}\tother.sql\n'.encode()
+                ))
+                missing_sql_revision = self.fixture_revision(repository, [
+                    ('040000', 'tree', directory_tree, '20261015030000_missing_sql'),
+                ])
+                with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_SQL_LAYOUT_INVALID'):
+                    DEPLOYER.git_manifest(missing_sql_revision)
+
+                wrong_lock = self.git(repository, 'hash-object', '-w', '--stdin',
+                                      input_bytes=b'provider = "sqlite"\n')
+                wrong_lock_tree = self.git(repository, 'mktree', input_bytes=(
+                    f'100644 blob {wrong_lock}\tmigration_lock.toml\n'.encode()
+                ))
+                prisma_tree = self.git(repository, 'mktree', input_bytes=(
+                    f'040000 tree {wrong_lock_tree}\tmigrations\n'.encode()
+                ))
+                root_tree = self.git(repository, 'mktree', input_bytes=(
+                    f'040000 tree {prisma_tree}\tprisma\n'.encode()
+                ))
+                with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_LOCK_INVALID'):
+                    DEPLOYER.git_manifest(root_tree)
+
+    def test_helper_accepts_only_trusted_public_modes_without_creating_bytecode_cache(self):
+        child = textwrap.dedent(r'''
+            import importlib.util, os, pathlib, shutil, stat, sys, tempfile
+            tool = pathlib.Path(sys.argv[1])
+            helper_source = pathlib.Path(sys.argv[2])
+            artifact_source = pathlib.Path(sys.argv[3])
+            sys.dont_write_bytecode = True
+            spec = importlib.util.spec_from_file_location("deployer_fixture", tool)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            with tempfile.TemporaryDirectory() as temporary:
+                for mode in (0o600, 0o644, 0o700):
+                    root = pathlib.Path(temporary) / format(mode, "o")
+                    helper = root / module.HELPER_SOURCE
+                    helper.parent.mkdir(parents=True)
+                    shutil.copyfile(helper_source, helper)
+                    helper.chmod(mode)
+                    module.ROOT = root
+                    module.trusted = lambda *_args, **_kwargs: None
+                    sys.dont_write_bytecode = False
+                    if mode in (0o600, 0o644):
+                        module.load_helper()
+                        assert sys.dont_write_bytecode is True
+                    else:
+                        try:
+                            module.load_helper()
+                        except RuntimeError as error:
+                            assert str(error) == "V102_PINNED_HELPER_MODE_INVALID"
+                        else:
+                            raise AssertionError("unsupported helper mode admitted")
+                    assert not helper.parent.joinpath("__pycache__").exists()
+                    if mode in (0o600, 0o644):
+                        artifact = helper.parent / "ai_project_os_backup_artifact.py"
+                        shutil.copyfile(artifact_source, artifact)
+                        artifact.chmod(0o755)
+                        module.ARTIFACT_HELPER = artifact
+                        module.HELPER = type("Helper", (), {
+                            "trusted": staticmethod(lambda *_args, **_kwargs: None),
+                        })()
+                        sys.dont_write_bytecode = False
+                        module.read_backup_artifact_helper()
+                        assert sys.dont_write_bytecode is True
+                        assert not helper.parent.joinpath("__pycache__").exists()
+            print("HELPER_MODE_AND_BYTECODE_OK")
+        ''')
+        environment = os.environ.copy()
+        environment.pop('PYTHONDONTWRITEBYTECODE', None)
+        environment.pop('PYTHONPYCACHEPREFIX', None)
+        result = subprocess.run(
+            [sys.executable, '-c', child, str(SCRIPT), str(ROOT / DEPLOYER.HELPER_SOURCE),
+             str(ARTIFACT_PATH)],
+            cwd=ROOT, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'HELPER_MODE_AND_BYTECODE_OK')
+
+
 class FixedTransitionTests(unittest.TestCase):
-    def test_only_exact_source_and_v101_tag_transition_is_accepted(self):
+    def test_only_exact_source_and_v102_tag_transition_is_accepted(self):
         DEPLOYER.validate_transition(
-            'v1.0.0', DEPLOYER.SOURCE_REVISION, 'v1.0.1', 'a' * 40,
+            'v1.0.0', DEPLOYER.SOURCE_REVISION, 'v1.0.2', 'a' * 40,
         )
         for values in (
-            ('v0.8.0', DEPLOYER.SOURCE_REVISION, 'v1.0.1', 'a' * 40),
-            ('v1.0.0', 'b' * 40, 'v1.0.1', 'a' * 40),
-            ('v1.0.0', DEPLOYER.SOURCE_REVISION, 'v1.0.2', 'a' * 40),
-            ('v1.0.0', DEPLOYER.SOURCE_REVISION, 'v1.0.1', 'a' * 39),
+            ('v0.8.0', DEPLOYER.SOURCE_REVISION, 'v1.0.2', 'a' * 40),
+            ('v1.0.0', 'b' * 40, 'v1.0.2', 'a' * 40),
+            ('v1.0.0', DEPLOYER.SOURCE_REVISION, 'v1.0.1', 'a' * 40),
+            ('v1.0.0', DEPLOYER.SOURCE_REVISION, 'v1.0.2', 'a' * 39),
         ):
             with self.subTest(values=values), self.assertRaises(RuntimeError):
                 DEPLOYER.validate_transition(*values)
@@ -405,15 +631,15 @@ class FixedTransitionTests(unittest.TestCase):
         DEPLOYER.validate_manifest_delta(source, target)
         changed = list(target)
         changed[20] = (changed[20][0], 'c' * 64)
-        with self.assertRaisesRegex(RuntimeError, 'V101_MIGRATION_BASELINE_CHANGED'):
+        with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_BASELINE_CHANGED'):
             DEPLOYER.validate_manifest_delta(source, changed)
-        with self.assertRaisesRegex(RuntimeError, 'V101_MIGRATION_COUNT_INVALID'):
+        with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_COUNT_INVALID'):
             DEPLOYER.validate_manifest_delta(source, target[:-1])
         wrong_additions = source + [
             ('20261015030000_unapproved', 'a' * 64),
             (DEPLOYER.TARGET_MIGRATIONS[1], 'b' * 64),
         ]
-        with self.assertRaisesRegex(RuntimeError, 'V101_MIGRATION_DELTA_INVALID'):
+        with self.assertRaisesRegex(RuntimeError, 'V102_MIGRATION_DELTA_INVALID'):
             DEPLOYER.validate_manifest_delta(source, wrong_additions)
 
     def test_source_receipt_accepts_only_the_existing_deploy_marker_and_key_values(self):
@@ -424,7 +650,7 @@ class FixedTransitionTests(unittest.TestCase):
                 'status': 'DEPLOY_OK', 'tag': 'v1.0.0', 'revision': DEPLOYER.SOURCE_REVISION,
             })
             path.write_text('FAILED\ntag=v1.0.0\nrevision=' + DEPLOYER.SOURCE_REVISION + '\n')
-            with self.assertRaisesRegex(RuntimeError, 'V101_RECORD_INVALID'):
+            with self.assertRaisesRegex(RuntimeError, 'V102_RECORD_INVALID'):
                 DEPLOYER.parse_record(path)
 
     def test_pre_migration_failures_restore_exact_source(self):
@@ -475,7 +701,7 @@ class ProductionResourceContractTests(unittest.TestCase):
         self.assertIn("RESTORE_DATABASE_PRINCIPALS_INVALID", source)
         self.assertIn("RESTORE_PRIVATE_TRIGGER_ACL_INVALID", source)
         self.assertIn('@sha256:', source)
-        self.assertIn("'ai-project-os.v101-restore-owner'", source)
+        self.assertIn("'ai-project-os.v102-restore-owner'", source)
 
     def test_cleanup_is_limited_to_captured_owned_ids_and_names(self):
         source = SCRIPT.read_text(encoding='utf-8')
@@ -490,13 +716,13 @@ class ProductionResourceContractTests(unittest.TestCase):
     def test_bootstrap_and_deploy_require_target_tag_ci_and_backup_confirmation(self):
         source = SCRIPT.read_text(encoding='utf-8')
         self.assertIn("require_ci(target_revision)", source)
-        self.assertIn("'CONFIRM_INSTALL_V101_TOOLING'", source)
-        self.assertIn("'CONFIRM_V101_WITH_BACKUP_AND_FULL_CI'", source)
+        self.assertIn("'CONFIRM_INSTALL_V102_TOOLING'", source)
+        self.assertIn("'CONFIRM_V102_WITH_BACKUP_AND_FULL_CI'", source)
         self.assertIn("'+refs/tags/' + TARGET_TAG + ':refs/tags/' + TARGET_TAG", source)
         self.assertIn("'refs/remotes/origin/main'", source)
         self.assertIn('ai-project-os-deploy.lock', source)
         self.assertIn('gateway_promoted_last=true', source)
-        self.assertIn("'V101_TOOLING_READY'", source)
+        self.assertIn("'V102_TOOLING_READY'", source)
         self.assertIn('validate_tooling_bytes(gateway, sudoers)', source)
         self.assertIn("[visudo, '-cf', str(path)]", source)
         self.assertLess(source.index('(SUDOERS, files[\'sudoers\'], 0o440)'),

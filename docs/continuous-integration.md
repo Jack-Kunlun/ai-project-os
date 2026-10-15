@@ -1,10 +1,20 @@
 # 持续集成与浏览器门禁
 
-仓库的 GitHub Actions 工作流在分支 push 和 pull request 上按改动范围运行发布门禁；发布标签始终运行完整门禁。只有提交全部改动均为 `src/**/*.css`、`public` 下 PNG/JPEG/WebP/ICO 位图，或历史 `0.6.0-dev.N` 仅递增 `package.json` 版本号时，才使用无需 PostgreSQL 的快速路径：Prisma Client 生成、Lint、类型检查、生产构建及性能预算。`0.7.x` 版本、SVG、客户端代码、脚本、配置、测试和混合改动均使用完整路径。0.7 发布标签必须指向同 SHA 已成功的主分支完整 CI，且标签 CI 自身的数据库作业必须成功；生产部署仍会停写、备份、预检数据库账本并检查健康。它是 GitHub 适配器，不改变产品对 Gitee、GitLab、自建 GitLab、Gitea、Forgejo 或通用 Git 的支持边界；使用其他 CI 平台时应按同样规则移植仓库命令。
+仓库的 GitHub Actions 工作流按实际生产源版本到候选 SHA 的累计差异分层；无法确认线上源标签、祖先关系或改动风险时，保守运行高风险门禁。正式发布复用同 SHA 的主分支 CI，不再为版本标签重复整套测试。它是 GitHub 适配器，不改变产品对 Gitee、GitLab、自建 GitLab、Gitea、Forgejo 或通用 Git 的支持边界；使用其他 CI 平台时应按同样规则移植仓库命令。
 
 ## 自动门禁
 
-完整路径使用 Node.js 24、pnpm 10 和带 pgvector 的 PostgreSQL 18，执行：
+正式发布由用户在[发布正式版本工作流](production-release.md)手动发起，CI 本身不自动上线。发布工作流与受限生产发布器分别核对同 SHA 成功主分支 CI 的源版本、风险层级及适用作业；annotated 标签负责版本身份，不重复代码测试。
+
+| 风险 | 改动范围 | CI 检查 |
+| --- | --- | --- |
+| 低 | Markdown 文档、CSS、位图、经比对的纯版本元数据 | Prisma Client、Lint、类型检查、生产构建、性能预算 |
+| 中 | 不触及认证/授权/额度/外发的数据展示与客户端交互、组件、SVG | 低风险静态检查、默认测试与覆盖率、隔离 PostgreSQL 浏览器/可访问性和性能验证 |
+| 高 | 服务端/API、认证/授权/额度/模型外发、Schema/迁移、生产/CI/构建/依赖，以及未知改动 | 完整默认测试、全部 PostgreSQL 门禁、账号与 OID10 门禁、生产浏览器/性能、隔离 Compose 候选 |
+
+混合改动取最高风险。`package.json`、公开版本文件和 Dockerfile 只有版本值变化时才能按纯版本元数据处理；依赖、脚本或构建指令同时变化仍是高风险。CI 与生产使用同一份受固定哈希保护的分类逻辑。最终验证作业记录实际基线 SHA 和风险层级，防止复用仅覆盖最后一笔轻量提交的结果。人工推送标签时，仅验证标签身份及同 SHA 的成功主分支 CI。
+
+高风险完整路径使用 Node.js 24、pnpm 10 和带 pgvector 的 PostgreSQL 18，执行：
 
 1. 冻结锁文件安装依赖，生成并校验 Prisma Client 和完整迁移目录。
 2. 运行 Lint、TypeScript 类型检查和完整默认测试集；覆盖率门禁要求源代码行覆盖率不少于 60%、分支覆盖率不少于 78%、函数覆盖率不少于 67%。
@@ -20,13 +30,13 @@
 
 性能预算保存在 `config/performance-budgets.json`。0.7.x 候选的共享 JavaScript 上限为 145 KiB、最大单个 JavaScript 文件为 75 KiB、全局 CSS 为 15 KiB、全站静态资产库存为 760 KiB。0.7.x 新增注册、MCP 与 Git 治理页面后，隔离生产构建实测 CSS 14.7 KiB、全站静态资产 752.2 KiB；因此 CSS 从 14.5 KiB、资产库存从 724 KiB 调整，保留约 1% 的库存余量。此调整不改变共享脚本、单文件或关键路由上限。setup、Dashboard、项目列表、指南、MCP 连接、账号访问、个人工作区和个人知识库路由分别使用 155、165、165、155、175、155、170 和 180 KiB 的 JavaScript 上限。全站静态资产库存会排除 Next 生成的 `static/chunks/app/api/**/route-*.js` 服务端 API 路由入口桩；页面和动态页面 chunk 不排除。库存是其余静态客户端构建文件逐文件 gzip 后的总量，不是首屏性能指标，也不等同于首屏加载体积。所有数值均按每个构建文件独立 gzip 后计算，避免机器速度与临时负载造成误报；调整预算必须和可解释的产品或依赖变化一起评审。`pnpm test:performance` 会使用不可连接的 loopback 数据库占位地址生成新的生产构建再检查预算，避免误连部署数据库；快速路径用 `pnpm test:performance` 建立无数据库连接的生产构建；完整路径的数据库作业已有浏览器门禁产物，因此直接运行 `pnpm performance:check`。
 
-0.8 邮箱候选同时新增邮箱验证客户端并更新到 Next.js 16.3.8。2026-10-13 精确主分支 CI（`fcc5ba6`）的库存实测为 784.1 KiB，本地为 784.0 KiB；前一成功主分支 `bc90bc9` 为 779.2 KiB，本轮增加约 0.63%。现有 780 KiB 上限只比前一实测多 0.8 KiB，因此将库存上限调整为 792 KiB，保留约 1% 余量。共享 JavaScript、单文件 JavaScript、CSS 和全部关键路由上限保持不变；本轮 CI 的这些指标全部通过。此调整只重新设定全站构建库存基线，不改变计量算法、文件排除规则或首屏预算；最终提交仍须重新通过完整主分支与标签 CI。
+0.8 邮箱候选同时新增邮箱验证客户端并更新到 Next.js 16.3.8。2026-10-13 精确主分支 CI（`fcc5ba6`）的库存实测为 784.1 KiB，本地为 784.0 KiB；前一成功主分支 `bc90bc9` 为 779.2 KiB，本轮增加约 0.63%。现有 780 KiB 上限只比前一实测多 0.8 KiB，因此将库存上限调整为 792 KiB，保留约 1% 余量。共享 JavaScript、单文件 JavaScript、CSS 和全部关键路由上限保持不变；本轮 CI 的这些指标全部通过。此调整只重新设定全站构建库存基线，不改变计量算法、文件排除规则或首屏预算；该历史候选按当时规则要求完整主分支与标签 CI，当前正式版采用上文的同 SHA 复用规则。
 
 容器交付门禁的隔离与清理规则见[本地持续交付候选门禁](local-release.md)。它只验证一次性本地候选，不发布镜像、不创建 tag、不升级正式 Compose，也不替代备份恢复和真实外部服务现场验收。
 
 ## 安全边界
 
-- 工作流权限只有 `contents: read`，第三方 Action 固定到完整提交 SHA，checkout 不保留 Git 写凭据。
+- CI 使用只读的 `contents` 与 `actions` 权限，第三方 Action 固定到完整提交 SHA，checkout 不保留 Git 写凭据。独立的手动发布工作流使用创建版本标签和发布 Release 所需的写权限；该权限不授予普通 CI 作业。
 - CI 中的 PostgreSQL 密码仅属于当次隔离服务，不是部署凭据。
 - 工作流不接收模型 API Key、Git Token/SSH Key、OIDC Client Secret 或 MCP Bearer Token，也不会调用真实外部服务。
 - `pnpm test:browser-e2e` 会执行生产构建，但不能替代正式部署的备份恢复、Compose 状态或入口代理验收。

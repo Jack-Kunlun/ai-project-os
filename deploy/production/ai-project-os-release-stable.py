@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Root-only, single-transition v1.0.0 -> v1.0.2 release and recovery gate."""
+"""Root-only stable release and recovery gate with a one-time tooling bootstrap."""
 from __future__ import annotations
 
 import fcntl
@@ -24,31 +24,24 @@ ENV = Path('/etc/ai-project-os/production.env')
 OVERRIDE = Path('/etc/ai-project-os/compose.operations.yaml')
 EMAIL_ENV = Path('/etc/ai-project-os/email-auth.env')
 RESULT = Path('/var/lib/ai-project-os/last-deployment')
-STATE = Path('/etc/ai-project-os/release-tooling-v102.json')
+STATE = Path('/etc/ai-project-os/release-tooling-stable.json')
 NGINX = Path('/etc/nginx/sites-available/ai-project-os.conf')
 NGINX_ENABLED = Path('/etc/nginx/sites-enabled/ai-project-os.conf')
 NGINX_SNIPPET = Path('/etc/nginx/snippets/ai-project-os-proxy.conf')
 BACKUP = Path('/usr/local/sbin/ai-project-os-backup')
 ARTIFACT_HELPER = Path('/usr/local/libexec/ai-project-os/backup-artifact.py')
-DEPLOYER = Path('/usr/local/sbin/ai-project-os-v102-deploy')
+DEPLOYER = Path('/usr/local/sbin/ai-project-os-release-stable')
 GATEWAY = Path('/usr/local/sbin/ai-project-os-actions-gateway')
 SUDOERS = Path('/etc/sudoers.d/ai-project-os-deploy')
 BACKUP_SOURCE = 'deploy/production/ai-project-os-backup'
 ARTIFACT_SOURCE = 'deploy/production/ai_project_os_backup_artifact.py'
-DEPLOYER_SOURCE = 'deploy/production/ai-project-os-v102-deploy.py'
+DEPLOYER_SOURCE = 'deploy/production/ai-project-os-release-stable.py'
 GATEWAY_SOURCE = 'deploy/production/ai-project-os-actions-gateway'
 SUDOERS_SOURCE = 'deploy/production/ai-project-os-deploy.sudoers'
 HELPER_SOURCE = 'deploy/production/ai-project-os-v074-deploy.py'
-SOURCE_TAG = 'v1.0.0'
-SOURCE_REVISION = 'f57d050fffa445a6ef9eb3d7e692e6df06fac98d'
-TARGET_TAG = 'v1.0.2'
-TARGET_VERSION = '1.0.2'
-TARGET_MIGRATIONS = (
-    '20261015010000_add_local_registration_entitlement_source',
-    '20261015020000_bind_personal_semantic_token_reservations',
-)
-EXPECTED_MIGRATIONS = 145
-SOURCE_MIGRATIONS = 143
+INITIAL_SOURCE_TAG = 'v1.0.0'
+INITIAL_SOURCE_REVISION = 'f57d050fffa445a6ef9eb3d7e692e6df06fac98d'
+MINIMUM_MIGRATIONS = 143
 HELPER_SHA256 = '01c1f299098da8e4e9316e92d57e42bcf95e89eeee8424e4fe51395d6cc2d95e'
 IMAGE = 'pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff'
 PROJECT = 'ai-project-os'
@@ -72,7 +65,11 @@ BACKUP_REQUIRED_FILES = {
     'postgres.dump', 'secrets.tar.gz', 'uploads.tar.gz', 'host-config.tar.gz',
     'backup-metadata.env', 'SHA256SUMS', '.cos-upload-verified',
 }
-BACKUP_NAME = re.compile(r'^[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v1\.0\.2\.[A-Za-z0-9]{6}$')
+BACKUP_NAME = re.compile(
+    r'^[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v(?:[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.[A-Za-z0-9]{6}$'
+)
+STABLE_TAG = re.compile(r'^v([1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
+MIGRATION_NAME = re.compile(r'^\d{14}_[a-z0-9_]+$')
 HEX64 = re.compile(r'^[a-f0-9]{64}$')
 HEX40 = re.compile(r'^[a-f0-9]{40}$')
 HELPER = None
@@ -80,7 +77,7 @@ HELPER = None
 
 def require(condition: bool, code: str) -> None:
     if not condition:
-        raise RuntimeError('V102_' + code)
+        raise RuntimeError('STABLE_' + code)
 
 
 def sha256(data: bytes) -> str:
@@ -114,26 +111,301 @@ def policy_snapshot(snapshot):
             'activeEmbeddingRoutes': snapshot['activeEmbeddingRoutes']}
 
 
+def stable_version(tag: str) -> tuple[int, int, int]:
+    match = STABLE_TAG.fullmatch(tag)
+    require(match is not None, 'STABLE_TAG_INVALID')
+    return tuple(int(part) for part in match.groups())
+
+
+def version_text(tag: str) -> str:
+    stable_version(tag)
+    return tag[1:]
+
+
+def backup_name_pattern(target_tag: str):
+    stable_version(target_tag)
+    return re.compile(r'^[0-9]{8}T[0-9]{6}Z-pre-deploy-to-' + re.escape(target_tag)
+                      + r'\.[A-Za-z0-9]{6}$')
+
+
 def validate_transition(source_tag: str, source_revision: str, target_tag: str, target_revision: str) -> None:
-    require(source_tag == SOURCE_TAG and source_revision == SOURCE_REVISION, 'SOURCE_TRANSITION_INVALID')
-    require(target_tag == TARGET_TAG and HEX40.fullmatch(target_revision) is not None,
-            'TARGET_TRANSITION_INVALID')
-    require(target_revision != source_revision, 'TARGET_TRANSITION_INVALID')
+    source_version = stable_version(source_tag)
+    target_version = stable_version(target_tag)
+    require(HEX40.fullmatch(source_revision) is not None
+            and HEX40.fullmatch(target_revision) is not None, 'TRANSITION_REVISION_INVALID')
+    if source_tag == INITIAL_SOURCE_TAG:
+        require(source_revision == INITIAL_SOURCE_REVISION, 'INITIAL_SOURCE_REVISION_INVALID')
+    same_release = target_tag == source_tag and target_revision == source_revision
+    require(target_version > source_version or (same_release and source_tag != INITIAL_SOURCE_TAG),
+            'TARGET_NOT_FORWARD_STABLE_RELEASE')
+    require(target_tag != source_tag or same_release, 'TARGET_TAG_REVISION_MISMATCH')
 
 
 def validate_manifest_delta(source: list[tuple[str, str]], target: list[tuple[str, str]]) -> None:
-    require(len(source) == SOURCE_MIGRATIONS and len(target) == EXPECTED_MIGRATIONS,
-            'MIGRATION_COUNT_INVALID')
-    require(target[:SOURCE_MIGRATIONS] == source, 'MIGRATION_BASELINE_CHANGED')
-    require(tuple(name for name, _ in target[-2:]) == TARGET_MIGRATIONS, 'MIGRATION_DELTA_INVALID')
-    require(len({name for name, _ in target}) == EXPECTED_MIGRATIONS
+    source_names = [name for name, _ in source]
+    target_names = [name for name, _ in target]
+    require(len(source) >= MINIMUM_MIGRATIONS and len(target) >= len(source), 'MIGRATION_COUNT_INVALID')
+    require(target[:len(source)] == source, 'MIGRATION_BASELINE_CHANGED')
+    require(len(set(source_names)) == len(source) and len(set(target_names)) == len(target)
+            and all(MIGRATION_NAME.fullmatch(name) for name in target_names)
             and all(HEX64.fullmatch(digest) for _, digest in target), 'MIGRATION_MANIFEST_INVALID')
+    require(target_names == sorted(target_names), 'MIGRATION_ORDER_INVALID')
 
 
-def deployment_flow(ops) -> None:
+def migration_manifest_sha256(manifest: list[tuple[str, str]]) -> str:
+    encoded = json.dumps(manifest, separators=(',', ':'), ensure_ascii=True).encode('ascii')
+    return sha256(encoded)
+
+
+def _classifier_git(repository, args):
+    environment = {
+        'PATH': '/usr/local/bin:/usr/bin:/bin',
+        'HOME': '/nonexistent',
+        'GIT_CONFIG_NOSYSTEM': '1',
+        'GIT_CONFIG_GLOBAL': os.devnull,
+        'GIT_OPTIONAL_LOCKS': '0',
+        'GIT_NO_REPLACE_OBJECTS': '1',
+        'LC_ALL': 'C.UTF-8',
+    }
+    result = subprocess.run(
+        ['git', '--no-pager', '--literal-pathspecs', '-C', os.fspath(repository), *args],
+        env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError('git command failed')
+    return result.stdout
+
+
+def _classifier_entry_mode(repository, revision, path):
+    raw = _classifier_git(repository, ['ls-tree', '-z', '--full-tree', revision, '--', path])
+    records = [record for record in raw.split(b'\0') if record]
+    if not records:
+        return None
+    if len(records) != 1:
+        raise ValueError('ambiguous git tree entry')
+    metadata, separator, raw_path = records[0].partition(b'\t')
+    if not separator or raw_path.decode('utf-8', errors='strict') != path:
+        raise ValueError('invalid git tree entry')
+    parts = metadata.decode('ascii', errors='strict').split(' ')
+    if len(parts) != 3:
+        raise ValueError('invalid git tree metadata')
+    return parts[0], parts[1]
+
+
+def _classifier_blob(repository, revision, path):
+    return _classifier_git(repository, ['show', revision + ':' + path])
+
+
+def _replace_one_version(data, pattern):
+    matches = list(pattern.finditer(data))
+    if len(matches) != 1:
+        return None, None
+    match = matches[0]
+    old = match.group(2)
+    normalized = data[:match.start(2)] + b'<VERSION>' + data[match.end(2):]
+    return old, normalized
+
+
+def _stable_version_bytes(value):
+    if value is None:
+        return False
+    try:
+        text = value.decode('ascii')
+    except UnicodeDecodeError:
+        return False
+    return re.fullmatch(r'[1-9][0-9]*\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', text) is not None
+
+
+def _is_version_only_change(repository, path, source_revision, target_revision):
+    before = _classifier_blob(repository, source_revision, path)
+    after = _classifier_blob(repository, target_revision, path)
+    if path == 'package.json':
+        pattern = re.compile(rb'(?m)^([ \t]*"version"[ \t]*:[ \t]*)"([^"\r\n]+)"([ \t]*,?[ \t]*\r?)$')
+        source_version, source_normalized = _replace_one_version(before, pattern)
+        target_version, target_normalized = _replace_one_version(after, pattern)
+        try:
+            source_json = json.loads(before)
+            target_json = json.loads(after)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        if not isinstance(source_json, dict) or not isinstance(target_json, dict):
+            return False
+        source_copy = dict(source_json)
+        target_copy = dict(target_json)
+        source_copy.pop('version', None)
+        target_copy.pop('version', None)
+        return (source_version != target_version
+                and _stable_version_bytes(source_version) and _stable_version_bytes(target_version)
+                and source_normalized == target_normalized and source_copy == target_copy)
+    if path == 'src/lib/version.ts':
+        pattern = re.compile(rb'(APP_VERSION\s*=\s*")([^"\r\n]+)("\s+as\s+const;)')
+        source_version, source_normalized = _replace_one_version(before, pattern)
+        target_version, target_normalized = _replace_one_version(after, pattern)
+        return (source_version != target_version
+                and _stable_version_bytes(source_version) and _stable_version_bytes(target_version)
+                and source_normalized == target_normalized)
+    if path == 'Dockerfile':
+        pattern = re.compile(rb'(org\.opencontainers\.image\.version=")([^"\r\n]+)(")')
+        source_version, source_normalized = _replace_one_version(before, pattern)
+        target_version, target_normalized = _replace_one_version(after, pattern)
+        return (source_version != target_version
+                and _stable_version_bytes(source_version) and _stable_version_bytes(target_version)
+                and source_normalized == target_normalized)
+    return False
+
+
+def _risk_result(risk, reasons):
+    return {
+        'risk': risk,
+        'databaseRequired': risk == 'high',
+        'browserRequired': risk in ('medium', 'high'),
+        'coverageRequired': risk in ('medium', 'high'),
+        'reasons': reasons,
+    }
+
+
+def _sensitive_release_path(path):
+    segments = re.split(r'[^a-z0-9]+', path.lower())
+    sensitive = {
+        'account', 'accounts', 'admin', 'admins', 'auth', 'authorization', 'billing',
+        'agent', 'agents', 'captcha', 'credit', 'credits', 'email', 'entitlement', 'entitlements', 'login',
+        'permission', 'permissions', 'phone', 'profile', 'provider', 'providers', 'recover',
+        'register', 'registration', 'role', 'roles', 'security', 'semantic', 'session',
+        'setup', 'signup', 'team', 'teams',
+    }
+    return any(segment in sensitive for segment in segments)
+
+
+def _frontend_test_matches(path, frontend_sources):
+    if not re.fullmatch(r'(?:test|tests|e2e)/.+\.(?:test|spec)\.tsx?', path):
+        return False
+    test_name = PurePosixPath(path).name
+    test_stem = re.sub(r'\.(?:test|spec)\.tsx?$', '', test_name)
+    source_names = set()
+    for source in frontend_sources:
+        parsed = PurePosixPath(source)
+        source_names.add(parsed.stem)
+        if parsed.parent.name not in ('app', 'components'):
+            source_names.add(parsed.parent.name)
+    return test_stem in source_names
+
+
+def classify_release_risk(repository, source_revision, target_revision):
+    """Classify a cumulative production source-to-target diff; any ambiguity fails high."""
+    try:
+        if (HEX40.fullmatch(source_revision) is None
+                or HEX40.fullmatch(target_revision) is None):
+            return _risk_result('high', ['invalid-revision'])
+        for revision in (source_revision, target_revision):
+            _classifier_git(repository, ['cat-file', '-e', revision + '^{commit}'])
+        ancestry = subprocess.run(
+            ['git', '--no-pager', '-C', os.fspath(repository), 'merge-base', '--is-ancestor',
+             source_revision, target_revision],
+            env={
+                'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': '/nonexistent',
+                'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
+                'GIT_OPTIONAL_LOCKS': '0', 'GIT_NO_REPLACE_OBJECTS': '1', 'LC_ALL': 'C.UTF-8',
+            }, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        if ancestry.returncode != 0:
+            return _risk_result('high', ['source-target-ancestry-invalid'])
+        raw = _classifier_git(repository, [
+            'diff', '--name-status', '-z', '--no-renames', '--no-ext-diff', '--no-textconv',
+            source_revision, target_revision, '--',
+        ])
+        records = [record for record in raw.split(b'\0') if record]
+        if not records:
+            return _risk_result('low', ['no-changes'])
+        changes = []
+        index = 0
+        while index < len(records):
+            status = records[index].decode('ascii', errors='strict')
+            index += 1
+            if status not in ('A', 'M', 'D') or index >= len(records):
+                return _risk_result('high', ['git-diff-entry-unknown'])
+            path = records[index].decode('utf-8', errors='strict')
+            index += 1
+            if not path or path.startswith('/') or '\\' in path or PurePosixPath(path).is_absolute():
+                return _risk_result('high', ['git-path-invalid'])
+            changes.append((status, path))
+        if index != len(records):
+            return _risk_result('high', ['git-diff-entry-malformed'])
+
+        frontend_sources = [
+            path for _status, path in changes
+            if (path.startswith('src/components/') and path.endswith('.tsx'))
+            or (path.startswith('src/app/') and re.fullmatch(r'src/app/.+[^/]+-client\.tsx', path))
+            or (path.endswith('.svg') and (path.startswith('public/') or path.startswith('src/components/')))
+        ]
+        has_medium = False
+        reasons = []
+        for status, path in changes:
+            if (path.startswith(('src/lib/', 'src/app/api/', 'app/api/', 'prisma/', 'scripts/',
+                                 '.github/', 'deploy/', 'config/'))
+                    or path in ('next.config.ts', 'next.config.js', 'tsconfig.json', 'pnpm-lock.yaml',
+                                'package-lock.json', 'yarn.lock', 'Dockerfile')):
+                if path not in ('package.json', 'src/lib/version.ts', 'Dockerfile'):
+                    return _risk_result('high', ['server-build-or-config-path'])
+            source_mode = _classifier_entry_mode(repository, source_revision, path)
+            target_mode = _classifier_entry_mode(repository, target_revision, path)
+            if status == 'A':
+                if source_mode is not None or target_mode not in (('100644', 'blob'), ('100755', 'blob')):
+                    return _risk_result('high', ['git-file-type-unknown'])
+            elif status == 'D':
+                if target_mode is not None or source_mode not in (('100644', 'blob'), ('100755', 'blob')):
+                    return _risk_result('high', ['git-file-type-unknown'])
+            elif (source_mode not in (('100644', 'blob'), ('100755', 'blob'))
+                  or target_mode not in (('100644', 'blob'), ('100755', 'blob'))
+                  or source_mode != target_mode):
+                return _risk_result('high', ['git-file-type-unknown'])
+
+            if path in ('package.json', 'src/lib/version.ts', 'Dockerfile'):
+                if not _is_version_only_change(repository, path, source_revision, target_revision):
+                    return _risk_result('high', ['version-file-has-non-version-change'])
+                reasons.append('version-only')
+                continue
+
+            if (path.endswith('.md') and (path.startswith('docs/') or path == 'README.md')
+                    and PurePosixPath(path).name.lower() == 'agents.md'):
+                return _risk_result('high', ['sensitive-path'])
+            if path.endswith('.md') and (path.startswith('docs/') or path == 'README.md'):
+                reasons.append('documentation')
+                continue
+            if path.startswith('src/') and path.endswith('.css'):
+                reasons.append('stylesheet')
+                continue
+            if path.startswith('public/') and PurePosixPath(path).suffix.lower() in (
+                '.png', '.jpg', '.jpeg', '.webp', '.ico', '.gif',
+            ):
+                reasons.append('public-bitmap')
+                continue
+            if _sensitive_release_path(path):
+                return _risk_result('high', ['sensitive-path'])
+            if ((path.startswith('src/components/') and path.endswith('.tsx'))
+                    or (path.startswith('src/app/')
+                        and re.fullmatch(r'src/app/.+[^/]+-client\.tsx', path))):
+                has_medium = True
+                reasons.append('frontend-tsx')
+                continue
+            if path.endswith('.svg') and (path.startswith('public/') or path.startswith('src/components/')):
+                has_medium = True
+                reasons.append('frontend-svg')
+                continue
+            if _frontend_test_matches(path, frontend_sources):
+                has_medium = True
+                reasons.append('matching-frontend-test')
+                continue
+            return _risk_result('high', ['unclassified-path'])
+        return _risk_result('medium' if has_medium else 'low', sorted(set(reasons)))
+    except (OSError, ValueError, UnicodeDecodeError, subprocess.SubprocessError, TypeError):
+        return _risk_result('high', ['git-classification-error'])
+
+
+def deployment_flow(ops, preflight_source=None) -> None:
     """Explicitly encode the one allowed rollback boundary for deterministic tests."""
-    source = ops.preflight()
+    source = preflight_source if preflight_source is not None else ops.preflight()
     migration_started = False
+    database_required = getattr(ops, 'database_required', True)
     try:
         ops.checkout_target()
         images = ops.build_target_images()
@@ -141,11 +413,16 @@ def deployment_flow(ops) -> None:
         ops.stop_nginx()
         ops.stop_source_writers(source)
         backup = ops.create_and_validate_backup(source)
-        ops.restore_drill(source, backup, images)
+        if database_required:
+            ops.restore_drill(source, backup, images)
         ops.install_and_test_target_nginx()
-        migration_started = True  # Set before the first migration process can run.
-        ops.migrate(images)
-        ops.reconcile(images)
+        if database_required:
+            migration_started = True  # Set before the first migration process can run.
+            ops.migrate(images)
+            ops.reconcile(images)
+        else:
+            # Target writers may begin changing the shared database after this point.
+            migration_started = True
         ops.start_target_writers(images)
         ops.verify_target(source, backup, images)
         ops.cleanup_restore_drill()
@@ -245,24 +522,62 @@ def healthy(version, public=False):
     return payload
 
 
-def require_ci(revision):
+def _ci_runs(revision, event):
     api = 'https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions'
-    runs = request_json(api + '/workflows/ci.yml/runs?event=push&status=success&head_sha='
-                        + revision + '&per_page=100')
-    for branch in ('main', TARGET_TAG):
-        candidates = [item for item in runs.get('workflow_runs', [])
-                     if item.get('head_sha') == revision and item.get('head_branch') == branch
-                     and item.get('event') == 'push' and item.get('status') == 'completed'
-                     and item.get('conclusion') == 'success']
-        require(bool(candidates), 'EXACT_MAIN_AND_TAG_CI_REQUIRED')
-        accepted = False
-        for candidate in candidates:
-            jobs = request_json(api + '/runs/' + str(int(candidate['id'])) + '/jobs?per_page=100')
-            if any(job.get('name') == 'Verify database and release candidate'
-                   and job.get('conclusion') == 'success' for job in jobs.get('jobs', [])):
-                accepted = True
-                break
-        require(accepted, 'FULL_DATABASE_CI_REQUIRED')
+    payload = request_json(api + '/workflows/ci.yml/runs?event=' + event + '&status=success&head_sha='
+                           + revision + '&per_page=100')
+    return [item for item in payload.get('workflow_runs', [])
+            if item.get('head_sha') == revision and item.get('event') == event
+            and item.get('status') == 'completed' and item.get('conclusion') == 'success']
+
+
+def _run_has_jobs(run, required_names):
+    run_id = run.get('id')
+    require(isinstance(run_id, int) and run_id > 0, 'CI_RUN_ID_INVALID')
+    api = 'https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions'
+    jobs = request_json(api + '/runs/' + str(run_id) + '/jobs?per_page=100').get('jobs', [])
+    successful = {job.get('name') for job in jobs if job.get('conclusion') == 'success'}
+    return set(required_names).issubset(successful)
+
+
+def require_ci(target_tag, revision, bootstrap=False, source_revision=None, classification=None):
+    main_runs = [run for run in _ci_runs(revision, 'push')
+                 if run.get('head_branch') == 'main' and run.get('head_sha') == revision
+                 and run.get('event') == 'push' and run.get('status') == 'completed'
+                 and run.get('conclusion') == 'success']
+    if bootstrap:
+        require(any(_run_has_jobs(run, ('Verify database and release candidate',)) for run in main_runs),
+                'EXACT_MAIN_FULL_CI_REQUIRED')
+        return
+
+    require(source_revision is not None and HEX40.fullmatch(source_revision) is not None,
+            'RELEASE_CI_BASE_INVALID')
+    if classification is None:
+        classification = classify_release_risk(ROOT, source_revision, revision)
+    risk = classification.get('risk')
+    require(risk in ('low', 'medium', 'high')
+            and type(classification.get('databaseRequired')) is bool
+            and type(classification.get('browserRequired')) is bool
+            and type(classification.get('coverageRequired')) is bool,
+            'RELEASE_CI_CLASSIFICATION_INVALID')
+    require(classification['databaseRequired'] == (risk == 'high')
+            and classification['browserRequired'] == (risk in ('medium', 'high'))
+            and classification['coverageRequired'] == (risk in ('medium', 'high')),
+            'RELEASE_CI_CLASSIFICATION_INVALID')
+    tiers = {'low': 0, 'medium': 1, 'high': 2}
+    for attested_risk in ('low', 'medium', 'high'):
+        if tiers[attested_risk] < tiers[risk]:
+            continue
+        attestation = (f'Verify internal delivery gates [risk={attested_risk} '
+                       f'base={source_revision}]')
+        required_jobs = ['Verify source and client', attestation]
+        if attested_risk == 'high':
+            required_jobs.append('Verify database and release candidate')
+        elif attested_risk == 'medium':
+            required_jobs.append('Verify browser and release client')
+        if any(_run_has_jobs(run, required_jobs) for run in main_runs):
+            return
+    require(False, 'EXACT_MAIN_APPLICABLE_CI_REQUIRED')
 
 
 def git(args, capture=True, timeout=600):
@@ -279,25 +594,46 @@ def git_raw(args, timeout=600):
     return result.stdout
 
 
-def fetch_target(target_revision):
+def fetch_main(target_revision):
     trusted(ROOT); trusted(ROOT / '.git')
     require(git(['remote', 'get-url', 'origin']) == REMOTE, 'REMOTE_INVALID')
     require(git(['status', '--porcelain', '--untracked-files=all']) == '', 'MANAGED_CHECKOUT_DIRTY')
     git(['fetch', '--no-tags', 'origin',
-         '+refs/heads/main:refs/remotes/origin/main',
-         '+refs/tags/' + TARGET_TAG + ':refs/tags/' + TARGET_TAG])
-    require(git(['cat-file', '-t', 'refs/tags/' + TARGET_TAG]) == 'tag', 'TAG_NOT_ANNOTATED')
-    require(git(['rev-parse', 'refs/tags/' + TARGET_TAG + '^{}']) == target_revision,
-            'TAG_REVISION_MISMATCH')
+         '+refs/heads/main:refs/remotes/origin/main'])
     require(git(['rev-parse', 'refs/remotes/origin/main']) == target_revision,
             'ORIGIN_MAIN_REVISION_MISMATCH')
+
+
+def fetch_target(target_tag, target_revision):
+    fetch_main(target_revision)
+    git(['fetch', '--no-tags', 'origin', '+refs/tags/' + target_tag + ':refs/tags/' + target_tag])
+    require(git(['cat-file', '-t', 'refs/tags/' + target_tag]) == 'tag', 'TAG_NOT_ANNOTATED')
+    require(git(['rev-parse', 'refs/tags/' + target_tag + '^{}']) == target_revision,
+            'TAG_REVISION_MISMATCH')
+
+
+def require_ancestor(source_revision, target_revision):
+    try:
+        git(['merge-base', '--is-ancestor', source_revision, target_revision])
+    except RuntimeError:
+        require(False, 'RELEASE_ANCESTRY_INVALID')
+
+
+def verify_prior_stable_tag(result, current_revision):
+    prior_tag = result['source_tag']
+    prior_revision = result['source_revision']
+    require(git(['cat-file', '-t', 'refs/tags/' + prior_tag]) == 'tag',
+            'PRIOR_SOURCE_TAG_NOT_ANNOTATED')
+    require(git(['rev-parse', 'refs/tags/' + prior_tag + '^{}']) == prior_revision,
+            'PRIOR_SOURCE_TAG_REVISION_MISMATCH')
+    require_ancestor(prior_revision, current_revision)
 
 
 def source_manifest(root=ROOT):
     base = root / 'prisma/migrations'
     require(base.is_dir() and not base.is_symlink(), 'MIGRATION_DIRECTORY_INVALID')
     directories = sorted(path for path in base.iterdir() if path.is_dir() and not path.is_symlink())
-    require(all(re.fullmatch(r'\d{14}_[a-z0-9_]+', path.name) for path in directories),
+    require(all(MIGRATION_NAME.fullmatch(path.name) for path in directories),
             'MIGRATION_NAME_INVALID')
     result = []
     for directory in directories:
@@ -333,7 +669,7 @@ def git_manifest(revision):
     require(len(lock_entries) == 1 and lock_entries[0][:2] == ('100644', 'blob'),
             'MIGRATION_LOCK_INVALID')
     lock_content = git_raw(['cat-file', 'blob', lock_entries[0][2]])
-    source_lock = git_raw(['show', SOURCE_REVISION + ':prisma/migrations/migration_lock.toml'])
+    source_lock = git_raw(['show', INITIAL_SOURCE_REVISION + ':prisma/migrations/migration_lock.toml'])
     require(lock_content == source_lock and sha256(lock_content) == sha256(source_lock),
             'MIGRATION_LOCK_INVALID')
 
@@ -341,7 +677,7 @@ def git_manifest(revision):
     for mode, object_type, _object_id, name in entries:
         if name == 'migration_lock.toml':
             continue
-        require(re.fullmatch(r'\d{14}_[a-z0-9_]+', name) is not None, 'MIGRATION_NAME_INVALID')
+        require(MIGRATION_NAME.fullmatch(name) is not None, 'MIGRATION_NAME_INVALID')
         require(mode == '040000' and object_type == 'tree', 'MIGRATION_ENTRY_TYPE_INVALID')
         children = git_tree_entries(root_path + '/' + name)
         require(len(children) == 1 and children[0][0] == '100644'
@@ -357,17 +693,18 @@ def git_blob(revision, path):
     return git_raw(['show', revision + ':' + path])
 
 
-def validate_target_tree(revision, source):
+def validate_target_tree(revision, source, target_tag):
+    target_version = version_text(target_tag)
     package = json.loads(git_blob(revision, 'package.json'))
     version_source = git_blob(revision, 'src/lib/version.ts').decode('utf-8')
     dockerfile = git_blob(revision, 'Dockerfile').decode('utf-8')
-    release_notes = git_blob(revision, 'docs/releases/v1.0.2.md').decode('utf-8')
-    require(package.get('version') == TARGET_VERSION, 'PACKAGE_VERSION_INVALID')
-    require(re.search(r'APP_VERSION\s*=\s*"1\.0\.2"', version_source) is not None,
+    release_notes = git_blob(revision, 'docs/releases/' + target_tag + '.md').decode('utf-8')
+    require(package.get('version') == target_version, 'PACKAGE_VERSION_INVALID')
+    require(re.search(r'APP_VERSION\s*=\s*"' + re.escape(target_version) + r'"', version_source) is not None,
             'APP_VERSION_INVALID')
-    require(len(re.findall(r'org\.opencontainers\.image\.version="1\.0\.2"', dockerfile)) == 1,
+    require(len(re.findall(r'org\.opencontainers\.image\.version="' + re.escape(target_version) + r'"', dockerfile)) == 1,
             'OCI_VERSION_INVALID')
-    require(release_notes.startswith('# v1.0.2 — 账号与个人知识修复'), 'RELEASE_NOTES_INVALID')
+    require(release_notes.startswith('# ' + target_tag + ' — '), 'RELEASE_NOTES_INVALID')
     target = git_manifest(revision)
     validate_manifest_delta(source, target)
     helper = git_blob(revision, HELPER_SOURCE)
@@ -379,7 +716,7 @@ def validate_target_tree(revision, source):
     gateway = git_blob(revision, GATEWAY_SOURCE)
     sudoers = git_blob(revision, SUDOERS_SOURCE)
     validate_tooling_bytes(gateway, sudoers)
-    require(b'v1.0.2' in backup and b'email-auth.env' in backup,
+    require(b'TARGET_TAG' in backup and b'pre-deploy' in backup and b'email-auth.env' in backup,
             'TARGET_BACKUP_CONTRACT_INVALID')
     compile(artifact, ARTIFACT_SOURCE, 'exec')
     nginx = git_blob(revision, 'deploy/production/nginx/ai-project-os.conf')
@@ -398,7 +735,7 @@ def validate_tooling_bytes(gateway, sudoers):
     require(result.returncode == 0, 'BOOTSTRAP_GATEWAY_INVALID')
     directory = STATE.parent
     HELPER.trusted(directory)
-    with tempfile.TemporaryDirectory(prefix='.v102-sudoers-validate-', dir=directory) as temporary:
+    with tempfile.TemporaryDirectory(prefix='.stable-sudoers-validate-', dir=directory) as temporary:
         path = Path(temporary) / 'sudoers'
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as stream:
@@ -515,16 +852,56 @@ def parse_record(path):
     return values
 
 
+def validate_source_restore_receipt(result, manifest):
+    restore = json.loads(result.get('restore_drill', 'null'))
+    require(isinstance(restore, dict), 'SOURCE_RECEIPT_RESTORE_INVALID')
+    if restore.get('required') is False:
+        require(set(restore) == {'required', 'reason', 'source_migration_count',
+                                 'target_migration_count'}
+                and restore.get('reason') == 'no-database-change'
+                and type(restore.get('source_migration_count')) is int
+                and type(restore.get('target_migration_count')) is int
+                and restore['source_migration_count'] == len(manifest)
+                and restore['target_migration_count'] == len(manifest)
+                and result.get('migration_manifest_sha256') == migration_manifest_sha256(manifest),
+                'SOURCE_RECEIPT_RESTORE_INVALID')
+    else:
+        require(type(restore.get('source_migration_count')) is int
+                and type(restore.get('target_migration_count')) is int
+                and restore['source_migration_count'] >= MINIMUM_MIGRATIONS
+                and restore['target_migration_count'] == len(manifest),
+                'SOURCE_RECEIPT_RESTORE_INVALID')
+    return restore
+
+
 def source_runtime_state(require_checkout=True):
     HELPER.trusted(RESULT, 0o600)
     result = parse_record(RESULT)
-    require(result.get('status') == 'DEPLOY_OK' and result.get('tag') == SOURCE_TAG
-            and result.get('revision') == SOURCE_REVISION,
+    source_tag = result.get('tag', '')
+    source_revision = result.get('revision', '')
+    source_version = version_text(source_tag)
+    require(result.get('status') == 'DEPLOY_OK' and HEX40.fullmatch(source_revision) is not None,
             'SOURCE_RECEIPT_INVALID')
-    require(not require_checkout or git(['rev-parse', 'HEAD']) == SOURCE_REVISION,
+    if source_tag == INITIAL_SOURCE_TAG:
+        require(source_revision == INITIAL_SOURCE_REVISION and 'release_protocol' not in result,
+                'INITIAL_SOURCE_RECEIPT_INVALID')
+    else:
+        require(result.get('release_protocol') == 'stable-v1', 'STABLE_SOURCE_RECEIPT_INVALID')
+        stable_version(result.get('source_tag', ''))
+        require(HEX40.fullmatch(result.get('source_revision', '')) is not None
+                and stable_version(result['source_tag']) < stable_version(source_tag),
+                'STABLE_SOURCE_RECEIPT_INVALID')
+    require(not require_checkout or git(['rev-parse', 'HEAD']) == source_revision,
             'SOURCE_CHECKOUT_INVALID')
     if require_checkout:
         require(git(['status', '--porcelain', '--untracked-files=all']) == '', 'MANAGED_CHECKOUT_DIRTY')
+        require(git(['cat-file', '-t', 'refs/tags/' + source_tag]) == 'tag', 'SOURCE_TAG_NOT_ANNOTATED')
+        require(git(['rev-parse', 'refs/tags/' + source_tag + '^{}']) == source_revision,
+                'SOURCE_TAG_REVISION_MISMATCH')
+        if result.get('release_protocol') == 'stable-v1':
+            verify_prior_stable_tag(result, source_revision)
+    package = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))
+    require(package.get('version') == source_version, 'SOURCE_PACKAGE_VERSION_INVALID')
     values = env_values()
     hashes = config_hashes()
     HELPER.trusted(ROOT); HELPER.trusted(ROOT / '.git')
@@ -534,8 +911,8 @@ def source_runtime_state(require_checkout=True):
     require(stat.S_ISLNK(enabled_info.st_mode) and enabled_info.st_uid == enabled_info.st_gid == 0
             and NGINX_ENABLED.resolve() == NGINX, 'NGINX_ENABLED_PATH_INVALID')
     HELPER.run(['systemctl', 'is-active', '--quiet', 'nginx'])
-    local_health = HELPER.healthy('1.0.0')
-    public_health = HELPER.healthy('1.0.0', public=True)
+    local_health = HELPER.healthy(source_version)
+    public_health = HELPER.healthy(source_version, public=True)
     writers = [container(service) for service in ('app', 'worker', 'git-worker')]
     postgres = container('postgres')
     postgres_id = postgres['Id']
@@ -551,14 +928,27 @@ def source_runtime_state(require_checkout=True):
         require(writer['State'].get('Health', {}).get('Status') == 'healthy'
                 and writer['State'].get('Running') and not writer['State'].get('Paused'),
                 'SOURCE_WRITER_UNHEALTHY')
-        require(writer['Config'].get('Labels', {}).get('org.opencontainers.image.version') == '1.0.0',
+        require(writer['Config'].get('Labels', {}).get('org.opencontainers.image.version') == source_version,
                 'SOURCE_IMAGE_VERSION_INVALID')
     manifest = source_manifest()
-    require(len(manifest) == SOURCE_MIGRATIONS, 'SOURCE_MIGRATION_COUNT_INVALID')
+    require(len(manifest) >= MINIMUM_MIGRATIONS, 'SOURCE_MIGRATION_COUNT_INVALID')
     migration_ledger(postgres_id, manifest)
+    require(git_manifest(source_revision) == manifest, 'SOURCE_GIT_MANIFEST_MISMATCH')
     database = readonly_database_snapshot(postgres_id)
-    validate_default_signup_policy(database)
+    if result.get('release_protocol') == 'stable-v1':
+        require(re.fullmatch(r'0|[1-9][0-9]*', result.get('migration_count', '')) is not None
+                and int(result['migration_count']) == len(manifest), 'SOURCE_RECEIPT_MIGRATION_COUNT_INVALID')
+        backup_name = result.get('backup_name', '')
+        require(backup_name_pattern(source_tag).fullmatch(backup_name) is not None,
+                'SOURCE_RECEIPT_BACKUP_INVALID')
+        validate_source_restore_receipt(result, manifest)
+    else:
+        validate_default_signup_policy(database)
     return {
+        'tag': source_tag,
+        'revision': source_revision,
+        'version': source_version,
+        'receipt': result,
         'postgres_id': postgres_id,
         'writers': writers,
         'writer_ids': {service: writer['Id'] for service, writer in zip(('app', 'worker', 'git-worker'), writers)},
@@ -570,14 +960,34 @@ def source_runtime_state(require_checkout=True):
         'public_health': public_health,
         'env': values,
         'nginx_before': NGINX.read_bytes(),
-        'source_tag': SOURCE_TAG,
-        'source_revision': SOURCE_REVISION,
+        'source_tag': source_tag,
+        'source_revision': source_revision,
     }
+
+
+def already_current_line(source, target_tag, target_revision):
+    receipt = source['receipt']
+    require(receipt.get('release_protocol') == 'stable-v1'
+            and receipt.get('tag') == target_tag and receipt.get('revision') == target_revision,
+            'ALREADY_CURRENT_RECEIPT_INVALID')
+    restore = validate_source_restore_receipt(receipt, source['source_manifest'])
+    if restore.get('required') is False:
+        require(restore.get('reason') == 'no-database-change'
+                and restore.get('source_migration_count') == len(source['source_manifest'])
+                and restore.get('target_migration_count') == len(source['source_manifest'])
+                and receipt.get('migration_manifest_sha256') == migration_manifest_sha256(source['source_manifest']),
+                'ALREADY_CURRENT_RECEIPT_INVALID')
+        restore_text = 'not-required'
+    else:
+        restore_text = str(restore['source_migration_count']) + '-to-' + str(restore['target_migration_count'])
+    return ('STABLE_DEPLOY_ALREADY_CURRENT tag=' + target_tag + ' revision=' + target_revision
+            + ' migration_count=' + str(len(source['source_manifest']))
+            + ' backup=' + receipt['backup_name'] + ' restore=' + restore_text)
 
 
 def read_backup_artifact_helper():
     HELPER.trusted(ARTIFACT_HELPER, 0o755)
-    spec = importlib.util.spec_from_file_location('ai_project_os_backup_artifact_v102', ARTIFACT_HELPER)
+    spec = importlib.util.spec_from_file_location('ai_project_os_backup_artifact_stable', ARTIFACT_HELPER)
     require(spec is not None and spec.loader is not None, 'BACKUP_ARTIFACT_HELPER_LOAD_FAILED')
     module = importlib.util.module_from_spec(spec)
     sys.dont_write_bytecode = True
@@ -585,7 +995,11 @@ def read_backup_artifact_helper():
     return module
 
 
-def verify_backup_output(stdout):
+def verify_backup_output(stdout, target_tag):
+    expected_reason = 'pre-deploy-to-' + target_tag
+    backup_pattern = re.compile(
+        r'^[0-9]{8}T[0-9]{6}Z-' + re.escape(expected_reason) + r'\.[A-Za-z0-9]{6}$'
+    )
     matches = [line for line in stdout.splitlines() if line.startswith('BACKUP_OK ')]
     require(len(matches) == 1, 'BACKUP_RECEIPT_INVALID')
     fields = {}
@@ -594,12 +1008,12 @@ def verify_backup_output(stdout):
         key, value = token.split('=', 1)
         require(key not in fields, 'BACKUP_RECEIPT_INVALID')
         fields[key] = value
-    require(fields.get('reason') == 'pre-deploy-to-v1.0.2'
+    require(fields.get('reason') == expected_reason
             and fields.get('retention_removed') == '0'
             and fields.get('source_quiesced') == 'true', 'BACKUP_RECEIPT_INVALID')
     source = Path(fields.get('source', ''))
     require(source.parent == Path('/var/backups/ai-project-os')
-            and BACKUP_NAME.fullmatch(source.name) is not None, 'BACKUP_SOURCE_INVALID')
+            and backup_pattern.fullmatch(source.name) is not None, 'BACKUP_SOURCE_INVALID')
     object_path = fields.get('object', '')
     verified_manifest = fields.get('verified_manifest', '')
     latest_manifest = fields.get('manifest', '')
@@ -618,7 +1032,7 @@ def verify_backup_output(stdout):
             'sha256': fields['sha256']}
 
 
-def validate_local_backup(backup, current_email_bytes):
+def validate_local_backup(backup, current_email_bytes, target_tag, source_version):
     path = backup['path']
     HELPER.trusted(path, 0o700)
     entries = {entry.name for entry in path.iterdir()}
@@ -636,8 +1050,8 @@ def validate_local_backup(backup, current_email_bytes):
     for name, digest in sums.items():
         require(hash_file(path / name) == digest, 'BACKUP_FILE_SHA_MISMATCH')
     metadata = parse_record(path / 'backup-metadata.env')
-    require(metadata.get('format_version') == '2' and metadata.get('reason') == 'pre-deploy-to-v1.0.2'
-            and metadata.get('compose_project') == PROJECT and metadata.get('app_version') == '1.0.0'
+    require(metadata.get('format_version') == '2' and metadata.get('reason') == 'pre-deploy-to-' + target_tag
+            and metadata.get('compose_project') == PROJECT and metadata.get('app_version') == source_version
             and metadata.get('writers_quiesced') == 'true' and metadata.get('source_quiesced') == 'true'
             and metadata.get('backup_name') == backup['name'], 'BACKUP_METADATA_INVALID')
     marker = parse_record(path / '.cos-upload-verified')
@@ -662,7 +1076,7 @@ def validate_local_backup(backup, current_email_bytes):
     require((path / 'postgres.dump').stat().st_size > 0, 'BACKUP_DATABASE_DUMP_EMPTY')
 
 
-def create_backup(source):
+def create_backup(source, target_tag):
     env = dict(PROCESS_ENV)
     env.update({
         'AI_PROJECT_OS_DEPLOY_LOCK_HELD': '1',
@@ -673,18 +1087,23 @@ def create_backup(source):
         'AI_PROJECT_OS_EXPECTED_GIT_WORKER_ID': source['writer_ids']['git-worker'],
     })
     HELPER.trusted(BACKUP, 0o755)
-    result = subprocess.run([str(BACKUP), 'pre-deploy', TARGET_TAG], env=env,
+    result = subprocess.run([str(BACKUP), 'pre-deploy', target_tag], env=env,
                             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             timeout=7200, check=False)
     require(result.returncode == 0, 'BACKUP_COMMAND_FAILED')
-    backup = verify_backup_output(result.stdout)
-    validate_local_backup(backup, EMAIL_ENV.read_bytes())
+    backup = verify_backup_output(result.stdout, target_tag)
+    validate_local_backup(backup, EMAIL_ENV.read_bytes(), target_tag, source['version'])
     return backup
 
 
 class HostDeployment:
-    def __init__(self, target_revision):
+    def __init__(self, target_tag, target_revision):
+        self.target_tag = target_tag
+        self.target_version = version_text(target_tag)
         self.target_revision = target_revision
+        self.already_current = False
+        self.release_classification = None
+        self.database_required = True
         self.source = None
         self.target_files = None
         self.images = None
@@ -698,42 +1117,55 @@ class HostDeployment:
         self.restore_network_id = None
         self.restore_volume = None
         self.restore_container_ids = []
+        self.restore_evidence = None
 
     def preflight(self):
-        validate_transition(SOURCE_TAG, SOURCE_REVISION, TARGET_TAG, self.target_revision)
         require(os.geteuid() == 0, 'ROOT_REQUIRED')
         HELPER.trusted('/root'); HELPER.trusted('/usr/bin'); HELPER.trusted('/usr/sbin')
         HELPER.trusted(ROOT); HELPER.trusted(ROOT / '.git')
         require(git(['remote', 'get-url', 'origin']) == REMOTE, 'REMOTE_INVALID')
-        require(git(['rev-parse', 'HEAD']) == SOURCE_REVISION, 'SOURCE_CHECKOUT_INVALID')
         require(git(['status', '--porcelain', '--untracked-files=all']) == '', 'MANAGED_CHECKOUT_DIRTY')
         self.source = source_runtime_state(require_checkout=True)
-        fetch_target(self.target_revision)
-        require_ci(self.target_revision)
-        _, self.target_files = validate_target_tree(self.target_revision, self.source['source_manifest'])
-        self._validate_installed_state()
+        validate_transition(self.source['tag'], self.source['revision'], self.target_tag, self.target_revision)
+        fetch_target(self.target_tag, self.target_revision)
+        require_ancestor(self.source['revision'], self.target_revision)
+        self.target_manifest, self.target_files = validate_target_tree(
+            self.target_revision, self.source['source_manifest'], self.target_tag,
+        )
+        self.release_classification = classify_release_risk(
+            ROOT, self.source['revision'], self.target_revision,
+        )
+        require(self.release_classification.get('risk') in ('low', 'medium', 'high')
+                and type(self.release_classification.get('databaseRequired')) is bool
+                and self.release_classification.get('databaseRequired')
+                == (self.release_classification['risk'] == 'high'),
+                'RELEASE_CI_CLASSIFICATION_INVALID')
+        self.database_required = self.release_classification['databaseRequired']
+        manifest_changed = self.target_manifest != self.source['source_manifest']
+        require(not manifest_changed or self.database_required,
+                'NO_DATABASE_RELEASE_MIGRATION_CHANGED')
+        self._validate_installed_state(self.target_files)
+        self.already_current = self.target_tag == self.source['tag'] \
+            and self.target_revision == self.source['revision']
+        if not self.already_current:
+            require_ci(self.target_tag, self.target_revision, source_revision=self.source['revision'],
+                       classification=self.release_classification)
         return self.source
 
-    def _validate_installed_state(self):
-        HELPER.trusted(STATE, 0o600)
-        data = json.loads(STATE.read_text(encoding='utf-8'))
-        require(set(data) == {'format_version', 'tag', 'revision', 'files'}
-                and data.get('format_version') == 1 and data.get('tag') == TARGET_TAG
-                and data.get('revision') == self.target_revision, 'TOOLING_STATE_INVALID')
-        paths = {'deployer': DEPLOYER, 'backup': BACKUP, 'artifact_helper': ARTIFACT_HELPER,
-                 'sudoers': SUDOERS, 'gateway': GATEWAY}
-        expected_sources = {'deployer': DEPLOYER_SOURCE, 'backup': BACKUP_SOURCE,
-                            'artifact_helper': ARTIFACT_SOURCE, 'sudoers': SUDOERS_SOURCE,
-                            'gateway': GATEWAY_SOURCE}
-        require(set(data.get('files', {})) == set(paths), 'TOOLING_STATE_INVALID')
-        for key, path in paths.items():
-            expected_mode = {'deployer': 0o700, 'backup': 0o755, 'artifact_helper': 0o755,
-                             'sudoers': 0o440, 'gateway': 0o755}[key]
-            HELPER.trusted(path, expected_mode)
-            digest = sha256(path.read_bytes())
-            require(data['files'].get(key) == digest
-                    and path.read_bytes() == git_blob(self.target_revision, expected_sources[key]),
-                    'TOOLING_FILE_MISMATCH')
+    def _validate_installed_state(self, target_files):
+        state = validate_state_file()
+        try:
+            git(['merge-base', '--is-ancestor', state['toolingRevision'], self.target_revision])
+        except RuntimeError:
+            require(False, 'TOOLING_REVISION_NOT_ANCESTOR')
+        require(sha256(Path(__file__).read_bytes()) == state['files']['deployer'],
+                'INSTALLED_TOOL_HASH_INVALID')
+        for name, installed_path in (
+            ('deployer', DEPLOYER), ('backup', BACKUP), ('artifact_helper', ARTIFACT_HELPER),
+            ('sudoers', SUDOERS), ('gateway', GATEWAY),
+        ):
+            require(installed_path.read_bytes() == target_files[name]
+                    and sha256(target_files[name]) == state['files'][name], 'TOOLING_FILE_MISMATCH')
         require(sha256((ROOT / HELPER_SOURCE).read_bytes()) == HELPER_SHA256,
                 'PINNED_HELPER_HASH_INVALID')
 
@@ -741,7 +1173,9 @@ class HostDeployment:
         git(['checkout', '--detach', self.target_revision])
         require(git(['rev-parse', 'HEAD']) == self.target_revision, 'TARGET_CHECKOUT_INVALID')
         require(git(['status', '--porcelain', '--untracked-files=all']) == '', 'TARGET_CHECKOUT_DIRTY')
-        target, files = validate_target_tree(self.target_revision, self.source['source_manifest'])
+        target, files = validate_target_tree(
+            self.target_revision, self.source['source_manifest'], self.target_tag,
+        )
         self.target_files = files
         self.target_manifest = target
         require((ROOT / DEPLOYER_SOURCE).read_bytes() == files['deployer'], 'INSTALLED_TOOL_TARGET_MISMATCH')
@@ -750,13 +1184,16 @@ class HostDeployment:
 
     def build_target_images(self):
         compose('config', '--quiet')
-        service_names = {
+        all_service_names = {
             'principal-bootstrap': 'ai-project-os-principal-bootstrap',
             'migrate': 'ai-project-os-migrate',
             'reconcile': 'ai-project-os-reconcile',
             'app': 'ai-project-os-app',
             'worker': 'ai-project-os-worker',
             'git-worker': 'ai-project-os-git-worker',
+        }
+        service_names = all_service_names if self.database_required else {
+            service: all_service_names[service] for service in ('app', 'worker', 'git-worker')
         }
         for service in service_names:
             compose('build', service, capture=False, timeout=7200)
@@ -766,9 +1203,9 @@ class HostDeployment:
             require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id) is not None, 'TARGET_IMAGE_ID_INVALID')
             inspected = json.loads(docker('image', 'inspect', image_id))[0]
             require(inspected.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.version')
-                    == TARGET_VERSION, 'TARGET_IMAGE_VERSION_INVALID')
+                    == self.target_version, 'TARGET_IMAGE_VERSION_INVALID')
             images[service] = image_id
-        pin_path = Path('/var/lib/ai-project-os/.v102-images-' + secrets.token_hex(12) + '.yaml')
+        pin_path = Path('/var/lib/ai-project-os/.stable-images-' + secrets.token_hex(12) + '.yaml')
         self.pin_file = pin_path
         text = 'services:\n'
         for service, image_id in images.items():
@@ -781,6 +1218,7 @@ class HostDeployment:
 
     def revalidate_source(self, source):
         require(git(['rev-parse', 'HEAD']) == self.target_revision, 'TARGET_CHECKOUT_CHANGED')
+        fetch_target(self.target_tag, self.target_revision)
         require(source['postgres_id'] == container('postgres')['Id'], 'SOURCE_POSTGRES_CHANGED_DURING_BUILD')
         writers = [container(service) for service in ('app', 'worker', 'git-worker')]
         require([(writer['Id'], writer['Image']) for writer in writers]
@@ -792,10 +1230,11 @@ class HostDeployment:
         require(config_hashes() == source['config_hashes'], 'SOURCE_CONFIG_CHANGED_DURING_BUILD')
         migration_ledger(source['postgres_id'], source['source_manifest'])
         snapshot = readonly_database_snapshot(source['postgres_id'])
-        validate_default_signup_policy(snapshot)
+        if source['tag'] == INITIAL_SOURCE_TAG:
+            validate_default_signup_policy(snapshot)
         require(policy_snapshot(snapshot) == policy_snapshot(source['database_snapshot']),
                 'SOURCE_DATABASE_POLICY_CHANGED_DURING_BUILD')
-        HELPER.healthy('1.0.0'); HELPER.healthy('1.0.0', public=True)
+        HELPER.healthy(source['version']); HELPER.healthy(source['version'], public=True)
 
     def stop_nginx(self):
         self.nginx_stopped = True
@@ -807,13 +1246,14 @@ class HostDeployment:
         HELPER.stopped(source['postgres_id'])
         migration_ledger(source['postgres_id'], source['source_manifest'])
         snapshot = readonly_database_snapshot(source['postgres_id'])
-        validate_default_signup_policy(snapshot)
+        if source['tag'] == INITIAL_SOURCE_TAG:
+            validate_default_signup_policy(snapshot)
         require(policy_snapshot(snapshot) == policy_snapshot(source['database_snapshot']),
                 'SOURCE_DATABASE_POLICY_CHANGED_AT_CUTOVER')
         source['database_snapshot'] = snapshot
 
     def create_and_validate_backup(self, source):
-        self.backup = create_backup(source)
+        self.backup = create_backup(source, self.target_tag)
         migration_ledger(source['postgres_id'], source['source_manifest'])
         require(readonly_database_snapshot(source['postgres_id']) == source['database_snapshot'],
                 'SOURCE_DATABASE_STATE_CHANGED_DURING_BACKUP')
@@ -822,11 +1262,11 @@ class HostDeployment:
     def restore_drill(self, source, backup, images):
         self.restore_token = secrets.token_hex(16)
         suffix = self.restore_token
-        owner_key = 'ai-project-os.v102-restore-owner'
+        owner_key = 'ai-project-os.stable-restore-owner'
         owner_value = suffix
-        network_name = 'ai-project-os-v102-net-' + suffix
-        volume_name = 'ai-project-os-v102-vol-' + suffix
-        pg_name = 'ai-project-os-v102-pg-' + suffix
+        network_name = 'ai-project-os-stable-net-' + suffix
+        volume_name = 'ai-project-os-stable-vol-' + suffix
+        pg_name = 'ai-project-os-stable-pg-' + suffix
         self.restore_network = network_name
         self.restore_network_id = docker('network', 'create', '--internal',
                                          '--label', owner_key + '=' + owner_value,
@@ -863,10 +1303,10 @@ class HostDeployment:
                                 'scripts/reconcile-database-principals.ts', '--bootstrap-if-needed'])
         self._verify_restore_roles(pg_id)
         dump_path = backup['path'] / 'postgres.dump'
-        docker('cp', str(dump_path), pg_id + ':/tmp/ai-project-os-v102-postgres.dump')
+        docker('cp', str(dump_path), pg_id + ':/tmp/ai-project-os-stable-postgres.dump')
         docker('exec', pg_id, 'pg_restore', '--clean', '--if-exists', '--no-privileges',
                '--exit-on-error', '-U', 'ai_project_os_cluster_admin', '-d', 'ai_project_os',
-               '/tmp/ai-project-os-v102-postgres.dump', timeout=3600)
+               '/tmp/ai-project-os-stable-postgres.dump', timeout=3600)
         migration_ledger(pg_id, source['source_manifest'])
         counts_before = readonly_database_snapshot(pg_id)
         migrate_env = dict(env)
@@ -885,8 +1325,8 @@ class HostDeployment:
         require(counts_before == source['database_snapshot'], 'RESTORE_SOURCE_COUNTS_MISMATCH')
         self.restore_evidence = {'container_id': pg_id, 'network_id': self.restore_network_id,
                                  'volume': self.restore_volume,
-                                 'source_migration_count': SOURCE_MIGRATIONS,
-                                 'target_migration_count': EXPECTED_MIGRATIONS,
+                                 'source_migration_count': len(source['source_manifest']),
+                                 'target_migration_count': len(self.target_manifest),
                                  'database_snapshot': counts_before,
                                  'source_sha256': hash_file(backup['path'] / 'postgres.dump')}
 
@@ -902,7 +1342,7 @@ class HostDeployment:
         }
 
     def _run_restore_image(self, image_id, network, owner_key, owner_value, env, command, timeout=1800):
-        name = 'ai-project-os-v102-job-' + secrets.token_hex(12)
+        name = 'ai-project-os-stable-job-' + secrets.token_hex(12)
         args = ['create', '--name', name, '--network', network, '--label', owner_key + '=' + owner_value]
         for key, value in env.items():
             args.extend(['--env', key + '=' + value])
@@ -924,9 +1364,9 @@ class HostDeployment:
             if state.get('Health', {}).get('Status') == 'healthy':
                 return
             if state.get('Status') == 'exited':
-                raise RuntimeError('V102_RESTORE_POSTGRES_FAILED')
+                raise RuntimeError('STABLE_RESTORE_POSTGRES_FAILED')
             time.sleep(1)
-        raise RuntimeError('V102_RESTORE_POSTGRES_TIMEOUT')
+        raise RuntimeError('STABLE_RESTORE_POSTGRES_TIMEOUT')
 
     def _private_trigger_acl_closed(self, postgres_id):
         sql = '''SELECT to_json(count(*) = 1 AND bool_and(
@@ -994,22 +1434,23 @@ class HostDeployment:
                             and writer['Image'] == images[service]
                             for service, writer in zip(('app', 'worker', 'git-worker'), writers)),
                         'TARGET_WRITER_UNHEALTHY')
-                local_health = healthy(TARGET_VERSION)
+                local_health = healthy(self.target_version)
                 HELPER.run(['systemctl', 'start', 'nginx'])
                 self.nginx_stopped = False
                 HELPER.run(['nginx', '-t'])
                 HELPER.run(['systemctl', 'reload', 'nginx'])
-                public_health = healthy(TARGET_VERSION, public=True)
+                public_health = healthy(self.target_version, public=True)
                 break
             except (RuntimeError, OSError, ValueError):
                 time.sleep(2)
         else:
-            raise RuntimeError('V102_TARGET_HEALTH_TIMEOUT')
+            raise RuntimeError('STABLE_TARGET_HEALTH_TIMEOUT')
         self.target_health = {'local': local_health, 'public': public_health}
         require(container('postgres')['Id'] == source['postgres_id'], 'PRODUCTION_POSTGRES_REPLACED')
         migration_ledger(source['postgres_id'], self.target_manifest)
         snapshot = readonly_database_snapshot(source['postgres_id'])
-        validate_default_signup_policy(snapshot)
+        if source['tag'] == INITIAL_SOURCE_TAG:
+            validate_default_signup_policy(snapshot)
         require(policy_snapshot(snapshot) == policy_snapshot(source['database_snapshot']),
                 'PRODUCTION_ROUTE_OR_OFFER_CHANGED')
         expected_config_hashes = dict(source['config_hashes'])
@@ -1019,37 +1460,54 @@ class HostDeployment:
         self.target_writer_ids = {service: container(service)['Id'] for service in ('app', 'worker', 'git-worker')}
 
     def write_receipt(self, source, backup, images):
+        restore_drill = self.restore_evidence
+        if not self.database_required:
+            require(self.target_manifest == source['source_manifest'],
+                    'NO_DATABASE_RELEASE_MIGRATION_CHANGED')
+            restore_drill = {
+                'required': False,
+                'reason': 'no-database-change',
+                'source_migration_count': len(source['source_manifest']),
+                'target_migration_count': len(self.target_manifest),
+            }
         record = {
-            'tag': TARGET_TAG, 'revision': self.target_revision,
-            'source_tag': SOURCE_TAG, 'source_revision': SOURCE_REVISION,
+            'tag': self.target_tag, 'revision': self.target_revision,
+            'source_tag': source['tag'], 'source_revision': source['revision'],
+            'release_protocol': 'stable-v1',
             'source_postgres_container_id': source['postgres_id'],
             'target_writer_ids': self.target_writer_ids,
-            'migration_count': EXPECTED_MIGRATIONS,
+            'migration_count': len(self.target_manifest),
+            'migration_manifest_sha256': migration_manifest_sha256(self.target_manifest),
             'backup_name': backup['name'], 'backup_object': backup['object'],
             'backup_verified_manifest': backup['verified_manifest'],
             'backup_sha256': backup['sha256'], 'source_config_hashes': source['config_hashes'],
             'target_nginx_sha256': sha256(self.target_files['nginx']),
-            'target_image_ids': images, 'restore_drill': self.restore_evidence,
+            'target_image_ids': images, 'restore_drill': restore_drill,
             'readonly_source_snapshot': source['database_snapshot'],
             'health': self.target_health,
             'completed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         }
-        plain_string_keys = {'tag', 'revision', 'source_tag', 'source_revision'}
+        plain_string_keys = {'tag', 'revision', 'source_tag', 'source_revision', 'release_protocol',
+                             'migration_manifest_sha256'}
         text = 'DEPLOY_OK\n' + ''.join(
             key + '=' + (value if key in plain_string_keys else
                          json.dumps(value, separators=(',', ':'), sort_keys=True)) + '\n'
             for key, value in record.items()
         )
         HELPER.atomic_write(RESULT, text.encode('utf-8'), 0o600)
-        print('V102_DEPLOY_OK tag=' + TARGET_TAG + ' revision=' + self.target_revision
-              + ' migration_count=145 backup=' + backup['name'] + ' restore=143-to-145', flush=True)
+        print('STABLE_DEPLOY_OK tag=' + self.target_tag + ' revision=' + self.target_revision
+              + ' migration_count=' + str(len(self.target_manifest))
+              + ' backup=' + backup['name'] + ' restore='
+              + (str(restore_drill['source_migration_count']) + '-to-'
+                 + str(restore_drill['target_migration_count'])
+                 if self.database_required else 'not-required'), flush=True)
 
     def restore_exact_source(self, source):
         failures = []
         try:
-            if git(['rev-parse', 'HEAD']) != SOURCE_REVISION:
-                git(['checkout', '--detach', SOURCE_REVISION])
-            require(git(['rev-parse', 'HEAD']) == SOURCE_REVISION, 'SOURCE_CHECKOUT_RESTORE_FAILED')
+            if git(['rev-parse', 'HEAD']) != source['revision']:
+                git(['checkout', '--detach', source['revision']])
+            require(git(['rev-parse', 'HEAD']) == source['revision'], 'SOURCE_CHECKOUT_RESTORE_FAILED')
         except BaseException:
             failures.append('checkout')
         try:
@@ -1073,7 +1531,7 @@ class HostDeployment:
                     docker('start', *stopped_ids)
                 for _ in range(120):
                     try:
-                        HELPER.healthy('1.0.0')
+                        HELPER.healthy(source['version'])
                         require(all(container(service)['State'].get('Health', {}).get('Status') == 'healthy'
                                     for service in ('app', 'worker', 'git-worker')),
                                 'SOURCE_WRITER_RESTART_FAILED')
@@ -1081,7 +1539,7 @@ class HostDeployment:
                     except (RuntimeError, OSError, ValueError):
                         time.sleep(2)
                 else:
-                    raise RuntimeError('V102_SOURCE_HEALTH_RESTORE_FAILED')
+                    raise RuntimeError('STABLE_SOURCE_HEALTH_RESTORE_FAILED')
         except BaseException:
             failures.append('writers')
         try:
@@ -1092,7 +1550,7 @@ class HostDeployment:
                 HELPER.run(['systemctl', 'reload', 'nginx'])
             if self.nginx_stopped is False:
                 HELPER.run(['systemctl', 'is-active', '--quiet', 'nginx'])
-                HELPER.healthy('1.0.0', public=True)
+                HELPER.healthy(source['version'], public=True)
         except BaseException:
             failures.append('nginx-service')
         try:
@@ -1100,10 +1558,10 @@ class HostDeployment:
             migration_ledger(source['postgres_id'], source['source_manifest'])
         except BaseException:
             failures.append('database')
-        print('V102_PRE_MIGRATION_SOURCE_RESTORED=' + ('false' if failures else 'true'),
+        print('STABLE_PRE_MIGRATION_SOURCE_RESTORED=' + ('false' if failures else 'true'),
               file=sys.stderr, flush=True)
         if failures:
-            raise RuntimeError('V102_PRE_MIGRATION_RECOVERY_INCOMPLETE')
+            raise RuntimeError('STABLE_PRE_MIGRATION_RECOVERY_INCOMPLETE')
 
     def quiesce_for_manual_recovery(self, source):
         try:
@@ -1122,15 +1580,15 @@ class HostDeployment:
             if to_stop:
                 docker('stop', *to_stop)
             HELPER.stopped(source['postgres_id'])
-            print('V102_MIGRATION_RECOVERY_REQUIRED writers_stopped=true nginx_stopped=true',
+            print('STABLE_MIGRATION_RECOVERY_REQUIRED writers_stopped=true nginx_stopped=true',
                   file=sys.stderr, flush=True)
         except BaseException as error:
-            raise RuntimeError('V102_MANUAL_RECOVERY_QUIESCE_FAILED') from error
+            raise RuntimeError('STABLE_MANUAL_RECOVERY_QUIESCE_FAILED') from error
 
     def cleanup_restore_drill(self):
         if self.restore_token is None:
             return
-        owner_key = 'ai-project-os.v102-restore-owner'
+        owner_key = 'ai-project-os.stable-restore-owner'
         owner_value = self.restore_token
         failures = []
         for identifier in list(reversed(self.restore_container_ids)):
@@ -1189,7 +1647,7 @@ class HostDeployment:
             except BaseException:
                 failures.append('network')
         if failures:
-            raise RuntimeError('V102_RESTORE_RESOURCE_CLEANUP_FAILED')
+            raise RuntimeError('STABLE_RESTORE_RESOURCE_CLEANUP_FAILED')
         self.restore_token = None
         self.restore_container_ids = []
         self.restore_volume = None
@@ -1206,7 +1664,7 @@ class HostDeployment:
                 require(not self.pin_file.exists(), 'TARGET_IMAGE_PIN_FILE_REMAINS')
             self.pin_file = None
         except BaseException as error:
-            raise RuntimeError('V102_TARGET_IMAGE_PIN_FILE_CLEANUP_FAILED') from error
+            raise RuntimeError('STABLE_TARGET_IMAGE_PIN_FILE_CLEANUP_FAILED') from error
 
 
 def secure_lock():
@@ -1231,7 +1689,7 @@ def atomic_install(path, data, mode):
                 and current.st_nlink == 1, 'TOOLING_DESTINATION_INVALID')
     except FileNotFoundError:
         pass
-    temporary = path.parent / ('.v102-' + secrets.token_hex(12))
+    temporary = path.parent / ('.stable-' + secrets.token_hex(12))
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
     try:
         os.fchown(fd, 0, 0)
@@ -1251,49 +1709,47 @@ def atomic_install(path, data, mode):
             temporary.unlink()
 
 
-def validate_state_file(target_revision=None):
+def validate_state_file():
     HELPER.trusted(STATE, 0o600)
     value = json.loads(STATE.read_text(encoding='utf-8'))
-    require(set(value) == {'format_version', 'tag', 'revision', 'files'}
-            and value.get('format_version') == 1 and value.get('tag') == TARGET_TAG
-            and HEX40.fullmatch(value.get('revision', '')) is not None,
+    require(set(value) == {'formatVersion', 'toolingRevision', 'files'}
+            and value.get('formatVersion') == 1
+            and HEX40.fullmatch(value.get('toolingRevision', '')) is not None,
             'TOOLING_STATE_INVALID')
-    if target_revision is not None:
-        require(value['revision'] == target_revision, 'TOOLING_STATE_REVISION_INVALID')
     path_map = {'deployer': (DEPLOYER, 0o700), 'backup': (BACKUP, 0o755),
                 'artifact_helper': (ARTIFACT_HELPER, 0o755), 'sudoers': (SUDOERS, 0o440),
                 'gateway': (GATEWAY, 0o755)}
-    require(set(value.get('files', {})) == set(path_map), 'TOOLING_STATE_INVALID')
+    require(set(value.get('files', {})) == set(path_map)
+            and all(HEX64.fullmatch(value['files'].get(name, '')) for name in path_map),
+            'TOOLING_STATE_INVALID')
     for name, (path, mode) in path_map.items():
         HELPER.trusted(path, mode)
         require(sha256(path.read_bytes()) == value['files'][name], 'TOOLING_FILE_HASH_INVALID')
     return value
 
 
-def install_bootstrap(target_revision):
+def install_bootstrap(target_tag, target_revision):
     require(os.geteuid() == 0, 'ROOT_REQUIRED')
-    validate_transition(SOURCE_TAG, SOURCE_REVISION, TARGET_TAG, target_revision)
+    stable_version(target_tag)
     self_path = Path(__file__).absolute()
     HELPER.trusted(self_path, 0o755)
-    require(git(['rev-parse', 'HEAD']) == SOURCE_REVISION, 'SOURCE_CHECKOUT_INVALID')
     require(git(['status', '--porcelain', '--untracked-files=all']) == '', 'MANAGED_CHECKOUT_DIRTY')
     source = source_runtime_state(require_checkout=True)
-    fetch_target(target_revision)
-    require_ci(target_revision)
-    _, files = validate_target_tree(target_revision, source['source_manifest'])
+    validate_transition(source['tag'], source['revision'], target_tag, target_revision)
+    fetch_main(target_revision)
+    require_ancestor(source['revision'], target_revision)
+    require_ci(target_tag, target_revision, bootstrap=True)
+    _, files = validate_target_tree(target_revision, source['source_manifest'], target_tag)
     require(self_path.read_bytes() == files['deployer'], 'BOOTSTRAP_SOURCE_BYTES_UNTRUSTED')
     try:
-        existing = validate_state_file(target_revision)
-        require(existing['files']['deployer'] == sha256(files['deployer'])
-                and existing['files']['backup'] == sha256(files['backup'])
-                and existing['files']['artifact_helper'] == sha256(files['artifact_helper'])
-                and existing['files']['sudoers'] == sha256(files['sudoers'])
-                and existing['files']['gateway'] == sha256(files['gateway']),
-                'TOOLING_STATE_CONFLICT')
-        print('V102_TOOLING_ALREADY_READY tag=' + TARGET_TAG + ' revision=' + target_revision)
-        return
+        existing = validate_state_file()
     except FileNotFoundError:
-        pass
+        existing = None
+    if existing is not None:
+        require_ancestor(existing['toolingRevision'], target_revision)
+        if all(existing['files'][name] == sha256(files[name]) for name in existing['files']):
+            print('STABLE_TOOLING_ALREADY_READY tooling_revision=' + existing['toolingRevision'])
+            return
     helper_path = ROOT / HELPER_SOURCE
     require(sha256(helper_path.read_bytes()) == HELPER_SHA256, 'PINNED_HELPER_HASH_INVALID')
     destinations = [
@@ -1322,13 +1778,13 @@ def install_bootstrap(target_revision):
         for path, content, mode in destinations:
             atomic_install(path, content, mode)
         state = {
-            'format_version': 1, 'tag': TARGET_TAG, 'revision': target_revision,
+            'formatVersion': 1, 'toolingRevision': target_revision,
             'files': {'deployer': sha256(files['deployer']), 'backup': sha256(files['backup']),
                       'artifact_helper': sha256(files['artifact_helper']),
                       'sudoers': sha256(files['sudoers']), 'gateway': sha256(files['gateway'])},
         }
         atomic_install(STATE, (json.dumps(state, sort_keys=True, separators=(',', ':')) + '\n').encode(), 0o600)
-        validate_state_file(target_revision)
+        validate_state_file()
     except BaseException:
         for path, _, _ in reversed(destinations):
             old = original[path]
@@ -1347,12 +1803,12 @@ def install_bootstrap(target_revision):
         except BaseException:
             pass
         raise
-    print('V102_TOOLING_INSTALLED tag=' + TARGET_TAG + ' revision=' + target_revision
+    print('STABLE_TOOLING_INSTALLED tooling_revision=' + target_revision
           + ' files=5 gateway_promoted_last=true', flush=True)
 
 
 def interrupted(_signum, _frame):
-    raise RuntimeError('V102_INTERRUPTED')
+    raise RuntimeError('STABLE_INTERRUPTED')
 
 
 def main(args):
@@ -1361,26 +1817,37 @@ def main(args):
     HELPER.trusted('/root'); HELPER.trusted('/usr/bin'); HELPER.trusted('/usr/sbin')
     if args == ['--status']:
         state = validate_state_file()
-        output = {'kind': 'V102_TOOLING_READY', 'tag': state['tag'],
-                  'revision': state['revision'], 'files': state['files']}
+        output = {'kind': 'STABLE_TOOLING_READY', 'formatVersion': 1,
+                  'toolingRevision': state['toolingRevision'], 'files': state['files']}
         print(json.dumps(output, sort_keys=True, separators=(',', ':')))
         return
-    require(len(args) == 3 and HEX40.fullmatch(args[1]) is not None, 'ARGUMENTS_INVALID')
-    command, revision, confirmation = args
+    require(len(args) == 4 and HEX40.fullmatch(args[2]) is not None, 'ARGUMENTS_INVALID')
+    command, target_tag, revision, confirmation = args
+    stable_version(target_tag)
     fd = secure_lock()
     signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
+    signal.signal(signal.SIGHUP, interrupted)
     try:
         if command == 'bootstrap':
-            require(confirmation == 'CONFIRM_INSTALL_V102_TOOLING', 'BOOTSTRAP_CONFIRMATION_INVALID')
-            install_bootstrap(revision)
+            require(confirmation == 'CONFIRM_INSTALL_STABLE_TOOLING', 'BOOTSTRAP_CONFIRMATION_INVALID')
+            install_bootstrap(target_tag, revision)
             return
-        require(command == 'deploy' and confirmation == 'CONFIRM_V102_WITH_BACKUP_AND_FULL_CI',
+        require(command == 'deploy' and confirmation == 'CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI',
                 'DEPLOY_CONFIRMATION_INVALID')
-        state = validate_state_file(revision)
+        state = validate_state_file()
+        for name, path in (
+            ('deployer', DEPLOYER), ('backup', BACKUP), ('artifact_helper', ARTIFACT_HELPER),
+            ('sudoers', SUDOERS), ('gateway', GATEWAY),
+        ):
+            require(sha256(path.read_bytes()) == state['files'][name], 'TOOLING_FILE_HASH_INVALID')
         require(sha256(Path(__file__).read_bytes()) == state['files']['deployer'], 'INSTALLED_TOOL_HASH_INVALID')
-        host = HostDeployment(revision)
-        host.preflight()
-        deployment_flow(host)
+        host = HostDeployment(target_tag, revision)
+        source = host.preflight()
+        if host.already_current:
+            print(already_current_line(source, target_tag, revision), flush=True)
+            return
+        deployment_flow(host, source)
     finally:
         os.close(fd)
 
@@ -1391,6 +1858,6 @@ if __name__ == '__main__':
         HELPER = load_helper()
         main(sys.argv[1:])
     except BaseException as error:
-        message = str(error) if isinstance(error, RuntimeError) and re.fullmatch(r'V102_[A-Z0-9_]+', str(error)) else 'V102_UNEXPECTED_FAILURE'
+        message = str(error) if isinstance(error, RuntimeError) and re.fullmatch(r'STABLE_[A-Z0-9_]+', str(error)) else 'STABLE_UNEXPECTED_FAILURE'
         print(message, file=sys.stderr)
         sys.exit(1)

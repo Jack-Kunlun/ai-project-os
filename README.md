@@ -4,7 +4,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-源码版本标识为 `1.0.2`，见 [v1.0.2 版本说明](docs/releases/v1.0.2.md)。本版本调整认证与赠送额度，并改进个人知识库编辑和语义检索；相对 `v1.0.0` 新增两条数据库迁移。源码、同 SHA 的主分支与标签 CI、生产部署分别验收；实际线上状态以公网 `/api/health` 和生产发布回执为准。邮箱注册和改密已完成真实收信验收；邮箱换绑、邮箱找回、收费、真实 MCP/OIDC 联调和独立浏览器 broker 不在本轮范围。历史正式版说明见 [v1.0.0](docs/releases/v1.0.0.md)。
+源码版本标识为 `1.0.2`，见 [v1.0.2 版本说明](docs/releases/v1.0.2.md)。本版本调整认证与赠送额度，并改进个人知识库编辑和语义检索；相对 `v1.0.0` 新增两条数据库迁移。正式发布由用户点击 Workflow 发起，并复用同 SHA 的分层主分支 CI；实际线上状态以公网 `/api/health` 和生产发布回执为准。邮箱注册和改密已完成真实收信验收；邮箱换绑、邮箱找回、收费、真实 MCP/OIDC 联调和独立浏览器 broker 不在本轮范围。历史正式版说明见 [v1.0.0](docs/releases/v1.0.0.md)。
 
 `v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
 
@@ -47,6 +47,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 平台管理员完整指南：[docs/admin-operation-guide.md](docs/admin-operation-guide.md)。
 - 兼容索引：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
+- 正式版本手动发布：[docs/production-release.md](docs/production-release.md)。
 - GitHub Actions 受控生产部署：[docs/production-deployment.md](docs/production-deployment.md)。
 - 单节点主机迁移与恢复：[docs/production-host-migration.md](docs/production-host-migration.md)。
 - 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
@@ -171,7 +172,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前限制
 
-- 正式版的已验收生产来源为 `0.8.0-dev.4`；`1.0.0` 的生产切换须以精确标签 CI、发布回执与线上健康版本共同确认。现仅有一台云主机，独立 S1b broker 未部署，近期不新增付费服务器。平台管理员只负责平台运营和安全治理，不进入项目、团队或用户工作区；普通用户负责自己的项目和个人连接。
+- 上一正式版的生产来源和发布记录见 [v1.0.0](docs/releases/v1.0.0.md)；当前 `1.0.2` 候选的上线须以同 SHA 主分支 CI、发布回执与线上健康版本共同确认。现仅有一台云主机，独立 S1b broker 未部署，近期不新增付费服务器。平台管理员只负责平台运营和安全治理，不进入项目、团队或用户工作区；普通用户负责自己的项目和个人连接。
 - 数据库 trigger 只约束正常应用写入的一致性，不是抵抗已取得应用数据库凭据或任意 SQL 能力的独立授权边界；生产需隔离 runtime 与 migrator 角色并限制网络访问。账号访问代次迁移不支持旧、新应用滚动并存，部署必须在维护窗口停止旧 app/worker、执行迁移，再启动新版本。
 - OIDC 不按相同邮箱自动合并账户。0.7 源码已有显式身份绑定入口；当前没有标准 OIDC 身份服务，用户已选择暂待配置，真实登录与绑定尚未验收。已登录的飞书 CLI 不能替代 OIDC 身份源。
 - 已完成单个受控仓库、独立分支与目录的 Git 自动增量现场验收，并撤销临时授权、归档验收项目；其他仓库、供应商及 GitHub Issue、PR、Release 读取仍须分别验收。

@@ -68,7 +68,7 @@ test("gateway rejects malformed application release commands", async () => {
   }
 });
 
-test("tag CI attests main and runs full source and database gates", async () => {
+test("tag CI attests identity and main proof while branch jobs follow risk tier", async () => {
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");
   const scope = workflow.split("\n  scope:\n")[1]?.split("\n  source:\n")[0];
   assert.ok(scope);
@@ -82,17 +82,19 @@ test("tag CI attests main and runs full source and database gates", async () => 
       env: { ...process.env, GITHUB_REF: "refs/tags/v0.7.3", GITHUB_OUTPUT: output },
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(await readFile(output, "utf8"), "database=true\ncoverage=true\n");
+    assert.equal(await readFile(output, "utf8"), "risk=tag\nbase=unknown\ndatabase=false\nbrowser=false\ncoverage=false\n");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
   assert.match(workflow, /tag-attestation:/u);
-  assert.match(workflow, /\.head_branch == "main"/u);
-  assert.match(workflow, /refs\/tags\/\$RELEASE_TAG\^\{\}/u);
-  assert.match(workflow, /database:\n    needs: scope\n    if: \$\{\{ needs\.scope\.outputs\.database == 'true' \}\}/u);
+  assert.match(workflow, /node scripts\/production-stable-release\.mjs attest-tag/u);
+  assert.match(workflow, /database:\n    needs: scope\n    if: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) && needs\.scope\.outputs\.database == 'true' \}\}/u);
+  assert.match(workflow, /browser:\n    needs: scope\n    if: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) && needs\.scope\.outputs\.database != 'true' && needs\.scope\.outputs\.browser == 'true' \}\}/u);
+  assert.match(workflow, /name: Verify internal delivery gates \[risk=\$\{\{ needs\.scope\.outputs\.risk \}\} base=\$\{\{ needs\.scope\.outputs\.base \}\}\]/u);
+  assert.match(workflow, /needs: \[scope, source, database, browser\]/u);
   assert.doesNotMatch(workflow.split("  source:\n")[1]?.split("  database:\n")[0], /services:/u);
-  assert.match(workflow, /verify:\n    needs: \[scope, source, database\]/u);
-  assert.match(workflow, /verify:\n    needs: \[scope, source, database\]\n    if: \$\{\{ always\(\) \}\}/u);
+  assert.match(workflow, /verify:\n    needs: \[scope, source, database, browser\]/u);
+  assert.match(workflow, /verify:\n    needs: \[scope, source, database, browser\]\n    if: \$\{\{ always\(\) && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/u);
   assert.match(workflow, /test "\$DATABASE_RESULT" = success/u);
 });
 

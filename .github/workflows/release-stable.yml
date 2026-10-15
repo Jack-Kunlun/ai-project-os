@@ -1,0 +1,107 @@
+name: 发布正式版本
+run-name: 发布正式版本 ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: ai-project-os-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate, deploy, and publish stable release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    environment:
+      name: production
+      url: https://ai-project-os.com
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+
+      - name: Require the manual main-branch candidate
+        run: node scripts/production-stable-release.mjs validate-candidate
+
+      - name: Confirm production source and risk tier
+        run: node scripts/production-stable-release.mjs verify-source-health
+
+      - name: Reuse successful exact-SHA main CI for the applicable risk tier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/production-stable-release.mjs wait-main-ci
+
+      - name: Prepare the pinned production SSH identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
+          test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/ai-project-os-stable-ssh"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts"
+          ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts" >/dev/null
+
+      - name: Require the permanent server tooling before creating a tag
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts" \
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "stable-tooling-status" > "$RUNNER_TEMP/stable-tooling.json"
+
+      - name: Verify all permanent tooling hashes and bootstrap ancestry
+        run: node scripts/production-stable-release.mjs verify-tooling "$RUNNER_TEMP/stable-tooling.json"
+
+      - name: Create or reuse the immutable annotated version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/production-stable-release.mjs ensure-tag
+
+      - name: Recheck main and immutable tag before production deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/production-stable-release.mjs assert-current-target
+
+      - name: Deploy through the permanent restricted server gateway
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=90 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "deploy-stable $RELEASE_TAG $GITHUB_SHA CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI" \
+            | tee "$RUNNER_TEMP/stable-deploy.log"
+
+      - name: Verify the exact backup and migration receipt
+        run: node scripts/production-stable-release.mjs verify-deployment "$RUNNER_TEMP/stable-deploy.log"
+
+      - name: Verify public target health and publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/production-stable-release.mjs publish-release "$RUNNER_TEMP/stable-deploy.log"
+
+      - name: Remove the temporary production SSH identity
+        if: ${{ always() }}
+        run: rm -f -- "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts"

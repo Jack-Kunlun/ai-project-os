@@ -1,9 +1,9 @@
 name: CI
+run-name: CI ${{ github.ref_name }} @ ${{ github.sha }}
 
 on:
   push:
   pull_request:
-
 permissions:
   contents: read
   actions: read
@@ -17,7 +17,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      risk: ${{ steps.classify.outputs.risk }}
+      base: ${{ steps.classify.outputs.base }}
       database: ${{ steps.classify.outputs.database }}
+      browser: ${{ steps.classify.outputs.browser }}
       coverage: ${{ steps.classify.outputs.coverage }}
     steps:
       - name: Check out repository
@@ -29,18 +32,18 @@ jobs:
       - name: Classify change impact
         id: classify
         env:
-          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           CI_HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            printf 'database=true\ncoverage=true\n' >> "$GITHUB_OUTPUT"
+            printf 'risk=tag\nbase=unknown\ndatabase=false\nbrowser=false\ncoverage=false\n' >> "$GITHUB_OUTPUT"
           else
             node scripts/ci-change-scope.mjs
           fi
 
   source:
     needs: scope
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     name: Verify source and client
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -80,12 +83,12 @@ jobs:
         run: pnpm test:coverage
 
       - name: Build and check production client performance
-        if: ${{ needs.scope.outputs.database != 'true' }}
+        if: ${{ needs.scope.outputs.database != 'true' && needs.scope.outputs.browser != 'true' }}
         run: pnpm test:performance
 
   database:
     needs: scope
-    if: ${{ needs.scope.outputs.database == 'true' }}
+    if: ${{ !startsWith(github.ref, 'refs/tags/') && needs.scope.outputs.database == 'true' }}
     name: Verify database and release candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -165,10 +168,80 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  browser:
+    needs: scope
+    if: ${{ !startsWith(github.ref, 'refs/tags/') && needs.scope.outputs.database != 'true' && needs.scope.outputs.browser == 'true' }}
+    name: Verify browser and release client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
+        env:
+          POSTGRES_USER: ai_project_os_ci_cluster_admin
+          POSTGRES_PASSWORD: AiProjectOsCiAdmin_20260831
+          POSTGRES_DB: postgres
+        ports:
+          - 56432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_project_os_ci_cluster_admin -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://ai_project_os_gate:AiProjectOsCiGate_20260831@127.0.0.1:56432/ai_project_os_ci_default_test
+      POSTGRES_GATE_ADMIN_URL: postgresql://ai_project_os_ci_cluster_admin:AiProjectOsCiAdmin_20260831@127.0.0.1:56432/postgres
+      POSTGRES_GATE_TEST_PASSWORD: AiProjectOsCiGate_20260831
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack install --global pnpm@10.14.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate and validate Prisma
+        run: |
+          pnpm db:generate
+          pnpm db:validate
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run production browser and accessibility gates
+        run: NODE_OPTIONS=--max-old-space-size=6144 pnpm test:browser-e2e
+
+      - name: Enforce production client performance budgets
+        run: pnpm performance:check
+
+      - name: Upload browser diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-diagnostics
+          path: |
+            playwright-report
+            test-results/playwright
+          if-no-files-found: ignore
+          retention-days: 14
+
   verify:
-    needs: [scope, source, database]
-    if: ${{ always() }}
-    name: Verify internal delivery gates
+    needs: [scope, source, database, browser]
+    if: ${{ always() && !startsWith(github.ref, 'refs/tags/') }}
+    name: Verify internal delivery gates [risk=${{ needs.scope.outputs.risk }} base=${{ needs.scope.outputs.base }}]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -177,20 +250,39 @@ jobs:
           SCOPE_RESULT: ${{ needs.scope.result }}
           SOURCE_RESULT: ${{ needs.source.result }}
           DATABASE_RESULT: ${{ needs.database.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+          RISK: ${{ needs.scope.outputs.risk }}
+          BASE: ${{ needs.scope.outputs.base }}
           DATABASE_REQUIRED: ${{ needs.scope.outputs.database }}
+          BROWSER_REQUIRED: ${{ needs.scope.outputs.browser }}
         run: |
           set -euo pipefail
           test "$SCOPE_RESULT" = success
           test "$SOURCE_RESULT" = success
+          case "$RISK" in low|medium|high) ;; *) exit 1 ;; esac
+          if [[ "$BASE" != unknown ]]; then
+            [[ "$BASE" =~ ^[a-f0-9]{40}$ ]]
+          else
+            test "$RISK" = high
+            test "$DATABASE_REQUIRED" = true
+            test "$BROWSER_REQUIRED" = true
+          fi
           if [[ "$DATABASE_REQUIRED" == true ]]; then
             test "$DATABASE_RESULT" = success
+            test "$BROWSER_RESULT" = skipped
           else
             test "$DATABASE_REQUIRED" = false
             test "$DATABASE_RESULT" = skipped
           fi
+          if [[ "$BROWSER_REQUIRED" == true && "$DATABASE_REQUIRED" != true ]]; then
+            test "$BROWSER_RESULT" = success
+          else
+            test "$BROWSER_RESULT" = skipped
+          fi
 
   tag-attestation:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    name: Attest tag ${{ github.ref_name }} at ${{ github.sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -200,20 +292,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require successful main CI for the exact commit
+      - name: Require an applicable successful main CI proof for the exact commit
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          RELEASE_SHA=$(git rev-parse HEAD)
-          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
-          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" = "$RELEASE_SHA"
-          runs_json=$(curl --fail --silent --show-error \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$RELEASE_SHA&per_page=100")
-          jq --exit-status --arg sha "$RELEASE_SHA" \
-            '.workflow_runs | any(.head_sha == $sha and .head_branch == "main" and .event == "push" and .status == "completed" and .conclusion == "success")' \
-            <<<"$runs_json" >/dev/null
+        run: node scripts/production-stable-release.mjs attest-tag

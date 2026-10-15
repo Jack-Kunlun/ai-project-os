@@ -12,7 +12,11 @@ from pathlib import Path, PurePosixPath
 
 
 BACKUP_NAME = re.compile(
-    r"^[0-9]{8}T[0-9]{6}Z-(?:daily|manual|pre-deploy-to-v0\.(?:4\.0|5\.0)-dev\.(?:1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.(?:6|7|8|9|[1-9][0-9]+)|pre-deploy-to-v0\.7\.0(?:-dev\.[1-9][0-9]*)?|pre-deploy-to-v0\.7\.3|pre-deploy-to-v0\.8\.0-dev\.1|pre-deploy-to-v1\.0\.(?:1|2))\.[A-Za-z0-9]{6}$"
+    r"^[0-9]{8}T[0-9]{6}Z-(?:daily|manual|pre-deploy-to-v0\.(?:4\.0|5\.0)-dev\.(?:1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.(?:6|7|8|9|[1-9][0-9]+)|pre-deploy-to-v0\.7\.0(?:-dev\.[1-9][0-9]*)?|pre-deploy-to-v0\.7\.3|pre-deploy-to-v0\.8\.0-dev\.1|pre-deploy-to-v[1-9][0-9]*\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\.[A-Za-z0-9]{6}$"
+)
+STABLE_PRE_DEPLOY_BACKUP = re.compile(
+    r"^[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v"
+    r"(?P<major>[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.[A-Za-z0-9]{6}$"
 )
 APP_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 COS_OBJECT = re.compile(r"^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]{1,2000}$")
@@ -265,10 +269,10 @@ def validate_extracted(root: Path) -> None:
             fail("BACKUP_INNER_SHA256_MISMATCH")
     validate_safe_inner_tar(backup_root / "secrets.tar.gz", require_master_key=True)
     validate_safe_inner_tar(backup_root / "uploads.tar.gz")
+    stable_release = STABLE_PRE_DEPLOY_BACKUP.fullmatch(backup_root.name)
     validate_host_config(backup_root / "host-config.tar.gz",
-                         require_email=any(
-                             f"-pre-deploy-to-v{version}." in backup_root.name
-                             for version in ("1.0.1", "1.0.2")))
+                         require_email=stable_release is not None
+                         and int(stable_release.group("major")) >= 1)
     parse_metadata(backup_root / "backup-metadata.env", backup_root.name)
     print(backup_root)
 

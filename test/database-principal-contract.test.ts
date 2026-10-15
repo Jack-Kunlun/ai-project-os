@@ -67,7 +67,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
   assert.equal(DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.length, 7);
   assert.equal(DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX.length, 10);
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 113);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 114);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false
@@ -85,6 +85,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
     ["20261006012000_add_account_closure", ["account_closure_receipt_guard", "workspace_account_closure_guard", "closed_workspace_write_guard", "account_closure_final_state_guard"]],
     ["20261013010000_add_email_auth", ["app_user_email_revision_guard", "email_auth_challenge_binding_guard", "email_graphic_captcha_binding_guard", "app_user_email_auth_proof_guard"]],
     ["20261015020000_bind_personal_semantic_token_reservations", ["personal_semantic_token_reservation_guard"]],
+    ["20261015030000_add_personal_vision_platform_billing", ["personal_vision_token_reservation_guard"]],
   ] as const) {
     const sql = readFileSync(`prisma/migrations/${directory}/migration.sql`, "utf8");
     for (const name of names) {
@@ -112,6 +113,20 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.match(personalSemanticReservationMigration, /REVOKE ALL ON FUNCTION "personal_semantic_token_reservation_guard"\(\) FROM PUBLIC/u);
   for (const principal of ["ai_project_os_runtime", "ai_project_os_entitlement_writer"]) {
     assert.match(personalSemanticReservationMigration, new RegExp(`IF EXISTS \\(SELECT 1 FROM pg_roles WHERE rolname = '${principal}'\\) THEN\\s+REVOKE ALL ON FUNCTION "personal_semantic_token_reservation_guard"\\(\\) FROM ${principal}`, "u"));
+  }
+
+  const personalVisionReservationMigration = readFileSync("prisma/migrations/20261015030000_add_personal_vision_platform_billing/migration.sql", "utf8");
+  assert.deepEqual(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.find((entry) => entry.name === "personal_vision_token_reservation_guard"), {
+    name: "personal_vision_token_reservation_guard",
+    identityArguments: "",
+    runtime: false,
+    entitlementWriter: false,
+    securityDefiner: false,
+    reason: "personal vision consent-bound token reservation trigger",
+  });
+  assert.match(personalVisionReservationMigration, /REVOKE ALL ON FUNCTION "personal_vision_token_reservation_guard"\(\) FROM PUBLIC/u);
+  for (const principal of ["ai_project_os_runtime", "ai_project_os_entitlement_writer"]) {
+    assert.match(personalVisionReservationMigration, new RegExp(`IF EXISTS \\(SELECT 1 FROM pg_roles WHERE rolname = '${principal}'\\) THEN\\s+REVOKE ALL ON FUNCTION "personal_vision_token_reservation_guard"\\(\\) FROM ${principal}`, "u"));
   }
 
   assert.ok(DATABASE_PRINCIPAL_RELATIONS.includes("ProjectMcpActionResultImport"));
@@ -345,7 +360,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   }
   assert.match(gitAutomationMaterialMigration, /"ProjectGitRepositoryMaterialPublicationHead"[\s\S]*?project_git_material_head_guard/u);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "legacy_mcp_source_reference_guard"));
-  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 145/u);
+  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 146/u);
   for (const roleName of ["ai_project_os_runtime", "ai_project_os_entitlement_writer", "ai_project_os_git_automation_worker"]) {
     assert.ok(emailAuthMigration.includes(`'${roleName}'`));
   }

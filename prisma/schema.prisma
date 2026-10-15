@@ -5589,6 +5589,16 @@ model PersonalKnowledgeExtractionAttempt {
   inputHash                    String                     @db.Char(64)
   inputBytes                   Int
   pageManifestHash             String?                    @db.Char(64)
+  visionPageCount              Int?
+  visionPageManifest           Json?                      @db.JsonB
+  billingMode                  String                     @default("byok") @db.VarChar(16)
+  platformRouteId              String?                    @db.Uuid
+  platformRouteVersion         Int?
+  platformRouteUpdatedAt       DateTime?
+  platformQuotaMultiplierBps   Int?
+  platformMaxOutputTokens      Int?
+  visionMaxOutputTokens        Int?
+  platformRouteFenceFingerprint String?                    @db.Char(64)
   providerConnectionId         String                     @db.Uuid
   providerConfigurationVersion Int
   modelId                      String                     @db.VarChar(128)
@@ -5609,6 +5619,7 @@ model PersonalKnowledgeExtractionAttempt {
   document                     PersonalKnowledgeDocument? @relation("PersonalKnowledgeExtractionAttemptDocument", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
   revision                     PersonalKnowledgeRevision? @relation("PersonalKnowledgeExtractionAttemptRevision", fields: [documentId, ownerUserId, revisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
   provider                     AiProviderConnection       @relation("PersonalKnowledgeExtractionAttemptProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  platformReservations         PlatformTokenReservation[]
 
   @@unique([ownerUserId, id])
   @@index([ownerUserId, issuedAt])
@@ -6164,6 +6175,8 @@ model PlatformTokenReservation {
   webAiGrantReferenceId        String?                              @db.Uuid
   webAiGrantProjectId          String?                              @db.Uuid
   personalKnowledgeSemanticChallengeId String? @db.Uuid
+  personalKnowledgeExtractionAttemptId String? @db.Uuid
+  personalKnowledgeExtractionPageIndex Int?
   jobId                        String?                              @db.Uuid
   providerConnectionId         String?                              @db.Uuid
   callKey                      String                               @db.VarChar(128)
@@ -6192,12 +6205,14 @@ model PlatformTokenReservation {
   webAiGrant                   WebAiGrant?                          @relation("WebAiGrantReservations", fields: [webAiGrantId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   providerConnection           AiProviderConnection?                @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   personalKnowledgeSemanticChallenge PersonalKnowledgeSemanticChallenge? @relation(fields: [userId, personalKnowledgeSemanticChallengeId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_semantic_challenge_fkey")
+  personalKnowledgeExtractionAttempt PersonalKnowledgeExtractionAttempt? @relation(fields: [userId, personalKnowledgeExtractionAttemptId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_extraction_attempt_fkey")
   providerCallAudit            ProviderCallAudit?
   ledgerEntries                PlatformTokenLedgerEntry[]
   allocations                  PlatformTokenReservationAllocation[]
 
   @@unique([userId, callKey])
   @@unique([userId, personalKnowledgeSemanticChallengeId], map: "PlatformTokenReservation_personal_semantic_challenge_key")
+  @@unique([userId, personalKnowledgeExtractionAttemptId, personalKnowledgeExtractionPageIndex], map: "PlatformTokenReservation_personal_extraction_page_key")
   @@index([userId, status, expiresAt])
   @@index([jobId, createdAt])
   @@index([webAiGrantId, createdAt])

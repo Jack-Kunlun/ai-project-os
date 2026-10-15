@@ -59,6 +59,13 @@ export type EmbeddingResult = Readonly<{
   providerRequestId: string | null;
 }>;
 
+export type VisionUsageObservation = Readonly<{
+  inputTokens: number;
+  outputTokens: number;
+  usageKnown: boolean;
+  providerRequestId: string | null;
+}>;
+
 type RuntimeConnection = Pick<
   AiProviderConnection,
   "id" | "kind" | "baseUrl" | "credentialId" | "status"
@@ -115,6 +122,7 @@ async function providerPost(
   path: "/chat/completions" | "/embeddings" | "/responses",
   body: Readonly<Record<string, unknown>>,
   absoluteDeadlineAt?: Date,
+  onVisionUsage?: (usage: VisionUsageObservation) => void,
 ): Promise<Readonly<{ payload: unknown; requestId: string | null }>> {
   if (connection.status === "disabled") throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
   const remaining = absoluteDeadlineAt === undefined
@@ -167,6 +175,10 @@ async function providerPost(
     const requestId = safeRequestId(response);
     if (!response.ok) return mapHttpError(response.status);
     const payload = await readBoundedJson(response);
+    if (onVisionUsage !== undefined && typeof payload === "object" && payload !== null) {
+      const usage = usageCounts(payload as Record<string, unknown>);
+      onVisionUsage(Object.freeze({ inputTokens: usage.input, outputTokens: usage.output, usageKnown: usage.known, providerRequestId: requestId }));
+    }
     if (absoluteDeadlineAt !== undefined && absoluteDeadlineAt.getTime() <= Date.now()) {
       return fail("AI_PROVIDER_TIMEOUT", 504, true);
     }
@@ -307,6 +319,8 @@ export async function invokeVisionCompletion(input: Readonly<{
   /** Disable provider reasoning only for bounded connectivity probes. */
   disableThinking?: boolean;
   absoluteDeadlineAt?: Date;
+  /** Safe usage metadata exposed before response-content validation. */
+  onUsage?: (usage: VisionUsageObservation) => void;
 }>): Promise<ChatResult> {
   if (input.image.length === 0 || input.image.length > 10 * 1024 * 1024 || input.prompt.length < 1 || input.prompt.length > 8_000) {
     throw new ProviderTransportError("AI_PROVIDER_REJECTED", 400, false);
@@ -327,12 +341,12 @@ export async function invokeVisionCompletion(input: Readonly<{
       max_output_tokens: input.maxOutputTokens,
       store: false,
       ...(input.disableThinking ? { reasoning: { effort: "none" } } : {}),
-    }, input.absoluteDeadlineAt);
+    }, input.absoluteDeadlineAt, input.onUsage);
     if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
     const record = payload as Record<string, unknown>;
+    const usage = usageCounts(record);
     const content = responseText(record);
     if (content === null || content.length > 1_000_000) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
-    const usage = usageCounts(record);
     return Object.freeze({
       content,
       inputTokens: usage.input,
@@ -353,9 +367,10 @@ export async function invokeVisionCompletion(input: Readonly<{
     max_tokens: input.maxOutputTokens,
     temperature: 0,
     stream: false,
-  }, input.absoluteDeadlineAt);
+  }, input.absoluteDeadlineAt, input.onUsage);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
+  const usage = usageCounts(record);
   const choices = record.choices;
   if (!Array.isArray(choices) || choices.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const first = choices[0];
@@ -366,7 +381,6 @@ export async function invokeVisionCompletion(input: Readonly<{
   if (typeof content !== "string" || content.trim().length === 0 || content.length > 1_000_000) {
     return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   }
-  const usage = usageCounts(record);
   return Object.freeze({
     content,
     inputTokens: usage.input,

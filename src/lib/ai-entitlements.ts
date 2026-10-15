@@ -341,6 +341,7 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
       reservedTokens: true,
       providerCallAudit: { select: { id: true } },
       personalKnowledgeSemanticChallengeId: true,
+      personalKnowledgeExtractionAttemptId: true,
       allocations: {
         orderBy: [{ ordinal: "asc" as const }],
         select: { id: true, grantId: true, ordinal: true, reservedTokens: true, settledTokens: true, releasedTokens: true },
@@ -361,7 +362,8 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
     // cannot prove that no batch reached the provider, so retain their credit
     // hold for reconciliation instead of refunding a potentially billable call.
     const hasDispatchEvidence = reservation.providerCallAudit !== null || dispatchedAttempt !== null
-      || reservation.personalKnowledgeSemanticChallengeId != null;
+      || reservation.personalKnowledgeSemanticChallengeId != null
+      || reservation.personalKnowledgeExtractionAttemptId != null;
     if (hasDispatchEvidence) {
       const exactAllocations = allocationRows((reservation as unknown as { allocations?: unknown }).allocations);
       if (isPrismaClient(db) && exactAllocations.length > 0) {

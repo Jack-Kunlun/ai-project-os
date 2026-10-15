@@ -410,6 +410,7 @@ export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
   triggerFunction("personal_knowledge_qa_challenge_guard", "", "personal knowledge QA challenge integrity trigger"),
   triggerFunction("personal_knowledge_qa_audit_guard", "", "personal knowledge QA audit settlement trigger"),
   triggerFunction("personal_semantic_token_reservation_guard", "", "personal semantic consent-bound token reservation trigger"),
+  triggerFunction("personal_vision_token_reservation_guard", "", "personal vision consent-bound token reservation trigger"),
   triggerFunction("personal_knowledge_semantic_invalidate_owner", "", "personal semantic document invalidation trigger"),
   triggerFunction("personal_knowledge_semantic_provider_invalidate", "", "personal semantic provider invalidation trigger"),
   triggerFunction("personal_knowledge_semantic_mutation_guard", "", "personal semantic owner integrity trigger"),

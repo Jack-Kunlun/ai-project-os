@@ -90,3 +90,68 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
   expect(pageErrors).toEqual([]);
 });
+
+test("personal vision import defaults to platform and requires page and billing confirmation", async ({ page }) => {
+  // These browser fixtures verify the consent interaction; real accounting is
+  // covered separately by the runtime-principal PostgreSQL extraction gate.
+  const providerId = "6049be4c-aaba-4cd4-a4f3-d72bc660199b";
+  let executions = 0;
+  await page.route("**/api/personal/knowledge/vision-providers", route => route.fulfill({
+    json: {
+      providers: [{ id: providerId, name: "平台视觉验收", modelId: "deepseek-flash", billingMode: "platform", quotaMultiplierBps: 15_000, isDefault: true }],
+      platformRouteAvailable: true,
+    },
+  }));
+  await page.route("**/api/personal/knowledge/import", route => {
+    const body = route.request().postDataBuffer()?.toString("latin1") ?? "";
+    const action = /name="action"\r\n\r\n(prepare|execute)/u.exec(body)?.[1];
+    if (action === "prepare") return route.fulfill({ json: { confirmation: {
+      attemptId: randomUUID(), expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      providerName: "平台视觉验收", modelId: "deepseek-flash", pageCount: 1,
+      billingMode: "platform", quotaMultiplierBps: 15_000,
+      maxOutputTokens: 2_048,
+      pages: [{ pageIndex: 1, ordinal: 0, pageNumber: null, locatorLabel: "合成图片 1" }],
+    } } });
+    if (action === "execute") {
+      executions += 1;
+      return route.fulfill({ json: { preview: { title: "视觉导入验收", content: "合成图片识别预览，尚未保存。" } } });
+    }
+    return route.fulfill({ status: 422, json: { error: { code: "PERSONAL_KNOWLEDGE_IMPORT_VISION_REQUIRED" } } });
+  });
+  await signInR02Admin(page);
+  const user = await seedBrowserPersonalUser(`browser-vision-${randomUUID().slice(0, 12)}`, "Test2026");
+  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await page.getByLabel("用户名或手机号", { exact: true }).fill(user.username);
+  await page.getByLabel("密码", { exact: true }).fill(user.password);
+  await page.getByRole("button", { name: "登 录", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await page.goto("/personal/knowledge");
+  await page.getByRole("button", { name: "导入文件", exact: true }).click();
+  const importing = page.getByRole("dialog", { name: "导入个人知识", exact: true });
+  await expect(importing.getByRole("combobox", { name: "图片及扫描 PDF 识别模型", exact: true })).toHaveValue(providerId);
+  const file = {
+    name: "synthetic-vision.png", mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aT9sAAAAASUVORK5CYII=", "base64"),
+  };
+  await importing.getByLabel("选择文件", { exact: true }).setInputFiles(file);
+  const confirmation = page.getByRole("dialog", { name: "发送图片或扫描页给视觉模型？", exact: true });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText("合成图片 1");
+  await expect(confirmation).toContainText("deepseek-flash");
+  await expect(confirmation).toContainText("1.5×");
+  expect(executions).toBe(0);
+  await confirmation.getByRole("button", { name: "返回", exact: true }).click();
+  await expect(importing).toBeVisible();
+  expect(executions).toBe(0);
+  await importing.getByLabel("选择文件", { exact: true }).setInputFiles(file);
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "确认发送", exact: true }).click();
+  const preview = page.getByRole("dialog", { name: "新建个人知识", exact: true });
+  await expect(preview).toBeVisible();
+  await expect(preview.getByRole("textbox", { name: "标题", exact: true })).toHaveValue("视觉导入验收");
+  await expect(preview.getByRole("textbox", { name: /^正文/u })).toHaveValue("合成图片识别预览，尚未保存。");
+  expect(executions).toBe(1);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "放弃修改并离开", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});

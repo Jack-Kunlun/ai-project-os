@@ -58,6 +58,14 @@ type WorkspaceSection = "library" | "search";
 type LibraryScreen = "list" | "view";
 type KnowledgeModal = "editor" | "import" | null;
 type SearchTool = "semantic" | "index" | "project";
+type VisionProviderOption = Readonly<{
+  id: string;
+  name: string;
+  modelId: string;
+  billingMode: "platform" | "byok";
+  quotaMultiplierBps: number | null;
+  isDefault: boolean;
+}>;
 /** Formats exposed by the server export endpoint. */
 type ExportFormat = "markdown" | "text";
 
@@ -169,8 +177,11 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [forcePdfVision, setForcePdfVision] = useState(false);
-  const [visionProviders, setVisionProviders] = useState<readonly Readonly<{ id: string; name: string; defaultVisionModelId: string }>[]>([]);
+  const [visionProviders, setVisionProviders] = useState<readonly VisionProviderOption[]>([]);
   const [visionProviderId, setVisionProviderId] = useState("");
+  const [visionProviderLoadState, setVisionProviderLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [visionProviderLoadError, setVisionProviderLoadError] = useState<string | null>(null);
+  const [visionProviderReloadToken, setVisionProviderReloadToken] = useState(0);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [revisions, setRevisions] = useState<KnowledgeRevision[]>([]);
@@ -204,17 +215,26 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   }, [editorDirty]);
 
   useEffect(() => {
-    if (knowledgeModal !== "import" || visionProviders.length > 0) return;
+    if (knowledgeModal !== "import") return;
     const controller = new AbortController();
-    void fetch("/api/me/ai-providers", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => response.ok ? await response.json() as { providers: Array<{ id: string; name: string; status: string; defaultVisionModelId: string | null }> } : null)
+    void fetch("/api/personal/knowledge/vision-providers", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readError(response, "视觉模型列表加载失败"));
+        return await response.json() as { providers: VisionProviderOption[] };
+      })
       .then((payload) => {
-        if (controller.signal.aborted || payload === null) return;
-        const providers = payload.providers.filter((provider): provider is { id: string; name: string; status: string; defaultVisionModelId: string } => provider.status === "verified" && provider.defaultVisionModelId !== null);
+        if (controller.signal.aborted) return;
+        const providers = payload.providers;
         setVisionProviders(providers);
-      }).catch(() => undefined);
+        setVisionProviderId(providers.find((provider) => provider.isDefault)?.id ?? providers[0]?.id ?? "");
+        setVisionProviderLoadState("ready");
+      }).catch((cause: unknown) => {
+        if (controller.signal.aborted || cause instanceof DOMException && cause.name === "AbortError") return;
+        setVisionProviderLoadError(cause instanceof Error ? cause.message : "视觉模型列表加载失败");
+        setVisionProviderLoadState("error");
+      });
     return () => controller.abort();
-  }, [knowledgeModal, visionProviders.length]);
+  }, [knowledgeModal, visionProviderReloadToken]);
 
   /**
    * Every request has a token and, where supported, an AbortController. A
@@ -284,6 +304,10 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
 
   function openKnowledgeModal(next: Exclude<KnowledgeModal, null>): void {
     if (knowledgeModalRef.current === null) modalReturnScreenRef.current = libraryScreen;
+    if (next === "import") {
+      setVisionProviderLoadState("loading");
+      setVisionProviderLoadError(null);
+    }
     invalidateListRequest();
     setListLoading(false);
     setKnowledgeModal(next);
@@ -651,17 +675,35 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       if (response.status === 422) {
         const payload = await response.clone().json() as { error?: { code?: string } };
         if (payload.error?.code === "PERSONAL_KNOWLEDGE_IMPORT_VISION_REQUIRED") {
-          if (!visionProviderId) throw new Error("图片或扫描 PDF 需要先选择已验证的视觉模型。");
+          if (!visionProviderId) {
+            throw new Error(visionProviderLoadState === "error"
+              ? "视觉模型列表暂时无法加载，请重试后再导入图片或扫描 PDF。"
+              : "尚无可用视觉模型。管理员需配置已验证的平台视觉路由，或先添加个人视觉模型。");
+          }
           const preparedResponse = await postFile("prepare", visionProviderId);
           if (!preparedResponse.ok) throw new Error(await readError(preparedResponse, "无法准备视觉识别"));
-          const prepared = await preparedResponse.json() as { confirmation: { attemptId: string; providerName: string; modelId: string; pageCount: number } };
+          const prepared = await preparedResponse.json() as { confirmation: {
+            attemptId: string;
+            providerName: string;
+            modelId: string;
+            pageCount: number;
+            billingMode: "platform" | "byok";
+            quotaMultiplierBps: number | null;
+            maxOutputTokens: number;
+            pages: Array<{ pageIndex: number; locatorLabel: string }>;
+          } };
+          const confirmation = prepared.confirmation;
+          const pageList = confirmation.pages.map((page) => `• ${page.locatorLabel}`).join("\n");
+          const billingDescription = confirmation.billingMode === "platform"
+            ? `由平台额度支付，额度倍率 ${(confirmation.quotaMultiplierBps ?? 10_000) / 10_000}×。`
+            : "使用个人 BYOK 模型，服务商可能另行计费。";
           const decision = await confirmWithKnowledgeModal({
             eyebrow: "个人知识识别", title: "发送图片或扫描页给视觉模型？",
-            description: `本次将 ${prepared.confirmation.pageCount} 页发送给 ${prepared.confirmation.providerName}（${prepared.confirmation.modelId}）识别，可能产生服务商费用。识别结果仅作为待核对预览。`,
+            description: `本次将以下 ${confirmation.pageCount} 页发送给 ${confirmation.providerName}（${confirmation.modelId}）识别：\n${pageList}\n${billingDescription}\n每页最多输出 ${confirmation.maxOutputTokens.toLocaleString("zh-CN")} token。\n识别结果仅作为待核对预览。`,
             confirmLabel: "确认发送", cancelLabel: "返回",
           });
           if (!decision) return;
-          response = await postFile("execute", prepared.confirmation.attemptId);
+          response = await postFile("execute", confirmation.attemptId);
         }
       }
       if (!response.ok) throw new Error(await readError(response, "文件内容提取失败"));
@@ -1036,13 +1078,16 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
               </div>
               <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4 text-sm text-slate-600">
                 <label className="block font-semibold text-slate-700">图片及扫描 PDF 识别模型
-                  <select value={visionProviderId} onChange={(event) => setVisionProviderId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal">
-                    <option value="">不使用视觉模型</option>
-                    {visionProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.defaultVisionModelId}</option>)}
+                  <select value={visionProviderId} disabled={importing || visionProviderLoadState !== "ready"} onChange={(event) => setVisionProviderId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal disabled:bg-slate-100">
+                    <option value="">选择视觉模型</option>
+                    {visionProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.billingMode === "platform" ? "平台额度" : "个人 BYOK"} · {provider.name} · {provider.modelId}</option>)}
                   </select>
                 </label>
                 <p className="mt-3 text-xs leading-5">遇到图片或扫描页时，会在发送前显示模型与页数，并请你单独确认。一次最多识别 3 页扫描内容；识别结果仅作为待核对预览，确认保存后才进入知识库。</p>
-                {visionProviders.length === 0 ? <p className="mt-2 text-xs text-amber-700">尚无已验证的视觉模型；文本文件和可提取文字的 PDF 仍可导入。</p> : null}
+                {visionProviderLoadState === "loading" ? <p role="status" className="mt-2 text-xs text-slate-500">正在读取可用视觉模型…</p> : null}
+                {visionProviderLoadState === "error" ? <div role="alert" className="mt-2 text-xs text-rose-700"><p>{visionProviderLoadError}</p><button type="button" onClick={() => { setVisionProviderLoadState("loading"); setVisionProviderLoadError(null); setVisionProviderReloadToken((value) => value + 1); }} className="mt-1 font-semibold underline">重新加载</button></div> : null}
+                {visionProviderLoadState === "ready" && !visionProviders.some((provider) => provider.billingMode === "platform") ? <p className="mt-2 text-xs text-amber-700">平台视觉模型暂不可用，请管理员配置并验证 visionExtract 路由；你也可以选择个人 BYOK 模型。文本文件和可提取文字的 PDF 仍可导入。</p> : null}
+                {visionProviderLoadState === "ready" && visionProviders.length === 0 ? <p className="mt-2 text-xs text-amber-700">当前没有可用视觉模型。可先等待管理员配置平台路由，或添加个人视觉模型。</p> : null}
                 <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-700"><input type="checkbox" checked={forcePdfVision} onChange={(event) => setForcePdfVision(event.target.checked)} className="mt-0.5 shrink-0" /><span>PDF 含扫描正文或图片时，使用视觉模型逐页补充识别（最多 3 页）。即使页眉有可复制文字，也建议勾选；发送前会再次确认。</span></label>
               </div>
             </div>

@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCanvas } from "@napi-rs/canvas";
 import { ProjectAssetArchiveError } from "../src/lib/project-assets/archive";
-import { parseAssetBuffer, readOfficeImageForVision, renderPdfPageForVision } from "../src/lib/project-assets/parser";
+import { parseAssetBuffer, ProjectAssetParserError, PROJECT_ASSET_PARSER_VERSION, readOfficeImageForVision, renderPdfPageForVision } from "../src/lib/project-assets/parser";
 import {
   detectAssetFile,
   ProjectAssetStorageError,
   sanitizeAssetFileName,
 } from "../src/lib/project-assets/storage";
+import { decodeTextFile } from "../src/lib/text-file-decoding";
 
 function crc32(buffer: Buffer): number {
   let crc = 0xffffffff;
@@ -100,6 +101,70 @@ test("asset detection validates real signatures, dimensions and file names", asy
     mimeType: "text/markdown",
     extension: ".md",
   });
+});
+
+test("project and personal text imports strictly decode UTF-8, GB18030 and BOM UTF-16", async () => {
+  const utf16LeBody = Buffer.from("审批内容", "utf16le");
+  const utf16BeBody = Buffer.from(utf16LeBody);
+  utf16BeBody.swap16();
+  const cases = [
+    { fileName: "utf8.txt", mimeType: "text/plain", buffer: Buffer.from("项目资料", "utf8"), text: "项目资料", encoding: "utf-8" },
+    { fileName: "legacy.md", mimeType: "text/markdown", buffer: Buffer.from("CEC4BCFEC4DAC8DD", "hex"), text: "文件内容", encoding: "gb18030" },
+    { fileName: "little.csv", mimeType: "text/csv", buffer: Buffer.concat([Buffer.from([0xff, 0xfe]), utf16LeBody]), text: "审批内容", encoding: "utf-16le" },
+    { fileName: "big.markdown", mimeType: "text/markdown", buffer: Buffer.concat([Buffer.from([0xfe, 0xff]), utf16BeBody]), text: "审批内容", encoding: "utf-16be" },
+  ] as const;
+
+  assert.equal(PROJECT_ASSET_PARSER_VERSION, "project-asset-parser:v3");
+  for (const sample of cases) {
+    const decoded = decodeTextFile(sample.buffer, sample.fileName);
+    assert.deepEqual(decoded, { text: sample.text, encoding: sample.encoding });
+    assert.equal(detectAssetFile(sample.fileName, sample.buffer).mimeType, sample.mimeType);
+    const segments = await parseAssetBuffer(sample);
+    assert.equal(segments.map((entry) => entry.contentText).join("\n"), sample.text);
+    const personalImportSegments = await parseAssetBuffer({ ...sample, includeOfficeImages: false });
+    assert.equal(personalImportSegments.map((entry) => entry.contentText).join("\n"), sample.text);
+  }
+});
+
+test("JSON remains strict UTF-8 and malformed or binary-like text is rejected by import paths", async () => {
+  const json = Buffer.from("{\"标题\":\"决议\"}", "utf8");
+  assert.equal(decodeTextFile(json, "data.json").text, "{\"标题\":\"决议\"}");
+  assert.throws(
+    () => detectAssetFile("legacy.json", Buffer.from("CEC4BCFE", "hex")),
+    (error: unknown) => error instanceof ProjectAssetStorageError && error.code === "ASSET_FILE_SIGNATURE_INVALID",
+  );
+  assert.throws(
+    () => detectAssetFile("utf16.json", Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("{}", "utf16le")])),
+    (error: unknown) => error instanceof ProjectAssetStorageError && error.code === "ASSET_FILE_SIGNATURE_INVALID",
+  );
+  assert.throws(
+    () => detectAssetFile("binary.txt", Buffer.from("正文\u0000\u0007", "utf8")),
+    (error: unknown) => error instanceof ProjectAssetStorageError && error.code === "ASSET_FILE_SIGNATURE_INVALID",
+  );
+  assert.throws(
+    () => decodeTextFile(Buffer.from("a\u0085b", "utf8"), "c1-control.txt"),
+    /TEXT_FILE_ENCODING_INVALID/u,
+  );
+  assert.throws(
+    () => detectAssetFile("c1-control.txt", Buffer.from("a\u0085b", "utf8")),
+    (error: unknown) => error instanceof ProjectAssetStorageError && error.code === "ASSET_FILE_SIGNATURE_INVALID",
+  );
+  await assert.rejects(
+    () => parseAssetBuffer({ buffer: Buffer.from([0xff, 0xfe, 0x41]), mimeType: "text/plain", fileName: "broken.txt", includeOfficeImages: false }),
+    (error: unknown) => error instanceof ProjectAssetParserError && error.code === "ASSET_DOCUMENT_INVALID",
+  );
+  await assert.rejects(
+    () => parseAssetBuffer({ buffer: Buffer.from("<script>bad()</script>", "utf8"), mimeType: "text/html", fileName: "fake.html" }),
+    (error: unknown) => error instanceof ProjectAssetParserError && error.code === "ASSET_DOCUMENT_INVALID",
+  );
+  assert.throws(
+    () => detectAssetFile("fake.svg", Buffer.from("<svg/>", "utf8")),
+    (error: unknown) => error instanceof ProjectAssetStorageError && error.code === "ASSET_FILE_TYPE_UNSUPPORTED",
+  );
+  assert.throws(
+    () => decodeTextFile(Buffer.from("hello", "utf16le"), "no-bom.txt"),
+    /TEXT_FILE_ENCODING_INVALID/u,
+  );
 });
 
 test("deterministic parsers preserve Word, PowerPoint and spreadsheet locators", async () => {

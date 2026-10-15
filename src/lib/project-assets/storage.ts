@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from "nod
 import path from "node:path";
 import type { ProjectAssetKind } from "@prisma/client";
 import { DEFAULT_UPLOAD_POLICY, getUploadPolicy } from "@/lib/project-assets/policy";
+import { decodeTextFile, textFileMimeType } from "@/lib/text-file-decoding";
 
 export const MAX_ASSET_FILE_BYTES = DEFAULT_UPLOAD_POLICY.maxFileBytes;
 export const MAX_IMAGE_FILE_BYTES = DEFAULT_UPLOAD_POLICY.maxImageBytes;
@@ -12,8 +13,6 @@ export const MAX_IMAGE_PIXELS = 20_000_000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STORAGE_KEY_PATTERN = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/original$/i;
-const TEXT_EXTENSIONS = new Set([".txt", ".md", ".markdown", ".csv", ".json"]);
-
 export type DetectedAssetFile = Readonly<{
   kind: ProjectAssetKind;
   mimeType: string;
@@ -115,10 +114,9 @@ function assertImageDimensions(buffer: Buffer, mimeType: string): void {
   if (width <= 0 || height <= 0 || width * height > MAX_IMAGE_PIXELS) return fail("ASSET_IMAGE_TOO_LARGE");
 }
 
-function assertUtf8Text(buffer: Buffer): void {
-  if (buffer.includes(0)) return fail("ASSET_FILE_SIGNATURE_INVALID");
+function assertTextFile(buffer: Buffer, fileName: string): void {
   try {
-    new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    decodeTextFile(buffer, fileName);
   } catch {
     return fail("ASSET_FILE_SIGNATURE_INVALID");
   }
@@ -151,15 +149,9 @@ export function detectAssetFile(fileName: string, buffer: Buffer): DetectedAsset
     const [kind, mimeType] = office[extension as keyof typeof office];
     return Object.freeze({ kind, mimeType, extension });
   }
-  if (TEXT_EXTENSIONS.has(extension)) {
-    assertUtf8Text(buffer);
-    const mimeType = extension === ".md" || extension === ".markdown"
-      ? "text/markdown"
-      : extension === ".csv"
-        ? "text/csv"
-        : extension === ".json"
-          ? "application/json"
-          : "text/plain";
+  const mimeType = textFileMimeType(fileName);
+  if (mimeType !== null) {
+    assertTextFile(buffer, fileName);
     return Object.freeze({ kind: "text", mimeType, extension });
   }
   return fail("ASSET_FILE_TYPE_UNSUPPORTED");

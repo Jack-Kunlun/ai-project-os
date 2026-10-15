@@ -7,8 +7,9 @@ import type {
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { readSelectedZipEntries, type ArchiveReadLimits } from "@/lib/project-assets/archive";
 import { detectAssetFile, ProjectAssetStorageError } from "@/lib/project-assets/storage";
+import { decodeTextFile, textFileMimeType } from "@/lib/text-file-decoding";
 
-export const PROJECT_ASSET_PARSER_VERSION = "project-asset-parser:v2" as const;
+export const PROJECT_ASSET_PARSER_VERSION = "project-asset-parser:v3" as const;
 export const MAX_DOCUMENT_PAGES = 300;
 export const MAX_VISION_SEGMENTS_PER_ASSET = 20;
 const MAX_OFFICE_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -439,7 +440,13 @@ export async function parseAssetBuffer(input: Readonly<{
   includeOfficeImages?: boolean;
 }>): Promise<readonly ParsedAssetSegment[]> {
   if (input.mimeType.startsWith("text/") || input.mimeType === "application/json") {
-    return splitTextSegments(new TextDecoder().decode(input.buffer), input.fileName);
+    if (textFileMimeType(input.fileName) !== input.mimeType) return fail("ASSET_DOCUMENT_INVALID");
+    try {
+      const decoded = decodeTextFile(input.buffer, input.fileName);
+      return splitTextSegments(decoded.text, input.fileName);
+    } catch {
+      return fail("ASSET_DOCUMENT_INVALID");
+    }
   }
   if (input.mimeType === "application/pdf") return parsePdf(input.buffer, input.maxPdfPages);
   if (input.mimeType.endsWith("wordprocessingml.document")) return parseDocx(input.buffer, input.archiveLimits, input.includeOfficeImages);

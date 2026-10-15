@@ -82,7 +82,7 @@ export function EmailCodeInput({ id, email, purpose, availability, code, onCodeC
         signal: controller.signal,
         cache: "no-store",
       });
-      const result = await readSmsSendResponse(response);
+      const result = await readSmsSendResponse(response, { channel: "email", allowedCode: "EMAIL_AUTH_RATE_LIMITED" });
       if (request.sequence !== requestSequence.current || currentEmail.current !== request.email || currentPurpose.current !== request.purpose || controller.signal.aborted) return;
       if (result.kind === "rate-limited") {
         onCodeChange("");
@@ -90,13 +90,13 @@ export function EmailCodeInput({ id, email, purpose, availability, code, onCodeC
         const limitedAt = Date.now();
         setNow(limitedAt);
         setCooldown({ email: request.email, expiresAt: limitedAt + result.retryAfterSeconds * 1_000 });
-        setMessage({ email: request.email, purpose: request.purpose, text: result.message.replaceAll("短信", "邮件"), tone: "error" });
+        setMessage({ email: request.email, purpose: request.purpose, text: result.message, tone: "error" });
         flowLock.current = false;
         setCaptchaRequest(null);
         setPendingRequest(null);
         return;
       }
-      if (result.kind === "error") throw new Error(result.message.replaceAll("短信", "邮件"));
+      if (result.kind === "error") throw new Error(result.message);
       onChallengeIdChange(result.challengeId);
       const sentAt = Date.now();
       setNow(sentAt);

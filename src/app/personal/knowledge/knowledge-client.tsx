@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { modalNativeBackdropClassName } from "@/components/modal-styles";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { PersonalKnowledgeQaPanel } from "./personal-knowledge-qa-panel";
 import { PersonalProjectSearchPanel } from "./personal-project-search-panel";
 import { PersonalSemanticIndexPanel } from "./personal-semantic-index-panel";
 import { PersonalSemanticSearchPanel } from "./personal-semantic-search-panel";
+import { PersonalKnowledgeEditor, validateKnowledgeDraft, type KnowledgeDraft } from "./personal-knowledge-editor";
 
 /** Keep list requests bounded and aligned with the service default page size. */
 const PAGE_SIZE = 20;
@@ -50,10 +52,12 @@ type KnowledgeRevision = Readonly<{
 /** The single historical body returned by the version detail endpoint. */
 type KnowledgeRevisionDetail = KnowledgeRevision & Readonly<{ content: string }>;
 
-/** Form values are kept separate from the server document until the user saves. */
-type KnowledgeDraft = Readonly<{ title: string; content: string; isDefaultMemory: boolean }>;
 /** The detail pane has one read-only state and two explicit write states. */
 type EditorMode = "view" | "edit" | "create";
+type WorkspaceSection = "library" | "search";
+type LibraryScreen = "list" | "view";
+type KnowledgeModal = "editor" | "import" | null;
+type SearchTool = "semantic" | "index" | "project";
 /** Formats exposed by the server export endpoint. */
 type ExportFormat = "markdown" | "text";
 
@@ -138,8 +142,12 @@ function filenameFromDisposition(header: string | null, fallback: string): strin
  * offset for a document list that may change between requests.
  */
 export function KnowledgeClient({ username, isSystemAdmin = false }: { username: string; isSystemAdmin?: boolean }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedDocumentId = parseDocumentQuery(searchParams.get("document"));
+  const [acceptedDocumentId, setAcceptedDocumentId] = useState(requestedDocumentId);
+  const requestedDocumentIdRef = useRef(requestedDocumentId);
+  const acceptedDocumentIdRef = useRef(requestedDocumentId);
   const [documents, setDocuments] = useState<KnowledgeSummary[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -152,6 +160,11 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const [document, setDocument] = useState<KnowledgeDocument | null>(null);
   const [draft, setDraft] = useState<KnowledgeDraft>(emptyDraft);
   const [mode, setMode] = useState<EditorMode>("view");
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>("library");
+  const [libraryScreen, setLibraryScreen] = useState<LibraryScreen>(requestedDocumentId === null ? "list" : "view");
+  const [knowledgeModal, setKnowledgeModalState] = useState<KnowledgeModal>(null);
+  const [queryReconcileVersion, setQueryReconcileVersion] = useState(0);
+  const [searchTool, setSearchTool] = useState<SearchTool>("semantic");
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -172,8 +185,26 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
+  const knowledgeDialogRef = useRef<HTMLDialogElement | null>(null);
+  const knowledgeModalRef = useRef<KnowledgeModal>(null);
+  const modalReturnScreenRef = useRef<LibraryScreen>("list");
+
+  const editorDirty = mode === "create"
+    ? draft.title !== emptyDraft.title || draft.content !== emptyDraft.content || draft.isDefaultMemory !== emptyDraft.isDefaultMemory
+    : mode === "edit" && document !== null && (draft.title !== document.title || draft.content !== document.content || draft.isDefaultMemory !== document.isDefaultMemory);
 
   useEffect(() => {
+    if (!editorDirty) return;
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectDraft);
+    return () => window.removeEventListener("beforeunload", protectDraft);
+  }, [editorDirty]);
+
+  useEffect(() => {
+    if (knowledgeModal !== "import" || visionProviders.length > 0) return;
     const controller = new AbortController();
     void fetch("/api/me/ai-providers", { cache: "no-store", signal: controller.signal })
       .then(async (response) => response.ok ? await response.json() as { providers: Array<{ id: string; name: string; status: string; defaultVisionModelId: string | null }> } : null)
@@ -183,7 +214,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         setVisionProviders(providers);
       }).catch(() => undefined);
     return () => controller.abort();
-  }, []);
+  }, [knowledgeModal, visionProviders.length]);
 
   /**
    * Every request has a token and, where supported, an AbortController. A
@@ -199,6 +230,124 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const revisionRequestRef = useRef<{ token: number; controller: AbortController } | null>(null);
   const mutationTokenRef = useRef(0);
   const requestTokenRef = useRef(0);
+  const navigationPendingRef = useRef(false);
+  const queryNavigationPendingRef = useRef(false);
+  const reconcileDocumentQueryRef = useRef<() => Promise<boolean>>(async () => false);
+
+  useEffect(() => {
+    requestedDocumentIdRef.current = requestedDocumentId;
+  }, [requestedDocumentId]);
+
+  useEffect(() => {
+    if (knowledgeModal === null) return;
+    const previousOverflow = window.document.body.style.overflow;
+    window.document.body.style.overflow = "hidden";
+    return () => { window.document.body.style.overflow = previousOverflow; };
+  }, [knowledgeModal]);
+
+  async function confirmWithKnowledgeModal(
+    options: Parameters<typeof confirm>[0],
+    reopen: "always" | "on-cancel" = "always",
+  ): Promise<boolean> {
+    const dialogElement = knowledgeDialogRef.current;
+    const wasOpen = dialogElement?.open === true;
+    if (wasOpen) dialogElement.close();
+    const result = await confirm(options);
+    if (wasOpen && knowledgeModalRef.current !== null && (reopen === "always" || !result.confirmed)) {
+      dialogElement?.showModal();
+    }
+    return result.confirmed;
+  }
+
+  async function confirmDiscardDraft(): Promise<boolean> {
+    if (!editorDirty) return true;
+    return confirmWithKnowledgeModal({
+      eyebrow: "尚未保存的个人知识",
+      title: "离开编辑页面？",
+      description: "当前修改还没有保存。离开后这些修改会丢失。",
+      confirmLabel: "放弃修改并离开",
+      cancelLabel: "继续编辑",
+    }, "on-cancel");
+  }
+
+  function setKnowledgeModal(next: KnowledgeModal): void {
+    knowledgeModalRef.current = next;
+    setKnowledgeModalState(next);
+    const dialogElement = knowledgeDialogRef.current;
+    if (!dialogElement) return;
+    if (next === null) {
+      if (dialogElement.open) dialogElement.close();
+    } else if (!dialogElement.open) {
+      dialogElement.showModal();
+    }
+  }
+
+  function openKnowledgeModal(next: Exclude<KnowledgeModal, null>): void {
+    if (knowledgeModalRef.current === null) modalReturnScreenRef.current = libraryScreen;
+    invalidateListRequest();
+    setListLoading(false);
+    setKnowledgeModal(next);
+  }
+
+  async function requestCloseKnowledgeModal(): Promise<void> {
+    const currentModal = knowledgeModalRef.current;
+    if (currentModal === null || saving || importing) return;
+    if (currentModal === "editor" && !await confirmDiscardDraft()) return;
+    if (currentModal === "editor" && (mode === "edit" || mode === "create")) restoreSavedDraft();
+    setKnowledgeModal(null);
+    setMessage(null);
+    setLibraryScreen(modalReturnScreenRef.current);
+    if (modalReturnScreenRef.current === "list") void loadDocuments();
+  }
+
+  function restoreSavedDraft(): void {
+    setDraft(document ? { title: document.title, content: document.content, isDefaultMemory: document.isDefaultMemory } : emptyDraft);
+    setMode("view");
+  }
+
+  async function openWorkspaceSection(section: WorkspaceSection): Promise<void> {
+    if (section === workspaceSection && (section !== "library" || libraryScreen === "list")) return;
+    if (saving || !await confirmDiscardDraft()) return;
+    if (knowledgeModalRef.current !== null) setKnowledgeModal(null);
+    if (mode === "edit" || mode === "create") restoreSavedDraft();
+    setMessage(null);
+    setWorkspaceSection(section);
+    if (section === "library") {
+      setLibraryScreen("list");
+      void loadDocuments();
+    }
+  }
+
+  async function returnToList(): Promise<void> {
+    if (saving || !await confirmDiscardDraft()) return;
+    if (mode === "edit" || mode === "create") restoreSavedDraft();
+    setMessage(null);
+    setLibraryScreen("list");
+    void loadDocuments();
+  }
+
+  function handleInternalNavigation(event: MouseEvent<HTMLElement>): void {
+    if (!editorDirty || saving || navigationPendingRef.current || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+    if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+    const destination = new URL(anchor.href, window.location.href);
+    if (destination.origin !== window.location.origin || `${destination.pathname}${destination.search}${destination.hash}` === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
+    event.preventDefault();
+    navigationPendingRef.current = true;
+    void confirmDiscardDraft().then((canLeave) => {
+      if (!canLeave) return;
+      restoreSavedDraft();
+      if (knowledgeModalRef.current !== null) setKnowledgeModal(null);
+      router.push(`${destination.pathname}${destination.search}${destination.hash}`);
+    }).finally(() => {
+      navigationPendingRef.current = false;
+    });
+  }
+
+  function updateDraft(nextDraft: KnowledgeDraft): void {
+    setDraft(nextDraft);
+    if (message?.tone === "error") setMessage(null);
+  }
 
   /** Keep React state and the request-race ref on the same selected document. */
   function setSelectedDocumentId(nextId: string | null): void {
@@ -268,6 +417,57 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     setDetailLoading(false);
   }
 
+  useEffect(() => {
+    reconcileDocumentQueryRef.current = async () => {
+      function restoreAcceptedDocumentQuery(): void {
+        const destination = new URL(window.location.href);
+        const acceptedId = acceptedDocumentIdRef.current;
+        if (acceptedId === null) destination.searchParams.delete("document");
+        else destination.searchParams.set("document", acceptedId);
+        router.replace(`${destination.pathname}${destination.search}${destination.hash}`, { scroll: false });
+      }
+
+      // A save already in flight owns the editor. Restore the prior URL and let
+      // the user navigate again after the save has completed.
+      if (saving || importing || !await confirmDiscardDraft()) {
+        restoreAcceptedDocumentQuery();
+        return false;
+      }
+
+      // The browser URL can change again while the confirmation is open. Apply
+      // the latest requested ID only after the user has confirmed leaving.
+      const nextDocumentId = requestedDocumentIdRef.current;
+      if (nextDocumentId === acceptedDocumentIdRef.current) return false;
+
+      invalidateListRequest();
+      invalidateMutationRequests();
+      setSelectedDocumentId(null);
+      clearDetailState();
+      acceptedDocumentIdRef.current = nextDocumentId;
+      setAcceptedDocumentId(nextDocumentId);
+      setWorkspaceSection("library");
+      setKnowledgeModal(null);
+      setLibraryScreen(nextDocumentId === null ? "list" : "view");
+      setMessage(null);
+      return true;
+    };
+  });
+
+  useEffect(() => {
+    if (requestedDocumentId === acceptedDocumentIdRef.current || queryNavigationPendingRef.current) return;
+    queryNavigationPendingRef.current = true;
+    void reconcileDocumentQueryRef.current().then((accepted) => {
+      queryNavigationPendingRef.current = false;
+      // A second browser navigation may have arrived while the first prompt
+      // was open. Reconcile it after this confirmation finishes.
+      if (accepted && requestedDocumentIdRef.current !== acceptedDocumentIdRef.current) {
+        setQueryReconcileVersion((version) => version + 1);
+      }
+    }).catch(() => {
+      queryNavigationPendingRef.current = false;
+    });
+  }, [queryReconcileVersion, requestedDocumentId]);
+
   const loadDocuments = useCallback(async () => {
     listRequestRef.current?.controller.abort();
     const request = { token: ++requestTokenRef.current, controller: new AbortController() };
@@ -284,8 +484,11 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       setDocuments(result.documents);
       setNextCursor(result.nextCursor);
       setListError(null);
+      // A list refresh may finish while the user is writing. Keep it from
+      // resetting the selected document or replacing the current draft.
+      if (knowledgeModalRef.current !== null) return;
       const currentSelectedId = selectedIdRef.current;
-      const nextSelectedId = requestedDocumentId
+      const nextSelectedId = acceptedDocumentId
         ?? (currentSelectedId && result.documents.some((item) => item.id === currentSelectedId)
         ? currentSelectedId
         : result.documents[0]?.id ?? null);
@@ -326,7 +529,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         setListLoading(false);
       }
     }
-  }, [cursor, requestedDocumentId, searchQuery]);
+  }, [acceptedDocumentId, cursor, searchQuery]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDocuments(), 0);
@@ -414,10 +617,20 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
 
   /** Open a blank draft after invalidating requests tied to the old selection. */
   function startCreate(): void {
+    openKnowledgeModal("editor");
     invalidateMutationRequests();
     setSelectedDocumentId(null);
     clearDetailState("create");
     setDraft(emptyDraft);
+    setWorkspaceSection("library");
+    setMessage(null);
+  }
+
+  function startEdit(documentToEdit: KnowledgeDocument): void {
+    openKnowledgeModal("editor");
+    setDraft({ title: documentToEdit.title, content: documentToEdit.content, isDefaultMemory: documentToEdit.isDefaultMemory });
+    setMode("edit");
+    setWorkspaceSection("library");
     setMessage(null);
   }
 
@@ -442,18 +655,19 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           const preparedResponse = await postFile("prepare", visionProviderId);
           if (!preparedResponse.ok) throw new Error(await readError(preparedResponse, "无法准备视觉识别"));
           const prepared = await preparedResponse.json() as { confirmation: { attemptId: string; providerName: string; modelId: string; pageCount: number } };
-          const decision = await confirm({
+          const decision = await confirmWithKnowledgeModal({
             eyebrow: "个人知识识别", title: "发送图片或扫描页给视觉模型？",
             description: `本次将 ${prepared.confirmation.pageCount} 页发送给 ${prepared.confirmation.providerName}（${prepared.confirmation.modelId}）识别，可能产生服务商费用。识别结果仅作为待核对预览。`,
             confirmLabel: "确认发送", cancelLabel: "返回",
           });
-          if (!decision.confirmed) return;
+          if (!decision) return;
           response = await postFile("execute", prepared.confirmation.attemptId);
         }
       }
       if (!response.ok) throw new Error(await readError(response, "文件内容提取失败"));
       const payload = await response.json() as { preview: Pick<KnowledgeDraft, "title" | "content"> };
       startCreate();
+      setKnowledgeModal("editor");
       setDraft({ ...payload.preview, isDefaultMemory: false });
       setMessage({ tone: "success", text: "已提取文件内容，请核对后保存到个人知识库。" });
     } catch (cause) {
@@ -463,23 +677,25 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
 
   /** Select a list row and reset detail state before its request begins. */
   function selectDocument(documentId: string): void {
-    if (documentId === selectedIdRef.current && mode === "view") return;
+    setWorkspaceSection("library");
+    if (documentId === selectedIdRef.current && mode === "view") {
+      setLibraryScreen("view");
+      return;
+    }
     invalidateMutationRequests();
     setSelectedDocumentId(documentId);
     clearDetailState();
     setMode("view");
+    setLibraryScreen("view");
     setMessage(null);
   }
 
   /** Create or revise a document using the currently rendered version fence. */
   async function saveDraft(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (draft.title.trim().length === 0 || draft.content.trim().length === 0) {
-      setMessage({ tone: "error", text: "请填写标题和正文。" });
-      return;
-    }
-    if (draft.isDefaultMemory && draft.content.length > 2_000) {
-      setMessage({ tone: "error", text: "个人通用记忆每条最多 2,000 字符，请缩短正文或取消标记。" });
+    const validationError = validateKnowledgeDraft(draft);
+    if (validationError) {
+      setMessage({ tone: "error", text: validationError });
       return;
     }
     const isCreate = mode === "create";
@@ -509,6 +725,9 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       setDraft({ title: next.title, content: next.content, isDefaultMemory: next.isDefaultMemory });
       setSelectedDocumentId(next.id);
       setMode("view");
+      setWorkspaceSection("library");
+      setLibraryScreen(modalReturnScreenRef.current);
+      setKnowledgeModal(null);
       clearHistoryState();
       setMessage({ tone: "success", text: isCreate ? "个人知识已创建。" : "个人知识已保存为新版本。" });
       await loadDocuments();
@@ -551,6 +770,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       if (mutationTokenRef.current !== mutationToken || selectedIdRef.current !== targetId) return;
       setSelectedDocumentId(null);
       clearDetailState();
+      setLibraryScreen("list");
       setMessage({ tone: "success", text: "个人知识已删除。" });
       await loadDocuments();
     } catch (cause) {
@@ -689,7 +909,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const editing = mode === "edit" || mode === "create";
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+    <main className="min-h-screen bg-[#f4f6fb] text-slate-950" onClickCapture={handleInternalNavigation}>
       <AppHeader username={username} active="personalKnowledge" isSystemAdmin={isSystemAdmin} />
       <PersonalWorkspaceNav active="knowledge" />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
@@ -708,29 +928,25 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           </div>
         </section>
 
-        {message ? <div role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-5 py-4 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</div> : null}
+        <nav className="mt-6 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm" aria-label="个人知识功能分区">
+          <button type="button" aria-current={workspaceSection === "library" ? "page" : undefined} onClick={() => void openWorkspaceSection("library")} className={`min-h-11 rounded-xl px-2 py-2 text-sm font-semibold ${workspaceSection === "library" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>我的知识</button>
+          <button type="button" aria-current={workspaceSection === "search" ? "page" : undefined} onClick={() => void openWorkspaceSection("search")} className={`min-h-11 rounded-xl px-2 py-2 text-sm font-semibold ${workspaceSection === "search" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>智能检索</button>
+        </nav>
 
-        <div className="mt-7 grid gap-6 xl:grid-cols-[minmax(300px,.76fr)_minmax(0,1.24fr)]">
-          <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex items-start justify-between gap-3">
+        {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-5 py-4 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</div> : null}
+
+        {workspaceSection === "library" ? (
+          libraryScreen === "list" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Knowledge list</p>
                 <h2 className="mt-2 text-2xl font-semibold">我的内容</h2>
                 <Link href="/personal/knowledge/graph" className="mt-2 inline-block text-xs font-semibold text-indigo-700 underline underline-offset-2">查看知识图谱 →</Link>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-2"><label className="cursor-pointer rounded-xl border border-indigo-200 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">{importing ? "提取中…" : "导入文件"}<input type="file" accept=".txt,.md,.json,.pdf,.docx,.png,.jpg,.jpeg,.webp" disabled={importing} onChange={(event) => void importFile(event)} className="sr-only" /></label><button type="button" onClick={startCreate} className="rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500">新建内容</button></div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 text-xs text-slate-600">
-              <label className="block font-semibold text-slate-700">图片及扫描 PDF 识别模型
-                <select value={visionProviderId} onChange={(event) => setVisionProviderId(event.target.value)} className="mt-2 min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">
-                  <option value="">不使用视觉模型</option>
-                  {visionProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.defaultVisionModelId}</option>)}
-                </select>
-              </label>
-              <p className="mt-3 leading-5">遇到图片或扫描页时，会在发送前显示模型与页数，并请你单独确认。一次最多识别 3 页扫描内容；识别结果仅作为待核对预览，确认保存后才进入知识库。</p>
-              {visionProviders.length === 0 ? <p className="mt-2 text-amber-700">尚无已验证的视觉模型；文本文件和可提取文字的 PDF 仍可导入。</p> : null}
-              <label className="mt-3 flex items-start gap-2 text-xs text-slate-700"><input type="checkbox" checked={forcePdfVision} onChange={(event) => setForcePdfVision(event.target.checked)} className="mt-0.5" /><span>PDF 含扫描正文或图片时，使用视觉模型逐页补充识别（最多 3 页）。即使页眉有可复制文字，也建议勾选；发送前会再次确认。</span></label>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => openKnowledgeModal("import")} className="rounded-xl border border-indigo-200 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">导入文件</button>
+                <button type="button" onClick={startCreate} className="rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500">新建内容</button>
+              </div>
             </div>
 
             <form onSubmit={submitSearch} className="mt-5 flex gap-2">
@@ -742,18 +958,99 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             </form>
 
             {listError ? <div role="alert" className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{listError}</p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline">重新加载</button></div> : null}
-            {listLoading ? <div className="mt-5 space-y-3" aria-label="正在加载个人知识"><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /></div> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} onCreate={startCreate} /> : <div className="mt-5 space-y-2">{documents.map((item) => <button key={item.id} type="button" onClick={() => selectDocument(item.id)} className={`block w-full rounded-2xl border p-4 text-left transition ${item.id === selectedId && mode !== "create" ? "border-indigo-300 bg-indigo-50/60 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200 hover:bg-slate-50"}`}><div className="flex items-start justify-between gap-3"><h3 className="min-w-0 truncate text-sm font-semibold text-slate-800">{item.title}</h3><span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">v{item.version}</span></div><p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{item.excerpt ?? `已保存 ${formatBytes(item.byteCount)}，点击查看正文。`}</p><p className="mt-2 text-xs text-slate-400">更新于 {formatDate(item.updatedAt)}</p></button>)}</div>}
+            {listLoading ? <div className="mt-5 space-y-3" aria-label="正在加载个人知识"><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /></div> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} onCreate={startCreate} /> : <div className="mt-5 space-y-2">{documents.map((item) => <button key={item.id} type="button" onClick={() => selectDocument(item.id)} className={`block w-full rounded-2xl border p-4 text-left transition ${item.id === selectedId ? "border-indigo-300 bg-indigo-50/60 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200 hover:bg-slate-50"}`}><div className="flex items-start justify-between gap-3"><h3 className="min-w-0 truncate text-sm font-semibold text-slate-800">{item.title}</h3><span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">v{item.version}</span></div><p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{item.excerpt ?? `已保存 ${formatBytes(item.byteCount)}，点击查看正文。`}</p><p className="mt-2 text-xs text-slate-400">更新于 {formatDate(item.updatedAt)}</p></button>)}</div>}
 
             {documents.length > 0 ? <nav className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4" aria-label="个人知识分页"><span className="text-xs text-slate-400">第 {pageNumber} 页</span><div className="flex gap-2"><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">上一页</button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">下一页</button></div></nav> : null}
-          </section>
+          </section> : null
+        ) : null}
 
-          <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
-            {editing ? <EditorForm mode={mode} draft={draft} saving={saving} onDraftChange={setDraft} onCancel={() => { if (document) { setDraft({ title: document.title, content: document.content, isDefaultMemory: document.isDefaultMemory }); setMode("view"); } else { setMode("view"); } }} onSubmit={saveDraft} /> : detailLoading ? <div className="space-y-4" aria-label="正在加载内容"><div className="h-7 w-2/3 animate-pulse rounded bg-slate-100" /><div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" /><div className="h-72 animate-pulse rounded-2xl bg-slate-100" /></div> : document ? <DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onEdit={() => { setDraft({ title: document.title, content: document.content, isDefaultMemory: document.isDefaultMemory }); setMode("edit"); }} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} /> : <EmptyDetail onCreate={startCreate} />}
-          </section>
-        </div>
-        <div className="mt-7"><PersonalSemanticIndexPanel /></div>
-        <div className="mt-7"><PersonalSemanticSearchPanel /></div>
-        <div className="mt-7"><PersonalProjectSearchPanel /></div>
+        {workspaceSection === "library" && libraryScreen === "view" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
+          <button type="button" onClick={() => void returnToList()} className="mb-5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">← 返回我的内容</button>
+          {detailLoading ? <div className="space-y-4" aria-label="正在加载内容"><div className="h-7 w-2/3 animate-pulse rounded bg-slate-100" /><div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" /><div className="h-72 animate-pulse rounded-2xl bg-slate-100" /></div> : document ? <DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} /> : <EmptyDetail onCreate={startCreate} />}
+        </section> : null}
+
+        {workspaceSection === "search" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Search tools</p>
+          <h2 className="mt-2 text-2xl font-semibold">智能检索</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">按用途选择一个检索工具，当前页面只显示所选工具。</p>
+          <nav className="mt-5 grid gap-2 sm:grid-cols-3" aria-label="智能检索工具">
+            <button type="button" aria-current={searchTool === "semantic" ? "page" : undefined} onClick={() => setSearchTool("semantic")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "semantic" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>个人语义搜索</button>
+            <button type="button" aria-current={searchTool === "index" ? "page" : undefined} onClick={() => setSearchTool("index")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "index" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>索引管理</button>
+            <button type="button" aria-current={searchTool === "project" ? "page" : undefined} onClick={() => setSearchTool("project")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "project" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>项目来源搜索</button>
+          </nav>
+          <div className="mt-5">{searchTool === "semantic" ? <PersonalSemanticSearchPanel /> : searchTool === "index" ? <PersonalSemanticIndexPanel /> : <PersonalProjectSearchPanel />}</div>
+        </section> : null}
+
+        <dialog
+          ref={knowledgeDialogRef}
+          aria-labelledby="knowledge-modal-title"
+          aria-modal="true"
+          tabIndex={-1}
+          onCancel={(event) => { event.preventDefault(); void requestCloseKnowledgeModal(); }}
+          onKeyDown={(event: KeyboardEvent<HTMLDialogElement>) => {
+            if (event.key !== "Tab" || !event.currentTarget.open) return;
+            const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
+              .filter((element) => element.getClientRects().length > 0 && element.closest("[hidden], [aria-hidden='true']") === null);
+            if (focusable.length === 0) {
+              event.preventDefault();
+              event.currentTarget.focus();
+              return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            const active = window.document.activeElement;
+            const outsideDialog = !(active instanceof Node) || !event.currentTarget.contains(active);
+            if (event.shiftKey && (outsideDialog || active === event.currentTarget || active === first)) {
+              event.preventDefault();
+              last.focus();
+            } else if (!event.shiftKey && (outsideDialog || active === event.currentTarget || active === last)) {
+              event.preventDefault();
+              first.focus();
+            }
+          }}
+          onClick={(event: MouseEvent<HTMLDialogElement>) => {
+            if (event.target !== event.currentTarget) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+              void requestCloseKnowledgeModal();
+            }
+          }}
+          className={`m-auto max-h-[90dvh] w-full max-w-4xl overflow-hidden rounded-3xl border-0 bg-white p-0 text-slate-900 shadow-2xl max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none ${modalNativeBackdropClassName} sm:w-11/12`}
+        >
+          {knowledgeModal === "editor" ? <div className="h-[90dvh] max-h-[90dvh] min-h-0 max-sm:h-dvh max-sm:max-h-dvh">
+            <PersonalKnowledgeEditor mode={mode === "create" ? "create" : "edit"} draft={draft} saving={saving} error={message?.tone === "error" ? message.text : null} notice={message?.tone === "success" ? message.text : null} onDraftChange={updateDraft} onCancel={() => void requestCloseKnowledgeModal()} onSubmit={saveDraft} />
+          </div> : null}
+          {knowledgeModal === "import" ? <div className="flex max-h-[90dvh] min-h-0 flex-col max-sm:h-dvh max-sm:max-h-dvh">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7">
+              <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Import</p><h2 id="knowledge-modal-title" className="mt-1 text-xl font-semibold">导入个人知识</h2></div>
+              <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} aria-label="关闭导入弹窗" className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">关闭</button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
+              <p className="max-w-2xl text-sm leading-6 text-slate-500">选择文本、Markdown、JSON、PDF、DOCX 或图片。提取结果会转入编辑弹窗，核对后再保存。</p>
+              {message?.tone === "error" ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{message.text}</div> : null}
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                <label className="block text-sm font-semibold text-slate-700">选择文件
+                  <input type="file" accept=".txt,.md,.json,.pdf,.docx,.png,.jpg,.jpeg,.webp" disabled={importing} onChange={(event) => void importFile(event)} className="mt-2 block w-full text-sm disabled:opacity-50" />
+                </label>
+                {importing ? <p role="status" className="mt-3 text-sm text-indigo-700">正在提取文件内容…</p> : null}
+              </div>
+              <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4 text-sm text-slate-600">
+                <label className="block font-semibold text-slate-700">图片及扫描 PDF 识别模型
+                  <select value={visionProviderId} onChange={(event) => setVisionProviderId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal">
+                    <option value="">不使用视觉模型</option>
+                    {visionProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.defaultVisionModelId}</option>)}
+                  </select>
+                </label>
+                <p className="mt-3 text-xs leading-5">遇到图片或扫描页时，会在发送前显示模型与页数，并请你单独确认。一次最多识别 3 页扫描内容；识别结果仅作为待核对预览，确认保存后才进入知识库。</p>
+                {visionProviders.length === 0 ? <p className="mt-2 text-xs text-amber-700">尚无已验证的视觉模型；文本文件和可提取文字的 PDF 仍可导入。</p> : null}
+                <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-700"><input type="checkbox" checked={forcePdfVision} onChange={(event) => setForcePdfVision(event.target.checked)} className="mt-0.5 shrink-0" /><span>PDF 含扫描正文或图片时，使用视觉模型逐页补充识别（最多 3 页）。即使页眉有可复制文字，也建议勾选；发送前会再次确认。</span></label>
+              </div>
+            </div>
+            <div className="shrink-0 border-t border-slate-100 px-5 py-3 text-right sm:px-7">
+              <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50">完成</button>
+            </div>
+          </div> : null}
+        </dialog>
       </div>
       {dialog}
     </main>
@@ -768,18 +1065,6 @@ function EmptyList({ searchQuery, onCreate }: { searchQuery: string; onCreate: (
 /** Render the neutral detail state before a document has been selected. */
 function EmptyDetail({ onCreate }: { onCreate: () => void }): React.JSX.Element {
   return <div className="flex min-h-[28rem] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-12 text-center"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-2xl text-indigo-700">✦</span><h2 className="mt-5 text-xl font-semibold text-slate-800">选择一条内容开始</h2><p className="mt-2 max-w-md text-sm leading-6 text-slate-500">个人知识独立于项目存在。可以先独立整理，之后再决定是否把它带入项目工作流。</p><button type="button" onClick={onCreate} className="mt-5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500">新建个人知识</button></div>;
-}
-
-/** Shared create/edit form with bounded fields and explicit pending state. */
-function EditorForm({ mode, draft, saving, onDraftChange, onCancel, onSubmit }: { mode: "edit" | "create"; draft: KnowledgeDraft; saving: boolean; onDraftChange: (draft: KnowledgeDraft) => void; onCancel: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }): React.JSX.Element {
-  return <form onSubmit={onSubmit} className="space-y-5">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{mode === "create" ? "New note" : "Edit note"}</p><h2 className="mt-2 text-2xl font-semibold">{mode === "create" ? "新建个人知识" : "编辑个人知识"}</h2></div><span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500">纯文本 / Markdown</span></div>
-    <p className="rounded-2xl bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-800">内容只保存在你的个人知识库中，不需要先创建项目。保存后会保留版本历史。</p>
-    <label className="block text-sm font-semibold text-slate-700">标题<input value={draft.title} onChange={(event) => onDraftChange({ ...draft, title: event.target.value })} required maxLength={240} placeholder="例如：产品想法与待验证假设" className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
-    <label className="block text-sm font-semibold text-slate-700">正文<textarea value={draft.content} onChange={(event) => onDraftChange({ ...draft, content: event.target.value })} required maxLength={100000} rows={18} placeholder="记录你的知识、摘要、规则或下一步想法……" className="mt-2 min-h-[20rem] w-full resize-y rounded-xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /><span className="mt-1 block text-right text-xs font-normal text-slate-400">{draft.content.length.toLocaleString("zh-CN")} / 100,000 字符</span></label>
-    <label className="flex items-start gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={draft.isDefaultMemory} onChange={(event) => onDraftChange({ ...draft, isDefaultMemory: event.target.checked })} className="mt-1 h-4 w-4 shrink-0" /><span><strong className="block">作为个人通用记忆</strong><span className="mt-1 block text-xs leading-5">仅将明确标记的约定自动带入你发起的项目 AI 问答与分析；当前项目约定优先。原始文档仍属于个人知识库，但项目成员可查看生成结果，结果可能复述其中内容。取消标记只影响后续请求，不会撤回已生成的项目结果。最多 8 条，每条不超过 2,000 字符。</span></span></label>
-    <div className="flex flex-wrap justify-end gap-3"><button type="button" onClick={onCancel} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50">取消</button><button type="submit" disabled={saving} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50">{saving ? "保存中…" : mode === "create" ? "创建内容" : "保存新版本"}</button></div>
-  </form>;
 }
 
 type DocumentDetailProps = Readonly<{

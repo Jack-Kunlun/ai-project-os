@@ -340,6 +340,7 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
       callKey: true,
       reservedTokens: true,
       providerCallAudit: { select: { id: true } },
+      personalKnowledgeSemanticChallengeId: true,
       allocations: {
         orderBy: [{ ordinal: "asc" as const }],
         select: { id: true, grantId: true, ordinal: true, reservedTokens: true, settledTokens: true, releasedTokens: true },
@@ -356,7 +357,11 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
           where: { jobId: reservation.jobId, dispatchState: { in: [...DISPATCH_EVIDENCE_STATES] } },
           select: { id: true },
         });
-    const hasDispatchEvidence = reservation.providerCallAudit !== null || dispatchedAttempt !== null;
+    // Personal confirmations are consumed before reserving. After a crash we
+    // cannot prove that no batch reached the provider, so retain their credit
+    // hold for reconciliation instead of refunding a potentially billable call.
+    const hasDispatchEvidence = reservation.providerCallAudit !== null || dispatchedAttempt !== null
+      || reservation.personalKnowledgeSemanticChallengeId != null;
     if (hasDispatchEvidence) {
       const exactAllocations = allocationRows((reservation as unknown as { allocations?: unknown }).allocations);
       if (isPrismaClient(db) && exactAllocations.length > 0) {

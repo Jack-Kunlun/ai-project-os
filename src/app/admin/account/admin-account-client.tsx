@@ -91,8 +91,8 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
       <form onSubmit={changePassword} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold">登录密码</h2>
         {profile?.hasLocalPassword ? <label className="mt-5 block text-sm font-medium text-slate-700">当前密码<input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label> : null}
-        <label className="mt-4 block text-sm font-medium text-slate-700">新密码<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={12} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
-        <p className="mt-2 text-xs leading-5 text-slate-500">至少 12 位，同时包含字母和数字。更新后需要重新登录。</p>
+        <label className="mt-4 block text-sm font-medium text-slate-700">新密码<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
+        <p className="mt-2 text-xs leading-5 text-slate-500">8–128 位，同时包含字母和数字。更新后需要重新登录。</p>
         <button disabled={pending || profile === null} className="mt-5 min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">更新密码</button>
       </form>
     </div>

@@ -60,7 +60,7 @@ const projectProvisioningRoleSchema = projectRoleSchema.exclude(["owner"]);
 const projectGrantSchema = z.object({ projectId: z.string().uuid(), role: projectProvisioningRoleSchema }).strict();
 const createMemberSchema = z.object({
   username: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u),
-  password: z.string().min(12).max(128),
+  password: z.string().min(8).max(128),
   displayName: z.string().trim().min(1).max(160).nullable().optional(),
   email: z.string().trim().toLowerCase().max(320).nullable().optional(),
   // Creation is intentionally a narrow provisioning path.  Owner/Admin role

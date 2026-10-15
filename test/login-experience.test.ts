@@ -80,7 +80,16 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(registrationRoute, /reserveLocalRegistrationAttempt/u);
   assert.match(registrationService, /isolationLevel: Prisma\.TransactionIsolationLevel\.Serializable/u);
   assert.match(registrationService, /role: "owner"/u);
-  assert.doesNotMatch(registrationService, /activateAccountEntitlements/u);
+  const emailRegistrationStart = registrationService.indexOf("export async function registerEmailAccount(");
+  const emailRegistrationEnd = registrationService.indexOf("/**\n * Create a user account", emailRegistrationStart);
+  const emailRegistrationService = registrationService.slice(emailRegistrationStart, emailRegistrationEnd);
+  const localRegistrationStart = registrationService.indexOf("export async function registerLocalAccount(");
+  const localRegistrationEnd = registrationService.indexOf("export async function createOrdinaryAccountInTransaction(", localRegistrationStart);
+  const localRegistrationService = registrationService.slice(localRegistrationStart, localRegistrationEnd);
+  assert.ok(emailRegistrationStart >= 0 && emailRegistrationEnd > emailRegistrationStart);
+  assert.ok(localRegistrationStart >= 0 && localRegistrationEnd > localRegistrationStart);
+  assert.match(emailRegistrationService, /consumeEmailAuthProof\(tx, proof, userId, input\.browserToken, now, config\)[\s\S]*tx\.appUser\.update\(\{ where: \{ id: userId \}, data: \{ email, emailVerifiedAt: now \} \}\)[\s\S]*appendEmailVerificationAudit\(tx, \{[\s\S]*event: "verified"[\s\S]*activateAccountEntitlements\(\{[\s\S]*evidenceKind: "email_registration"[\s\S]*evidenceRef: proof\.id/u);
+  assert.doesNotMatch(localRegistrationService, /activateAccountEntitlements/u);
   assert.match(registrationBudget, /pg_advisory_xact_lock/u);
   assert.match(registrationBudget, /GLOBAL_HOURLY_LIMIT = 50/u);
   assert.match(registrationBudget, /GLOBAL_DAILY_LIMIT = 200/u);

@@ -7,12 +7,26 @@ export type SmsSendResponseResult =
   | { kind: "success"; challengeId: string; retryAfterSeconds: number }
   | { kind: "error"; message: string };
 
+export type CodeSendResponseOptions =
+  | { channel: "sms"; allowedCode: "PHONE_AUTH_RATE_LIMITED" }
+  | { channel: "email"; allowedCode: "EMAIL_AUTH_RATE_LIMITED" };
+
+const SMS_RESPONSE_OPTIONS: CodeSendResponseOptions = { channel: "sms", allowedCode: "PHONE_AUTH_RATE_LIMITED" };
+
 function serverErrorMessage(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null || !("error" in payload)) return null;
   const error = payload.error;
   if (typeof error !== "object" || error === null || !("message" in error)) return null;
   const message = error.message;
   return typeof message === "string" && message.trim() ? message.trim().slice(0, 240) : null;
+}
+
+function serverErrorCode(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || !("error" in payload)) return null;
+  const error = payload.error;
+  if (typeof error !== "object" || error === null || !("code" in error)) return null;
+  const code = error.code;
+  return typeof code === "string" && code.trim() ? code.trim() : null;
 }
 
 function boundedRateLimitSeconds(value: number): number {
@@ -35,6 +49,7 @@ export function parseRateLimitRetryAfter(value: string | null, nowMs = Date.now(
 
 export async function readSmsSendResponse(
   response: Pick<Response, "ok" | "status" | "headers" | "json">,
+  options: CodeSendResponseOptions = SMS_RESPONSE_OPTIONS,
   nowMs = Date.now(),
 ): Promise<SmsSendResponseResult> {
   const payload = await response.json().catch(() => null) as {
@@ -44,14 +59,22 @@ export async function readSmsSendResponse(
   } | null;
 
   if (response.status === 429) {
-    const retryAfterSeconds = parseRateLimitRetryAfter(response.headers.get("retry-after"), nowMs);
     const detail = serverErrorMessage(payload);
+    const channelLabel = options.channel === "sms" ? "短信" : "邮件";
+    if (serverErrorCode(payload) !== options.allowedCode) {
+      return {
+        kind: "error",
+        message: detail ?? `${channelLabel}请求触发网络防护限制，请稍后重试。`,
+      };
+    }
+
+    const retryAfterSeconds = parseRateLimitRetryAfter(response.headers.get("retry-after"), nowMs);
     return {
       kind: "rate-limited",
       retryAfterSeconds,
       message: detail
-        ? `短信发送受限：${detail} 请在 ${retryAfterSeconds} 秒后重试。`
-        : `短信请求过于频繁，请在 ${retryAfterSeconds} 秒后重试。`,
+        ? `${channelLabel}发送受限：${detail} 请在 ${retryAfterSeconds} 秒后重试。`
+        : `${channelLabel}请求过于频繁，请在 ${retryAfterSeconds} 秒后重试。`,
     };
   }
 

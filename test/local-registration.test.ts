@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApiError } from "@/lib/api-errors";
-import { AuthError } from "@/lib/auth";
+import { AuthError, validateAccountPassword } from "@/lib/auth";
 import { localRegistrationUsernameFingerprint } from "@/lib/local-registration-abuse-budget";
 import { assertLocalRegistrationOrigin } from "@/lib/local-registration-config";
 import { normalizeLocalRegistrationUsername, registerLocalAccount } from "@/lib/local-registration-service";
@@ -61,6 +61,14 @@ test("local registration rejects weak passwords before opening a database transa
     (error: unknown) => error instanceof AuthError && error.code === "AUTH_INVALID_INPUT",
   );
   assert.equal(admissionCalled, false);
+});
+
+test("account password policy accepts eight characters while retaining alpha-numeric and 128-character bounds", () => {
+  assert.doesNotThrow(() => validateAccountPassword("Abcd1234"));
+  assert.doesNotThrow(() => validateAccountPassword("StrongPassword_2026"));
+  assert.throws(() => validateAccountPassword("Abcd123"), (error: unknown) => error instanceof AuthError && error.code === "AUTH_INVALID_INPUT");
+  assert.throws(() => validateAccountPassword("12345678"), (error: unknown) => error instanceof AuthError && error.code === "AUTH_INVALID_INPUT");
+  assert.throws(() => validateAccountPassword("Abcd1234".repeat(17)), (error: unknown) => error instanceof AuthError && error.code === "AUTH_INVALID_INPUT");
 });
 
 test("registration API rejects missing and cross-origin Origin headers before database access", async () => {

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX } from "../src/lib/database-principal-catalog";
 
 const runner = readFileSync("scripts/run-database-principal-oid10-gate.ts", "utf8");
+const reconcile = readFileSync("scripts/reconcile-database-principals.ts", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
 
 test("OID10 PostgreSQL gate is isolated, pinned, and self-cleaning", () => {
@@ -28,10 +30,17 @@ test("OID10 PostgreSQL gate is isolated, pinned, and self-cleaning", () => {
   assert.match(runner, /DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
   assert.match(runner, /migrate-noop-before-retry/u);
   assert.match(runner, /migrate-noop-post-restart/u);
-  assert.match(runner, /const EXPECTED_MIGRATION_COUNT = 143;/u);
+  assert.match(runner, /const EXPECTED_MIGRATION_COUNT = 145;/u);
   assert.match(runner, /\["rm", "--force", resources\.container\]/u);
   assert.match(runner, /\["volume", "rm", resources\.volume\]/u);
   assert.match(runner, /\["network", "rm", resources\.network\]/u);
   assert.doesNotMatch(runner, /volume\s+prune|down\s+-v|rm\s+-rf|REASSIGN\s+OWNED\s+BY|DROP\s+EXTENSION/iu);
   assert.doesNotMatch(runner, /UPDATE\s+pg_(?:extension|shdepend)/iu);
+  assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "personal_semantic_token_reservation_guard"));
+  const triggerAclReconciliationStart = reconcile.indexOf("for (const trigger of DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX)");
+  const triggerAclReconciliationEnd = reconcile.indexOf("const seenPrivateSignatures", triggerAclReconciliationStart);
+  const triggerAclReconciliation = reconcile.slice(triggerAclReconciliationStart, triggerAclReconciliationEnd);
+  assert.ok(triggerAclReconciliationStart >= 0 && triggerAclReconciliationEnd > triggerAclReconciliationStart);
+  assert.match(triggerAclReconciliation, /REVOKE ALL ON FUNCTION \$\{signature\} FROM PUBLIC, \$\{quoteIdentifier\(RUNTIME_DATABASE_PRINCIPAL\)\}, \$\{quoteIdentifier\(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL\)\}, \$\{quoteIdentifier\(GIT_AUTOMATION_WORKER_DATABASE_PRINCIPAL\)\}/u);
+  assert.match(reconcile, /triggerRows\.rows\.length !== DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX\.length/u);
 });

@@ -383,7 +383,7 @@ function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatu
           <PasswordField id="profile-new-password" label="新密码" value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
           <PasswordField id="profile-confirm-password" label="再次输入新密码" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
         </div>
-        <p className="text-xs text-slate-400">新密码至少 12 位，并同时包含字母和数字。</p>
+        <p className="text-xs text-slate-400">新密码 8–128 位，并同时包含字母和数字。</p>
         {emailAuthStatus !== "disabled" && email ? <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="mb-3 text-xs leading-5 text-slate-600">{emailVerifiedAt ? `当前邮箱 ${email} 需要通过验证码确认后才能修改密码。` : "请先在上方验证当前邮箱。"}</p>{emailVerifiedAt ? <EmailCodeInput key={email} id="profile-password-email-code" email={email} purpose="password" availability={emailAuthStatus === "available" ? "available" : "unavailable"} code={emailCode} onCodeChange={setEmailCode} onChallengeIdChange={setEmailChallengeId} /> : null}</div> : null}
         {message ? <Message {...message} /> : null}
         <div><button disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword || (emailAuthStatus !== "disabled" && email !== null && (!emailVerifiedAt || emailAuthStatus !== "available" || !emailChallengeId || emailCode.length !== 6))} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40">{pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"}</button></div>
@@ -393,7 +393,7 @@ function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatu
 }
 
 function PasswordField({ id, label, value, onChange, autoComplete }: { id: string; label: string; value: string; onChange: (value: string) => void; autoComplete: string }) {
-  return <label htmlFor={id} className="text-sm font-semibold text-slate-700">{label}<input id={id} type="password" value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} minLength={12} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>;
+  return <label htmlFor={id} className="text-sm font-semibold text-slate-700">{label}<input id={id} type="password" value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>;
 }
 
 function StatusItem({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "success" }) {

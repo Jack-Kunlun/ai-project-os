@@ -11,6 +11,7 @@ export const ACCOUNT_ENTITLEMENT_ACTIVATION_CONTEXT = "service-v1" as const;
 export const ACCOUNT_ENTITLEMENT_ACTIVATION_SOURCES = [
   "bootstrap",
   "localProvisioning",
+  "localRegistration",
   "githubRegistration",
   "oidcRegistration",
   "oidcInvitationRegistration",

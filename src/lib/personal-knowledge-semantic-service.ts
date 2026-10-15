@@ -1,7 +1,6 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   Prisma,
-  type AiProviderConnectionStatus,
   type PersonalKnowledgeSemanticAuditStatus,
   type PersonalKnowledgeSemanticChallengeKind,
   type PersonalKnowledgeSemanticChallengeStatus,
@@ -13,9 +12,10 @@ import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/acco
 import { lockActorAccess } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { loadOrCreateMasterKey } from "@/lib/credential-vault";
-import { getProviderDefinition } from "@/lib/ai-providers/registry";
 import { invokeEmbeddings, ProviderTransportError } from "@/lib/ai-providers/transport";
 import { lockProviderConfiguration } from "@/lib/ai-providers/service";
+import { AiEntitlementError, acquirePlatformTokenDispatchFence, assertPlatformConcurrency, calculateChargedPlatformTokens, estimatePlatformTokens, holdPlatformTokenReservation, releasePlatformTokenReservation, reservePlatformTokens, settlePlatformTokenReservation } from "@/lib/ai-entitlements";
+import { lockPersonalSemanticRoute, readPersonalSemanticPlatformProvider, semanticBillingMatches, semanticProviderOwnerMatches, semanticProviderSelect, semanticProviderVerified, type SemanticProvider } from "@/lib/personal-knowledge-semantic-provider";
 import {
   buildPersonalKnowledgeSemanticChunks,
   canonicalPersonalKnowledgeSemanticJson,
@@ -101,22 +101,6 @@ function fail(code: PersonalKnowledgeSemanticErrorCode): never {
 
 type SemanticDb = PrismaClient | Prisma.TransactionClient;
 type SemanticActor = Readonly<{ id: string; role: "admin" | "user"; accountAccessVersion?: number }>;
-
-type SemanticProvider = Readonly<{
-  id: string;
-  name: string;
-  kind: "openai" | "deepseek" | "qwen" | "glm";
-  protocol: "chatCompletions";
-  baseUrl: string;
-  credentialId: string;
-  configurationVersion: number;
-  ownerAccountAccessVersion: number | null;
-  status: AiProviderConnectionStatus;
-  disabledAt: Date | null;
-  defaultEmbeddingModelId: string | null;
-  embeddingDimensions: number | null;
-  credential: { kind: "aiProvider"; secretFingerprint: string };
-}>;
 
 type SemanticPageWithChunks = Readonly<{ page: SemanticPage; chunks: readonly SemanticChunk[] }>;
 
@@ -209,24 +193,6 @@ function equalHash(left: string | null | undefined, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function providerSelect() {
-  return {
-    id: true,
-    name: true,
-    kind: true,
-    protocol: true,
-    baseUrl: true,
-    credentialId: true,
-    configurationVersion: true,
-    ownerAccountAccessVersion: true,
-    status: true,
-    disabledAt: true,
-    defaultEmbeddingModelId: true,
-    embeddingDimensions: true,
-    credential: { select: { kind: true, secretFingerprint: true } },
-  } as const;
-}
-
 async function hmacDigest(value: unknown): Promise<string> {
   const key = await loadOrCreateMasterKey();
   return createHmac("sha256", key)
@@ -275,32 +241,36 @@ async function databaseNow(db: SemanticDb): Promise<Date> {
 }
 
 async function readVerifiedEmbeddingProvider(db: SemanticDb, ownerUserId: string, providerId: string): Promise<SemanticProvider> {
-  const provider = await db.aiProviderConnection.findFirst({
-    where: { id: providerId, scope: "user", ownerUserId },
-    select: providerSelect(),
+  const personal = await db.aiProviderConnection.findFirst({
+    where: { id: providerId, scope: "user", ownerUserId }, select: semanticProviderSelect,
   });
-  if (provider === null) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_NOT_FOUND");
-  let definition: ReturnType<typeof getProviderDefinition>;
-  try {
-    definition = getProviderDefinition(provider.kind);
-  } catch {
-    return fail("PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_NOT_VERIFIED");
+  if (personal !== null) {
+    const provider = personal as SemanticProvider;
+    if (!semanticProviderVerified(provider) || provider.ownerAccountAccessVersion === null) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_NOT_VERIFIED");
+    return provider;
   }
-  if (
-    provider.protocol !== "chatCompletions"
-    || provider.baseUrl !== definition.baseUrl
-    || provider.status !== "verified"
-    || provider.disabledAt !== null
-    || provider.defaultEmbeddingModelId === null
-    || provider.embeddingDimensions === null
-    || provider.embeddingDimensions < 8
-    || provider.embeddingDimensions > 8_192
-    || provider.ownerAccountAccessVersion === null
-    || provider.credential.kind !== "aiProvider"
-    || !HASH_PATTERN.test(provider.credential.secretFingerprint)
-    || !definition.supportsEmbeddings
-  ) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_NOT_VERIFIED");
-  return provider as SemanticProvider;
+  const platform = await readPersonalSemanticPlatformProvider(db);
+  if (platform === null || platform.id !== providerId) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_NOT_FOUND");
+  return platform;
+}
+
+/** Return only usable owner connections and the tested platform embedding route. */
+export async function listPersonalKnowledgeSemanticProviders(actor: SemanticActor, db: PrismaClient = getDb()) {
+  assertActorShape(actor);
+  const current = await assertCurrentOrdinaryUser(db, actor);
+  const personal = await db.aiProviderConnection.findMany({
+    where: { scope: "user", ownerUserId: actor.id }, select: semanticProviderSelect,
+  });
+  const platform = await readPersonalSemanticPlatformProvider(db);
+  const available = [...(platform === null ? [] : [platform]), ...personal as SemanticProvider[]]
+    .filter(provider => semanticProviderVerified(provider) && semanticProviderOwnerMatches(provider, current.accountAccessVersion));
+  return { providers: available.map(provider => ({
+    id: provider.id, name: provider.name, scope: provider.scope, status: provider.status,
+    disabledAt: provider.disabledAt, defaultEmbeddingModelId: provider.defaultEmbeddingModelId,
+    embeddingDimensions: provider.embeddingDimensions,
+    billingMode: provider.billingRoute === undefined ? "byok" : "platform",
+    quotaMultiplierBps: provider.billingRoute?.quotaMultiplierBps ?? null,
+  })) };
 }
 
 async function readIndexState(db: SemanticDb, ownerUserId: string) {
@@ -390,6 +360,7 @@ function summaryForPages(
   expiresAt: Date,
   kind: PersonalKnowledgeSemanticChallengeKind,
   corpusEpoch: number,
+  query?: string,
 ) {
   return Object.freeze({
     action: kind === "build" ? "personalKnowledgeSemanticBuild" as const : "personalKnowledgeSemanticSearch" as const,
@@ -405,8 +376,23 @@ function summaryForPages(
     totalChunks: pages.reduce((total, item) => total + item.chunks.length, 0),
     totalSourceBytes: personalKnowledgeSemanticTotalBytes(pages.map(({ page }) => page)),
     provider: Object.freeze({ name: provider.name, model: provider.defaultEmbeddingModelId!, dimensions: provider.embeddingDimensions! }),
+    billing: provider.billingRoute === undefined ? { mode: "byok" as const } : {
+      mode: "platform" as const,
+      estimatedCredits: calculateChargedPlatformTokens(semanticTokenEstimate(pages, kind, query), provider.billingRoute.quotaMultiplierBps),
+      quotaMultiplierBps: provider.billingRoute.quotaMultiplierBps,
+    },
     expiresAt: expiresAt.toISOString(),
   });
+}
+
+function semanticTokenEstimate(pages: readonly SemanticPageWithChunks[], kind: PersonalKnowledgeSemanticChallengeKind, query?: string): number {
+  if (kind === "search") return estimatePlatformTokens([query ?? ""], 1);
+  const chunks = pages.flatMap(item => item.chunks);
+  let estimate = 0;
+  for (let start = 0; start < chunks.length; start += EMBEDDING_OPERATION_BATCH) {
+    estimate += estimatePlatformTokens(chunks.slice(start, start + EMBEDDING_OPERATION_BATCH).map(chunk => chunk.contentText), 1);
+  }
+  return Math.max(1, estimate);
 }
 
 function fingerprintMaterial(input: Readonly<{
@@ -433,6 +419,7 @@ function fingerprintMaterial(input: Readonly<{
     dimensions: input.provider.embeddingDimensions,
     credentialSecretFingerprint: input.provider.credential.secretFingerprint,
     queryHash: input.queryHash,
+    ...(input.provider.billingRoute === undefined ? {} : { platformRoute: input.provider.billingRoute }),
   });
 }
 
@@ -534,6 +521,7 @@ async function assertDispatchStillValid(snapshot: SemanticDispatchSnapshot, db: 
   try {
     return await db.$transaction(async (tx) => {
       await lockActorAccess(tx, snapshot.actor.id);
+      await lockPersonalSemanticRoute(tx);
       await lockProviderConfiguration(tx, snapshot.provider.id);
       const current = await assertCurrentOrdinaryUser(tx, snapshot.actor);
       const state = await readIndexState(tx, snapshot.actor.id);
@@ -547,13 +535,22 @@ async function assertDispatchStillValid(snapshot: SemanticDispatchSnapshot, db: 
       const manifestFingerprint = personalKnowledgeSemanticManifestFingerprint(manifestForPages(pages));
       if (manifestFingerprint !== personalKnowledgeSemanticManifestFingerprint(snapshot.documentManifest)) return false;
       const provider = await readVerifiedEmbeddingProvider(tx, snapshot.actor.id, snapshot.provider.id);
-      if (provider.ownerAccountAccessVersion !== current.accountAccessVersion || !providerMatches(provider, {
+      if (!semanticProviderOwnerMatches(provider, current.accountAccessVersion) || !providerMatches(provider, {
         id: snapshot.provider.id,
         configurationVersion: snapshot.provider.configurationVersion,
         modelId: snapshot.provider.defaultEmbeddingModelId!,
         dimensions: snapshot.provider.embeddingDimensions!,
         credentialSecretFingerprint: snapshot.provider.credential.secretFingerprint,
-      })) return false;
+      }) || !semanticBillingMatches(provider, snapshot.provider)) return false;
+      if (provider.billingRoute !== undefined) {
+        const fence = await acquirePlatformTokenDispatchFence({
+          userId: snapshot.actor.id, callKey: `personal-semantic:${snapshot.challengeId}`,
+          jobId: null, operation: "embedding", modelId: provider.defaultEmbeddingModelId!, webAiGrantId: null,
+          routeFenceFingerprint: provider.billingRoute.routeFenceFingerprint,
+          quotaMultiplierBps: provider.billingRoute.quotaMultiplierBps,
+        }, tx);
+        if (fence === null || !fence.allowed) return false;
+      }
       return true;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 15_000 });
   } catch {
@@ -604,6 +601,7 @@ export async function preparePersonalKnowledgeSemantic(
   try {
     return await db.$transaction(async (tx) => {
       await lockActorAccess(tx, actor.id);
+      await lockPersonalSemanticRoute(tx);
       const current = await assertCurrentOrdinaryUser(tx, actor);
       const state = await ensureIndexState(tx, actor.id);
       let generationId: string;
@@ -625,7 +623,7 @@ export async function preparePersonalKnowledgeSemantic(
         const pages = await readPagesAndChunks(tx, actor.id);
         await lockProviderConfiguration(tx, providerId);
         const lockedProvider = await readVerifiedEmbeddingProvider(tx, actor.id, providerId);
-        if (lockedProvider.ownerAccountAccessVersion !== current.accountAccessVersion) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_ACCOUNT_ACCESS_STALE");
+        if (!semanticProviderOwnerMatches(lockedProvider, current.accountAccessVersion)) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_ACCOUNT_ACCESS_STALE");
         const manifest = manifestForPages(pages);
         const expectedEntryCount = personalKnowledgeSemanticTotalEntries(manifest);
         const manifestFingerprint = personalKnowledgeSemanticManifestFingerprint(manifest);
@@ -676,7 +674,7 @@ export async function preparePersonalKnowledgeSemantic(
       await lockProviderConfiguration(tx, provider.id);
       const lockedProvider = await readVerifiedEmbeddingProvider(tx, actor.id, provider.id);
       if (
-        lockedProvider.ownerAccountAccessVersion !== current.accountAccessVersion
+        !semanticProviderOwnerMatches(lockedProvider, current.accountAccessVersion)
         || !providerMatches(lockedProvider, { id: generation.providerConnectionId, configurationVersion: generation.providerConfigurationVersion, modelId: generation.modelId, dimensions: generation.dimensions, credentialSecretFingerprint: generation.credentialSecretFingerprint })
       ) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_STALE");
       const queryHash = parsed.kind === "search" ? await persistedQueryHash(parsed.query!) : null;
@@ -712,7 +710,7 @@ export async function preparePersonalKnowledgeSemantic(
         kind: parsed.kind,
         issuedAt: challenge.issuedAt.toISOString(),
         expiresAt: challenge.expiresAt.toISOString(),
-        safeSummary: summaryForPages(pages, lockedProvider, challenge.expiresAt, parsed.kind, corpusEpoch),
+        safeSummary: summaryForPages(pages, lockedProvider, challenge.expiresAt, parsed.kind, corpusEpoch, parsed.query),
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 15_000 });
   } catch (error) {
@@ -728,6 +726,7 @@ async function admitExecution(
 ): Promise<SemanticDispatchSnapshot> {
   return db.$transaction(async (tx) => {
     await lockActorAccess(tx, actor.id);
+    await lockPersonalSemanticRoute(tx);
     // The challenge identifies the provider whose writer lock must be held
     // before any dispatch admission state is read.  This first lookup only
     // discovers that lock key; the complete challenge is read again below.
@@ -775,13 +774,18 @@ async function admitExecution(
       return fail("PERSONAL_KNOWLEDGE_SEMANTIC_CONFIRMATION_STALE");
     }
     const provider = await readVerifiedEmbeddingProvider(tx, actor.id, challenge.providerConnectionId);
-    if (provider.ownerAccountAccessVersion !== current.accountAccessVersion || !providerMatches(provider, {
+    if (!semanticProviderOwnerMatches(provider, current.accountAccessVersion) || !providerMatches(provider, {
       id: challenge.providerConnectionId,
       configurationVersion: challenge.providerConfigurationVersion,
       modelId: challenge.modelId,
       dimensions: challenge.dimensions,
       credentialSecretFingerprint: challenge.credentialSecretFingerprint,
     })) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_CONFIRMATION_STALE");
+    if (provider.billingRoute !== undefined) {
+      await assertPlatformConcurrency({ id: actor.id, role: "user" }, tx);
+      const running = await tx.personalKnowledgeSemanticAudit.count({ where: { ownerUserId: actor.id, status: "running" } });
+      if (running > 0) throw new AiEntitlementError("AI_PLATFORM_CONCURRENCY_LIMIT");
+    }
     const expectedInputFingerprint = await hmacDigest(fingerprintMaterial({ actor, kind: challenge.kind, generationId: challenge.generationId, corpusEpoch: challenge.corpusEpoch, manifestFingerprint, provider, queryHash: suppliedQueryHash }));
     if (!equalHash(challenge.inputFingerprint, expectedInputFingerprint)) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_CONFIRMATION_STALE");
     await mutationContext(tx);
@@ -858,6 +862,7 @@ async function publishBuild(
   try {
     return await db.$transaction(async (tx) => {
       await lockActorAccess(tx, snapshot.actor.id);
+      await lockPersonalSemanticRoute(tx);
       await lockProviderConfiguration(tx, snapshot.provider.id);
       const current = await assertCurrentOrdinaryUser(tx, snapshot.actor);
       const state = await readIndexState(tx, snapshot.actor.id);
@@ -866,13 +871,13 @@ async function publishBuild(
       const manifest = manifestForPages(pages);
       if (personalKnowledgeSemanticManifestFingerprint(manifest) !== personalKnowledgeSemanticManifestFingerprint(snapshot.documentManifest)) return false;
       const provider = await readVerifiedEmbeddingProvider(tx, snapshot.actor.id, snapshot.provider.id);
-      if (provider.ownerAccountAccessVersion !== current.accountAccessVersion || !providerMatches(provider, {
+      if (!semanticProviderOwnerMatches(provider, current.accountAccessVersion) || !providerMatches(provider, {
         id: snapshot.provider.id,
         configurationVersion: snapshot.provider.configurationVersion,
         modelId: snapshot.provider.defaultEmbeddingModelId!,
         dimensions: snapshot.provider.embeddingDimensions!,
         credentialSecretFingerprint: snapshot.provider.credential.secretFingerprint,
-      })) return false;
+      }) || !semanticBillingMatches(provider, snapshot.provider)) return false;
       const generation = await tx.personalKnowledgeSemanticGeneration.findFirst({ where: { id: snapshot.generationId, ownerUserId: snapshot.actor.id, corpusEpoch: snapshot.corpusEpoch, status: "building" }, select: { expectedEntryCount: true, dimensions: true } });
       if (generation === null || generation.expectedEntryCount !== vectors.length || generation.dimensions !== provider.embeddingDimensions) return false;
       const flatChunks = pages.flatMap(({ page, chunks }) => chunks.map((chunk) => ({ page, chunk })));
@@ -962,18 +967,19 @@ async function runSearch(snapshot: SemanticDispatchSnapshot, queryVector: Semant
   try {
     const rows = await db.$transaction(async (tx) => {
       await lockActorAccess(tx, snapshot.actor.id);
+      await lockPersonalSemanticRoute(tx);
       await lockProviderConfiguration(tx, snapshot.provider.id);
       const current = await assertCurrentOrdinaryUser(tx, snapshot.actor);
       const state = await readIndexState(tx, snapshot.actor.id);
       if (state === null || state.corpusEpoch !== snapshot.corpusEpoch || state.status !== "ready" || state.activeGenerationId !== snapshot.generationId) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_STALE");
       const provider = await readVerifiedEmbeddingProvider(tx, snapshot.actor.id, snapshot.provider.id);
-      if (provider.ownerAccountAccessVersion !== current.accountAccessVersion || !providerMatches(provider, {
+      if (!semanticProviderOwnerMatches(provider, current.accountAccessVersion) || !providerMatches(provider, {
         id: snapshot.provider.id,
         configurationVersion: snapshot.provider.configurationVersion,
         modelId: snapshot.provider.defaultEmbeddingModelId!,
         dimensions: snapshot.provider.embeddingDimensions!,
         credentialSecretFingerprint: snapshot.provider.credential.secretFingerprint,
-      })) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_STALE");
+      }) || !semanticBillingMatches(provider, snapshot.provider)) return fail("PERSONAL_KNOWLEDGE_SEMANTIC_STALE");
       const result = await tx.$queryRaw<SearchRow[]>(Prisma.sql`
         SELECT
           e."documentId" AS "documentId",
@@ -1037,10 +1043,72 @@ export async function executePersonalKnowledgeSemantic(
   const parsed = parseExecuteInput(input);
   assertActorShape(actor);
   const snapshot = await admitExecution(parsed, actor, db);
+  const billing: SemanticBillingRun = { dispatched: false, unknown: false, inputTokens: 0, usageKnown: true };
+  const callKey = `personal-semantic:${snapshot.challengeId}`;
+  let reserved = false;
+  try {
+    if (snapshot.provider.billingRoute !== undefined) {
+      const reservation = await reservePlatformTokens({
+        userId: actor.id, providerConnectionId: snapshot.provider.id, callKey,
+        operation: "embedding", modelId: snapshot.provider.defaultEmbeddingModelId!,
+        rawEstimatedTokens: semanticTokenEstimate(snapshot.pages, snapshot.kind, snapshot.query ?? undefined),
+        routeSnapshot: snapshot.provider.billingRoute,
+      }, db);
+      if (reservation.status !== "reserved" || !reservation.created) throw new AiEntitlementError("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
+      reserved = true;
+    }
+    const result = await executeSemanticSnapshot(snapshot, billing, db);
+    if (reserved) await settlePlatformTokenReservation({ userId: actor.id, callKey, actualTokens: billing.inputTokens, usageKnown: billing.usageKnown }, db);
+    return result;
+  } catch (error) {
+    // No successful or uncertain provider call may be refunded as a failed UI operation.
+    if (reserved) {
+      if (billing.unknown) await holdPlatformTokenReservation({ userId: actor.id, callKey, errorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" }, db);
+      else if (!billing.dispatched) await releasePlatformTokenReservation({ userId: actor.id, callKey }, db);
+      else await settlePlatformTokenReservation({ userId: actor.id, callKey, actualTokens: billing.inputTokens, usageKnown: billing.usageKnown }, db);
+    }
+    await setAuditStatus(snapshot, { status: "failed", safeErrorCode: "PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_UNAVAILABLE", inputTokens: billing.inputTokens, usageKnown: billing.usageKnown }, db);
+    throw error;
+  }
+}
+
+type SemanticBillingRun = { dispatched: boolean; unknown: boolean; inputTokens: number; usageKnown: boolean };
+
+async function invokeSemanticEmbeddings(
+  input: Parameters<typeof invokeEmbeddings>[0], billing: SemanticBillingRun,
+): Promise<Awaited<ReturnType<typeof invokeEmbeddings>>> {
+  let dispatched = false;
+  try {
+    const result = await invokeEmbeddings({ ...input, connection: {
+      ...input.connection,
+      onBeforeRequest: async () => {
+        const allowed = await input.connection.onBeforeRequest?.();
+        if (allowed === false) return false;
+        dispatched = true;
+        return true;
+      },
+    } });
+    billing.dispatched = true;
+    billing.inputTokens += result.inputTokens;
+    billing.usageKnown = billing.usageKnown && result.usageKnown;
+    return result;
+  } catch (error) {
+    // Even an HTTP rejection has reached the provider. Without trustworthy
+    // usage evidence its charge must be reconciled, never silently refunded.
+    const uncertain = dispatched && !(error instanceof ProviderTransportError && error.requestDispatched === false);
+    billing.unknown = billing.unknown || uncertain;
+    billing.dispatched = billing.dispatched || uncertain;
+    throw error;
+  }
+}
+
+async function executeSemanticSnapshot(
+  snapshot: SemanticDispatchSnapshot, billing: SemanticBillingRun, db: PrismaClient,
+): Promise<PersonalKnowledgeSemanticSearchResult | Readonly<{ generationId: string; indexedEntryCount: number; status: "ready" }>> {
   if (snapshot.kind === "search") {
     let generated: Awaited<ReturnType<typeof invokeEmbeddings>>;
     try {
-      generated = await invokeEmbeddings({
+      generated = await invokeSemanticEmbeddings({
         connection: {
           id: snapshot.provider.id,
           kind: snapshot.provider.kind,
@@ -1054,7 +1122,7 @@ export async function executePersonalKnowledgeSemantic(
         modelId: snapshot.provider.defaultEmbeddingModelId!,
         texts: [snapshot.query!],
         expectedDimensions: snapshot.provider.embeddingDimensions,
-      });
+      }, billing);
     } catch (error) {
       const stale = !(await assertDispatchStillValid(snapshot, db));
       const uncertain = transportUncertain(error);
@@ -1087,7 +1155,7 @@ export async function executePersonalKnowledgeSemantic(
         return fail("PERSONAL_KNOWLEDGE_SEMANTIC_STALE");
       }
       const batch = chunks.slice(start, start + EMBEDDING_OPERATION_BATCH);
-      const generated = await invokeEmbeddings({
+      const generated = await invokeSemanticEmbeddings({
         connection: {
           id: snapshot.provider.id,
           kind: snapshot.provider.kind,
@@ -1101,7 +1169,7 @@ export async function executePersonalKnowledgeSemantic(
         modelId: snapshot.provider.defaultEmbeddingModelId!,
         texts: batch.map((chunk) => chunk.contentText),
         expectedDimensions: snapshot.provider.embeddingDimensions,
-      });
+      }, billing);
       requestCount += 1;
       inputTokens += generated.inputTokens;
       usageKnown = usageKnown && generated.usageKnown;

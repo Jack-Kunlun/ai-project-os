@@ -27,6 +27,8 @@ test("personal project search makes archived selection explicit and keeps all-ac
   await page.route("**/api/personal/knowledge/project-search", (route) => route.fulfill({ json: { results: [], selectedProjects: [] } }));
 
   await page.goto("/personal/knowledge");
+  await page.getByRole("button", { name: "智能检索", exact: true }).click();
+  await page.getByRole("button", { name: "项目来源搜索", exact: true }).click();
   await expect(page.getByRole("heading", { name: "搜索我的空间", exact: true })).toBeVisible();
   const activeProject = page.getByRole("button").filter({ hasText: "Active Alpha" });
   const archivedProject = page.getByRole("button").filter({ hasText: "Archived Beta" });

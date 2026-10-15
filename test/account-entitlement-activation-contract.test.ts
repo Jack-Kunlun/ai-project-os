@@ -6,7 +6,10 @@ const activationService = readFileSync("src/lib/account-entitlement-activation-s
 const backfillService = readFileSync("src/lib/account-entitlement-backfill-service.ts", "utf8");
 const backfillRoute = readFileSync("src/app/api/admin/credits/backfill/route.ts", "utf8");
 const migration = readFileSync("prisma/migrations/20260910040000_add_account_entitlement_activation/migration.sql", "utf8");
+const localRegistrationMigration = readFileSync("prisma/migrations/20261015010000_add_local_registration_entitlement_source/migration.sql", "utf8");
 const auth = readFileSync("src/lib/auth.ts", "utf8");
+const phoneAuth = readFileSync("src/lib/phone-auth-service.ts", "utf8");
+const localRegistration = readFileSync("src/lib/local-registration-service.ts", "utf8");
 const github = readFileSync("src/lib/github-oauth.ts", "utf8");
 const oidc = readFileSync("src/lib/oidc.ts", "utf8");
 const workspaces = readFileSync("src/lib/workspaces.ts", "utf8");
@@ -16,6 +19,7 @@ test("ENT-009 keeps one immutable activation source and versioned signup identit
   for (const source of [
     "bootstrap",
     "localProvisioning",
+    "localRegistration",
     "githubRegistration",
     "oidcRegistration",
     "oidcInvitationRegistration",
@@ -100,6 +104,12 @@ test("ENT-009 backfill remains a strict, frozen preview-to-execute API", () => {
   assert.match(backfillService, /createHmac\("sha256"/u);
 });
 
+test("verified local registration extends the immutable activation source and grant snapshot contract", () => {
+  assert.match(localRegistrationMigration, /ALTER TYPE "AccountEntitlementActivationSource" ADD VALUE 'localRegistration'/u);
+  assert.match(localRegistrationMigration, /"eligibilitySource" IN \([\s\S]*?'localRegistration'/u);
+  assert.match(localRegistrationMigration, /'localProvisioning'[\s\S]*?'localRegistration'[\s\S]*?'githubRegistration'/u);
+});
+
 test("ENT-009 migration preserves legacy rows and protects new versioned grant facts", () => {
   assert.match(migration, /ACCOUNT_ENTITLEMENT_LEGACY_RECONCILIATION_REQUIRED/u);
   assert.match(migration, /DROP INDEX "PlatformTokenGrant_userId_kind_key"/u);
@@ -130,4 +140,14 @@ test("ENT-009 migration preserves legacy rows and protects new versioned grant f
   assert.match(migration, /activation_row\."decision" NOT IN \('granted', 'already_issued', 'no_active_offer'\)/u);
   assert.doesNotMatch(migration, /INSERT INTO "PlatformTokenGrant"/u);
   assert.doesNotMatch(migration, /INSERT INTO "PlatformTokenLedgerEntry"/u);
+});
+
+test("verified email and phone registration activate entitlements only after consuming proof", () => {
+  assert.match(localRegistration, /consumeEmailAuthProof\(tx, proof, userId[\s\S]*emailVerifiedAt: now[\s\S]*activateAccountEntitlements\([\s\S]*source: "localRegistration"/u);
+  assert.match(phoneAuth, /consumePhoneChallenge\(tx, proof, userId, now\)[\s\S]*createOrdinaryAccountInTransaction\(tx, \{ id: userId,[\s\S]*activateAccountEntitlements\([\s\S]*source: "localRegistration"/u);
+  const unverifiedRegistration = localRegistration.slice(
+    localRegistration.indexOf("export async function registerLocalAccount"),
+    localRegistration.indexOf("export async function createOrdinaryAccountInTransaction"),
+  );
+  assert.doesNotMatch(unverifiedRegistration, /activateAccountEntitlements/u);
 });

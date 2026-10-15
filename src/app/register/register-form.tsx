@@ -168,12 +168,12 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="new-password"
-            minLength={12}
+            minLength={8}
             maxLength={128}
             required
             className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-4 text-base outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"
           />
-          <p className="mt-1.5 text-xs leading-5 text-slate-500">至少 12 个字符，并同时包含英文字母和数字。</p>
+          <p className="mt-1.5 text-xs leading-5 text-slate-500">8–128 位，并同时包含英文字母和数字。</p>
 
         </div>
         <div>
@@ -184,7 +184,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             autoComplete="new-password"
-            minLength={12}
+            minLength={8}
             maxLength={128}
             required
             className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-4 text-base outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"

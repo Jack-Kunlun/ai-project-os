@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 
 
 BACKUP_NAME = re.compile(
-    r"^[0-9]{8}T[0-9]{6}Z-(?:daily|manual|pre-deploy-to-v0\.(?:4\.0|5\.0)-dev\.(?:1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.(?:6|7|8|9|[1-9][0-9]+)|pre-deploy-to-v0\.7\.0(?:-dev\.[1-9][0-9]*)?|pre-deploy-to-v0\.7\.3)\.[A-Za-z0-9]{6}$"
+    r"^[0-9]{8}T[0-9]{6}Z-(?:daily|manual|pre-deploy-to-v0\.(?:4\.0|5\.0)-dev\.(?:1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.(?:6|7|8|9|[1-9][0-9]+)|pre-deploy-to-v0\.7\.0(?:-dev\.[1-9][0-9]*)?|pre-deploy-to-v0\.7\.3|pre-deploy-to-v0\.8\.0-dev\.1|pre-deploy-to-v1\.0\.1)\.[A-Za-z0-9]{6}$"
 )
 APP_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 COS_OBJECT = re.compile(r"^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]{1,2000}$")
@@ -203,10 +203,11 @@ def validate_safe_inner_tar(path: Path, require_master_key: bool = False) -> Non
         fail("BACKUP_MASTER_KEY_MISSING")
 
 
-def validate_host_config(path: Path) -> None:
+def validate_host_config(path: Path, require_email: bool = False) -> None:
     members = safe_tar_members(path, "r|gz")
     regular_files = {name for name, is_directory in members if not is_directory}
-    if regular_files != HOST_CONFIG_FILES:
+    with_email = HOST_CONFIG_FILES | {"etc/ai-project-os/email-auth.env"}
+    if regular_files != with_email and (require_email or regular_files != HOST_CONFIG_FILES):
         fail("BACKUP_HOST_CONFIG_LAYOUT_INVALID")
 
 
@@ -264,7 +265,8 @@ def validate_extracted(root: Path) -> None:
             fail("BACKUP_INNER_SHA256_MISMATCH")
     validate_safe_inner_tar(backup_root / "secrets.tar.gz", require_master_key=True)
     validate_safe_inner_tar(backup_root / "uploads.tar.gz")
-    validate_host_config(backup_root / "host-config.tar.gz")
+    validate_host_config(backup_root / "host-config.tar.gz",
+                         require_email="-pre-deploy-to-v1.0.1." in backup_root.name)
     parse_metadata(backup_root / "backup-metadata.env", backup_root.name)
     print(backup_root)
 

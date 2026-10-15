@@ -8,8 +8,10 @@ import { Client } from "pg";
 import { DATABASE_PRINCIPAL_RELATIONS, DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX, ENTITLEMENT_PROTECTED_RELATIONS } from "@/lib/database-principal-catalog";
 async function main() {
 const selection=process.argv.slice(2);
-if(selection.length>1 || (selection.length===1 && selection[0]!=="--email-only"))throw new Error("PHONE_AUTH_GATE_SELECTION_INVALID");
+if(selection.length>1 || (selection.length===1 && !["--email-only","--feedback","--personal-semantic-only"].includes(selection[0])))throw new Error("PHONE_AUTH_GATE_SELECTION_INVALID");
 const emailOnly=selection[0]==="--email-only";
+const personalSemanticOnly=selection[0]==="--personal-semantic-only";
+const feedbackOnly=selection[0]==="--feedback"||personalSemanticOnly;
 const exec=promisify(execFile);
 const image="pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff";
 const container=`ai-project-os-phone-auth-${randomUUID().slice(0,8)}`;
@@ -74,19 +76,28 @@ try {
   "test/account-security-postgres.test.ts",
   "test/email-auth-postgres.test.ts",
  ];
- const legacyFiles=files.filter((file)=>file!=="test/email-auth-postgres.test.ts");
+ const legacyFiles=feedbackOnly ? ["test/phone-auth-postgres.test.ts"] : files.filter((file)=>file!=="test/email-auth-postgres.test.ts");
  for(const file of files)await readFile(file);
  const sharedTestEnv={
   ...process.env,PHONE_AUTH_POSTGRES_GATE:"1",PHONE_AUTH_TEST_DATABASE_URL:url("ai_project_os_entitlement_writer"),PHONE_AUTH_TEST_OWNER_URL:url("ai_project_os_migrator"),DATABASE_URL:url("ai_project_os_runtime"),ENTITLEMENT_DATABASE_URL:url("ai_project_os_entitlement_writer"),LOCAL_REGISTRATION_ENABLED:"true",PHONE_AUTH_ENABLED:"true",PHONE_AUTH_SECRET:randomBytes(32).toString("base64url"),AI_PROJECT_OS_PUBLIC_ORIGIN:"https://phone-auth.example.com",AI_PROJECT_OS_MASTER_KEY_FILE:masterKeyFile,
  };
- if(!emailOnly){
+ if(!emailOnly&&!personalSemanticOnly){
   const legacyOutput=await command(process.execPath,["--import","tsx","--test","--test-concurrency=1",...legacyFiles],{...sharedTestEnv,AI_PROJECT_OS_EMAIL_AUTH_ENABLED:"false"});
   console.log(legacyOutput.trim());
  }
+ if(!personalSemanticOnly){
  const emailOutput=await command(process.execPath,["--import","tsx","--test","--test-concurrency=1","test/email-auth-postgres.test.ts"],{
   ...sharedTestEnv,AI_PROJECT_OS_EMAIL_AUTH_ENABLED:"true",AI_PROJECT_OS_ALIYUN_DM_ACCESS_KEY_ID:"email-gate-test-key",AI_PROJECT_OS_ALIYUN_DM_ACCESS_KEY_SECRET:"email-gate-test-secret",AI_PROJECT_OS_ALIYUN_DM_REGION_ID:"cn-hangzhou",AI_PROJECT_OS_ALIYUN_DM_ACCOUNT_NAME:"no-reply@example.test",
  });
- console.log(emailOutput.trim());console.log("PHONE_AUTH_POSTGRES_GATE_OK");
+ console.log(emailOutput.trim());
+ }
+if(feedbackOnly){
+  const semanticOutput=await command(process.execPath,["--import","tsx","--test","--test-concurrency=1",...(personalSemanticOnly ? [] : ["test/personal-knowledge-semantic-postgres.test.ts"]),"test/personal-knowledge-platform-semantic-postgres.test.ts"],{
+   ...sharedTestEnv,DATABASE_URL:url("ai_project_os_migrator"),PERSONAL_KNOWLEDGE_SEMANTIC_POSTGRES_GATE:"1",
+  });
+  console.log(semanticOutput.trim());
+ }
+ console.log("PHONE_AUTH_POSTGRES_GATE_OK");
 } catch(error){
  if(error && typeof error==="object" && "stdout" in error) console.error(String(error.stdout).replaceAll(secret,"[redacted]"));
  console.error(error instanceof Error ? error.message.replaceAll(secret,"[redacted]").replace(/postgres(?:ql)?:\/\/[^\s]+/gu,"[database-url]") : "PHONE_AUTH_GATE_FAILED");process.exitCode=1;

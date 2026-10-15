@@ -1364,6 +1364,7 @@ enum PlatformGrantOfferPolicyAuditAction {
 enum AccountEntitlementActivationSource {
   bootstrap
   localProvisioning
+  localRegistration
   githubRegistration
   oidcRegistration
   oidcInvitationRegistration
@@ -5787,6 +5788,7 @@ model PersonalKnowledgeSemanticChallenge {
   owner                        AppUser                                  @relation("PersonalKnowledgeSemanticChallengeOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   generation                   PersonalKnowledgeSemanticGeneration      @relation("PersonalKnowledgeSemanticChallengeGeneration", fields: [ownerUserId, generationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
   providerConnection           AiProviderConnection                     @relation("PersonalKnowledgeSemanticChallengeProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  tokenReservation PlatformTokenReservation?
   audit                        PersonalKnowledgeSemanticAudit?
 
   @@unique([ownerUserId, id])
@@ -6161,6 +6163,7 @@ model PlatformTokenReservation {
   /// Stable non-FK evidence identity retained when the project grant is cascaded.
   webAiGrantReferenceId        String?                              @db.Uuid
   webAiGrantProjectId          String?                              @db.Uuid
+  personalKnowledgeSemanticChallengeId String? @db.Uuid
   jobId                        String?                              @db.Uuid
   providerConnectionId         String?                              @db.Uuid
   callKey                      String                               @db.VarChar(128)
@@ -6188,11 +6191,13 @@ model PlatformTokenReservation {
   grant                        PlatformTokenGrant                   @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   webAiGrant                   WebAiGrant?                          @relation("WebAiGrantReservations", fields: [webAiGrantId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   providerConnection           AiProviderConnection?                @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  personalKnowledgeSemanticChallenge PersonalKnowledgeSemanticChallenge? @relation(fields: [userId, personalKnowledgeSemanticChallengeId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_semantic_challenge_fkey")
   providerCallAudit            ProviderCallAudit?
   ledgerEntries                PlatformTokenLedgerEntry[]
   allocations                  PlatformTokenReservationAllocation[]
 
   @@unique([userId, callKey])
+  @@unique([userId, personalKnowledgeSemanticChallengeId], map: "PlatformTokenReservation_personal_semantic_challenge_key")
   @@index([userId, status, expiresAt])
   @@index([jobId, createdAt])
   @@index([webAiGrantId, createdAt])

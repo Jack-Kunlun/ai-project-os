@@ -56,8 +56,9 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
   assert.match(currentCorpus, /\/admin\/credits/u);
   assert.match(currentCorpus, /\/admin\/operations\/probes/u);
   assert.match(currentCorpus, /\/admin\/users/u);
-  assert.match(docs["README.md"], /平台托管模型消耗平台额度/u);
-  assert.match(docs["README.md"], /个人模型连接才消耗用户自己的供应商额度并可能产生供应商费用/u);
+  assert.match(docs["README.md"], /个人语义索引与搜索可选平台默认向量模型或个人 BYOK/u);
+  assert.match(docs["README.md"], /平台托管模型消耗该用户的平台额度/u);
+  assert.match(docs["README.md"], /个人 BYOK 连接消耗用户自己的供应商额度并可能产生供应商费用/u);
   assert.doesNotMatch(docs["README.md"], /模型调用使用用户自己的供应商额度/u);
   assert.match(currentCorpus, /连接所有者与项目 Owner 双确认委托/u);
   assert.match(currentCorpus, /个人模型不会自动替代平台默认模型/u);

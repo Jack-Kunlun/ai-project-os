@@ -89,7 +89,7 @@ function canonicalUsername(value: unknown): string {
 function canonicalPassword(value: unknown): string {
   if (
     typeof value !== "string" ||
-    value.length < 12 ||
+    value.length < 8 ||
     value.length > 128 ||
     CONTROL_PATTERN.test(value) ||
     !/[A-Za-z]/.test(value) ||

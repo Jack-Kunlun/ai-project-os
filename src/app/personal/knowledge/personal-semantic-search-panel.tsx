@@ -2,15 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { safeResponseError } from "@/lib/safe-error-presentation";
-
-type SemanticProvider = Readonly<{
-  id: string;
-  name: string;
-  status: string;
-  disabledAt: string | null;
-  defaultEmbeddingModelId: string | null;
-  embeddingDimensions: number | null;
-}>;
+import { useSemanticProviders } from "./use-semantic-providers";
 
 type SemanticSummaryDocument = Readonly<{
   documentId: string;
@@ -28,6 +20,7 @@ type SemanticConfirmationSummary = Readonly<{
   totalChunks: number;
   totalSourceBytes: number;
   provider: Readonly<{ name: string; model: string; dimensions: number }>;
+  billing?: Readonly<{ mode: "platform" | "byok"; estimatedCredits?: number; quotaMultiplierBps?: number }>;
   expiresAt: string;
 }>;
 
@@ -97,43 +90,13 @@ export function PersonalSemanticSearchPanel({
   const [confirmation, setConfirmation] = useState<SemanticConfirmation | null>(null);
   const [results, setResults] = useState<readonly SemanticSearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [providers, setProviders] = useState<readonly SemanticProvider[]>([]);
-  const [providerId, setProviderId] = useState<string | null>(null);
-  const [providersLoading, setProvidersLoading] = useState(true);
-  const [providersError, setProvidersError] = useState<string | null>(null);
+  const { providers, providerId, setProviderId, providersLoading, providersError, reloadProviders } = useSemanticProviders();
+  const selectedProvider = providers.find(provider => provider.id === providerId);
   const requestRef = useRef<AbortController | null>(null);
   const clientKeyRef = useRef(randomClientKey());
 
   useEffect(() => () => requestRef.current?.abort(), []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    async function loadProviders(): Promise<void> {
-      try {
-        const response = await fetch("/api/me/ai-providers", { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error(await responseError(response, "个人向量模型列表暂时不可用"));
-        const payload = await response.json() as { providers?: readonly SemanticProvider[] };
-        const available = (payload.providers ?? []).filter((provider) => (
-          provider.status === "verified"
-          && provider.disabledAt === null
-          && provider.defaultEmbeddingModelId !== null
-          && Number.isSafeInteger(provider.embeddingDimensions)
-        ));
-        setProviders(available);
-        setProviderId((current) => current !== null && available.some((provider) => provider.id === current)
-          ? current
-          : (available[0]?.id ?? null));
-        setProvidersError(null);
-      } catch (cause) {
-        if (controller.signal.aborted || isAbortError(cause)) return;
-        setProvidersError(cause instanceof Error ? cause.message : "个人向量模型列表暂时不可用");
-      } finally {
-        if (!controller.signal.aborted) setProvidersLoading(false);
-      }
-    }
-    void loadProviders();
-    return () => controller.abort();
-  }, []);
 
   function resetConfirmation(): void {
     setConfirmation(null);
@@ -151,7 +114,7 @@ export function PersonalSemanticSearchPanel({
       return;
     }
     if (providerId === null) {
-      setError("请选择一个已验证且支持向量的个人模型后再搜索。");
+      setError("请选择一个可用的向量模型后再搜索。");
       setState("error");
       return;
     }
@@ -241,9 +204,9 @@ export function PersonalSemanticSearchPanel({
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Semantic search</p>
           <h3 id="personal-semantic-search-title" className="mt-2 text-lg font-semibold text-slate-900">搜索我的知识库</h3>
-          <p className="mt-1 text-xs leading-5 text-slate-600">只检索当前个人知识版本。发送前会列出完整文档范围、片段数量和个人向量模型，并需要你单独确认。</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600">只检索当前个人知识版本。发送前会列出完整文档范围、片段数量和向量模型，并需要你单独确认。</p>
         </div>
-        <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700">BYOK · 不扣平台额度</span>
+        <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700">{selectedProvider?.billingMode === "platform" ? "平台模型 · 使用平台额度" : "BYOK · 不扣平台额度"}</span>
       </div>
 
       <form onSubmit={prepare} className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -264,7 +227,7 @@ export function PersonalSemanticSearchPanel({
       </form>
 
       <div className="mt-3">
-        <label className="block text-xs font-semibold text-slate-600" htmlFor="personal-semantic-provider">发送到个人向量模型</label>
+        <label className="block text-xs font-semibold text-slate-600" htmlFor="personal-semantic-provider">发送到向量模型</label>
         <select
           id="personal-semantic-provider"
           value={providerId ?? ""}
@@ -272,11 +235,11 @@ export function PersonalSemanticSearchPanel({
           disabled={providersLoading || busy || state === "awaiting-confirmation"}
           className="mt-1 w-full rounded-xl border border-indigo-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:opacity-60"
         >
-          <option value="">{providersLoading ? "正在读取已验证的个人向量模型…" : "请选择个人向量模型"}</option>
-          {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.defaultEmbeddingModelId} · {provider.embeddingDimensions} 维</option>)}
+          <option value="">{providersLoading ? "正在读取已验证的向量模型…" : "请选择向量模型"}</option>
+          {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.billingMode === "platform" ? "平台默认" : "个人 BYOK"} · {provider.name} · {provider.defaultEmbeddingModelId} · {provider.embeddingDimensions} 维</option>)}
         </select>
-        {providersError !== null ? <p className="mt-1 text-xs text-rose-700" role="alert">{providersError}</p> : null}
-        {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-500">没有可用的已验证个人向量模型，请先到“配置 · 我的模型”完成连接测试并配置向量模型。</p> : null}
+        {providersError !== null ? <div className="mt-1 text-xs text-rose-700" role="alert">{providersError} <button type="button" onClick={reloadProviders} className="font-semibold underline">重新加载模型</button></div> : null}
+        {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-500">平台暂未开放可用的向量模型，请联系管理员配置。你也可以到“配置 · 我的模型”连接自己的向量模型。</p> : null}
       </div>
 
       {state === "awaiting-confirmation" && confirmation !== null && confirmationSummary !== undefined ? (
@@ -295,6 +258,9 @@ export function PersonalSemanticSearchPanel({
             </ul>
           </div>
           <p className="mt-2 text-xs text-amber-800">确认有效期至 {formatExpiry(confirmation.expiresAt)}；知识内容或模型配置变化后需要重新准备。搜索结果只会引用执行时仍是当前版本的内容。</p>
+          <p className="mt-2 text-xs font-semibold text-amber-900">{confirmationSummary.billing?.mode === "platform"
+            ? `使用平台额度：预计预占 ${(confirmationSummary.billing.estimatedCredits ?? 0).toLocaleString("zh-CN")}，按供应商返回的实际用量和当前倍率结算；用量不明时保留预占待核对。`
+            : "BYOK 请求不扣平台额度。"}</p>
           <div className="mt-3 flex flex-wrap justify-end gap-2">
             <button type="button" onClick={resetConfirmation} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900">取消</button>
             <button type="button" onClick={() => void execute()} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800">确认并搜索</button>
@@ -302,7 +268,7 @@ export function PersonalSemanticSearchPanel({
         </div>
       ) : null}
 
-      {state === "executing" ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-xs text-slate-600" role="status">正在请求个人向量模型并校验当前版本引用…</p> : null}
+      {state === "executing" ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-xs text-slate-600" role="status">正在请求向量模型并校验当前版本引用…</p> : null}
       {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</div> : null}
       {state === "success" && results.length === 0 ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-xs text-slate-600" role="status">没有找到可验证的相关内容。</p> : null}
       {results.length > 0 ? (

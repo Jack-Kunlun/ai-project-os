@@ -9,6 +9,7 @@ import { loadEmailAuthConfig } from "@/lib/email-auth-config";
 import { lockEmailAuthAdmission, emailDatabaseClock } from "@/lib/email-auth-budget";
 import { consumeEmailAuthProof, verifyEmailChallenge } from "@/lib/email-auth-service";
 import { normalizeEmailAddress } from "@/lib/email-auth-identity";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u;
 
@@ -90,6 +91,12 @@ export async function registerEmailAccount(
         source: "email",
         reason: "email_one_time_code_registration",
       });
+      await activateAccountEntitlements({
+        userId,
+        source: "localRegistration",
+        evidenceKind: "email_registration",
+        evidenceRef: proof.id,
+      }, tx);
       return session;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   } catch (error) {

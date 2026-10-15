@@ -149,6 +149,7 @@ test(
       assert.equal(await db.membershipAccessAudit.count({ where: { userId: registeredUserId, workspaceId: workspace.id, action: "confirmed", reason: "local_registration_personal_workspace_created" } }), 1);
       assert.equal(await db.appSession.count({ where: { userId: registeredUserId, revokedAt: null } }), 1);
       assert.equal(await db.accountEntitlementActivation.count({ where: { userId: registeredUserId } }), 0);
+      assert.equal(await db.platformTokenGrant.count({ where: { userId: registeredUserId, kind: "signup" } }), 0);
 
       const triggerSuffix = randomUUID().replaceAll("-", "").slice(0, 12);
       const functionName = `local_registration_fail_${triggerSuffix}`;

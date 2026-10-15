@@ -2,15 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { safeResponseError } from "@/lib/safe-error-presentation";
-
-type SemanticProvider = Readonly<{
-  id: string;
-  name: string;
-  status: string;
-  disabledAt: string | null;
-  defaultEmbeddingModelId: string | null;
-  embeddingDimensions: number | null;
-}>;
+import { useSemanticProviders } from "./use-semantic-providers";
 
 type SemanticSummaryDocument = Readonly<{
   documentId: string;
@@ -28,6 +20,7 @@ type SemanticConfirmationSummary = Readonly<{
   totalChunks: number;
   totalSourceBytes: number;
   provider: Readonly<{ name: string; model: string; dimensions: number }>;
+  billing?: Readonly<{ mode: "platform" | "byok"; estimatedCredits?: number; quotaMultiplierBps?: number }>;
   expiresAt: string;
 }>;
 
@@ -94,10 +87,7 @@ export function PersonalSemanticIndexPanel({
   const [overview, setOverview] = useState<SemanticIndexOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
-  const [providers, setProviders] = useState<readonly SemanticProvider[]>([]);
-  const [providerId, setProviderId] = useState<string | null>(null);
-  const [providersLoading, setProvidersLoading] = useState(true);
-  const [providersError, setProvidersError] = useState<string | null>(null);
+  const { providers, providerId, setProviderId, providersLoading, providersError, reloadProviders } = useSemanticProviders();
   const [error, setError] = useState<string | null>(null);
   const [indexedEntryCount, setIndexedEntryCount] = useState<number | null>(null);
   const requestRef = useRef<AbortController | null>(null);
@@ -124,34 +114,6 @@ export function PersonalSemanticIndexPanel({
     return () => controller.abort();
   }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    async function loadProviders(): Promise<void> {
-      try {
-        const response = await fetch("/api/me/ai-providers", { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error(await responseError(response, "个人向量模型列表暂时不可用"));
-        const payload = await response.json() as { providers?: readonly SemanticProvider[] };
-        const available = (payload.providers ?? []).filter((provider) => (
-          provider.status === "verified"
-          && provider.disabledAt === null
-          && provider.defaultEmbeddingModelId !== null
-          && Number.isSafeInteger(provider.embeddingDimensions)
-        ));
-        setProviders(available);
-        setProviderId((current) => current !== null && available.some((provider) => provider.id === current)
-          ? current
-          : (available[0]?.id ?? null));
-        setProvidersError(null);
-      } catch (cause) {
-        if (controller.signal.aborted || isAbortError(cause)) return;
-        setProvidersError(cause instanceof Error ? cause.message : "个人向量模型列表暂时不可用");
-      } finally {
-        if (!controller.signal.aborted) setProvidersLoading(false);
-      }
-    }
-    void loadProviders();
-    return () => controller.abort();
-  }, []);
 
   function cancelConfirmation(): void {
     setConfirmation(null);
@@ -161,7 +123,7 @@ export function PersonalSemanticIndexPanel({
 
   async function prepare(): Promise<void> {
     if (providerId === null) {
-      setError("请选择一个已验证且支持向量的个人模型后再建立索引。");
+      setError("请选择一个可用的向量模型后再建立索引。");
       setState("error");
       return;
     }
@@ -249,7 +211,7 @@ export function PersonalSemanticIndexPanel({
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Personal semantic index</p>
           <h3 id="personal-semantic-index-title" className="mt-2 text-lg font-semibold text-slate-900">建立个人语义索引</h3>
-          <p className="mt-1 text-xs leading-5 text-slate-600">索引只属于当前账号，内容或向量模型配置变化后会自动失效。建立前会展示完整范围，确认后才会发送片段到你的个人向量模型。</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600">索引只属于当前账号，内容或向量模型配置变化后会自动失效。建立前会展示完整范围，确认后才会发送片段到所选向量模型。</p>
         </div>
         <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${overview?.status === "ready" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{statusLabel}</span>
       </div>
@@ -262,7 +224,7 @@ export function PersonalSemanticIndexPanel({
       {overviewError !== null ? <p className="mt-2 text-xs text-rose-700" role="alert">{overviewError}</p> : null}
 
       <div className="mt-4">
-        <label className="block text-xs font-semibold text-slate-600" htmlFor="personal-semantic-index-provider">建立索引使用的个人向量模型</label>
+        <label className="block text-xs font-semibold text-slate-600" htmlFor="personal-semantic-index-provider">建立索引使用的向量模型</label>
         <select
           id="personal-semantic-index-provider"
           value={providerId ?? ""}
@@ -270,11 +232,11 @@ export function PersonalSemanticIndexPanel({
           disabled={providersLoading || busy || state === "awaiting-confirmation"}
           className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:opacity-60"
         >
-          <option value="">{providersLoading ? "正在读取已验证的个人向量模型…" : "请选择个人向量模型"}</option>
-          {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.defaultEmbeddingModelId} · {provider.embeddingDimensions} 维</option>)}
+          <option value="">{providersLoading ? "正在读取已验证的向量模型…" : "请选择向量模型"}</option>
+          {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.billingMode === "platform" ? "平台默认" : "个人 BYOK"} · {provider.name} · {provider.defaultEmbeddingModelId} · {provider.embeddingDimensions} 维</option>)}
         </select>
-        {providersError !== null ? <p className="mt-1 text-xs text-rose-700" role="alert">{providersError}</p> : null}
-        {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-500">没有可用的已验证个人向量模型，请先到“配置 · 我的模型”完成连接测试并配置向量模型。</p> : null}
+        {providersError !== null ? <div className="mt-1 text-xs text-rose-700" role="alert">{providersError} <button type="button" onClick={reloadProviders} className="font-semibold underline">重新加载模型</button></div> : null}
+        {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-500">平台暂未开放可用的向量模型，请联系管理员配置。你也可以到“配置 · 我的模型”连接自己的向量模型。</p> : null}
       </div>
 
       <button type="button" onClick={() => void prepare()} disabled={busy || state === "awaiting-confirmation" || providersLoading || providerId === null} className="mt-4 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
@@ -296,7 +258,10 @@ export function PersonalSemanticIndexPanel({
               ))}
             </ul>
           </div>
-          <p className="mt-2 text-xs text-amber-800">确认有效期至 {formatExpiry(confirmation.expiresAt)}；内容或模型配置变化后需要重新建立。BYOK 请求不扣平台额度。</p>
+          <p className="mt-2 text-xs text-amber-800">确认有效期至 {formatExpiry(confirmation.expiresAt)}；内容或模型配置变化后需要重新建立。</p>
+          <p className="mt-2 text-xs font-semibold text-amber-900">{summary.billing?.mode === "platform"
+            ? `使用平台额度：预计预占 ${(summary.billing.estimatedCredits ?? 0).toLocaleString("zh-CN")}，按供应商返回的实际用量和当前倍率结算；用量不明时保留预占待核对。`
+            : "BYOK 请求不扣平台额度。"}</p>
           <div className="mt-3 flex flex-wrap justify-end gap-2">
             <button type="button" onClick={cancelConfirmation} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900">取消</button>
             <button type="button" onClick={() => void execute()} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800">确认并建立</button>
@@ -304,7 +269,7 @@ export function PersonalSemanticIndexPanel({
         </div>
       ) : null}
 
-      {state === "executing" ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600" role="status">正在请求个人向量模型并写入索引…</p> : null}
+      {state === "executing" ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600" role="status">正在请求向量模型并写入索引…</p> : null}
       {state === "success" ? <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-xs text-emerald-800" role="status">语义索引已建立，共写入 {indexedEntryCount ?? 0} 个片段，现在可以使用个人语义搜索。</p> : null}
       {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</div> : null}
     </section>

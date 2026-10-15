@@ -16,12 +16,13 @@ import { registerEmailAccount } from "@/lib/local-registration-service";
 import { GRAPHIC_CAPTCHA_COOKIE, newCaptchaBrowserToken } from "@/lib/graphic-captcha-cookie";
 import { ACCESS_ACTOR_LOCK_NAMESPACE, lockActorAccess } from "@/lib/access-linearization";
 import { PATCH as patchProfile } from "@/app/api/profile/route";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 
 const enabled = process.env.PHONE_AUTH_POSTGRES_GATE === "1";
 const publicOrigin = "https://phone-auth.example.com";
 const publicHost = new URL(publicOrigin).host;
 const currentPassword = "EmailAuth_CurrentPassword_2026";
-const replacementPassword = "EmailAuth_ReplacementPassword_2026";
+const replacementPassword = "Abcd1234";
 type Purpose = "register" | "verify" | "password";
 
 function databaseUrl(name: string): string {
@@ -94,6 +95,9 @@ test("email authentication proofs, password protection, alias revalidation, and 
   const owner = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl("PHONE_AUTH_TEST_OWNER_URL") }) });
   const adminId = randomUUID();
   await owner.appUser.create({ data: { id: adminId, username: `email_admin_${adminId.slice(0, 8)}`, role: "admin" } });
+  await createSignupOfferFixture(owner, adminId);
+  assert.equal(await db.platformTokenGrant.count({ where: { userId: adminId, kind: "signup" } }), 0);
+  assert.equal(await db.accountEntitlementActivation.count({ where: { userId: adminId } }), 0);
   let sentCount = 0;
   const mail: EmailMailTransport = {
     send: async () => {
@@ -300,6 +304,16 @@ test("email authentication proofs, password protection, alias revalidation, and 
       const user = await db.appUser.findUniqueOrThrow({ where: { id: session.user.id } });
       assert.equal(user.email, email);
       assert.ok(user.emailVerifiedAt);
+      const activation = await db.accountEntitlementActivation.findUniqueOrThrow({ where: { userId_lifecycleKey: { userId: user.id, lifecycleKey: "initial_account_v1" } } });
+      assert.equal(activation.source, "localRegistration");
+      assert.equal(activation.decision, "granted");
+      assert.equal(activation.status, "granted");
+      const grant = await db.platformTokenGrant.findFirstOrThrow({ where: { userId: user.id, kind: "signup" } });
+      assert.equal(grant.amount, 500_000);
+      assert.equal(grant.eligibilitySource, "localRegistration");
+      assert.equal(await db.platformTokenGrant.count({ where: { userId: user.id, kind: "signup" } }), 1);
+      assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: user.id, reasonCode: "AI_SIGNUP_GRANT" } }), 1);
+      assert.equal(await db.accountEntitlementActivationAudit.count({ where: { userId: user.id } }), 1);
       const memberships = await db.workspaceMembership.findMany({ where: { userId: user.id, accessState: "confirmed" } });
       assert.equal(memberships.length, 1);
       assert.equal(memberships[0]?.role, "owner");
@@ -312,6 +326,8 @@ test("email authentication proofs, password protection, alias revalidation, and 
       assert.equal(JSON.stringify(challengeRow).includes(email), false);
       assert.equal(JSON.stringify(challengeRow).includes(challenge.code), false);
       const unproven = await owner.appUser.create({ data: { username: `email_unproven_${randomUUID().slice(0, 8)}`, role: "user" } });
+      assert.equal(await db.accountEntitlementActivation.count({ where: { userId: unproven.id } }), 0);
+      assert.equal(await db.platformTokenGrant.count({ where: { userId: unproven.id, kind: "signup" } }), 0);
       await assert.rejects(owner.appUser.update({ where: { id: unproven.id }, data: { email: `unproven-${randomUUID().slice(0, 8)}@example.test`, emailVerifiedAt: new Date() } }), (error: unknown) => postgresCode(error) === "23514" && postgresMessage(error).includes("EMAIL_IDENTITY_PROOF_REQUIRED"));
       assert.equal((await owner.appUser.findUniqueOrThrow({ where: { id: unproven.id } })).email, null);
       await assert.rejects(verifyEmailChallenge({ challengeId: challenge.challengeId, code: challenge.code, purpose: "register", email, browserToken: challenge.browserToken }, db), apiCode("EMAIL_AUTH_CODE_INVALID"));

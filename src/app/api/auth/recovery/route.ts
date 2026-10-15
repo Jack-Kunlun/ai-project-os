@@ -8,7 +8,7 @@ import { recoverAccountPassword } from "@/lib/account-security-service";
 
 const schema = z.object({
   phone: z.string().max(14), challengeId: z.string().uuid(),
-  code: z.string().regex(/^[0-9]{6}$/u), newPassword: z.string().min(12).max(128),
+  code: z.string().regex(/^[0-9]{6}$/u), newPassword: z.string().min(8).max(128),
 }).strict();
 
 export async function POST(request: Request) {

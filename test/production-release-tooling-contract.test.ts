@@ -225,6 +225,23 @@ test("public registration has a dedicated source limit in production and example
   }
 });
 
+test("SMS send has a forgiving edge flood limit and the release installer enforces it", async () => {
+  const { updater, nginxConfig } = await readContractFiles();
+  const example = await readFile(path.join(repositoryRoot, "deploy/nginx/ai-project-os.conf.example"), "utf8");
+
+  for (const config of [nginxConfig, example]) {
+    assert.match(config, /^limit_req_zone \$binary_remote_addr zone=ai_project_os_sms:10m rate=20r\/m;$/mu);
+    const smsLocation = config.match(/^    location = \/api\/auth\/sms\/send \{\n([\s\S]*?)^    \}/mu)?.[1] ?? "";
+    assert.match(smsLocation, /limit_req zone=ai_project_os_sms burst=20 nodelay;/u);
+    assert.match(smsLocation, /limit_req_status 429;/u);
+    assert.match(smsLocation, /client_max_body_size 2k;/u);
+    assert.match(smsLocation, /include \/etc\/nginx\/snippets\/ai-project-os-proxy\.conf;/u);
+  }
+
+  assert.ok(updater.includes("limit_req_zone $binary_remote_addr zone=ai_project_os_sms:10m rate=20r/m;"));
+  assert.match(updater, /location = \/api\/auth\/sms\/send[\s\S]*?limit_req zone=ai_project_os_sms burst=20 nodelay;/u);
+});
+
 test("updater backup helper contract accepts existing and future 0.6 app artifacts", async () => {
   const helper = await readFile(backupArtifactHelperPath, "utf8");
   assert.ok(helper.includes("pre-deploy-to-v0\\.6\\.0-dev\\.(?:6|7|8|9|[1-9][0-9]+)"));

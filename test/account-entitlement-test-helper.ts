@@ -8,7 +8,7 @@ export async function activateCanonicalSignupGrant(
   input: Readonly<{
     userId: string;
     actorId: string;
-    source?: "githubRegistration" | "oidcRegistration" | "oidcInvitationRegistration" | "localProvisioning";
+    source?: "githubRegistration" | "oidcRegistration" | "oidcInvitationRegistration" | "localProvisioning" | "localRegistration";
     now?: Date;
   }>,
 ) {

@@ -8,6 +8,7 @@ import type { SafeSessionUser } from "@/lib/auth";
 import { lockActorAccess } from "@/lib/access-linearization";
 import { createPasswordRecord, createPhoneSessionInTransaction, validateAccountPassword, type CreatedSession } from "@/lib/auth";
 import { createOrdinaryAccountInTransaction, normalizeLocalRegistrationUsername } from "@/lib/local-registration-service";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 import { reserveLocalRegistrationAttempt } from "@/lib/local-registration-abuse-budget";
 import { isLocalRegistrationEnabled, requireLocalRegistrationEnabled } from "@/lib/local-registration-config";
 import { phoneAuthSecret, loadActiveSmsConfig, lockSmsConfiguration, assertSmsConfigVersion } from "@/lib/phone-auth-config";
@@ -199,7 +200,15 @@ export async function registerPhoneAccount(input: { username: unknown; password:
     await assertPhoneAliasAvailable(tx, proof.phone);
     const userId = randomUUID();
     await consumePhoneChallenge(tx, proof, userId, now);
-    return createOrdinaryAccountInTransaction(tx, { id: userId, username, password, phoneE164: proof.phone }, now);
+    const session = await createOrdinaryAccountInTransaction(tx, { id: userId, username, password, phoneE164: proof.phone }, now);
+    await activateAccountEntitlements({
+      userId,
+      source: "localRegistration",
+      evidenceKind: "phone_registration",
+      evidenceRef: proof.id,
+      now,
+    }, tx);
+    return session;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -235,6 +244,14 @@ export async function loginWithSms(input: { phone: unknown; challengeId: string;
     const userId = randomUUID();
     await consumePhoneChallenge(tx, proof, userId, now);
     const username = `phone_${userId.replaceAll("-", "").slice(0, 20)}`;
-    return { session: await createOrdinaryAccountInTransaction(tx, { id: userId, username, phoneE164: proof.phone }, now), registered: true };
+    const session = await createOrdinaryAccountInTransaction(tx, { id: userId, username, phoneE164: proof.phone }, now);
+    await activateAccountEntitlements({
+      userId,
+      source: "localRegistration",
+      evidenceKind: "phone_login_registration",
+      evidenceRef: proof.id,
+      now,
+    }, tx);
+    return { session, registered: true };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }

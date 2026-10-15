@@ -198,6 +198,7 @@ test(
         "oidcRegistration",
         "oidcInvitationRegistration",
         "localProvisioning",
+        "localRegistration",
       ] as const;
       for (const source of registrationSources) {
         const sourceUser = await db.appUser.create({
@@ -209,12 +210,23 @@ test(
           actorId: actor.id,
           actorAccountAccessVersion: actor.accountAccessVersion,
           accountAccessVersion: sourceUser.accountAccessVersion,
-          evidenceKind: source === "githubRegistration" ? "github" : "oidc",
+          evidenceKind: source === "githubRegistration" ? "github" : source === "localRegistration" ? "verified-local-registration" : "oidc",
           evidenceRef: `${source}:${sourceUser.id}`,
           now: new Date(),
         }, db);
         assert.equal(sourceActivation.source, source);
         assert.equal(sourceActivation.decision, "granted");
+        const sourceReplay = await activateAccountEntitlements({
+          userId: sourceUser.id,
+          source,
+          actorId: actor.id,
+          actorAccountAccessVersion: actor.accountAccessVersion,
+          accountAccessVersion: sourceUser.accountAccessVersion,
+          evidenceKind: source === "githubRegistration" ? "github" : source === "localRegistration" ? "verified-local-registration" : "oidc",
+          evidenceRef: `${source}:${sourceUser.id}`,
+          now: sourceActivation.createdAt,
+        }, db);
+        assert.equal(sourceReplay.id, sourceActivation.id);
         assert.equal(await db.accountEntitlementActivation.count({ where: { userId: sourceUser.id } }), 1);
         assert.equal(await db.platformTokenGrant.count({ where: { userId: sourceUser.id, kind: "signup" } }), 1);
         assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: sourceUser.id, reasonCode: "AI_SIGNUP_GRANT" } }), 1);

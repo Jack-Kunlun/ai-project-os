@@ -82,6 +82,13 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
     gateEnv: "MCP_CLIENT_ACCEPTANCE_POSTGRES_GATE",
     setup: "migrate",
   });
+  assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "personal-knowledge-platform-semantic"), {
+    id: "personal-knowledge-platform-semantic",
+    file: "test/personal-knowledge-platform-semantic-postgres.test.ts",
+    database: "ai_project_os_personal_knowledge_platform_semantic_test",
+    gateEnv: "PERSONAL_KNOWLEDGE_SEMANTIC_POSTGRES_GATE",
+    setup: "principals",
+  });
 });
 
 test("PostgreSQL gate admin URL is restricted to the fixed disposable loopback target", () => {

@@ -5,6 +5,15 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 original_command=${SSH_ORIGINAL_COMMAND-}
 
+# Fixed 1.0.1 tooling status and one source-to-target release transition.
+if [[ "$original_command" == v101-tooling-status ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v101-deploy --status
+fi
+if [[ "$original_command" =~ ^deploy-v101\ ([0-9a-f]{40})\ (CONFIRM_V101_WITH_BACKUP_AND_FULL_CI)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v101-deploy \
+    deploy "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+fi
+
 # Reviewed email candidate and stable 1.0 path; never an arbitrary tag command.
 if [[ "$original_command" == v1-tooling-status ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-release-v1 --status

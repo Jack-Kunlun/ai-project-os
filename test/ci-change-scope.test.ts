@@ -18,7 +18,7 @@ const healthy = {
 };
 
 function sourceGit({ annotated = true, ancestor = true } = {}) {
-  return (args) => {
+  return (args: string[]) => {
     if (args[0] === "cat-file") {
       return annotated ? "tag" : "commit";
     }
@@ -37,8 +37,8 @@ test("production version must be healthy stable semver", () => {
 });
 
 test("scope resolves the annotated production tag commit and requires it to be an ancestor", () => {
-  const calls = [];
-  const base = resolveProductionBase(healthy, target, (args) => {
+  const calls: string[][] = [];
+  const base = resolveProductionBase(healthy, target, (args: string[]) => {
     calls.push(args);
     return sourceGit()(args);
   });
@@ -53,12 +53,12 @@ test("scope resolves the annotated production tag commit and requires it to be a
 });
 
 test("risk output follows the pinned classifier for the cumulative source-to-target range", () => {
-  let classified;
+  let classified: [string, string] | undefined;
   const result = classifyProductionChange({
     payload: healthy,
     targetRevision: target,
     runGit: sourceGit(),
-    classify: (base, revision) => {
+    classify: (base: string, revision: string) => {
       classified = [base, revision];
       return { risk: "medium", databaseRequired: false, browserRequired: true, coverageRequired: true };
     },

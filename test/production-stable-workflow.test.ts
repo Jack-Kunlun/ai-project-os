@@ -37,7 +37,7 @@ const successfulMainRun = {
 const sourceJob = { name: "Verify source and client", conclusion: "success" };
 const dbJob = { name: "Verify database and release candidate", conclusion: "success" };
 const browserJob = { name: "Verify browser and release client", conclusion: "success" };
-const attestation = (risk, sourceBase = base) => ({
+const attestation = (risk: "low" | "medium" | "high", sourceBase = base) => ({
   name: releaseAttestationJobName(risk, sourceBase),
   conclusion: "success",
 });

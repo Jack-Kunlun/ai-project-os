@@ -147,7 +147,7 @@ export function ServerResourcesPanel() {
           </div>
           <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 px-4 py-4 sm:grid-cols-2">
             <div>
-              <div className="flex flex-wrap items-center gap-2"><p className="text-xs font-semibold text-slate-500">Docker 容器内存</p>{snapshot.containerMemory.status === "available" ? <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${containerLevel ? toneClasses[containerLevel].badge : "bg-slate-100 text-slate-600"}`}>{snapshot.containerMemory.limitBytes === null ? "未设置上限" : containerLevel === "danger" ? "告警" : containerLevel === "warning" ? "注意" : "正常"}</span> : null}</div>
+              <div className="flex flex-wrap items-center gap-2"><p className="text-xs font-semibold text-slate-500">Docker 容器内存</p>{snapshot.containerMemory.status === "available" ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${containerLevel ? toneClasses[containerLevel].badge : "bg-slate-100 text-slate-600"}`}>{snapshot.containerMemory.limitBytes === null ? "未设置上限" : containerLevel === "danger" ? "告警" : containerLevel === "warning" ? "注意" : "正常"}</span> : null}</div>
               {snapshot.containerMemory.status === "available"
                 ? <p className="mt-1 text-sm font-semibold text-slate-800">当前 {formatBytes(snapshot.containerMemory.currentBytes)} / {snapshot.containerMemory.limitBytes === null ? "未设置上限" : `上限 ${formatBytes(snapshot.containerMemory.limitBytes)}${snapshot.containerMemory.usedPercent === null ? " · 占用率不可计算" : ` · ${snapshot.containerMemory.usedPercent.toFixed(1)}%`}`}</p>
                 : <p className="mt-1 text-xs text-slate-500">不可读取：{reasonText(snapshot.containerMemory.unavailableReason)}</p>}

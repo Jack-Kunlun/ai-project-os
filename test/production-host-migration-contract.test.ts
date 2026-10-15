@@ -120,7 +120,7 @@ test("host bootstrap pins sensitive tooling and installs root-owned runtime copi
   assert.match(bootstrap, /install -o root -g root -m 0755/u);
 });
 
-test("portable backup validator accepts only the exact approved production prerelease", () => {
+test("portable backup validator accepts approved historical releases and canonical stable releases", () => {
   const code = `
 import runpy
 import sys
@@ -140,8 +140,14 @@ raise SystemExit(0 if accepted else 1)
   assert.notEqual(previousRelease.status, 0);
   const unapproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.2.0-dev.1.Abc123"]);
   assert.notEqual(unapproved.status, 0);
-  const stable = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v1.0.0.Abc123"]);
-  assert.notEqual(stable.status, 0);
+  for (const version of ["1.0.0", "1.0.3", "2.0.0"]) {
+    const stable = run("python3", ["-c", code, helperPath, `20260902T120000Z-pre-deploy-to-v${version}.Abc123`]);
+    assert.equal(stable.status, 0, stable.stderr);
+  }
+  for (const version of ["0.9.0", "01.0.0", "1.00.0", "1.0.0-rc.1"]) {
+    const invalid = run("python3", ["-c", code, helperPath, `20260902T120000Z-pre-deploy-to-v${version}.Abc123`]);
+    assert.notEqual(invalid.status, 0, version);
+  }
 });
 
 test("portable backup validator accepts the exact v2 layout and rejects tampering", async (context) => {

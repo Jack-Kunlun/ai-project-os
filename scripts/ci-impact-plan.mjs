@@ -76,6 +76,7 @@ function postgresGateFiles(repository) {
 }
 
 function testGateForPath(path, gatesByFile) {
+  if (gatesByFile.has(path)) return gatesByFile.get(path);
   const file = path.replace(/^test\//u, "");
   if (gatesByFile.has(file)) return gatesByFile.get(file);
   if (/^test\/(?:phone-auth-postgres|sms-provider-admin-postgres|sms-provider-adapters-postgres|account-closure-postgres|graphic-captcha-postgres|account-security-postgres|email-auth-postgres)\.test\.ts$/u.test(path)) {

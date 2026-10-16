@@ -22,6 +22,10 @@ test("impact planning selects cumulative PostgreSQL gates and client delivery ch
   assert.equal(selected.candidate, true);
   assert.equal(selected.phoneAuth, false);
   assert.equal(selected.oid10, false);
+  const registryPaths = new Map([["test/personal-knowledge-platform-semantic-postgres.test.ts", "personal-knowledge-platform-semantic"]]);
+  assert.equal(planCiImpact(["test/personal-knowledge-platform-semantic-postgres.test.ts"], {
+    gatesByFile: registryPaths,
+  }).gateFilter, "personal-knowledge-platform-semantic");
 });
 
 test("impact planning treats release infrastructure as image checks without PostgreSQL gates", () => {

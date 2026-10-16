@@ -24,6 +24,8 @@ ENV = Path('/etc/ai-project-os/production.env')
 OVERRIDE = Path('/etc/ai-project-os/compose.operations.yaml')
 EMAIL_ENV = Path('/etc/ai-project-os/email-auth.env')
 RESULT = Path('/var/lib/ai-project-os/last-deployment')
+RECOVERY_RECORD = Path('/var/lib/ai-project-os/recovery-v1.0.4.json')
+RECOVERY_RECEIPT_ARCHIVE = Path('/var/lib/ai-project-os/last-deployment.pre-v1.0.4-recovery')
 STATE = Path('/etc/ai-project-os/release-tooling-stable.json')
 NGINX = Path('/etc/nginx/sites-available/ai-project-os.conf')
 NGINX_ENABLED = Path('/etc/nginx/sites-enabled/ai-project-os.conf')
@@ -38,9 +40,27 @@ ARTIFACT_SOURCE = 'deploy/production/ai_project_os_backup_artifact.py'
 DEPLOYER_SOURCE = 'deploy/production/ai-project-os-release-stable.py'
 GATEWAY_SOURCE = 'deploy/production/ai-project-os-actions-gateway'
 SUDOERS_SOURCE = 'deploy/production/ai-project-os-deploy.sudoers'
+TOOLING_SOURCE_PATHS = {
+    'deployer': DEPLOYER_SOURCE,
+    'backup': BACKUP_SOURCE,
+    'artifact_helper': ARTIFACT_SOURCE,
+    'sudoers': SUDOERS_SOURCE,
+    'gateway': GATEWAY_SOURCE,
+}
 HELPER_SOURCE = 'deploy/production/ai-project-os-v074-deploy.py'
 INITIAL_SOURCE_TAG = 'v1.0.0'
 INITIAL_SOURCE_REVISION = 'f57d050fffa445a6ef9eb3d7e692e6df06fac98d'
+RECOVERY_SOURCE_TAG = 'v1.0.4'
+RECOVERY_SOURCE_REVISION = 'b56db120a534fadf1fcf36beabcbe8c366903e45'
+RECOVERY_POSTGRES_ID = '13e7c8f84a14f077b8d61ed7f6b5686c41fba0b78fff6dd6bdeed442fbfb912f'
+RECOVERY_WRITERS = {
+    'app': ('cce1b7aba7b9fe7b0064ec28785458bc988f5c44681f087eb2d95f1fc6841d9b',
+            'sha256:0e96e0a0c4141ec287dd0b8561c5a21ab1e4de483992a5c63b2966da78ba7f0d'),
+    'worker': ('81d864291e82effac25500103ba45a34b1a64636a2f4c64d4089af60064287f8',
+               'sha256:005d4a78619039791012077c47907d537d0f1cfa6323382ee679d9aff27bd8e2'),
+    'git-worker': ('bfe7d6307bb03044cff34681bfa0ace3709c4edbb850850a88652b84983bb518',
+                   'sha256:d6843397e91f45d7f65b4053ebf4fb5ec676ff6b9bc6b03d3911df7b1d0c79d4'),
+}
 MINIMUM_MIGRATIONS = 143
 HELPER_SHA256 = '01c1f299098da8e4e9316e92d57e42bcf95e89eeee8424e4fe51395d6cc2d95e'
 IMAGE = 'pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff'
@@ -834,15 +854,13 @@ def readonly_database_snapshot(postgres_id):
     return db_query(postgres_id, sql)
 
 
-def parse_record(path):
+def parse_record_text(text):
+    lines = text.splitlines()
     values = {}
-    status_seen = False
-    for line in Path(path).read_text(encoding='utf-8').splitlines():
+    if lines and lines[0] in ('DEPLOY_OK', 'RECOVERY_OK'):
+        values['status'] = lines.pop(0)
+    for line in lines:
         if not line:
-            continue
-        if line == 'DEPLOY_OK' and not status_seen and not values:
-            values['status'] = 'DEPLOY_OK'
-            status_seen = True
             continue
         require('=' in line, 'RECORD_INVALID')
         key, value = line.split('=', 1)
@@ -850,6 +868,423 @@ def parse_record(path):
                 'RECORD_INVALID')
         values[key] = value
     return values
+
+
+def parse_record(path):
+    return parse_record_text(Path(path).read_text(encoding='utf-8'))
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, 'RECOVERY_JSON_DUPLICATE_KEY')
+        result[key] = value
+    return result
+
+
+def _read_trusted_host_file(path, mode, max_bytes, code):
+    path = Path(path)
+    HELPER.trusted(path.parent)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, 'O_CLOEXEC', 0))
+    except FileNotFoundError:
+        raise
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == 0
+                and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == mode
+                and 0 < info.st_size <= max_bytes, code)
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(fd, min(65536, max_bytes + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            require(total <= max_bytes, code)
+        require(total == info.st_size, code)
+        return b''.join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _recovery_health_shape(value):
+    return (isinstance(value, dict) and value.get('status') == 'ok'
+            and value.get('version') == '1.0.4' and value.get('database') == 'up'
+            and isinstance(value.get('worker'), dict)
+            and value['worker'].get('status') == 'up'
+            and value['worker'].get('consecutiveFailures') == 0)
+
+
+def validate_v104_recovery_record(record):
+    expected_keys = {'kind', 'tag', 'revision', 'migrationCount', 'postgresId', 'writers',
+                     'nginxMode', 'configHashes', 'health', 'previousDeploymentReceiptUnmodified',
+                     'workflowPublicationCompleted', 'completedAt'}
+    require(isinstance(record, dict) and set(record) == expected_keys
+            and record.get('kind') == 'V104_RUNTIME_RECOVERY_OK'
+            and record.get('tag') == RECOVERY_SOURCE_TAG
+            and record.get('revision') == RECOVERY_SOURCE_REVISION
+            and type(record.get('migrationCount')) is int and record['migrationCount'] == 146
+            and record.get('postgresId') == RECOVERY_POSTGRES_ID
+            and record.get('nginxMode') == '0644'
+            and record.get('previousDeploymentReceiptUnmodified') is True
+            and record.get('workflowPublicationCompleted') is False
+            and isinstance(record.get('completedAt'), str)
+            and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', record['completedAt']) is not None,
+            'RECOVERY_RECORD_INVALID')
+    expected_writers = {
+        service: {'id': identity, 'imageId': image}
+        for service, (identity, image) in RECOVERY_WRITERS.items()
+    }
+    require(record.get('writers') == expected_writers, 'RECOVERY_RECORD_WRITERS_INVALID')
+    hashes = record.get('configHashes')
+    require(isinstance(hashes, dict) and set(hashes) == set(CONFIG_PATHS)
+            and all(isinstance(value, str) and HEX64.fullmatch(value) is not None
+                    for value in hashes.values()), 'RECOVERY_RECORD_CONFIG_HASHES_INVALID')
+    health = record.get('health')
+    require(isinstance(health, dict) and set(health) == {'local', 'public'}
+            and _recovery_health_shape(health['local'])
+            and _recovery_health_shape(health['public']), 'RECOVERY_RECORD_HEALTH_INVALID')
+    return record
+
+
+def read_v104_recovery_record():
+    raw = _read_trusted_host_file(RECOVERY_RECORD, 0o600, 256 * 1024,
+                                  'RECOVERY_RECORD_FILE_INVALID')
+    try:
+        record = json.loads(raw.decode('utf-8'), object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        require(False, 'RECOVERY_RECORD_JSON_INVALID')
+    validate_v104_recovery_record(record)
+    return record, sha256(raw)
+
+
+def validate_runtime_snapshot_shape(snapshot):
+    count_keys = {'AppUser', 'PersonalKnowledgeDocument', 'PersonalKnowledgeSemanticChallenge',
+                  'PersonalKnowledgeSemanticAudit', 'PlatformTokenGrant', 'PlatformTokenReservation',
+                  'PlatformTokenLedgerEntry', 'AccountEntitlementActivation'}
+    require(isinstance(snapshot, dict) and set(snapshot) == {'counts', 'activeOffers', 'activeEmbeddingRoutes'}
+            and isinstance(snapshot.get('counts'), dict)
+            and set(snapshot['counts']) == count_keys
+            and all(type(value) is int and value >= 0 for value in snapshot['counts'].values())
+            and isinstance(snapshot.get('activeOffers'), list)
+            and all(isinstance(item, dict) for item in snapshot['activeOffers'])
+            and isinstance(snapshot.get('activeEmbeddingRoutes'), list)
+            and all(isinstance(item, dict) for item in snapshot['activeEmbeddingRoutes']),
+            'RECOVERY_RUNTIME_SNAPSHOT_INVALID')
+    return snapshot
+
+
+def _strict_json_value(value, code):
+    try:
+        return json.loads(value, object_pairs_hook=_unique_json_object)
+    except (TypeError, json.JSONDecodeError, ValueError):
+        require(False, code)
+
+
+def _previous_receipt_is_v100(data):
+    try:
+        result = parse_record_text(data.decode('utf-8'))
+    except UnicodeDecodeError:
+        require(False, 'RECOVERY_PREVIOUS_RECEIPT_INVALID')
+    require(result.get('status') == 'DEPLOY_OK'
+            and result.get('tag') == INITIAL_SOURCE_TAG
+            and result.get('revision') == INITIAL_SOURCE_REVISION
+            and 'release_protocol' not in result,
+            'RECOVERY_PREVIOUS_RECEIPT_INVALID')
+    return result
+
+
+def find_v104_recovery_backup(current_email_bytes):
+    backup_root = Path('/var/backups/ai-project-os')
+    HELPER.trusted(backup_root)
+    pattern = backup_name_pattern(RECOVERY_SOURCE_TAG)
+    candidates = [entry for entry in backup_root.iterdir() if pattern.fullmatch(entry.name)]
+    require(len(candidates) == 1, 'RECOVERY_BACKUP_AMBIGUOUS')
+    path = candidates[0]
+    info = path.lstat()
+    require(stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode),
+            'RECOVERY_BACKUP_DIRECTORY_INVALID')
+    marker = parse_record(path / '.cos-upload-verified')
+    require(set(marker) == {'status', 'archive_object', 'manifest_object',
+                            'latest_manifest_object', 'archive_sha256'},
+            'RECOVERY_BACKUP_MARKER_INVALID')
+    line = ('BACKUP_OK reason=pre-deploy-to-v1.0.4 retention_removed=0 source_quiesced=true'
+            + ' source=' + str(path)
+            + ' object=' + marker['archive_object']
+            + ' verified_manifest=' + marker['manifest_object']
+            + ' manifest=' + marker['latest_manifest_object']
+            + ' sha256=' + marker['archive_sha256'])
+    backup = verify_backup_output(line, RECOVERY_SOURCE_TAG)
+    validate_local_backup(backup, current_email_bytes, RECOVERY_SOURCE_TAG, '1.0.0')
+    return backup
+
+
+def validate_v104_recovery_source_receipt(result, recovery_record, recovery_digest,
+                                         backup, previous_receipt_bytes, manifest):
+    expected_keys = {'status', 'tag', 'revision', 'source_tag', 'source_revision', 'release_protocol',
+                     'migration_count', 'migration_manifest_sha256', 'recovery_record_sha256',
+                     'recovery_completed_at', 'recovery_backup_name', 'recovery_backup_object',
+                     'recovery_backup_verified_manifest', 'recovery_backup_sha256',
+                     'previous_receipt_sha256', 'current_runtime_config_hashes',
+                     'current_runtime_snapshot', 'workflow_publication_completed', 'completed_at'}
+    require(isinstance(result, dict) and set(result) == expected_keys
+            and result.get('status') == 'RECOVERY_OK'
+            and result.get('tag') == RECOVERY_SOURCE_TAG
+            and result.get('revision') == RECOVERY_SOURCE_REVISION
+            and result.get('source_tag') == INITIAL_SOURCE_TAG
+            and result.get('source_revision') == INITIAL_SOURCE_REVISION
+            and result.get('release_protocol') == 'stable-v1-recovery'
+            and result.get('migration_count') == '146'
+            and result.get('migration_manifest_sha256') == migration_manifest_sha256(manifest)
+            and result.get('recovery_record_sha256') == recovery_digest
+            and result.get('recovery_completed_at') == recovery_record['completedAt']
+            and result.get('recovery_backup_name') == backup['name']
+            and result.get('recovery_backup_object') == backup['object']
+            and result.get('recovery_backup_verified_manifest') == backup['verified_manifest']
+            and result.get('recovery_backup_sha256') == backup['sha256']
+            and result.get('previous_receipt_sha256') == sha256(previous_receipt_bytes)
+            and result.get('workflow_publication_completed') == 'false'
+            and isinstance(result.get('completed_at'), str)
+            and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', result['completed_at']) is not None,
+            'RECOVERY_SOURCE_RECEIPT_INVALID')
+    _previous_receipt_is_v100(previous_receipt_bytes)
+    config_hashes_value = _strict_json_value(result['current_runtime_config_hashes'],
+                                             'RECOVERY_SOURCE_CONFIG_HASHES_INVALID')
+    require(config_hashes_value == recovery_record['configHashes'],
+            'RECOVERY_SOURCE_CONFIG_HASHES_INVALID')
+    snapshot = validate_runtime_snapshot_shape(
+        _strict_json_value(result['current_runtime_snapshot'], 'RECOVERY_RUNTIME_SNAPSHOT_INVALID'))
+    validate_default_signup_policy(snapshot)
+    return snapshot
+
+
+def _recovery_source_receipt_text(recovery_record, recovery_digest, backup,
+                                  previous_receipt_bytes, manifest, config_hashes_value,
+                                  current_snapshot):
+    record = {
+        'tag': RECOVERY_SOURCE_TAG,
+        'revision': RECOVERY_SOURCE_REVISION,
+        'source_tag': INITIAL_SOURCE_TAG,
+        'source_revision': INITIAL_SOURCE_REVISION,
+        'release_protocol': 'stable-v1-recovery',
+        'migration_count': '146',
+        'migration_manifest_sha256': migration_manifest_sha256(manifest),
+        'recovery_record_sha256': recovery_digest,
+        'recovery_completed_at': recovery_record['completedAt'],
+        'recovery_backup_name': backup['name'],
+        'recovery_backup_object': backup['object'],
+        'recovery_backup_verified_manifest': backup['verified_manifest'],
+        'recovery_backup_sha256': backup['sha256'],
+        'previous_receipt_sha256': sha256(previous_receipt_bytes),
+        'current_runtime_config_hashes': config_hashes_value,
+        'current_runtime_snapshot': current_snapshot,
+        'workflow_publication_completed': False,
+        'completed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    }
+    plain_keys = {'tag', 'revision', 'source_tag', 'source_revision', 'release_protocol',
+                  'migration_count', 'migration_manifest_sha256', 'recovery_record_sha256',
+                  'recovery_completed_at', 'recovery_backup_name', 'recovery_backup_object',
+                  'recovery_backup_verified_manifest', 'recovery_backup_sha256',
+                  'previous_receipt_sha256', 'completed_at'}
+    return ('RECOVERY_OK\n' + ''.join(
+        key + '=' + (value if key in plain_keys else
+                     json.dumps(value, separators=(',', ':'), sort_keys=True)) + '\n'
+        for key, value in record.items())).encode('utf-8')
+
+
+def _archive_previous_v100_receipt(previous_receipt_bytes):
+    _previous_receipt_is_v100(previous_receipt_bytes)
+    try:
+        archived = _read_trusted_host_file(RECOVERY_RECEIPT_ARCHIVE, 0o600, 256 * 1024,
+                                           'RECOVERY_RECEIPT_ARCHIVE_INVALID')
+    except FileNotFoundError:
+        atomic_install(RECOVERY_RECEIPT_ARCHIVE, previous_receipt_bytes, 0o600)
+        archived = _read_trusted_host_file(RECOVERY_RECEIPT_ARCHIVE, 0o600, 256 * 1024,
+                                           'RECOVERY_RECEIPT_ARCHIVE_INVALID')
+    require(archived == previous_receipt_bytes, 'RECOVERY_RECEIPT_ARCHIVE_CONFLICT')
+    return archived
+
+
+def validate_v104_recovery_runtime_evidence(record, manifest, postgres, writers,
+                                            config_hashes_value, nginx_bytes, expected_nginx_bytes,
+                                            local_health, public_health, backup):
+    validate_v104_recovery_record(record)
+    require(len(manifest) == 146, 'RECOVERY_MIGRATION_MANIFEST_INVALID')
+    validate_manifest_delta(manifest, manifest)
+    require(postgres.get('Id') == RECOVERY_POSTGRES_ID
+            and postgres.get('Config', {}).get('Image') == IMAGE
+            and postgres.get('State', {}).get('Running') is True
+            and postgres.get('State', {}).get('Paused') is not True
+            and postgres.get('State', {}).get('Health', {}).get('Status') == 'healthy',
+            'RECOVERY_POSTGRES_INVALID')
+    bindings = postgres.get('NetworkSettings', {}).get('Ports', {}).get('5432/tcp')
+    require(isinstance(bindings, list) and len(bindings) == 1
+            and bindings[0].get('HostIp') == '127.0.0.1', 'DATABASE_NOT_ISOLATED')
+    require(len(writers) == 3, 'RECOVERY_WRITER_INVALID')
+    expected_writer_record = {}
+    for service, writer in zip(('app', 'worker', 'git-worker'), writers):
+        identifier, image = RECOVERY_WRITERS[service]
+        labels = writer.get('Config', {}).get('Labels') or {}
+        require(writer.get('Id') == identifier and writer.get('Image') == image
+                and labels.get('com.docker.compose.project') == PROJECT
+                and labels.get('com.docker.compose.service') == service
+                and labels.get('org.opencontainers.image.version') == '1.0.4'
+                and writer.get('State', {}).get('Running') is True
+                and writer.get('State', {}).get('Paused') is not True
+                and writer.get('State', {}).get('Health', {}).get('Status') == 'healthy',
+                'RECOVERY_WRITER_INVALID')
+        expected_writer_record[service] = {'id': identifier, 'imageId': image}
+    require(record['writers'] == expected_writer_record
+            and record['postgresId'] == postgres['Id'], 'RECOVERY_RECORD_RUNTIME_MISMATCH')
+    require(config_hashes_value == record['configHashes'], 'RECOVERY_CONFIG_HASHES_CHANGED')
+    require(nginx_bytes == expected_nginx_bytes and record['nginxMode'] == '0644',
+            'RECOVERY_NGINX_BYTES_INVALID')
+    require(_recovery_health_shape(local_health) and _recovery_health_shape(public_health),
+            'RECOVERY_HEALTH_INVALID')
+    require(isinstance(backup, dict)
+            and backup_name_pattern(RECOVERY_SOURCE_TAG).fullmatch(backup.get('name', '')) is not None
+            and isinstance(backup.get('path'), Path)
+            and backup['path'].parent == Path('/var/backups/ai-project-os')
+            and HEX64.fullmatch(backup.get('sha256', '')) is not None,
+            'RECOVERY_BACKUP_INVALID')
+    return True
+
+
+def verify_v104_recovery_runtime():
+    recovery_record, recovery_digest = read_v104_recovery_record()
+    HELPER.trusted(ROOT); HELPER.trusted(ROOT / '.git')
+    require(git(['remote', 'get-url', 'origin']) == REMOTE
+            and git(['status', '--porcelain', '--untracked-files=all']) == '',
+            'RECOVERY_CHECKOUT_INVALID')
+    require(git(['rev-parse', 'HEAD']) == RECOVERY_SOURCE_REVISION,
+            'RECOVERY_CHECKOUT_REVISION_INVALID')
+    require(git(['cat-file', '-t', 'refs/tags/' + RECOVERY_SOURCE_TAG]) == 'tag'
+            and git(['rev-parse', 'refs/tags/' + RECOVERY_SOURCE_TAG + '^{}']) == RECOVERY_SOURCE_REVISION,
+            'RECOVERY_SOURCE_TAG_INVALID')
+    package = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))
+    require(package.get('version') == '1.0.4', 'RECOVERY_PACKAGE_VERSION_INVALID')
+    env = env_values()
+    hashes = config_hashes()
+    require(hashes == recovery_record['configHashes'], 'RECOVERY_CONFIG_HASHES_CHANGED')
+    nginx_bytes = NGINX.read_bytes()
+    require(nginx_bytes == git_blob(RECOVERY_SOURCE_REVISION,
+                                    'deploy/production/nginx/ai-project-os.conf'),
+            'RECOVERY_NGINX_BYTES_INVALID')
+    enabled_info = NGINX_ENABLED.lstat()
+    require(stat.S_ISLNK(enabled_info.st_mode) and enabled_info.st_uid == enabled_info.st_gid == 0
+            and NGINX_ENABLED.resolve() == NGINX, 'NGINX_ENABLED_PATH_INVALID')
+    HELPER.run(['systemctl', 'is-active', '--quiet', 'nginx'])
+    postgres = container('postgres')
+    require(postgres['Id'] == RECOVERY_POSTGRES_ID
+            and postgres['Config'].get('Image') == IMAGE
+            and postgres['State'].get('Running') and not postgres['State'].get('Paused')
+            and postgres['State'].get('Health', {}).get('Status') == 'healthy',
+            'RECOVERY_POSTGRES_INVALID')
+    bindings = postgres['NetworkSettings']['Ports'].get('5432/tcp')
+    require(isinstance(bindings, list) and len(bindings) == 1
+            and bindings[0]['HostIp'] == '127.0.0.1', 'DATABASE_NOT_ISOLATED')
+    writers = [container(service) for service in ('app', 'worker', 'git-worker')]
+    for service, writer in zip(('app', 'worker', 'git-worker'), writers):
+        identifier, image = RECOVERY_WRITERS[service]
+        labels = writer['Config'].get('Labels') or {}
+        require(writer['Id'] == identifier and writer['Image'] == image
+                and labels.get('com.docker.compose.project') == PROJECT
+                and labels.get('com.docker.compose.service') == service
+                and labels.get('org.opencontainers.image.version') == '1.0.4'
+                and writer['State'].get('Running') and not writer['State'].get('Paused')
+                and writer['State'].get('Health', {}).get('Status') == 'healthy',
+                'RECOVERY_WRITER_INVALID')
+    manifest = source_manifest()
+    require(len(manifest) == 146 and git_manifest(RECOVERY_SOURCE_REVISION) == manifest,
+            'RECOVERY_MIGRATION_MANIFEST_INVALID')
+    migration_ledger(RECOVERY_POSTGRES_ID, manifest)
+    snapshot = readonly_database_snapshot(RECOVERY_POSTGRES_ID)
+    validate_runtime_snapshot_shape(snapshot)
+    validate_default_signup_policy(snapshot)
+    local_health = HELPER.healthy('1.0.4')
+    public_health = HELPER.healthy('1.0.4', public=True)
+    require(_recovery_health_shape(local_health) and _recovery_health_shape(public_health),
+            'RECOVERY_HEALTH_INVALID')
+    backup = find_v104_recovery_backup(EMAIL_ENV.read_bytes())
+    validate_v104_recovery_runtime_evidence(
+        recovery_record, manifest, postgres, writers, hashes, nginx_bytes,
+        git_blob(RECOVERY_SOURCE_REVISION, 'deploy/production/nginx/ai-project-os.conf'),
+        local_health, public_health, backup)
+    return {
+        'recovery_record': recovery_record,
+        'recovery_digest': recovery_digest,
+        'backup': backup,
+        'manifest': manifest,
+        'config_hashes': hashes,
+        'database_snapshot': snapshot,
+        'postgres_id': postgres['Id'],
+        'writers': writers,
+        'writer_ids': {service: writer['Id'] for service, writer in zip(('app', 'worker', 'git-worker'), writers)},
+        'writer_images': {service: writer['Image'] for service, writer in zip(('app', 'worker', 'git-worker'), writers)},
+        'local_health': local_health,
+        'public_health': public_health,
+        'env': env,
+        'nginx_before': nginx_bytes,
+    }
+
+
+def v104_recovery_source_runtime_state(result):
+    runtime = verify_v104_recovery_runtime()
+    try:
+        previous_receipt_bytes = _read_trusted_host_file(
+            RECOVERY_RECEIPT_ARCHIVE, 0o600, 256 * 1024, 'RECOVERY_RECEIPT_ARCHIVE_INVALID')
+    except FileNotFoundError:
+        require(False, 'RECOVERY_RECEIPT_ARCHIVE_MISSING')
+    _previous_receipt_is_v100(previous_receipt_bytes)
+    validate_v104_recovery_source_receipt(
+        result, runtime['recovery_record'], runtime['recovery_digest'], runtime['backup'],
+        previous_receipt_bytes, runtime['manifest'])
+    return {
+        'tag': RECOVERY_SOURCE_TAG,
+        'revision': RECOVERY_SOURCE_REVISION,
+        'version': '1.0.4',
+        'receipt': result,
+        'postgres_id': runtime['postgres_id'],
+        'writers': runtime['writers'],
+        'writer_ids': runtime['writer_ids'],
+        'writer_images': runtime['writer_images'],
+        'source_manifest': runtime['manifest'],
+        'config_hashes': runtime['config_hashes'],
+        'database_snapshot': runtime['database_snapshot'],
+        'local_health': runtime['local_health'],
+        'public_health': runtime['public_health'],
+        'env': runtime['env'],
+        'nginx_before': runtime['nginx_before'],
+        'source_tag': RECOVERY_SOURCE_TAG,
+        'source_revision': RECOVERY_SOURCE_REVISION,
+    }
+
+
+def reconcile_v104_recovery_receipt(previous_receipt_bytes):
+    _previous_receipt_is_v100(previous_receipt_bytes)
+    current_receipt_bytes = _read_trusted_host_file(RESULT, 0o600, 256 * 1024,
+                                                   'RECOVERY_CURRENT_RECEIPT_INVALID')
+    require(current_receipt_bytes == previous_receipt_bytes,
+            'RECOVERY_CURRENT_RECEIPT_CHANGED')
+    runtime = verify_v104_recovery_runtime()
+    receipt_bytes = _recovery_source_receipt_text(
+        runtime['recovery_record'], runtime['recovery_digest'], runtime['backup'],
+        previous_receipt_bytes, runtime['manifest'], runtime['config_hashes'],
+        runtime['database_snapshot'])
+    try:
+        receipt_text = receipt_bytes.decode('utf-8')
+        typed_receipt = parse_record_text(receipt_text)
+    except UnicodeDecodeError:
+        require(False, 'RECOVERY_SOURCE_RECEIPT_INVALID')
+    _archive_previous_v100_receipt(previous_receipt_bytes)
+    atomic_install(RESULT, receipt_bytes, 0o600)
+    try:
+        return v104_recovery_source_runtime_state(typed_receipt)
+    except BaseException:
+        atomic_install(RESULT, previous_receipt_bytes, 0o600)
+        raise
 
 
 def validate_source_restore_receipt(result, manifest):
@@ -882,6 +1317,9 @@ def validate_source_restore_receipt(result, manifest):
 def source_runtime_state(require_checkout=True):
     HELPER.trusted(RESULT, 0o600)
     result = parse_record(RESULT)
+    if result.get('status') == 'RECOVERY_OK':
+        require(require_checkout, 'RECOVERY_SOURCE_CHECKOUT_REQUIRED')
+        return v104_recovery_source_runtime_state(result)
     source_tag = result.get('tag', '')
     source_revision = result.get('revision', '')
     source_version = version_text(source_tag)
@@ -1405,7 +1843,7 @@ class HostDeployment:
     def install_and_test_target_nginx(self):
         candidate = self.target_files['nginx']
         self.nginx_replaced = True
-        HELPER.atomic_write(NGINX, candidate, 0o644)
+        atomic_install(NGINX, candidate, 0o644)
         HELPER.run(['nginx', '-t'])
 
     def migrate(self, images):
@@ -1517,7 +1955,7 @@ class HostDeployment:
             failures.append('checkout')
         try:
             if self.nginx_replaced:
-                HELPER.atomic_write(NGINX, source['nginx_before'], 0o644)
+                atomic_install(NGINX, source['nginx_before'], 0o644)
                 HELPER.run(['nginx', '-t'])
         except BaseException:
             failures.append('nginx-config')
@@ -1733,28 +2171,139 @@ def validate_state_file():
     return value
 
 
+def validate_recovery_tooling_state_source(state, revision):
+    require(state.get('toolingRevision') == revision
+            and set(state.get('files', {})) == set(TOOLING_SOURCE_PATHS),
+            'RECOVERY_INSTALLED_TOOLING_SOURCE_INVALID')
+    for name, source_path in TOOLING_SOURCE_PATHS.items():
+        require(state['files'][name] == sha256(git_blob(revision, source_path)),
+                'RECOVERY_INSTALLED_TOOLING_SOURCE_INVALID')
+
+
+def validate_recovery_bootstrap_state(target_revision, target_files):
+    value = json.loads(_read_trusted_host_file(
+        STATE, 0o600, 256 * 1024, 'RECOVERY_TOOLING_STATE_INVALID'),
+        object_pairs_hook=_unique_json_object)
+    require(isinstance(value, dict)
+            and set(value) == {'formatVersion', 'toolingRevision', 'files'}
+            and value.get('formatVersion') == 1
+            and isinstance(value.get('files'), dict)
+            and value.get('toolingRevision') in (RECOVERY_SOURCE_REVISION, target_revision),
+            'RECOVERY_TOOLING_STATE_INVALID')
+    validate_recovery_tooling_state_source(value, value['toolingRevision'])
+    paths = {'deployer': (DEPLOYER, 0o700), 'backup': (BACKUP, 0o755),
+             'artifact_helper': (ARTIFACT_HELPER, 0o755), 'sudoers': (SUDOERS, 0o440),
+             'gateway': (GATEWAY, 0o755)}
+    consistent = True
+    for name, (path, mode) in paths.items():
+        current = _read_trusted_host_file(path, mode, 256 * 1024,
+                                          'RECOVERY_INSTALLED_TOOLING_INVALID')
+        previous = git_blob(RECOVERY_SOURCE_REVISION, TOOLING_SOURCE_PATHS[name])
+        require(current in (previous, target_files[name]),
+                'RECOVERY_INSTALLED_TOOLING_BYTES_UNKNOWN')
+        consistent = consistent and sha256(current) == value['files'][name]
+    return value, consistent
+
+
+def restore_stale_recovery_receipt_after_bootstrap_failure(previous_receipt_bytes):
+    _previous_receipt_is_v100(previous_receipt_bytes)
+    current = _read_trusted_host_file(RESULT, 0o600, 256 * 1024,
+                                      'BOOTSTRAP_RECEIPT_ROLLBACK_READ_FAILED')
+    if current == previous_receipt_bytes:
+        return
+    try:
+        result = parse_record_text(current.decode('utf-8'))
+    except UnicodeDecodeError:
+        require(False, 'BOOTSTRAP_RECEIPT_ROLLBACK_CONFLICT')
+    require(result.get('status') == 'RECOVERY_OK'
+            and result.get('tag') == RECOVERY_SOURCE_TAG
+            and result.get('revision') == RECOVERY_SOURCE_REVISION
+            and result.get('release_protocol') == 'stable-v1-recovery'
+            and result.get('previous_receipt_sha256') == sha256(previous_receipt_bytes),
+            'BOOTSTRAP_RECEIPT_ROLLBACK_CONFLICT')
+    atomic_install(RESULT, previous_receipt_bytes, 0o600)
+    require(_read_trusted_host_file(RESULT, 0o600, 256 * 1024,
+                                    'BOOTSTRAP_RECEIPT_ROLLBACK_VERIFY_FAILED')
+            == previous_receipt_bytes, 'BOOTSTRAP_RECEIPT_ROLLBACK_VERIFY_FAILED')
+
+
 def install_bootstrap(target_tag, target_revision):
     require(os.geteuid() == 0, 'ROOT_REQUIRED')
     stable_version(target_tag)
     self_path = Path(__file__).absolute()
     HELPER.trusted(self_path, 0o755)
     require(git(['status', '--porcelain', '--untracked-files=all']) == '', 'MANAGED_CHECKOUT_DIRTY')
-    source = source_runtime_state(require_checkout=True)
-    validate_transition(source['tag'], source['revision'], target_tag, target_revision)
-    fetch_main(target_revision)
-    require_ancestor(source['revision'], target_revision)
-    require_ci(target_tag, target_revision, bootstrap=True)
-    _, files = validate_target_tree(target_revision, source['source_manifest'], target_tag)
-    require(self_path.read_bytes() == files['deployer'], 'BOOTSTRAP_SOURCE_BYTES_UNTRUSTED')
+    current_receipt_bytes = _read_trusted_host_file(RESULT, 0o600, 256 * 1024,
+                                                    'SOURCE_RECEIPT_INVALID')
     try:
-        existing = validate_state_file()
-    except FileNotFoundError:
-        existing = None
+        current_receipt = parse_record_text(current_receipt_bytes.decode('utf-8'))
+    except UnicodeDecodeError:
+        require(False, 'SOURCE_RECEIPT_INVALID')
+    initial_receipt = (current_receipt.get('status') == 'DEPLOY_OK'
+                       and current_receipt.get('tag') == INITIAL_SOURCE_TAG
+                       and current_receipt.get('revision') == INITIAL_SOURCE_REVISION)
+    checkout_revision = git(['rev-parse', 'HEAD']) if initial_receipt else None
+    if initial_receipt:
+        require(checkout_revision in (INITIAL_SOURCE_REVISION, RECOVERY_SOURCE_REVISION),
+                'BOOTSTRAP_SOURCE_CHECKOUT_INVALID')
+    stale_v104_receipt = initial_receipt and checkout_revision == RECOVERY_SOURCE_REVISION
+    recovered_source = current_receipt.get('status') == 'RECOVERY_OK'
+    if stale_v104_receipt:
+        require(stable_version(target_tag) > stable_version(RECOVERY_SOURCE_TAG),
+                'RECOVERY_BOOTSTRAP_TARGET_NOT_FORWARD')
+        source_tag = RECOVERY_SOURCE_TAG
+        source_revision = RECOVERY_SOURCE_REVISION
+        source_manifest = git_manifest(RECOVERY_SOURCE_REVISION)
+        require(len(source_manifest) == 146, 'RECOVERY_MIGRATION_MANIFEST_INVALID')
+        require(git(['remote', 'get-url', 'origin']) == REMOTE
+                and git(['rev-parse', 'HEAD']) == RECOVERY_SOURCE_REVISION
+                and git(['cat-file', '-t', 'refs/tags/' + RECOVERY_SOURCE_TAG]) == 'tag'
+                and git(['rev-parse', 'refs/tags/' + RECOVERY_SOURCE_TAG + '^{}']) == RECOVERY_SOURCE_REVISION,
+                'RECOVERY_SOURCE_CHECKOUT_INVALID')
+    else:
+        source = source_runtime_state(require_checkout=True)
+        source_tag = source['tag']
+        source_revision = source['revision']
+        source_manifest = source['source_manifest']
+        recovered_source = source['receipt'].get('release_protocol') == 'stable-v1-recovery'
+        require(not recovered_source or stable_version(target_tag) > stable_version(RECOVERY_SOURCE_TAG),
+                'RECOVERY_BOOTSTRAP_TARGET_NOT_FORWARD')
+    validate_transition(source_tag, source_revision, target_tag, target_revision)
+    fetch_main(target_revision)
+    require_ancestor(source_revision, target_revision)
+    if stale_v104_receipt or recovered_source:
+        require_ci(target_tag, target_revision, source_revision=RECOVERY_SOURCE_REVISION,
+                   classification=_risk_result('high', ['recovery-receipt-reconciliation']))
+    else:
+        require_ci(target_tag, target_revision, bootstrap=True)
+    _, files = validate_target_tree(target_revision, source_manifest, target_tag)
+    require(self_path.read_bytes() == files['deployer'], 'BOOTSTRAP_SOURCE_BYTES_UNTRUSTED')
+    existing_is_consistent = True
+    if stale_v104_receipt or recovered_source:
+        existing, existing_is_consistent = validate_recovery_bootstrap_state(target_revision, files)
+    else:
+        try:
+            existing = validate_state_file()
+        except FileNotFoundError:
+            existing = None
+    if stale_v104_receipt:
+        require(existing is not None and existing['toolingRevision'] == RECOVERY_SOURCE_REVISION,
+                'RECOVERY_INSTALLED_TOOLING_INVALID')
+        validate_recovery_tooling_state_source(existing, RECOVERY_SOURCE_REVISION)
+    elif recovered_source:
+        require(existing is not None
+                and existing['toolingRevision'] in (RECOVERY_SOURCE_REVISION, target_revision),
+                'RECOVERY_INSTALLED_TOOLING_INVALID')
+        validate_recovery_tooling_state_source(existing, existing['toolingRevision'])
+    if recovered_source:
+        source = source_runtime_state(require_checkout=True)
     if existing is not None:
         require_ancestor(existing['toolingRevision'], target_revision)
-        if all(existing['files'][name] == sha256(files[name]) for name in existing['files']):
-            print('STABLE_TOOLING_ALREADY_READY tooling_revision=' + existing['toolingRevision'])
-            return
+        if existing_is_consistent and all(
+                existing['files'][name] == sha256(files[name]) for name in existing['files']):
+            if not stale_v104_receipt:
+                print('STABLE_TOOLING_ALREADY_READY tooling_revision=' + existing['toolingRevision'])
+                return
     helper_path = ROOT / HELPER_SOURCE
     require(sha256(helper_path.read_bytes()) == HELPER_SHA256, 'PINNED_HELPER_HASH_INVALID')
     destinations = [
@@ -1776,10 +2325,16 @@ def install_bootstrap(target_tag, target_revision):
             original[path] = None
     previous_state = None
     try:
-        try:
-            previous_state = (STATE.read_bytes(), stat.S_IMODE(STATE.stat().st_mode))
-        except FileNotFoundError:
-            previous_state = None
+        previous_state = (STATE.read_bytes(), stat.S_IMODE(STATE.stat().st_mode))
+    except FileNotFoundError:
+        pass
+    try:
+        if stale_v104_receipt:
+            source = reconcile_v104_recovery_receipt(current_receipt_bytes)
+            if existing is not None and existing_is_consistent and all(
+                    existing['files'][name] == sha256(files[name]) for name in existing['files']):
+                print('STABLE_TOOLING_ALREADY_READY tooling_revision=' + existing['toolingRevision'])
+                return
         for path, content, mode in destinations:
             atomic_install(path, content, mode)
         state = {
@@ -1790,7 +2345,8 @@ def install_bootstrap(target_tag, target_revision):
         }
         atomic_install(STATE, (json.dumps(state, sort_keys=True, separators=(',', ':')) + '\n').encode(), 0o600)
         validate_state_file()
-    except BaseException:
+    except BaseException as error:
+        rollback_failures = []
         for path, _, _ in reversed(destinations):
             old = original[path]
             try:
@@ -1799,14 +2355,49 @@ def install_bootstrap(target_tag, target_revision):
                 else:
                     atomic_install(path, old[0], old[1])
             except BaseException:
-                pass
+                rollback_failures.append('tooling:' + path.name)
         try:
             if previous_state is None:
                 STATE.unlink(missing_ok=True)
             else:
                 atomic_install(STATE, previous_state[0], previous_state[1])
         except BaseException:
-            pass
+            rollback_failures.append('state')
+        if stale_v104_receipt:
+            for path, _, _ in destinations:
+                old = original[path]
+                try:
+                    if old is None:
+                        require(not path.exists(), 'BOOTSTRAP_TOOLING_ROLLBACK_VERIFY_FAILED')
+                    else:
+                        require(path.read_bytes() == old[0]
+                                and stat.S_IMODE(path.stat().st_mode) == old[1],
+                                'BOOTSTRAP_TOOLING_ROLLBACK_VERIFY_FAILED')
+                except BaseException:
+                    rollback_failures.append('tooling-verify:' + path.name)
+            try:
+                if previous_state is None:
+                    require(not STATE.exists(), 'BOOTSTRAP_STATE_ROLLBACK_VERIFY_FAILED')
+                else:
+                    require(STATE.read_bytes() == previous_state[0]
+                            and stat.S_IMODE(STATE.stat().st_mode) == previous_state[1],
+                            'BOOTSTRAP_STATE_ROLLBACK_VERIFY_FAILED')
+            except BaseException:
+                rollback_failures.append('state-verify')
+            try:
+                restore_stale_recovery_receipt_after_bootstrap_failure(current_receipt_bytes)
+            except BaseException:
+                rollback_failures.append('receipt')
+        if stale_v104_receipt and rollback_failures:
+            original_code = (error.args[0] if error.args
+                             and isinstance(error.args[0], str)
+                             and re.fullmatch(r'STABLE_[A-Z0-9_]+', error.args[0])
+                             else 'UNKNOWN')
+            if 'receipt' in rollback_failures:
+                raise RuntimeError('STABLE_BOOTSTRAP_RECEIPT_ROLLBACK_FAILED original='
+                                   + original_code + ' components=' + ','.join(rollback_failures)) from error
+            raise RuntimeError('STABLE_BOOTSTRAP_INSTALL_ROLLBACK_FAILED original='
+                               + original_code + ' components=' + ','.join(rollback_failures)) from error
         raise
     print('STABLE_TOOLING_INSTALLED tooling_revision=' + target_revision
           + ' files=5 gateway_promoted_last=true', flush=True)
@@ -1863,6 +2454,10 @@ def safe_failure_code(error):
         code = str(error)
         if re.fullmatch(r'STABLE_[A-Z0-9_]{1,100}', code):
             return code
+        rollback_code = code.split(' ', 1)[0]
+        if rollback_code in ('STABLE_BOOTSTRAP_RECEIPT_ROLLBACK_FAILED',
+                             'STABLE_BOOTSTRAP_INSTALL_ROLLBACK_FAILED'):
+            return rollback_code
         if re.fullmatch(r'V074_[A-Z0-9_]{1,100}', code):
             return 'STABLE_PINNED_HELPER_' + code.removeprefix('V074_')
         if re.fullmatch(r'BACKUP_[A-Z0-9_]{1,100}', code):

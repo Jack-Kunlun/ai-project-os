@@ -232,6 +232,22 @@ test("already-current release retries may reuse the restricted prior deployment 
   assert.throws(() => parseDeploymentReceipt(`${receipt}\n${receipt}`, "v1.2.3", sha, context), /STABLE_DEPLOY_RECEIPT_MISSING_OR_AMBIGUOUS/u);
 });
 
+test("runtime recovery evidence cannot be published as a formal deployment receipt", () => {
+  const context = { migrationCount: 146, sourceMigrationCount: 146, risk: "high", databaseRequired: true };
+  for (const recoveryOutput of [
+    "RECOVERY_OK\nrelease_protocol=stable-v1-recovery\nworkflow_publication_completed=false",
+    `STABLE_RECOVERY_SOURCE_RECEIPT_OK tag=v1.0.4 revision=${base} migration_count=146`,
+    JSON.stringify({ kind: "V104_RUNTIME_RECOVERY_OK", version: "1.0.4", workflowPublicationCompleted: false }),
+  ]) {
+    assert.throws(
+      () => parseDeploymentReceipt(recoveryOutput, "v1.0.5", sha, context),
+      /STABLE_DEPLOY_RECEIPT_MISSING_OR_AMBIGUOUS/u,
+    );
+  }
+  const forwardReceipt = `STABLE_DEPLOY_OK tag=v1.0.5 revision=${sha} migration_count=146 backup=20261016T120000Z-pre-deploy-to-v1.0.5.Abc123 restore=skipped-by-policy-146-to-146`;
+  assert.equal(parseDeploymentReceipt(forwardReceipt, "v1.0.5", sha, context).tag, "v1.0.5");
+});
+
 test("annotated version tags are immutable and must target the reviewed commit", () => {
   const ref = { object: { type: "tag", sha: otherSha } };
   const tagObject = { sha: otherSha, object: { type: "commit", sha } };

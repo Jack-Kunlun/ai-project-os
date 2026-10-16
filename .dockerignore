@@ -6,7 +6,9 @@ node_modules
 !.env.example
 coverage
 .data
-test
+test/**
+!test/fixtures
+!test/fixtures/**
 e2e
 docs
 .github

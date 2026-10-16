@@ -110,7 +110,8 @@ test("performance budget is wired into production build and CI", async () => {
   assert.equal(packageJson.scripts["test:performance"], "node --import tsx scripts/run-performance-gate.ts");
   assert.match(runner, /127\.0\.0\.1:1\/performance_gate/u);
   assert.match(runner, /spawn\(command, \["build"\]/u);
-  assert.ok(workflow.indexOf("pnpm performance:check") > workflow.indexOf("pnpm test:browser-e2e"));
+  assert.ok(workflow.indexOf("pnpm performance:check") > workflow.indexOf("Export the already-built Next.js output"));
+  assert.ok(workflow.indexOf("Export the already-built Next.js output") > workflow.indexOf("Verify immutable IDs for the built images"));
   assert.equal(checkedConfig.budgets.sharedJavaScriptGzipBytes, 145 * 1024);
   assert.equal(checkedConfig.budgets.globalCssGzipBytes, 15.25 * 1024);
   assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 800 * 1024);

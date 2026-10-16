@@ -123,6 +123,9 @@ export function planCiImpact(paths, { baseKnown = true, gatesByFile = new Map() 
     }
     if (/^test\//u.test(path)) {
       // Test files without a registered gate still run in the default suite.
+      // This existing file reads SQL/CI text and runs unconditionally in that
+      // suite; principal implementation or migration changes still fail full above.
+      if (path === "test/database-principal-contract.test.ts") continue;
       if (/-(?:api-)?postgres\.test\.ts$/iu.test(path)) return failClosed(`unmapped-postgres-test:${path}`);
       if (/(?:auth|account|permission|authorization|entitlement|credit|quota|billing|security|provider|database-principal|mcp|action)/iu.test(path)) {
         return failClosed(`unmapped-sensitive-test:${path}`);

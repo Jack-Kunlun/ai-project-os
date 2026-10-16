@@ -87,6 +87,13 @@ test("unknown PostgreSQL tests, dependency locks, and unproven package edits fai
   assert.equal(planCiImpact([".github/workflows/ci.yml"], { baseKnown: false }).mode, "full");
 });
 
+test("the existing static principal contract stays in unit checks while principal source remains full", () => {
+  const planned = planCiImpact(["test/database-principal-contract.test.ts", ".github/workflows/ci.yml"]);
+  assert.equal(planned.gateFilter, "none");
+  assert.equal(planned.candidate, true);
+  assert.equal(planCiImpact(["test/database-principal-contract.test.ts", "prisma/schema.prisma"]).mode, "full");
+});
+
 test("version-only changes require all identity files and exact content normalization", () => {
   const root = mkdtempSync(join(tmpdir(), "ai-project-os-impact-"));
   try {

@@ -1,5 +1,6 @@
 """Offline contract tests for CI image delivery and bounded host maintenance."""
 import copy
+import ast
 import importlib.util
 import io
 import json
@@ -168,6 +169,55 @@ class Images(unittest.TestCase):
             self.assertFalse(m.prune_build_cache())
         self.assertIn('STABLE_CACHE_BUDGET_DEFERRED', output.getvalue())
         self.assertIn('"budgetMet":false', output.getvalue())
+
+    def test_cache_usage_accepts_buildx_036_si_sizes_and_legacy_bytes(self):
+        def row(size):
+            return json.dumps({'Size': size, 'Reclaimable': True, 'Shared': False})
+        sizes = ['248B', '1.024kB', '28.1MB', '1.653GB', '0B', '829898832', 404]
+        self.assertEqual(m.parse_cache_usage('\n'.join(map(row, sizes))), (2511000508, True))
+        self.assertEqual(m.parse_cache_usage(row('829898832')), (829898832, False))
+        self.assertEqual(m.parse_cache_usage(' \n'), (0, False))
+        for invalid in (True, -1, None, '1.5', 'NaN', '1GiB', '2GB*', '1e9', '99EB'):
+            with self.subTest(size=invalid), self.assertRaisesRegex(RuntimeError, 'CACHE_USAGE_INVALID'):
+                m.parse_cache_usage(row(invalid))
+        with self.assertRaisesRegex(RuntimeError, 'CACHE_USAGE_INVALID'):
+            m.parse_cache_usage(json.dumps({'Size': '1GB', 'Shared': 'false', 'Reclaimable': True}))
+
+    def test_si_cache_usage_allows_prune_and_reports_estimated_measurements(self):
+        def row(size):
+            return json.dumps({'Size': size, 'Reclaimable': True, 'Shared': True})
+        with patch.object(m, 'docker', side_effect=[row('49.89GB'), '', row('1.9GB')]) as docker, \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertTrue(m.prune_build_cache())
+        self.assertEqual(docker.call_args_list[1].args,
+                         ('buildx', 'prune', '--builder', 'default', '--force', '--max-used-space', '2GB'))
+        record = json.loads(output.getvalue().removeprefix('STABLE_CACHE_CLEANUP '))
+        self.assertEqual(record['beforeBytes'], 49890000000)
+        self.assertEqual(record['afterBytes'], 1900000000)
+        self.assertTrue(record['beforeEstimated'] and record['afterEstimated'] and record['budgetMet'])
+
+    def test_bootstrap_cache_failure_does_not_mask_installed_tools_or_runtime_health(self):
+        tree = ast.parse((Path(__file__).parents[1] / 'scripts/prepare-stable-images-bootstrap.py').read_text())
+        audit = next(node.value.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                     and any(isinstance(target, ast.Name) and target.id == 'audit' for target in node.targets)
+                     and isinstance(node.value, ast.Constant))
+        installed = MagicMock()
+        installed.source_runtime_state.return_value = {'tag': 'v1.0.5', 'revision': REVISION}
+        installed.secure_lock.return_value = 999
+        installed.docker.return_value = 'cache summary'
+        installed.prune_build_cache.side_effect = RuntimeError('STABLE_CACHE_USAGE_INVALID')
+        spec = MagicMock()
+        with patch.object(Path, 'read_bytes', return_value=b'installed'), \
+                patch.object(m.importlib.util, 'spec_from_file_location', return_value=spec), \
+                patch.object(m.importlib.util, 'module_from_spec', return_value=installed), \
+                patch.object(m.os, 'close') as close, \
+                patch('sys.argv', ['audit', m.sha256(b'installed')]), \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            exec(compile(audit, 'bootstrap-cache-audit', 'exec'), {})
+        self.assertIn('STABLE_BOOTSTRAP_RUNTIME_OK', output.getvalue())
+        self.assertIn('STABLE_CACHE_CLEANUP_DEFERRED error=RuntimeError', output.getvalue())
+        self.assertIn('STABLE_DISK_AVAILABLE_BYTES=', output.getvalue())
+        close.assert_called_once_with(999)
 
     def test_workflow_tool_refresh_requires_ci_before_installing_candidate_bytes(self):
         with tempfile.TemporaryDirectory() as directory:

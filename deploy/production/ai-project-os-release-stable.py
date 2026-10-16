@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+from decimal import Decimal
 import hashlib
 import importlib.util
 import io
@@ -648,24 +649,44 @@ def load_ci_images(run, credentials, revision, version):
     return validate_image_manifest(value, revision, version, run['id'])
 
 
+def parse_cache_usage(output):
+    """Buildx JSON Size can be raw bytes or a rounded SI display value."""
+    total, estimated = 0, False
+    units = {'B': 1, 'kB': 1000, 'MB': 1000 ** 2, 'GB': 1000 ** 3,
+             'TB': 1000 ** 4, 'PB': 1000 ** 5, 'EB': 1000 ** 6}
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        require(isinstance(row, dict) and type(row.get('Reclaimable')) is bool
+                and type(row.get('Shared')) is bool, 'CACHE_USAGE_INVALID')
+        size = row.get('Size')
+        require(type(size) in (str, int), 'CACHE_USAGE_INVALID')
+        match = re.fullmatch(r'([0-9]+(?:\.[0-9]+)?)(B|kB|MB|GB|TB|PB|EB)?', str(size))
+        require(match is not None and (match[2] is not None or '.' not in match[1]),
+                'CACHE_USAGE_INVALID')
+        value = Decimal(match[1]) * units.get(match[2], 1)
+        require(value <= 2 ** 63 - 1, 'CACHE_USAGE_INVALID')
+        total += int(value)
+        estimated = estimated or match[2] not in (None, 'B')
+    return total, estimated
+
+
 def prune_build_cache():
     """Measure the actual default builder used by historical Compose builds."""
     def usage():
-        rows = [json.loads(line) for line in docker(
-            'buildx', 'du', '--builder', 'default', '--format=json').splitlines() if line]
-        require(all(isinstance(row, dict) and str(row.get('Size', '')).isdigit()
-                    and type(row.get('Reclaimable')) is bool and type(row.get('Shared')) is bool
-                    for row in rows), 'CACHE_USAGE_INVALID')
-        return sum(int(row['Size']) for row in rows)
-    before = usage()
+        return parse_cache_usage(docker(
+            'buildx', 'du', '--builder', 'default', '--format=json'))
+    before, before_estimated = usage()
     disk_before = os.statvfs('/')
     docker('buildx', 'prune', '--builder', 'default', '--force',
            '--max-used-space', '2GB', capture=False, timeout=600)
-    after = usage()
+    after, after_estimated = usage()
     disk_after = os.statvfs('/')
     budget_met = after <= 2_000_000_000
     print('STABLE_CACHE_CLEANUP ' + json.dumps({
         'builder': 'default', 'beforeBytes': before, 'afterBytes': after,
+        'beforeEstimated': before_estimated, 'afterEstimated': after_estimated,
         'targetBytes': 2_000_000_000, 'budgetMet': budget_met,
         'availableBeforeBytes': disk_before.f_bavail * disk_before.f_frsize,
         'availableAfterBytes': disk_after.f_bavail * disk_after.f_frsize,

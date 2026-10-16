@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from contextlib import redirect_stdout
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -469,8 +470,16 @@ class BackupValidationTests(unittest.TestCase):
 
         class FixtureHelper:
             @staticmethod
-            def trusted(_path, _mode=None):
-                return None
+            def trusted(checked_path, mode=None):
+                # Preserve the pinned helper's regular-file mode contract;
+                # only root ownership/ancestor checks are bypassed in fixtures.
+                info = Path(checked_path).lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    raise RuntimeError('V074_HOST_SYMLINK_REJECTED')
+                if mode is not None and not (
+                    stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == mode
+                ):
+                    raise RuntimeError('V074_HOST_FILE_MODE_INVALID')
 
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / backup_name
@@ -537,11 +546,58 @@ class BackupValidationTests(unittest.TestCase):
                     patch.object(Path, 'read_bytes', reject_large_reads):
                 DEPLOYER.validate_local_backup(backup, current_email, TARGET_TAG, '1.0.0')
 
+                for mode in (0o750, 0o755, 0o777):
+                    path.chmod(mode)
+                    with self.subTest(mode=oct(mode)), self.assertRaisesRegex(
+                        RuntimeError, 'STABLE_BACKUP_DIRECTORY_MODE_INVALID',
+                    ):
+                        DEPLOYER.validate_local_backup(backup, current_email, TARGET_TAG, '1.0.0')
+                path.chmod(0o700)
+
+                regular = Path(temporary) / 'not-a-directory'
+                regular.write_text('fixture')
+                regular.chmod(0o700)
+                with self.assertRaisesRegex(RuntimeError, 'STABLE_BACKUP_DIRECTORY_MODE_INVALID'):
+                    DEPLOYER.validate_local_backup(
+                        dict(backup, path=regular), current_email, TARGET_TAG, '1.0.0',
+                    )
+
+                linked = Path(temporary) / 'linked-backup'
+                linked.symlink_to(path, target_is_directory=True)
+                with self.assertRaisesRegex(RuntimeError, 'V074_HOST_SYMLINK_REJECTED'):
+                    DEPLOYER.validate_local_backup(
+                        dict(backup, path=linked), current_email, TARGET_TAG, '1.0.0',
+                    )
+
+                dump = path / 'postgres.dump'
+                dump.chmod(0o644)
+                with self.assertRaisesRegex(RuntimeError, 'V074_HOST_FILE_MODE_INVALID'):
+                    DEPLOYER.validate_local_backup(backup, current_email, TARGET_TAG, '1.0.0')
+                dump.chmod(0o600)
+
             expected = hashlib.sha256()
             zero_chunk = bytes(1024 * 1024)
             for _ in range(8):
                 expected.update(zero_chunk)
             self.assertEqual(DEPLOYER.hash_file(path / 'postgres.dump'), expected.hexdigest())
+
+
+class SafeFailureCodeTests(unittest.TestCase):
+    def test_known_codes_are_preserved_without_exposing_exception_details(self):
+        for error, expected in (
+            (RuntimeError('STABLE_BACKUP_LAYOUT_INVALID'), 'STABLE_BACKUP_LAYOUT_INVALID'),
+            (RuntimeError('V074_HOST_FILE_MODE_INVALID'), 'STABLE_PINNED_HELPER_HOST_FILE_MODE_INVALID'),
+            (SystemExit('BACKUP_HOST_CONFIG_LAYOUT_INVALID'), 'STABLE_BACKUP_ARTIFACT_HOST_CONFIG_LAYOUT_INVALID'),
+            (subprocess.TimeoutExpired(['command', 'fixture-secret'], 10, output='fixture-secret'),
+             'STABLE_COMMAND_TIMEOUT'),
+            (RuntimeError('STABLE_FAILURE\nfixture-secret'), 'STABLE_UNEXPECTED_FAILURE'),
+            (ValueError('fixture-secret'), 'STABLE_UNEXPECTED_FAILURE'),
+            (SystemExit(1), 'STABLE_UNEXPECTED_FAILURE'),
+        ):
+            with self.subTest(expected=expected):
+                code = DEPLOYER.safe_failure_code(error)
+                self.assertEqual(code, expected)
+                self.assertNotIn('fixture-secret', code)
 
 
 class GitManifestTests(unittest.TestCase):

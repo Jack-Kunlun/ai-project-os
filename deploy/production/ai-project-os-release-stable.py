@@ -1034,7 +1034,12 @@ def verify_backup_output(stdout, target_tag):
 
 def validate_local_backup(backup, current_email_bytes, target_tag, source_version):
     path = backup['path']
-    HELPER.trusted(path, 0o700)
+    # The pinned helper's mode argument requires a regular file. Backups are
+    # directories, so retain its ancestor/ownership checks and check the kind here.
+    HELPER.trusted(path)
+    info = path.lstat()
+    require(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o700,
+            'BACKUP_DIRECTORY_MODE_INVALID')
     entries = {entry.name for entry in path.iterdir()}
     require(entries == BACKUP_REQUIRED_FILES, 'BACKUP_LAYOUT_INVALID')
     for name in BACKUP_REQUIRED_FILES:
@@ -1852,12 +1857,27 @@ def main(args):
         os.close(fd)
 
 
+def safe_failure_code(error):
+    """Preserve known validator codes without exposing subprocess args or data."""
+    if isinstance(error, (RuntimeError, SystemExit)):
+        code = str(error)
+        if re.fullmatch(r'STABLE_[A-Z0-9_]{1,100}', code):
+            return code
+        if re.fullmatch(r'V074_[A-Z0-9_]{1,100}', code):
+            return 'STABLE_PINNED_HELPER_' + code.removeprefix('V074_')
+        if re.fullmatch(r'BACKUP_[A-Z0-9_]{1,100}', code):
+            return 'STABLE_BACKUP_ARTIFACT_' + code.removeprefix('BACKUP_')
+    if isinstance(error, subprocess.TimeoutExpired):
+        return 'STABLE_COMMAND_TIMEOUT'
+    return 'STABLE_UNEXPECTED_FAILURE'
+
+
 if __name__ == '__main__':
     try:
         # Helper is pinned before loading any source-provided or host-controlled tooling.
         HELPER = load_helper()
         main(sys.argv[1:])
     except BaseException as error:
-        message = str(error) if isinstance(error, RuntimeError) and re.fullmatch(r'STABLE_[A-Z0-9_]+', str(error)) else 'STABLE_UNEXPECTED_FAILURE'
+        message = safe_failure_code(error)
         print(message, file=sys.stderr)
         sys.exit(1)

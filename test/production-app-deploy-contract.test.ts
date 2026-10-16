@@ -72,7 +72,8 @@ test("tag CI attests identity and main proof while branch jobs follow risk tier"
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");
   const scope = workflow.split("\n  scope:\n")[1]?.split("\n  source:\n")[0];
   assert.ok(scope);
-  const tagScopeScript = scope.split("        run: |\n")[1]?.split("\n").map((line) => line.replace(/^          /u, "")).join("\n");
+  const tagScopeScript = scope.split("        id: classify\n")[1]?.split("        run: |\n")[1]
+    ?.split("\n      - name:")[0]?.split("\n").map((line) => line.replace(/^          /u, "")).join("\n");
   assert.ok(tagScopeScript);
   const directory = await mkdtemp(path.join(tmpdir(), "ai-project-os-tag-ci-"));
   try {

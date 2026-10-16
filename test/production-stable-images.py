@@ -50,6 +50,29 @@ class Images(unittest.TestCase):
             with self.subTest(raw=raw[:20]), self.assertRaises((RuntimeError, ValueError)):
                 m.read_release_credentials(io.StringIO(raw))
 
+    def test_workflow_credentials_accept_opaque_legacy_and_long_stateless_tokens(self):
+        # Synthetic values only; preserve every character without decoding JWTs.
+        jwt = 'ghs_12345_' + 'eyJ' + 'a' * 170 + '.' + 'eyJ' + 'b' * 270 + '.' + 'c-_' * 40
+        self.assertGreater(len(jwt), 520)
+        for token in ('ghs_' + 'x' * 40, jwt, 'opaque-._~+/token==', 'a' * 3800):
+            value = {'token': token, 'runId': 38901002483}
+            with self.subTest(length=len(token)):
+                self.assertEqual(m.read_release_credentials(io.StringIO(json.dumps(value))), value)
+        for token in ('', 'a' * 3801, 'token\r\nInjected: value', 'token with spaces',
+                      'token\tsecret', 'token\x00secret', 'token中文', 'token;secret', True, None):
+            with self.subTest(kind=type(token).__name__), self.assertRaisesRegex(RuntimeError, 'WORKFLOW_TOKEN_INVALID'):
+                m.read_release_credentials(io.StringIO(json.dumps({'token': token, 'runId': 38901002483})))
+
+    def test_workflow_stdin_producer_round_trips_long_token_and_large_run_id(self):
+        # Execute the workflow's Node JSON producer and pass its bytes to the parser.
+        token = 'ghs_12345_' + 'eyJ' + 'a' * 300 + '.' + 'b-_' * 70 + '.' + 'c' * 100
+        result = subprocess.run(['node', '-e',
+            'process.stdout.write(JSON.stringify({token:process.env.RELEASE_REGISTRY_TOKEN,runId:Number(process.env.MAIN_CI_RUN_ID)}))'],
+            env={**m.os.environ, 'RELEASE_REGISTRY_TOKEN': token, 'MAIN_CI_RUN_ID': '38901002483'},
+            text=True, capture_output=True, check=True)
+        value = m.read_release_credentials(io.StringIO(result.stdout))
+        self.assertEqual(value, {'token': token, 'runId': 38901002483})
+
     def test_artifact_binds_exact_ci_run_zip_digest_and_filename(self):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, 'w') as bundle: bundle.writestr('release-images.json', json.dumps(manifest()))

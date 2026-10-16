@@ -555,15 +555,19 @@ def healthy(version, public=False):
 
 
 def read_release_credentials(stream):
-    """Workflow credentials travel over encrypted stdin, never argv or disk."""
+    """Receive opaque Workflow credentials over encrypted stdin, never argv."""
     raw = stream.read(4097)
     require(len(raw) <= 4096, 'WORKFLOW_INPUT_TOO_LARGE')
     value = json.loads(raw, object_pairs_hook=_unique_json_object)
     require(isinstance(value, dict) and set(value) == {'token', 'runId'}
-            and type(value['runId']) is int and value['runId'] > 0
-            and isinstance(value['token'], str)
-            and re.fullmatch(r'[A-Za-z0-9_]{20,255}', value['token']) is not None,
+            and type(value['runId']) is int and value['runId'] > 0,
             'WORKFLOW_INPUT_INVALID')
+    # Installation tokens are opaque, variable-length values (including JWTs).
+    # Bound transport size and HTTP Bearer characters, not a provider token format.
+    token = value['token']
+    require(isinstance(token, str) and 0 < len(token) <= 3800
+            and re.fullmatch(r'[A-Za-z0-9._~+/-]+={0,2}', token) is not None,
+            'WORKFLOW_TOKEN_INVALID')
     return value
 
 

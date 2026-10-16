@@ -349,7 +349,7 @@ async function main() {
 
     appContainer = await startImageContainer(appName, manifest.images.app.id, appEnvironment, temporaryDirectory, port);
     workerContainer = await startImageContainer(workerName, manifest.images.worker.id, workerEnvironment, temporaryDirectory);
-    const browserEnvironment = { ...process.env, BROWSER_E2E_BASE_URL: baseUrl, LOCAL_REGISTRATION_ENABLED: "true" };
+    const browserEnvironment = { ...environment, BROWSER_E2E_BASE_URL: baseUrl, LOCAL_REGISTRATION_ENABLED: "true" };
     await waitForHealthyApplication(port, appName, workerName);
     await run(process.execPath, ["node_modules/@playwright/test/cli.js", "test"], browserEnvironment);
   } catch (error) {

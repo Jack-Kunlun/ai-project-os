@@ -97,8 +97,8 @@ class DeploymentMethodTests(unittest.TestCase):
             ):
                 DEPLOYER.validate_default_signup_policy(snapshot)
 
-    def test_build_target_images_builds_each_service_in_fixed_sequence(self):
-        services = ('principal-bootstrap', 'migrate', 'reconcile', 'app', 'worker', 'git-worker')
+    def test_build_target_images_excludes_drill_bootstrap_but_pins_migration_and_writers(self):
+        services = ('migrate', 'reconcile', 'app', 'worker', 'git-worker')
         service_images = {
             service: 'ai-project-os-' + service for service in services
         }
@@ -318,7 +318,9 @@ class DeploymentMethodTests(unittest.TestCase):
         target_nginx = b'nginx'
         source = {
             'tag': 'v1.0.0', 'revision': DEPLOYER.INITIAL_SOURCE_REVISION,
-            'postgres_id': 'pg-id', 'source_manifest': [('source', 'a' * 64)],
+            'postgres_id': 'pg-id',
+            'source_manifest': [('source-' + str(index), 'a' * 64)
+                                for index in range(DEPLOYER.MINIMUM_MIGRATIONS)],
             'config_hashes': {'production_env': 'env-hash'},
             'database_snapshot': self.signup_snapshot(),
         }
@@ -328,21 +330,18 @@ class DeploymentMethodTests(unittest.TestCase):
             'sha256': 'e' * 64,
         }
         host = DEPLOYER.HostDeployment(TARGET_TAG, 'f' * 40)
-        host.target_manifest = [('target', 'c' * 64)]
+        host.target_manifest = source['source_manifest'] + [('target', 'c' * 64)]
         host.target_writer_ids = {'app': 'app-id', 'worker': 'worker-id', 'git-worker': 'git-id'}
         host.target_health = {'local': {'status': 'ok'}, 'public': {'status': 'ok'}}
         host.target_files = {'nginx': target_nginx}
-        host.restore_evidence = {
-            'source_sha256': 'f' * 64, 'source_migration_count': 143,
-            'target_migration_count': 145,
-        }
+        host.restore_evidence = None
         images = {'app': 'sha256:' + '1' * 64}
 
         with tempfile.TemporaryDirectory() as directory:
             result_path = Path(directory) / 'receipt'
             with patch.object(DEPLOYER, 'RESULT', result_path), \
                     patch.object(DEPLOYER, 'HELPER', FixtureHelper()), \
-                    redirect_stdout(io.StringIO()):
+                    redirect_stdout(stdout := io.StringIO()):
                 host.write_receipt(source, backup, images)
             record = DEPLOYER.parse_record(result_path)
             receipt_text = result_path.read_text(encoding='utf-8')
@@ -355,6 +354,27 @@ class DeploymentMethodTests(unittest.TestCase):
         self.assertEqual(json.loads(record['migration_count']), len(host.target_manifest))
         self.assertEqual(json.loads(record['target_writer_ids']), host.target_writer_ids)
         self.assertNotIn('status=', receipt_text)
+
+        restore = DEPLOYER.validate_source_restore_receipt(record, host.target_manifest)
+        self.assertEqual(restore, {
+            'required': False, 'reason': 'disabled-by-release-policy',
+            'source_migration_count': 143, 'target_migration_count': 144,
+        })
+        self.assertIn('restore=skipped-by-policy-143-to-144', stdout.getvalue())
+        retry_source = {'receipt': record, 'source_manifest': host.target_manifest}
+        self.assertIn('restore=skipped-by-policy-143-to-144',
+                      DEPLOYER.already_current_line(retry_source, TARGET_TAG, 'f' * 40))
+        for overrides in (
+                {'reason': 'unknown'}, {'source_migration_count': 142},
+                {'source_migration_count': 145}, {'source_migration_count': True},
+                {'target_migration_count': 145}, {'extra': 'unexpected'}):
+            with self.subTest(overrides=overrides):
+                malformed = {**record, 'restore_drill': json.dumps({**restore, **overrides})}
+                with self.assertRaisesRegex(RuntimeError, 'STABLE_SOURCE_RECEIPT_RESTORE_INVALID'):
+                    DEPLOYER.validate_source_restore_receipt(malformed, host.target_manifest)
+        with self.assertRaisesRegex(RuntimeError, 'STABLE_SOURCE_RECEIPT_RESTORE_INVALID'):
+            DEPLOYER.validate_source_restore_receipt(
+                {**record, 'migration_manifest_sha256': '0' * 64}, host.target_manifest)
 
     def test_no_database_receipt_is_explicit_and_supports_same_release_retry(self):
         class FixtureHelper:
@@ -1009,7 +1029,7 @@ class StableSemVerAndManifestTests(unittest.TestCase):
                 DEPLOYER.parse_record(path)
 
     def test_pre_migration_failures_restore_exact_source(self):
-        for failure in ('build', 'backup', 'restore'):
+        for failure in ('build', 'backup', 'nginx_candidate'):
             with self.subTest(failure=failure):
                 ops = FakeDeployment(failure)
                 with self.assertRaisesRegex(RuntimeError, 'injected_' + failure):
@@ -1029,10 +1049,13 @@ class StableSemVerAndManifestTests(unittest.TestCase):
                 self.assertNotIn('restore_source', ops.events)
                 self.assertIn('cleanup_restore', ops.events)
 
-    def test_success_cleans_restore_drill_before_receipt(self):
+    def test_high_risk_success_skips_drill_but_keeps_backup_migration_and_health(self):
         ops = FakeDeployment()
         DEPLOYER.deployment_flow(ops)
-        self.assertLess(ops.events.index('migrate'), ops.events.index('health'))
+        self.assertNotIn('restore', ops.events)
+        self.assertLess(ops.events.index('backup'), ops.events.index('migrate'))
+        self.assertLess(ops.events.index('migrate'), ops.events.index('reconcile'))
+        self.assertLess(ops.events.index('reconcile'), ops.events.index('health'))
         self.assertLess(ops.events.index('health'), ops.events.index('cleanup_restore'))
         self.assertLess(ops.events.index('cleanup_restore'), ops.events.index('cleanup_pin'))
         self.assertLess(ops.events.index('cleanup_pin'), ops.events.index('receipt'))

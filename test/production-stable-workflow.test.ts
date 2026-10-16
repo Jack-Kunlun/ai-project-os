@@ -120,13 +120,13 @@ test("higher-risk main CI proof preserves actual release receipt policy", () => 
     risk: highProof.scope.risk,
     databaseRequired: highProof.scope.database,
   }), /STABLE_DEPLOY_RECEIPT_MIGRATION_MISMATCH/u);
-  const fullRestoreReceipt = noDrillReceipt.replace("restore=not-required", "restore=143-to-145");
-  assert.equal(parseDeploymentReceipt(fullRestoreReceipt, "v1.2.3", sha, {
+  const policyReceipt = noDrillReceipt.replace("restore=not-required", "restore=skipped-by-policy-143-to-145");
+  assert.equal(parseDeploymentReceipt(policyReceipt, "v1.2.3", sha, {
     migrationCount: 145,
     sourceMigrationCount: 143,
     risk: highProof.scope.risk,
     databaseRequired: highProof.scope.database,
-  }).restore, "143-to-145");
+  }).restore, "skipped-by-policy-143-to-145");
 });
 
 test("already-current release keeps the production source policy when CI attests an older base", () => {
@@ -194,8 +194,8 @@ test("production SSH host accepts only a valid pinned IPv4 address", () => {
   assert.throws(() => validateSshHost("production.example.com"), /STABLE_SSH_HOST_INVALID/u);
 });
 
-test("high-risk receipt requires restore proof; lower risk accepts no-drill only with unchanged migration ledger", () => {
-  const highReceipt = `STABLE_DEPLOY_OK tag=v1.2.3 revision=${sha} migration_count=145 backup=20261015T120000Z-pre-deploy-to-v1.2.3.Abc123 restore=143-to-145`;
+test("high-risk release records the skipped drill while preserving migration counts", () => {
+  const highReceipt = `STABLE_DEPLOY_OK tag=v1.2.3 revision=${sha} migration_count=145 backup=20261015T120000Z-pre-deploy-to-v1.2.3.Abc123 restore=skipped-by-policy-143-to-145`;
   const highContext = { migrationCount: 145, sourceMigrationCount: 143, risk: "high", databaseRequired: true };
   assert.deepEqual(parseDeploymentReceipt(highReceipt, "v1.2.3", sha, highContext), {
     status: "STABLE_DEPLOY_OK",
@@ -205,23 +205,30 @@ test("high-risk receipt requires restore proof; lower risk accepts no-drill only
     backup: "20261015T120000Z-pre-deploy-to-v1.2.3.Abc123",
     sourceCount: 143,
     targetCount: 145,
-    restore: "143-to-145",
+    restore: "skipped-by-policy-143-to-145",
     line: highReceipt,
   });
-  assert.throws(() => parseDeploymentReceipt(highReceipt.replace("restore=143-to-145", "restore=not-required"), "v1.2.3", sha, highContext), /STABLE_DEPLOY_RECEIPT_MIGRATION_MISMATCH/u);
-  assert.throws(() => parseDeploymentReceipt(highReceipt.replace("restore=143-to-145", "restore=144-to-145"), "v1.2.3", sha, highContext), /STABLE_DEPLOY_RECEIPT_MIGRATION_MISMATCH/u);
+  for (const restore of ["not-required", "skipped-by-policy-144-to-145", "skipped-by-policy-143-to-144"]) {
+    assert.throws(() => parseDeploymentReceipt(highReceipt.replace("restore=skipped-by-policy-143-to-145", `restore=${restore}`), "v1.2.3", sha, highContext), /STABLE_DEPLOY_RECEIPT_MIGRATION_MISMATCH/u);
+  }
+  const legacyReceipt = highReceipt.replace("restore=skipped-by-policy-143-to-145", "restore=143-to-145");
+  assert.throws(() => parseDeploymentReceipt(legacyReceipt, "v1.2.3", sha, highContext), /STABLE_DEPLOY_RECEIPT_RESTORE_POLICY_MISMATCH/u);
 
-  const lowerReceipt = highReceipt.replace("migration_count=145", "migration_count=143").replace("restore=143-to-145", "restore=not-required");
+  const lowerReceipt = highReceipt.replace("migration_count=145", "migration_count=143").replace("restore=skipped-by-policy-143-to-145", "restore=not-required");
   const lowerContext = { migrationCount: 143, sourceMigrationCount: 143, risk: "medium", databaseRequired: false };
   assert.equal(parseDeploymentReceipt(lowerReceipt, "v1.2.3", sha, lowerContext).restore, "not-required");
   assert.throws(() => parseDeploymentReceipt(lowerReceipt, "v1.2.3", sha, { ...lowerContext, sourceMigrationCount: 142 }), /STABLE_DEPLOY_RECEIPT_MIGRATION_MISMATCH/u);
   assert.throws(() => parseDeploymentReceipt(lowerReceipt, "v1.2.3", sha, { ...lowerContext, risk: "high", databaseRequired: true }), /STABLE_DEPLOY_RECEIPT_MIGRATION_MISMATCH/u);
+  assert.throws(() => parseDeploymentReceipt(highReceipt, "v1.2.3", sha, { ...highContext, risk: "medium", databaseRequired: false }), /STABLE_DEPLOY_RECEIPT_RESTORE_POLICY_MISMATCH/u);
 });
 
 test("already-current release retries may reuse the restricted prior deployment receipt", () => {
   const receipt = `STABLE_DEPLOY_ALREADY_CURRENT tag=v1.2.3 revision=${sha} migration_count=145 backup=20261015T120000Z-pre-deploy-to-v1.2.3.Abc123 restore=143-to-145`;
   const context = { migrationCount: 145, sourceMigrationCount: 145, risk: "low", databaseRequired: false };
   assert.equal(parseDeploymentReceipt(receipt, "v1.2.3", sha, context).sourceCount, 143);
+  const skippedReceipt = receipt.replace("restore=143-to-145", "restore=skipped-by-policy-143-to-145");
+  assert.equal(parseDeploymentReceipt(skippedReceipt, "v1.2.3", sha, context).sourceCount, 143);
+  assert.equal(parseDeploymentReceipt(skippedReceipt, "v1.2.3", sha, context).restore, "skipped-by-policy-143-to-145");
   assert.throws(() => parseDeploymentReceipt(`${receipt}\n${receipt}`, "v1.2.3", sha, context), /STABLE_DEPLOY_RECEIPT_MISSING_OR_AMBIGUOUS/u);
 });
 

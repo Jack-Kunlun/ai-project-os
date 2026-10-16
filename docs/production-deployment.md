@@ -155,7 +155,7 @@ sudo deploy/production/install-production-deploy.sh \
 
 ## 部署流程
 
-一般生产标准要求在点击生产入口前用当前生产备份在隔离主机完成恢复演练，并确认备份归档、manifest、数据库权限、app、worker 和登录边界均通过。保留数据切换不删除生产数据库，但回退所需的源 checkout、可 inspect 的源回滚制品和 PostgreSQL 身份证据必须可用；还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整。
+当前正式发布策略不要求在发布步骤中进行隔离恢复演练，详见[正式版本发布](production-release.md)。仍需核验备份归档、manifest、数据库账本与权限，以及目标 app、worker 和健康状态。保留数据切换不删除生产数据库，但回退所需的源 checkout、可 inspect 的源回滚制品和 PostgreSQL 身份证据必须可用；还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整。
 
 1. 打开 GitHub 仓库的 **Actions**。
 2. 本次 `.10`→`.11` 迁移选择 **Deploy v0.6 default-memory migration**；后续无数据库变更的 0.6 版本选择 **Deploy application**。

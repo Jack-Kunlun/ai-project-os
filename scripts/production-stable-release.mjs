@@ -210,7 +210,7 @@ export function parseDeploymentReceipt(stdout, tag, sha, {
   requireCondition(["low", "medium", "high"].includes(risk) && typeof databaseRequired === "boolean", "RELEASE_RISK_INVALID");
   const escapedTag = escapeRegExp(tag);
   const pattern = new RegExp(
-    `^(STABLE_DEPLOY_OK|STABLE_DEPLOY_ALREADY_CURRENT) tag=${escapedTag} revision=${sha} migration_count=(\\d+) backup=(\\d{8}T\\d{6}Z-pre-deploy-to-${escapedTag}\\.[A-Za-z0-9]{6}) restore=(not-required|\\d+-to-\\d+)$`,
+    `^(STABLE_DEPLOY_OK|STABLE_DEPLOY_ALREADY_CURRENT) tag=${escapedTag} revision=${sha} migration_count=(\\d+) backup=(\\d{8}T\\d{6}Z-pre-deploy-to-${escapedTag}\\.[A-Za-z0-9]{6}) restore=(not-required|(?:skipped-by-policy-)?\\d+-to-\\d+)$`,
     "u",
   );
   const matches = String(stdout).split(/\r?\n/u).filter((line) => line.startsWith("STABLE_DEPLOY_OK ") || line.startsWith("STABLE_DEPLOY_ALREADY_CURRENT "));
@@ -230,11 +230,12 @@ export function parseDeploymentReceipt(stdout, tag, sha, {
       "DEPLOY_RECEIPT_MIGRATION_MISMATCH",
     );
   } else {
-    const restoreMatch = /^(\d+)-to-(\d+)$/u.exec(restore);
+    const restoreMatch = /^(?:skipped-by-policy-)?(\d+)-to-(\d+)$/u.exec(restore);
     requireCondition(restoreMatch, "DEPLOY_RECEIPT_INVALID");
     sourceCount = Number(restoreMatch[1]);
     requireCondition(
       migrationCount === expectedMigrationCount
+        && Number.isSafeInteger(sourceCount)
         && Number(restoreMatch[2]) === expectedMigrationCount
         && sourceCount <= expectedMigrationCount
         && (match[1] === "STABLE_DEPLOY_ALREADY_CURRENT" || sourceCount === sourceMigrationCount),
@@ -242,7 +243,9 @@ export function parseDeploymentReceipt(stdout, tag, sha, {
     );
   }
   if (match[1] === "STABLE_DEPLOY_OK") {
-    requireCondition(databaseRequired ? restore !== "not-required" : restore === "not-required", "DEPLOY_RECEIPT_RESTORE_POLICY_MISMATCH");
+    requireCondition(databaseRequired
+      ? risk === "high" && restore.startsWith("skipped-by-policy-")
+      : restore === "not-required", "DEPLOY_RECEIPT_RESTORE_POLICY_MISMATCH");
   }
   return {
     status: match[1],

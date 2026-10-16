@@ -413,8 +413,8 @@ def deployment_flow(ops, preflight_source=None) -> None:
         ops.stop_nginx()
         ops.stop_source_writers(source)
         backup = ops.create_and_validate_backup(source)
-        if database_required:
-            ops.restore_drill(source, backup, images)
+        # Production releases keep the verified backup but skip the isolated drill.
+        # Migration and failure boundaries below still apply to database releases.
         ops.install_and_test_target_nginx()
         if database_required:
             migration_started = True  # Set before the first migration process can run.
@@ -858,13 +858,18 @@ def validate_source_restore_receipt(result, manifest):
     if restore.get('required') is False:
         require(set(restore) == {'required', 'reason', 'source_migration_count',
                                  'target_migration_count'}
-                and restore.get('reason') == 'no-database-change'
+                and restore.get('reason') in ('no-database-change', 'disabled-by-release-policy')
                 and type(restore.get('source_migration_count')) is int
                 and type(restore.get('target_migration_count')) is int
-                and restore['source_migration_count'] == len(manifest)
                 and restore['target_migration_count'] == len(manifest)
                 and result.get('migration_manifest_sha256') == migration_manifest_sha256(manifest),
                 'SOURCE_RECEIPT_RESTORE_INVALID')
+        if restore['reason'] == 'no-database-change':
+            require(restore['source_migration_count'] == len(manifest),
+                    'SOURCE_RECEIPT_RESTORE_INVALID')
+        else:
+            require(MINIMUM_MIGRATIONS <= restore['source_migration_count'] <= len(manifest),
+                    'SOURCE_RECEIPT_RESTORE_INVALID')
     else:
         require(type(restore.get('source_migration_count')) is int
                 and type(restore.get('target_migration_count')) is int
@@ -972,12 +977,9 @@ def already_current_line(source, target_tag, target_revision):
             'ALREADY_CURRENT_RECEIPT_INVALID')
     restore = validate_source_restore_receipt(receipt, source['source_manifest'])
     if restore.get('required') is False:
-        require(restore.get('reason') == 'no-database-change'
-                and restore.get('source_migration_count') == len(source['source_manifest'])
-                and restore.get('target_migration_count') == len(source['source_manifest'])
-                and receipt.get('migration_manifest_sha256') == migration_manifest_sha256(source['source_manifest']),
-                'ALREADY_CURRENT_RECEIPT_INVALID')
-        restore_text = 'not-required'
+        restore_text = ('not-required' if restore['reason'] == 'no-database-change' else
+                        'skipped-by-policy-' + str(restore['source_migration_count']) + '-to-'
+                        + str(restore['target_migration_count']))
     else:
         restore_text = str(restore['source_migration_count']) + '-to-' + str(restore['target_migration_count'])
     return ('STABLE_DEPLOY_ALREADY_CURRENT tag=' + target_tag + ' revision=' + target_revision
@@ -1190,7 +1192,6 @@ class HostDeployment:
     def build_target_images(self):
         compose('config', '--quiet')
         all_service_names = {
-            'principal-bootstrap': 'ai-project-os-principal-bootstrap',
             'migrate': 'ai-project-os-migrate',
             'reconcile': 'ai-project-os-reconcile',
             'app': 'ai-project-os-app',
@@ -1465,16 +1466,15 @@ class HostDeployment:
         self.target_writer_ids = {service: container(service)['Id'] for service in ('app', 'worker', 'git-worker')}
 
     def write_receipt(self, source, backup, images):
-        restore_drill = self.restore_evidence
         if not self.database_required:
             require(self.target_manifest == source['source_manifest'],
                     'NO_DATABASE_RELEASE_MIGRATION_CHANGED')
-            restore_drill = {
-                'required': False,
-                'reason': 'no-database-change',
-                'source_migration_count': len(source['source_manifest']),
-                'target_migration_count': len(self.target_manifest),
-            }
+        restore_drill = {
+            'required': False,
+            'reason': ('disabled-by-release-policy' if self.database_required else 'no-database-change'),
+            'source_migration_count': len(source['source_manifest']),
+            'target_migration_count': len(self.target_manifest),
+        }
         record = {
             'tag': self.target_tag, 'revision': self.target_revision,
             'source_tag': source['tag'], 'source_revision': source['revision'],
@@ -1503,7 +1503,7 @@ class HostDeployment:
         print('STABLE_DEPLOY_OK tag=' + self.target_tag + ' revision=' + self.target_revision
               + ' migration_count=' + str(len(self.target_manifest))
               + ' backup=' + backup['name'] + ' restore='
-              + (str(restore_drill['source_migration_count']) + '-to-'
+              + ('skipped-by-policy-' + str(restore_drill['source_migration_count']) + '-to-'
                  + str(restore_drill['target_migration_count'])
                  if self.database_required else 'not-required'), flush=True)
 

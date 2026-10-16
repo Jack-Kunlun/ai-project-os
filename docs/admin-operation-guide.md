@@ -232,6 +232,6 @@ pg_restore -l ai-project-os.dump
 | 备份无法解析 | 停止恢复，保留原备份并重新生成；不得用导出 JSON 代替 dump+主密钥+uploads |
 | 普通用户看到平台入口 | 检查 Header、旧 URL 服务端守卫和 `/api/settings/*`/`/api/system/*` 直接请求，不能只依赖页面隐藏 |
 
-正式验收至少包含：`pnpm db:generate`、迁移校验、typecheck、Lint、定向及完整测试、生产构建、隔离 PostgreSQL 门禁、浏览器 smoke、Compose 健康、备份解析与恢复演练。真实模型、Git、OIDC、MCP 未配置时必须明确排除现场验收，不能用静态检查冒充。
+正式发布按[风险分层 CI](continuous-integration.md)完成适用的源码、数据库和容器验证，并核验来源、停写备份、账本及上线健康；复用同 SHA CI，不在生产发布步骤执行隔离恢复演练。独立备份可恢复性验证由管理员按恢复 Runbook 安排。真实模型、Git、OIDC、MCP 未配置时必须明确排除现场验收，不能用静态检查冒充。
 
 相关基线：[部署安全基线](./deployment-security.md)、[运行监控基线](./monitoring.md)、[持续集成与浏览器门禁](./continuous-integration.md)、[本地持续交付候选门禁](./local-release.md)、[外部服务现场验收](./external-service-acceptance.md)。

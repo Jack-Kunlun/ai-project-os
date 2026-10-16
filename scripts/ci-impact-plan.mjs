@@ -307,6 +307,16 @@ function versionNormalized(path, content) {
   }
 
   if (path === "Dockerfile") {
+    // Production 1.0.5 used a literal OCI label. Recognize its identity while
+    // still treating the move to build arguments as an infrastructure change.
+    const literal = [...content.matchAll(/org\.opencontainers\.image\.version="([^"]+)"/gu)];
+    if (literal.length !== 1) return null;
+    const entry = literal[0];
+    if (entry && VERSION_PATTERN.test(entry[1] ?? "")) {
+      const version = entry[1];
+      const start = (entry.index ?? 0) + entry[0].indexOf(version);
+      return { version, normalized: `${content.slice(0, start)}<VERSION>${content.slice(start + version.length)}` };
+    }
     const argument = [...content.matchAll(/^ARG APP_VERSION="([^"]+)"$/gmu)];
     const labels = [...content.matchAll(/org\.opencontainers\.image\.version="\$\{APP_VERSION\}"/gu)];
     if (argument.length !== 1 || labels.length !== 1 || !VERSION_PATTERN.test(argument[0]?.[1] ?? "")) return null;

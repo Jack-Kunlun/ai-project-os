@@ -100,9 +100,7 @@ test("version-only changes require all identity files and exact content normaliz
     writeFileSync(join(root, ".github/workflows/ci.yml"), "name: CI\n");
     writeFileSync(join(root, "Dockerfile"), [
       "FROM node:24 AS base",
-      'ARG APP_VERSION="1.0.5"',
-      "ARG APP_REVISION=unknown",
-      'LABEL org.opencontainers.image.version="${APP_VERSION}"',
+      'LABEL org.opencontainers.image.version="1.0.5"',
       "",
     ].join("\n"));
     execFileSync("git", ["init", "--quiet"], { cwd: root });
@@ -116,9 +114,7 @@ test("version-only changes require all identity files and exact content normaliz
     writeFileSync(join(root, "src/lib/version.ts"), 'export const APP_VERSION = "1.0.6" as const;\n');
     writeFileSync(join(root, "Dockerfile"), [
       "FROM node:24 AS base",
-      'ARG APP_VERSION="1.0.6"',
-      "ARG APP_REVISION=unknown",
-      'LABEL org.opencontainers.image.version="${APP_VERSION}"',
+      'LABEL org.opencontainers.image.version="1.0.6"',
       "",
     ].join("\n"));
     execFileSync("git", ["add", "."], { cwd: root });

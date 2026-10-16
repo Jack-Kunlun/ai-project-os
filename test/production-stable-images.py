@@ -130,7 +130,8 @@ class Images(unittest.TestCase):
             calls.append(args)
             if args[:2] == ('image', 'inspect'):
                 item = refs[args[2]]
-                return json.dumps([{'Id': item['id'], 'RepoDigests': [item['ref']], 'Config': {'Labels': {
+                return json.dumps([{'Id': item['id'], 'Os': 'linux', 'Architecture': 'amd64',
+                    'RepoDigests': [item['ref']], 'Config': {'Labels': {
                     'org.opencontainers.image.version': '1.0.6',
                     'org.opencontainers.image.revision': REVISION,
                     'org.opencontainers.image.source': 'https://github.com/Jack-Kunlun/ai-project-os'}}}])
@@ -164,6 +165,52 @@ class Images(unittest.TestCase):
                 merged = json.loads(config)['services']
                 self.assertTrue(all('build' not in merged[name] and merged[name]['image'] == images[name]
                                     for name in images))
+
+    def test_store_identity_accepts_config_or_bound_manifest_and_rejects_drift(self):
+        record = manifest()['images']['app']
+        digest = record['ref'].split('@')[1]
+        info = {'Id': record['id'], 'Os': 'linux', 'Architecture': 'amd64',
+                'RepoDigests': [record['ref']], 'Config': {'Labels': {
+                    'org.opencontainers.image.version': '1.0.6',
+                    'org.opencontainers.image.revision': REVISION,
+                    'org.opencontainers.image.source': 'https://github.com/Jack-Kunlun/ai-project-os'}}}
+        self.assertEqual(m.validate_pulled_image(info, record, '1.0.6', REVISION), record['id'])
+        info.update({'Id': digest, 'Descriptor': {'digest': digest,
+            'mediaType': 'application/vnd.docker.distribution.manifest.v2+json'}})
+        self.assertEqual(m.validate_pulled_image(info, record, '1.0.6', REVISION), digest)
+        for change in ({'Id': 'sha256:' + '9' * 64}, {'Descriptor': None},
+                       {'Descriptor': {'digest': record['id'], 'mediaType': info['Descriptor']['mediaType']}},
+                       {'Descriptor': {'digest': digest, 'mediaType': 'application/vnd.oci.image.index.v1+json'}},
+                       {'RepoDigests': []}, {'Architecture': 'arm64'}, {'Os': 'windows'},
+                       {'Config': {'Labels': {'org.opencontainers.image.version': 'other'}}}):
+            with self.subTest(change=change), self.assertRaisesRegex(RuntimeError, 'TARGET_IMAGE_IDENTITY_INVALID'):
+                m.validate_pulled_image({**info, **change}, record, '1.0.6', REVISION)
+
+    def test_pull_pins_engine_manifest_ids_instead_of_ci_config_ids(self):
+        value = manifest()
+        refs = {item['ref']: item for item in value['images'].values()}
+        engine = {name: record['ref'].split('@')[1] for name, record in value['images'].items()}
+        engine.update({name: engine['worker'] for name in ('git-worker', 'reconcile', 'principal-bootstrap')})
+        def docker(*args, **kwargs):
+            if args[:2] == ('image', 'inspect'):
+                record = refs[args[2]]; digest = record['ref'].split('@')[1]
+                return json.dumps([{'Id': digest, 'Os': 'linux', 'Architecture': 'amd64',
+                    'RepoDigests': [record['ref']], 'Descriptor': {'digest': digest,
+                    'mediaType': 'application/vnd.docker.distribution.manifest.v2+json'}, 'Config': {'Labels': {
+                    'org.opencontainers.image.version': '1.0.6',
+                    'org.opencontainers.image.revision': REVISION,
+                    'org.opencontainers.image.source': 'https://github.com/Jack-Kunlun/ai-project-os'}}}])
+            self.assertIn('pull', args); return ''
+        host = m.HostDeployment('v1.0.6', REVISION, {'runId': 42, 'token': 'ghs_' + 'x' * 40})
+        host.image_manifest = value
+        helper = MagicMock()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(m.tempfile, 'TemporaryDirectory', return_value=MagicMock(__enter__=lambda _: directory, __exit__=lambda *_: None)), \
+                patch.object(m, 'HELPER', helper), patch.object(m, 'docker', side_effect=docker), \
+                patch.object(m.subprocess, 'run', return_value=MagicMock(returncode=0)), \
+                patch.object(m, 'compose', return_value=json.dumps({'services': {name: {'image': identity} for name, identity in engine.items()}})):
+            self.assertEqual(host.build_target_images(), engine)
+        self.assertIn(engine['app'], helper.atomic_write.call_args.args[1].decode())
 
     def test_cleanup_keeps_current_previous_and_all_container_references(self):
         current, previous, referenced, old, foreign, legacy, same_title_foreign = ['sha256:' + str(i) * 64 for i in range(1, 8)]

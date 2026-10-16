@@ -6,7 +6,7 @@ const { parseReleaseImageManifest, expectedReleaseImageRepository } = createRequ
 
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 
-function runDocker(args, { capture = false } = {}) {
+function runDocker(args, { capture = false, stdoutOnly = false } = {}) {
   const result = spawnSync("docker", args, {
     encoding: "utf8",
     maxBuffer: 4 * 1024 * 1024,
@@ -15,22 +15,25 @@ function runDocker(args, { capture = false } = {}) {
   if (result.error || result.status !== 0) {
     throw new Error(`RELEASE_IMAGE_DOCKER_FAILED:${args[0]}`);
   }
-  return capture ? `${result.stdout}${result.stderr}` : "";
+  return capture ? (stdoutOnly ? result.stdout : `${result.stdout}${result.stderr}`) : "";
 }
 
 function inspectImage(imageId, version, revision) {
-  const source = runDocker(["image", "inspect", imageId, "--format", "{{json .Config.Labels}}"], { capture: true }).trim();
-  let labels;
+  const source = runDocker(["image", "inspect", imageId, "--format", "{{json .}}"], { capture: true, stdoutOnly: true }).trim();
+  let info;
   try {
-    labels = JSON.parse(source);
+    info = JSON.parse(source);
   } catch (error) {
     throw new Error("RELEASE_IMAGE_LABELS_INVALID", { cause: error });
   }
-  if (!labels || labels["org.opencontainers.image.version"] !== version
+  const labels = info?.Config?.Labels;
+  if (info?.Id !== imageId || info.Os !== "linux" || info.Architecture !== "amd64"
+      || !labels || labels["org.opencontainers.image.version"] !== version
       || labels["org.opencontainers.image.revision"] !== revision
       || labels["org.opencontainers.image.source"] !== "https://github.com/Jack-Kunlun/ai-project-os") {
     throw new Error("RELEASE_IMAGE_LABELS_MISMATCH");
   }
+  return info;
 }
 
 function readDigest(pushOutput) {
@@ -54,13 +57,26 @@ function main() {
   const refs = {};
   for (const name of ["app", "worker", "migrate"]) {
     const image = local.images[name];
-    inspectImage(image.id, local.version, local.revision);
+    const localInfo = inspectImage(image.id, local.version, local.revision);
     const repository = expectedReleaseImageRepository(name);
     const tag = `${repository}:${local.revision}`;
     runDocker(["tag", image.id, tag]);
-    const output = runDocker(["push", tag], { capture: true });
+    const output = runDocker(["push", "--platform", "linux/amd64", tag], { capture: true });
     const digest = readDigest(output);
-    refs[name] = { ref: `${repository}@${digest}`, id: image.id };
+    const ref = `${repository}@${digest}`;
+    const remote = JSON.parse(runDocker(["buildx", "imagetools", "inspect", ref, "--raw"], {
+      capture: true, stdoutOnly: true,
+    }));
+    if (remote.schemaVersion !== 2 || remote.manifests !== undefined
+        || !["application/vnd.docker.distribution.manifest.v2+json", "application/vnd.oci.image.manifest.v1+json"].includes(remote.mediaType)
+        || !SHA256_PATTERN.test(remote.config?.digest ?? "")) {
+      throw new Error("RELEASE_IMAGE_REGISTRY_MANIFEST_INVALID");
+    }
+    if (localInfo.Descriptor == null && remote.config.digest !== image.id) {
+      throw new Error("RELEASE_IMAGE_REGISTRY_CONFIG_MISMATCH");
+    }
+    // Published IDs are canonical config digests, independent of the CI store.
+    refs[name] = { ref, id: remote.config.digest };
   }
   const manifest = { schema: 1, revision: local.revision, version: local.version, runId: local.runId, images: refs };
   const target = resolve(outputPath);

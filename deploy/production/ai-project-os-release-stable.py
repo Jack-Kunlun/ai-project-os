@@ -676,6 +676,36 @@ def parse_cache_usage(output):
     return total, estimated
 
 
+def validate_pulled_image(info, record, version, revision):
+    """Bind a local engine ID to the exact CI registry artifact on either store."""
+    require(isinstance(info, dict), 'TARGET_IMAGE_IDENTITY_INVALID')
+    config = info.get('Config') or {}
+    require(isinstance(config, dict), 'TARGET_IMAGE_IDENTITY_INVALID')
+    labels = config.get('Labels') or {}
+    digests = info.get('RepoDigests') or []
+    descriptor = info.get('Descriptor')
+    registry_digest = record['ref'].split('@', 1)[1]
+    descriptor_valid = (isinstance(descriptor, dict)
+                        and descriptor.get('digest') == registry_digest
+                        and descriptor.get('mediaType') in (
+                            'application/vnd.docker.distribution.manifest.v2+json',
+                            'application/vnd.oci.image.manifest.v1+json'))
+    # Classic stores identify images by config digest; containerd uses the
+    # manifest digest. The immutable registry reference binds both to CI.
+    local_id = info.get('Id')
+    require(isinstance(labels, dict) and isinstance(digests, list)
+            and record['ref'] in digests
+            and ((local_id == record['id'] and (descriptor is None or descriptor_valid))
+                 or (local_id == registry_digest and descriptor_valid))
+            and info.get('Os') == 'linux' and info.get('Architecture') == 'amd64'
+            and labels.get('org.opencontainers.image.version') == version
+            and labels.get('org.opencontainers.image.revision') == revision
+            and labels.get('org.opencontainers.image.source')
+            == 'https://github.com/Jack-Kunlun/ai-project-os',
+            'TARGET_IMAGE_IDENTITY_INVALID')
+    return local_id
+
+
 def prune_build_cache():
     """Measure the actual default builder used by historical Compose builds."""
     def usage():
@@ -1846,14 +1876,8 @@ class HostDeployment:
             for service, record in manifest['images'].items():
                 docker('--config', temporary, 'pull', record['ref'], capture=False, timeout=1800)
                 info = json.loads(docker('image', 'inspect', record['ref']))[0]
-                labels = info.get('Config', {}).get('Labels', {})
-                require(info.get('Id') == record['id'] and record['ref'] in info.get('RepoDigests', [])
-                        and labels.get('org.opencontainers.image.version') == self.target_version
-                        and labels.get('org.opencontainers.image.revision') == self.target_revision
-                        and labels.get('org.opencontainers.image.source')
-                        == 'https://github.com/Jack-Kunlun/ai-project-os',
-                        'TARGET_IMAGE_IDENTITY_INVALID')
-                images[service] = record['id']
+                images[service] = validate_pulled_image(
+                    info, record, self.target_version, self.target_revision)
         # All worker roles use the identical worker image tested in CI.
         images.update({service: images['worker'] for service in
                        ('git-worker', 'reconcile', 'principal-bootstrap')})

@@ -7,6 +7,7 @@ export type ReleaseImageManifest = {
   revision: string;
   version: string;
   runId: number;
+  // Registry refs use canonical config digests; local refs use engine IDs.
   images: Record<ReleaseImageName, { ref: string; id: string }>;
 };
 

@@ -294,6 +294,9 @@ jobs:
           node --import tsx scripts/publish-release-images.mjs \
             "$RUNNER_TEMP/release-images.local.json" \
             "$RUNNER_TEMP/release-images.json"
+          python3 -I -B scripts/production-stable-image-roundtrip.py \
+            "$RUNNER_TEMP/release-images.local.json" \
+            "$RUNNER_TEMP/release-images.json"
 
       - name: Upload immutable release image manifest
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

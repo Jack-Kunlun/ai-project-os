@@ -14,6 +14,10 @@ test("application package, public health and OCI image use the same release vers
   assert.equal(APP_VERSION, packageVersion);
   const labels = [...dockerfile.matchAll(/org\.opencontainers\.image\.version="([^"]+)"/gu)];
   assert.equal(labels.length, 1);
-  assert.equal(labels[0]?.[1], packageVersion);
+  if (labels[0]?.[1] === "${APP_VERSION}") {
+    assert.equal(dockerfile.match(/^ARG APP_VERSION="([^"]+)"$/mu)?.[1], packageVersion);
+  } else {
+    assert.equal(labels[0]?.[1], packageVersion);
+  }
   assert.ok(releaseNotes.startsWith(`# v${packageVersion} `));
 });

@@ -124,6 +124,9 @@ test("PostgreSQL gate admin URL is restricted to the fixed disposable loopback t
 });
 
 test("PostgreSQL gate filters preserve manifest order and reject ambiguity", () => {
+  assert.equal(selectPostgresGates("none").length, 0, "the explicit none sentinel runs no gates");
+  assert.equal(selectPostgresGates(undefined).length, POSTGRES_GATES.length, "an absent filter stays fail-closed to all gates");
+  assert.equal(selectPostgresGates("").length, POSTGRES_GATES.length, "an empty filter stays fail-closed to all gates");
   assert.deepEqual(
     selectPostgresGates("project-world,ai-runtime").map((gate) => gate.id),
     ["ai-runtime", "project-world"],

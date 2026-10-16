@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
@@ -36,10 +38,63 @@ const successfulMainRun = {
 };
 const sourceJob = { name: "Verify source and client", conclusion: "success" };
 const dbJob = { name: "Verify database and release candidate", conclusion: "success" };
-const browserJob = { name: "Verify browser and release client", conclusion: "success" };
+const imageJob = { name: "Build and verify release images", conclusion: "success" };
+const browserJob = imageJob;
 const attestation = (risk: "low" | "medium" | "high", sourceBase = base) => ({
   name: releaseAttestationJobName(risk, sourceBase),
   conclusion: "success",
+});
+
+test("every release requires the exact CI image gate, even low risk", () => {
+  const scope = { risk: "low", base, database: false, browser: false };
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("low")], sha, scope), false);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("low")], sha, scope), true);
+});
+
+test("routine image release receipts explicitly disable backup and restore at every tier", () => {
+  const receipt = `STABLE_DEPLOY_OK tag=v1.2.3 revision=${sha} migration_count=146 backup=not-required restore=not-required`;
+  for (const risk of ["low", "medium", "high"]) {
+    assert.equal(parseDeploymentReceipt(receipt, "v1.2.3", sha, {
+      migrationCount: 146, sourceMigrationCount: 146, risk, databaseRequired: risk === "high",
+    }).backup, "not-required");
+  }
+  assert.throws(() => parseDeploymentReceipt(receipt, "v1.2.3", sha, {
+    migrationCount: 145, sourceMigrationCount: 145, risk: "high", databaseRequired: true,
+  }), /STABLE_DEPLOY_RECEIPT_MIGRATION_MISMATCH/u);
+});
+
+test("release context crosses jobs through valid nonsecret GitHub output keys", () => {
+  const directory = mkdtempSync(join(tmpdir(), "stable-context-"));
+  const output = join(directory, "outputs");
+  const context = {
+    RELEASE_VERSION: "1.0.6", RELEASE_TAG: "v1.0.6", MIGRATION_COUNT: "146", SOURCE_MIGRATION_COUNT: "146",
+    MAIN_CI_RUN_ID: "42", MAIN_CI_RUN_URL: "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/42",
+    MAIN_CI_SOURCE_BASE: base, MAIN_CI_ATTESTED_RISK: "high", RELEASE_RISK: "high",
+    RELEASE_DATABASE_REQUIRED: "true", RELEASE_BROWSER_REQUIRED: "true",
+  };
+  try {
+    const result = spawnSync(process.execPath, ["scripts/production-stable-release.mjs", "export-context"], {
+      encoding: "utf8", env: { ...process.env, ...context, GITHUB_OUTPUT: output },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const lines = readFileSync(output, "utf8");
+    for (const [key, value] of Object.entries(context)) assert.ok(lines.includes(`${key.toLowerCase()}=${value}\n`));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("production receives a read-only token and only publishing jobs can write the repository", () => {
+  const workflow = readFileSync(".github/workflows/release-stable.yml", "utf8");
+  const prepare = workflow.slice(workflow.indexOf("  prepare:"), workflow.indexOf("  release:"));
+  const deploy = workflow.slice(workflow.indexOf("  release:"), workflow.indexOf("  publish:"));
+  const publish = workflow.slice(workflow.indexOf("  publish:"));
+  assert.match(deploy, /permissions:\n      contents: read\n      actions: read\n      packages: read/u);
+  assert.doesNotMatch(deploy, /contents: write/u);
+  assert.match(prepare, /contents: write/u);
+  assert.match(publish, /contents: write/u);
+  assert.doesNotMatch(prepare + publish, /PRODUCTION_SSH_PRIVATE_KEY|RELEASE_REGISTRY_TOKEN/u);
+  assert.match(publish, /needs: \[prepare, release\]/u);
+  assert.match(publish, /name: production-deployment-receipt/u);
+  assert.equal((workflow.match(/name: production\n/gu) ?? []).length, 1);
 });
 
 test("stable versions and release identity are canonical across artifacts", () => {
@@ -74,32 +129,32 @@ test("migration manifest validation has no release-specific historical count flo
 
 test("main CI release proof binds exact push SHA, production base, tier, and required jobs", () => {
   const lowScope = { risk: "low", base, database: false, browser: false };
-  const lowJobs = [sourceJob, attestation("low" )];
+  const lowJobs = [sourceJob, imageJob, attestation("low" )];
   assert.equal(mainCiRunHasRiskProof(successfulMainRun, lowJobs, sha, lowScope), true);
   assert.equal(mainCiRunHasRiskProof({ ...successfulMainRun, event: "workflow_dispatch" }, lowJobs, sha, lowScope), false);
   assert.equal(mainCiRunHasRiskProof({ ...successfulMainRun, head_branch: "release" }, lowJobs, sha, lowScope), false);
   assert.equal(mainCiRunHasRiskProof({ ...successfulMainRun, head_sha: otherSha }, lowJobs, sha, lowScope), false);
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("low", otherSha)], sha, lowScope), false);
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("medium")], sha, lowScope), false);
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("low"), { ...sourceJob, conclusion: "skipped" }], sha, lowScope), true);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("low", otherSha)], sha, lowScope), false);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("medium")], sha, lowScope), false);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("low"), { ...sourceJob, conclusion: "skipped" }], sha, lowScope), true);
 
   const mediumScope = { risk: "medium", base, database: false, browser: true };
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("medium"), browserJob], sha, mediumScope), true);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("medium"), browserJob], sha, mediumScope), true);
   assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("medium")], sha, mediumScope), false);
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("medium"), { ...browserJob, conclusion: "failure" }], sha, mediumScope), false);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("medium"), { ...imageJob, conclusion: "failure" }], sha, mediumScope), false);
 
   const highScope = { risk: "high", base, database: true, browser: true };
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("high"), dbJob], sha, highScope), true);
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("high"), browserJob], sha, highScope), false);
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("high"), dbJob, { ...dbJob, conclusion: "skipped" }], sha, highScope), true);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("high"), dbJob], sha, highScope), true);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("high"), browserJob], sha, highScope), false);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("high"), dbJob, { ...dbJob, conclusion: "skipped" }], sha, highScope), true);
 
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("high"), dbJob], sha, mediumScope, { attestedRisk: "high" }), true);
-  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, attestation("medium"), browserJob], sha, highScope, { attestedRisk: "medium" }), false);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("high"), dbJob], sha, mediumScope, { attestedRisk: "high" }), true);
+  assert.equal(mainCiRunHasRiskProof(successfulMainRun, [sourceJob, imageJob, attestation("medium"), browserJob], sha, highScope, { attestedRisk: "medium" }), false);
 });
 
 test("higher-risk main CI proof preserves actual release receipt policy", () => {
   const lowScope = { risk: "low", base, database: false, browser: false };
-  const highJobs = [sourceJob, attestation("high"), dbJob];
+  const highJobs = [sourceJob, imageJob, attestation("high"), dbJob];
   const lowProof = selectMainCiProof(successfulMainRun, highJobs, sha, lowScope);
   assert.deepEqual(lowProof, { scope: lowScope, attestedRisk: "high", attestedBase: base });
 
@@ -132,7 +187,7 @@ test("higher-risk main CI proof preserves actual release receipt policy", () => 
 test("already-current release keeps the production source policy when CI attests an older base", () => {
   const currentScope = { risk: "low", base: sha, database: false, browser: false };
   const historicalScope = { risk: "high", base, database: true, browser: true };
-  const priorJobs = [sourceJob, attestation("high", base), dbJob];
+  const priorJobs = [sourceJob, imageJob, attestation("high", base), dbJob];
   const priorProof = selectMainCiProof(successfulMainRun, priorJobs, sha, currentScope, {
     allowPriorSourceProof: true,
     classifyBase: () => historicalScope,
@@ -147,7 +202,7 @@ test("already-current release keeps the production source policy when CI attests
     databaseRequired: priorProof.scope.database,
   }).restore, "not-required");
 
-  assert.equal(selectMainCiProof(successfulMainRun, [sourceJob, attestation("medium", base), browserJob], sha, currentScope, {
+  assert.equal(selectMainCiProof(successfulMainRun, [sourceJob, imageJob, attestation("medium", base), browserJob], sha, currentScope, {
     allowPriorSourceProof: true,
     classifyBase: () => historicalScope,
   }), null);
@@ -271,24 +326,24 @@ test("release is human-dispatched only and main CI is reused without tag CI disp
   assert.match(release, /^name: 发布正式版本$/mu);
   assert.match(release, /Confirm production source and risk tier/u);
   assert.match(release, /Reuse successful exact-SHA main CI for the applicable risk tier/u);
-  assert.match(release, /Require the permanent server tooling before creating a tag/u);
+  assert.match(release, /Require the permanent server tooling before deployment/u);
   assert.match(release, /stable-tooling-status/u);
-  assert.match(release, /deploy-stable \$RELEASE_TAG \$GITHUB_SHA CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI/u);
+  assert.match(release, /deploy-stable \$RELEASE_TAG \$GITHUB_SHA CONFIRM_STABLE_CI_IMAGES/u);
   assert.match(release, /StrictHostKeyChecking=yes/u);
   assert.match(release, /persist-credentials: false/u);
   assert.match(release, /contents: write[\s\S]*actions: read/u);
   assert.match(release, /group: ai-project-os-production[\s\S]*cancel-in-progress: false/u);
-  assert.match(release, /timeout-minutes: 240/u);
+  assert.match(release, /timeout-minutes: 45/u);
   assert.doesNotMatch(release, /StrictHostKeyChecking=no|set -x|scp |rsync |workflow_run:|PAT|verify-tag-ci|ci.yml\/dispatches/u);
   const orderedSteps = [
     "Require the manual main-branch candidate",
     "Confirm production source and risk tier",
     "Reuse successful exact-SHA main CI for the applicable risk tier",
-    "Require the permanent server tooling before creating a tag",
     "Create or reuse the immutable annotated version tag",
+    "Require the permanent server tooling before deployment",
     "Recheck main and immutable tag before production deployment",
     "Deploy through the permanent restricted server gateway",
-    "Verify the exact backup and migration receipt",
+    "Verify the exact image deployment and migration receipt",
     "Verify public target health and publish the GitHub release",
   ].map((name) => release.indexOf(name));
   assert.ok(orderedSteps.every((index) => index >= 0));
@@ -298,7 +353,7 @@ test("release is human-dispatched only and main CI is reused without tag CI disp
   assert.doesNotMatch(ci, /^  workflow_dispatch:/mu);
   assert.doesNotMatch(ci, /release_request_id|actions\/workflows\/ci\.yml\/dispatches/u);
   assert.match(ci, /risk=\$\{\{ needs\.scope\.outputs\.risk \}\} base=\$\{\{ needs\.scope\.outputs\.base \}\}/u);
-  assert.match(ci, /name: Verify browser and release client/u);
+  assert.match(ci, /name: Build and verify release images/u);
   assert.match(ci, /name: Attest tag \$\{\{ github\.ref_name \}\} at \$\{\{ github\.sha \}\}/u);
   assert.match(ci, /attest-tag/u);
   assert.doesNotMatch(ci, /if: \$\{\{ needs\.scope\.outputs\.database == 'true' \}\}[\s\S]{0,160}refs\/tags/u);

@@ -7,11 +7,14 @@ import { join, resolve } from "node:path";
 import {
   assertSafeCandidateIdentity,
   createCandidateIdentity,
+  createPrebuiltComposeOverride,
   evaluateCandidateReadiness,
   parseComposePs,
   readCoherentVersion,
   type CandidateIdentity,
 } from "./local-release-candidate";
+import { prepareReleaseImagesForCheck } from "./local-release-images";
+import type { ReleaseImageManifest } from "./release-image-manifest";
 import { createPasswordRecord } from "../src/lib/auth";
 
 type ProcessResult = { code: number; stdout: string; stderr: string };
@@ -681,8 +684,16 @@ async function verifyMigrations(composeArgs: string[], expected: number): Promis
   }
 }
 
-async function verifyImageLabels(composeArgs: string[], version: string): Promise<void> {
-  for (const service of ["principal-bootstrap", "migrate", "reconcile", "app", "worker", "git-worker"]) {
+async function verifyImageLabels(composeArgs: string[], manifest: ReleaseImageManifest): Promise<void> {
+  const expectedImages: Record<string, string> = {
+    "principal-bootstrap": manifest.images.worker.id,
+    migrate: manifest.images.migrate.id,
+    reconcile: manifest.images.worker.id,
+    app: manifest.images.app.id,
+    worker: manifest.images.worker.id,
+    "git-worker": manifest.images.worker.id,
+  };
+  for (const [service, expectedImage] of Object.entries(expectedImages)) {
     const container = await runProcess("docker", [...composeArgs, "ps", "--all", "--quiet", service]);
     const containerId = container.stdout.trim();
     if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
@@ -691,10 +702,25 @@ async function verifyImageLabels(composeArgs: string[], version: string): Promis
     const label = await runProcess("docker", [
       "inspect",
       "--format",
-      '{{ index .Config.Labels "org.opencontainers.image.version" }}',
+      '{{.Image}}|{{ index .Config.Labels "org.opencontainers.image.version" }}|{{ index .Config.Labels "org.opencontainers.image.revision" }}',
       containerId,
     ]);
-    if (label.stdout.trim() !== version) throw new Error(`LOCAL_RELEASE_IMAGE_VERSION_MISMATCH:${service}`);
+    if (label.stdout.trim() !== `${expectedImage}|${manifest.version}|${manifest.revision}`) {
+      throw new Error(`LOCAL_RELEASE_IMAGE_IDENTITY_MISMATCH:${service}`);
+    }
+  }
+}
+
+async function verifyPrebuiltImages(manifest: ReleaseImageManifest): Promise<void> {
+  for (const name of ["app", "worker", "migrate"] as const) {
+    const image = manifest.images[name];
+    const inspected = await runProcess("docker", [
+      "image", "inspect", image.id,
+      "--format",
+      '{{.Id}}|{{ index .Config.Labels "org.opencontainers.image.version" }}|{{ index .Config.Labels "org.opencontainers.image.revision" }}|{{ index .Config.Labels "org.opencontainers.image.source" }}',
+    ]);
+    const expected = `${image.id}|${manifest.version}|${manifest.revision}|https://github.com/Jack-Kunlun/ai-project-os`;
+    if (inspected.stdout.trim() !== expected) throw new Error(`LOCAL_RELEASE_IMAGE_IDENTITY_MISMATCH:${name}`);
   }
 }
 
@@ -776,6 +802,14 @@ async function main(): Promise<void> {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-local-release-"));
   const envFile = join(temporaryDirectory, "candidate.env");
   const overrideFile = join(temporaryDirectory, "compose.candidate.yaml");
+  let imageManifest: ReleaseImageManifest;
+  try {
+    imageManifest = await prepareReleaseImagesForCheck(version, revision);
+    await verifyPrebuiltImages(imageManifest);
+  } catch (error) {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+    throw error;
+  }
   const envSource = [
     "POSTGRES_USER=ai_project_os_cluster_admin",
     `POSTGRES_CLUSTER_ADMIN_PASSWORD=${clusterAdminPassword}`,
@@ -793,30 +827,10 @@ async function main(): Promise<void> {
     `AI_PROJECT_OS_SECRETS_VOLUME=${identity.volumes.secrets}`,
     `AI_PROJECT_OS_UPLOADS_VOLUME=${identity.volumes.uploads}`,
     `AI_PROJECT_OS_WORKER_NAME=${identity.workerName}`,
-    `LOCAL_RELEASE_IMAGE_PREFIX=${identity.projectName}`,
-    `LOCAL_RELEASE_VERSION=${version}`,
     "AI_PROJECT_OS_SECURE_COOKIES=false",
     "",
   ].join("\n");
-  const overrideSource = [
-    "services:",
-    "  principal-bootstrap:",
-    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-principal-bootstrap:${LOCAL_RELEASE_VERSION}"',
-    "  migrate:",
-    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-migrate:${LOCAL_RELEASE_VERSION}"',
-    "  reconcile:",
-    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-reconcile:${LOCAL_RELEASE_VERSION}"',
-    "  app:",
-    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-app:${LOCAL_RELEASE_VERSION}"',
-    "    env_file: !reset []",
-    "    environment:",
-    '      AI_PROJECT_OS_EMAIL_AUTH_ENABLED: "false"',
-    "  worker:",
-    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-worker:${LOCAL_RELEASE_VERSION}"',
-    "  git-worker:",
-    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-git-worker:${LOCAL_RELEASE_VERSION}"',
-    "",
-  ].join("\n");
+  const overrideSource = createPrebuiltComposeOverride(imageManifest.images);
 
   const composeArgs = [
     "compose",
@@ -846,17 +860,12 @@ async function main(): Promise<void> {
     console.log(`[local-release] validating isolated candidate ${identity.projectName}`);
     await runProcess("docker", [...composeArgs, "config", "--quiet"]);
     candidateTouched = true;
-    console.log("[local-release] building app, worker, Git worker, principal bootstrap, migration, and reconcile images");
-    // Explicit per-service commands also bound BuildKit/Bake concurrency.
-    for (const service of ["app", "worker", "git-worker", "principal-bootstrap", "migrate", "reconcile"]) {
-      await runProcess("docker", [...composeArgs, "build", service], { inherit: true });
-    }
-    console.log("[local-release] starting isolated candidate");
-    await runProcess("docker", [...composeArgs, "up", "--detach"], { inherit: true });
+    console.log(`[local-release] starting isolated candidate with prebuilt images from ${imageManifest.revision}`);
+    await runProcess("docker", [...composeArgs, "up", "--detach", "--no-build"], { inherit: true });
     await waitForCandidate(composeArgs);
     const migrationCount = await expectedMigrationCount();
     await verifyMigrations(composeArgs, migrationCount);
-    await verifyImageLabels(composeArgs, version);
+    await verifyImageLabels(composeArgs, imageManifest);
     await verifyHealth(appPort, version);
     console.log("[local-release] seeding disposable personal-workspace fixture in the candidate DB and business data through the application API");
     const fixture = await seedBusinessFixture(appPort, identity, composeArgs, entitlementWriterPassword);

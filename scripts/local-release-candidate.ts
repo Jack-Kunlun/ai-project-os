@@ -1,3 +1,5 @@
+import type { ReleaseImageManifest } from "./release-image-manifest";
+
 export const LOCAL_RELEASE_PROJECT_PREFIX = "ai-project-os-candidate-";
 
 export type CandidateIdentity = {
@@ -37,6 +39,34 @@ const TOKEN_PATTERN = /^[a-z0-9]{12,24}$/u;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const RUNNING_SERVICES = ["postgres", "app", "worker", "git-worker"] as const;
 const ONE_SHOT_SERVICES = ["principal-bootstrap", "migrate", "reconcile"] as const;
+
+export function createPrebuiltComposeOverride(images: ReleaseImageManifest["images"]): string {
+  return [
+    "services:",
+    "  principal-bootstrap:",
+    `    image: "${images.worker.id}"`,
+    "    build: !reset null",
+    "  migrate:",
+    `    image: "${images.migrate.id}"`,
+    "    build: !reset null",
+    "  reconcile:",
+    `    image: "${images.worker.id}"`,
+    "    build: !reset null",
+    "  app:",
+    `    image: "${images.app.id}"`,
+    "    build: !reset null",
+    "    env_file: !reset []",
+    "    environment:",
+    '      AI_PROJECT_OS_EMAIL_AUTH_ENABLED: "false"',
+    "  worker:",
+    `    image: "${images.worker.id}"`,
+    "    build: !reset null",
+    "  git-worker:",
+    `    image: "${images.worker.id}"`,
+    "    build: !reset null",
+    "",
+  ].join("\n");
+}
 
 export function createCandidateIdentity(token: string, version: string): CandidateIdentity {
   if (!TOKEN_PATTERN.test(token)) throw new Error("LOCAL_RELEASE_TOKEN_INVALID");
@@ -185,11 +215,18 @@ export function readCoherentVersion(
     throw new Error("LOCAL_RELEASE_PACKAGE_VERSION_INVALID", { cause: error });
   }
   const appVersion = appVersionSource.match(/APP_VERSION\s*=\s*"([^"]+)"/u)?.[1];
-  const imageVersion = dockerfileSource.match(/org\.opencontainers\.image\.version="([^"]+)"/u)?.[1];
+  const dockerVersionArguments = [...dockerfileSource.matchAll(/^ARG APP_VERSION="([^"]+)"$/gmu)];
+  const dockerVersionLabels = [...dockerfileSource.matchAll(/org\.opencontainers\.image\.version="\$\{APP_VERSION\}"/gu)];
+  const hasBuildArguments = dockerVersionArguments.length === 1
+    && dockerVersionArguments[0]?.[1] === packageVersion
+    && /ARG APP_REVISION=unknown/u.test(dockerfileSource);
+  const hasImageLabels = dockerVersionLabels.length === 1
+    && /org\.opencontainers\.image\.revision="\$\{APP_REVISION\}"/u.test(dockerfileSource)
+    && /org\.opencontainers\.image\.source="https:\/\/github\.com\/Jack-Kunlun\/ai-project-os"/u.test(dockerfileSource);
   if (typeof packageVersion !== "string" || !VERSION_PATTERN.test(packageVersion)) {
     throw new Error("LOCAL_RELEASE_PACKAGE_VERSION_INVALID");
   }
-  if (packageVersion !== appVersion || packageVersion !== imageVersion) {
+  if (packageVersion !== appVersion || !hasBuildArguments || !hasImageLabels) {
     throw new Error("LOCAL_RELEASE_VERSION_MISMATCH");
   }
   return packageVersion;

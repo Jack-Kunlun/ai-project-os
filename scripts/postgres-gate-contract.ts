@@ -172,6 +172,8 @@ export function buildPostgresGateDatabaseUrl(
 
 export function selectPostgresGates(filter: string | undefined): readonly PostgresGateDefinition[] {
   if (filter === undefined || filter.trim() === "") return POSTGRES_GATES;
+  if (filter === "all") return POSTGRES_GATES;
+  if (filter === "none") return [];
 
   const requested = filter.split(",").map((value) => value.trim()).filter(Boolean);
   if (new Set(requested).size !== requested.length) {

@@ -22,6 +22,12 @@ jobs:
       database: ${{ steps.classify.outputs.database }}
       browser: ${{ steps.classify.outputs.browser }}
       coverage: ${{ steps.classify.outputs.coverage }}
+      impact_gate_filter: ${{ steps.classify.outputs.impact_gate_filter }}
+      impact_phone_auth: ${{ steps.classify.outputs.impact_phone_auth }}
+      impact_oid10: ${{ steps.classify.outputs.impact_oid10 }}
+      impact_browser: ${{ steps.classify.outputs.impact_browser }}
+      impact_candidate: ${{ steps.classify.outputs.impact_candidate }}
+      impact_schema_validation: ${{ steps.classify.outputs.impact_schema_validation }}
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -29,14 +35,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Classify change impact
+      - name: Classify cumulative production and test impact
         id: classify
         env:
           CI_HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            printf 'risk=tag\nbase=unknown\ndatabase=false\nbrowser=false\ncoverage=false\n' >> "$GITHUB_OUTPUT"
+            printf 'risk=tag\nbase=unknown\ndatabase=false\nbrowser=false\ncoverage=false\nimpact_gate_filter=none\nimpact_phone_auth=false\nimpact_oid10=false\nimpact_browser=false\nimpact_candidate=false\nimpact_schema_validation=false\n' >> "$GITHUB_OUTPUT"
           else
             node scripts/ci-change-scope.mjs
           fi
@@ -82,13 +88,9 @@ jobs:
         if: ${{ needs.scope.outputs.coverage == 'true' }}
         run: pnpm test:coverage
 
-      - name: Build and check production client performance
-        if: ${{ needs.scope.outputs.database != 'true' && needs.scope.outputs.browser != 'true' }}
-        run: pnpm test:performance
-
   database:
     needs: scope
-    if: ${{ !startsWith(github.ref, 'refs/tags/') && needs.scope.outputs.database == 'true' }}
+    if: ${{ !startsWith(github.ref, 'refs/tags/') && needs.scope.outputs.risk == 'high' }}
     name: Verify database and release candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -110,6 +112,7 @@ jobs:
       DATABASE_URL: postgresql://ai_project_os_gate:AiProjectOsCiGate_20260831@127.0.0.1:56432/ai_project_os_ci_default_test
       POSTGRES_GATE_ADMIN_URL: postgresql://ai_project_os_ci_cluster_admin:AiProjectOsCiAdmin_20260831@127.0.0.1:56432/postgres
       POSTGRES_GATE_TEST_PASSWORD: AiProjectOsCiGate_20260831
+      POSTGRES_GATE_FILTER: ${{ needs.scope.outputs.impact_gate_filter }}
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - name: Check out repository
@@ -131,49 +134,34 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate and validate Prisma
-        run: |
-          pnpm db:generate
-          pnpm db:validate
+      - name: Generate Prisma client
+        run: pnpm db:generate
 
-      - name: Run every PostgreSQL gate
+      - name: Validate Prisma schema and migrations when changed
+        if: ${{ needs.scope.outputs.impact_schema_validation == 'true' }}
+        run: pnpm db:validate
+
+      - name: Run selected PostgreSQL gates
         run: pnpm test:postgres-gates
 
-      - name: Run isolated phone authentication and account closure gate
+      - name: Run phone authentication gate when affected
+        if: ${{ needs.scope.outputs.impact_phone_auth == 'true' }}
         run: pnpm test:phone-auth-postgres
 
-      - name: Run isolated PostgreSQL 18 OID10 gate
+      - name: Run PostgreSQL 18 OID10 gate when affected
+        if: ${{ needs.scope.outputs.impact_oid10 == 'true' }}
         run: pnpm test:database-principal-oid10
 
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Run production browser and accessibility gates
-        run: NODE_OPTIONS=--max-old-space-size=6144 pnpm test:browser-e2e
-
-      - name: Enforce production client performance budgets
-        run: pnpm performance:check
-
-      - name: Build, restart, and clean isolated release candidate
-        run: pnpm release:local
-
-      - name: Upload browser diagnostics
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-diagnostics
-          path: |
-            playwright-report
-            test-results/playwright
-          if-no-files-found: ignore
-          retention-days: 14
-
-  browser:
+  build-images:
     needs: scope
-    if: ${{ !startsWith(github.ref, 'refs/tags/') && needs.scope.outputs.database != 'true' && needs.scope.outputs.browser == 'true' }}
-    name: Verify browser and release client
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    name: Build and verify release images
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
+    permissions:
+      actions: read
+      contents: read
+      packages: write
     services:
       postgres:
         image: pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
@@ -189,10 +177,11 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      DATABASE_URL: postgresql://ai_project_os_gate:AiProjectOsCiGate_20260831@127.0.0.1:56432/ai_project_os_ci_default_test
+      DATABASE_URL: postgresql://ci_static:ci_static@127.0.0.1:1/ci_static
       POSTGRES_GATE_ADMIN_URL: postgresql://ai_project_os_ci_cluster_admin:AiProjectOsCiAdmin_20260831@127.0.0.1:56432/postgres
       POSTGRES_GATE_TEST_PASSWORD: AiProjectOsCiGate_20260831
       NEXT_TELEMETRY_DISABLED: "1"
+      RELEASE_IMAGES_MANIFEST: ${{ runner.temp }}/release-images.local.json
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -213,22 +202,98 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate and validate Prisma
-        run: |
-          pnpm db:generate
-          pnpm db:validate
+      - name: Generate Prisma client for runner-side release checks
+        run: pnpm db:generate
 
-      - name: Install Chromium
+      - name: Set up shared BuildKit builder
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        with:
+          driver: docker-container
+
+      - name: Resolve release identity
+        id: identity
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build app, worker, and migration images once
+        env:
+          APP_VERSION: ${{ steps.identity.outputs.version }}
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        with:
+          source: .
+          files: docker-bake.hcl
+          targets: app,worker,migrate
+          load: true
+          vars: |
+            APP_VERSION=${{ steps.identity.outputs.version }}
+            APP_REVISION=${{ github.sha }}
+          set: |
+            *.cache-from=type=gha,scope=release-images
+            *.cache-to=type=gha,scope=release-images,mode=max,ignore-error=true
+
+      - name: Verify immutable IDs for the built images
+        env:
+          APP_VERSION: ${{ steps.identity.outputs.version }}
+        run: node scripts/prepare-release-images.mjs "$RUNNER_TEMP/release-images.local.json"
+
+      - name: Export the already-built Next.js output for performance checks
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        with:
+          source: .
+          files: docker-bake.hcl
+          targets: performance-export
+          vars: |
+            APP_VERSION=${{ steps.identity.outputs.version }}
+            APP_REVISION=${{ github.sha }}
+          set: |
+            performance-export.cache-from=type=gha,scope=release-images
+            performance-export.output=type=local,dest=${{ runner.temp }}/ci-performance
+
+      - name: Check performance budget from the exported build output
+        run: |
+          set -euo pipefail
+          cp -a "$RUNNER_TEMP/ci-performance/.next" .next
+          pnpm performance:check
+
+      - name: Install Chromium for affected browser checks
+        if: ${{ needs.scope.outputs.impact_browser == 'true' }}
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run production browser and accessibility gates
+      - name: Run production browser and accessibility checks on the built images
+        if: ${{ needs.scope.outputs.impact_browser == 'true' }}
         run: NODE_OPTIONS=--max-old-space-size=6144 pnpm test:browser-e2e
 
-      - name: Enforce production client performance budgets
-        run: pnpm performance:check
+      - name: Run isolated release candidate with the same image IDs
+        if: ${{ needs.scope.outputs.impact_candidate == 'true' }}
+        run: pnpm release:local
+
+      - name: Publish immutable images for manual release workflow
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_USERNAME: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          APP_VERSION="${{ steps.identity.outputs.version }}"
+          export APP_VERSION
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GH_USERNAME" --password-stdin
+          node --import tsx scripts/publish-release-images.mjs \
+            "$RUNNER_TEMP/release-images.local.json" \
+            "$RUNNER_TEMP/release-images.json"
+
+      - name: Upload immutable release image manifest
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/release-images.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload browser diagnostics
-        if: ${{ !cancelled() }}
+        if: ${{ always() && needs.scope.outputs.impact_browser == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-diagnostics
@@ -239,45 +304,36 @@ jobs:
           retention-days: 14
 
   verify:
-    needs: [scope, source, database, browser]
+    needs: [scope, source, database, build-images]
     if: ${{ always() && !startsWith(github.ref, 'refs/tags/') }}
     name: Verify internal delivery gates [risk=${{ needs.scope.outputs.risk }} base=${{ needs.scope.outputs.base }}]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require every applicable gate
+      - name: Require every applicable gate and the exact-sha image job
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
           SOURCE_RESULT: ${{ needs.source.result }}
           DATABASE_RESULT: ${{ needs.database.result }}
-          BROWSER_RESULT: ${{ needs.browser.result }}
+          IMAGE_RESULT: ${{ needs.build-images.result }}
           RISK: ${{ needs.scope.outputs.risk }}
           BASE: ${{ needs.scope.outputs.base }}
-          DATABASE_REQUIRED: ${{ needs.scope.outputs.database }}
-          BROWSER_REQUIRED: ${{ needs.scope.outputs.browser }}
+          DATABASE_REQUIRED: ${{ needs.scope.outputs.risk == 'high' }}
         run: |
           set -euo pipefail
           test "$SCOPE_RESULT" = success
           test "$SOURCE_RESULT" = success
+          test "$IMAGE_RESULT" = success
           case "$RISK" in low|medium|high) ;; *) exit 1 ;; esac
           if [[ "$BASE" != unknown ]]; then
             [[ "$BASE" =~ ^[a-f0-9]{40}$ ]]
           else
             test "$RISK" = high
-            test "$DATABASE_REQUIRED" = true
-            test "$BROWSER_REQUIRED" = true
           fi
           if [[ "$DATABASE_REQUIRED" == true ]]; then
             test "$DATABASE_RESULT" = success
-            test "$BROWSER_RESULT" = skipped
           else
-            test "$DATABASE_REQUIRED" = false
             test "$DATABASE_RESULT" = skipped
-          fi
-          if [[ "$BROWSER_REQUIRED" == true && "$DATABASE_REQUIRED" != true ]]; then
-            test "$BROWSER_RESULT" = success
-          else
-            test "$BROWSER_RESULT" = skipped
           fi
 
   tag-attestation:

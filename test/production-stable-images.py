@@ -54,7 +54,7 @@ class Images(unittest.TestCase):
         # Synthetic values only; preserve every character without decoding JWTs.
         jwt = 'ghs_12345_' + 'eyJ' + 'a' * 170 + '.' + 'eyJ' + 'b' * 270 + '.' + 'c-_' * 40
         self.assertGreater(len(jwt), 520)
-        for token in ('ghs_' + 'x' * 40, jwt, 'opaque-._~+/token==', 'a' * 3800):
+        for token in ('ghs_' + 'x' * 40, jwt, 'opaque-._~+/token==', 'a===', 'a' * 3800):
             value = {'token': token, 'runId': 38901002483}
             with self.subTest(length=len(token)):
                 self.assertEqual(m.read_release_credentials(io.StringIO(json.dumps(value))), value)
@@ -72,6 +72,17 @@ class Images(unittest.TestCase):
             text=True, capture_output=True, check=True)
         value = m.read_release_credentials(io.StringIO(result.stdout))
         self.assertEqual(value, {'token': token, 'runId': 38901002483})
+        checker = Path(__file__).parents[1] / 'scripts/verify-release-credentials.py'
+        for raw, expected_run, expected_status in ((result.stdout, '38901002483', 0),
+                                                  (result.stdout, '42', 1),
+                                                  ('{"token":"SYNTHETIC_SECRET;INVALID","runId":42}', '42', 1)):
+            checked = subprocess.run(['python3', '-I', '-B', str(checker)], input=raw,
+                env={**m.os.environ, 'GITHUB_RUN_ID': expected_run}, text=True, capture_output=True)
+            self.assertEqual(checked.returncode, expected_status)
+            self.assertNotIn(token, checked.stdout + checked.stderr)
+            self.assertNotIn('SYNTHETIC_SECRET', checked.stdout + checked.stderr)
+            self.assertIn('CI_RELEASE_CREDENTIALS_TRANSPORT_' + ('OK' if expected_status == 0 else 'INVALID'),
+                          checked.stdout + checked.stderr)
 
     def test_artifact_binds_exact_ci_run_zip_digest_and_filename(self):
         buffer = io.BytesIO()

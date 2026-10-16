@@ -566,7 +566,7 @@ def read_release_credentials(stream):
     # Bound transport size and HTTP Bearer characters, not a provider token format.
     token = value['token']
     require(isinstance(token, str) and 0 < len(token) <= 3800
-            and re.fullmatch(r'[A-Za-z0-9._~+/-]+={0,2}', token) is not None,
+            and re.fullmatch(r'[A-Za-z0-9._~+/-]+=*', token) is not None,
             'WORKFLOW_TOKEN_INVALID')
     return value
 

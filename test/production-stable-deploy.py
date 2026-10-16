@@ -534,7 +534,9 @@ class BackupValidationTests(unittest.TestCase):
             )
             (path / '.cos-upload-verified').write_text(
                 'status=COS_UPLOAD_VERIFIED\n'
+                + 'verified_at=2026-10-15T01:02:03+00:00\n'
                 + 'archive_object=' + object_path + '\n'
+                + 'checksum_object=' + object_path + '.sha256\n'
                 + 'manifest_object=' + verified_manifest + '\n'
                 + 'latest_manifest_object=' + latest_manifest + '\n'
                 + 'archive_sha256=' + 'a' * 64 + '\n',
@@ -1361,6 +1363,81 @@ class ProductionResourceContractTests(unittest.TestCase):
             registered_signals = {call.args[0] for call in signal_mock.call_args_list}
             self.assertTrue({signal.SIGINT, signal.SIGHUP, signal.SIGTERM}.issubset(registered_signals))
             self.assertTrue(stdout.getvalue().startswith('STABLE_DEPLOY_ALREADY_CURRENT '))
+
+
+class RecoveryBackupMarkerTests(unittest.TestCase):
+    def _check_producer_marker(self, mutate=None):
+        backup_source = (ROOT / DEPLOYER.BACKUP_SOURCE).read_text()
+        start = backup_source.index("{\n  printf 'status=COS_UPLOAD_VERIFIED\\n'")
+        end = backup_source.index('} > "$marker_tmp"', start) + len('} > "$marker_tmp"')
+        producer = backup_source[start:end]
+        name = '20261016T043921Z-pre-deploy-to-v1.0.4.ABC123'
+        archive = 'cos://ai-project-os-backup-1/backups/2026/10/16/' + name + '/' + name + '.tar.age'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backup_path = root / name
+            backup_path.mkdir(mode=0o700)
+            marker_path = backup_path / '.cos-upload-verified'
+            environment = {**os.environ, 'marker_tmp': str(marker_path),
+                           'verified_at': '2026-10-16T12:39:21+08:00',
+                           'archive_object': archive, 'checksum_object': archive + '.sha256',
+                           'archive_sha256': 'a' * 64,
+                           'manifest_object': archive.removesuffix('.tar.age') + '.manifest.json',
+                           'latest_manifest_object': 'cos://ai-project-os-backup-1/manifests/latest.json'}
+            subprocess.run(['/bin/bash', '-c', 'umask 077\n' + producer],
+                           env=environment, check=True, capture_output=True)
+            self.assertEqual(len(DEPLOYER.parse_record(marker_path)), 7)
+            if mutate is not None:
+                marker_path.write_text(mutate(marker_path.read_text()))
+
+            class FixtureHelper:
+                @staticmethod
+                def trusted(_path, _mode=None):
+                    pass
+
+            def fixture_path(value):
+                return root if value == '/var/backups/ai-project-os' else Path(value)
+
+            with patch.object(DEPLOYER, 'Path', side_effect=fixture_path), \
+                    patch.object(DEPLOYER, 'HELPER', FixtureHelper()), \
+                    patch.object(DEPLOYER, 'validate_local_backup') as validate, \
+                    patch.object(DEPLOYER, 'atomic_install') as install:
+                try:
+                    backup = DEPLOYER.find_v104_recovery_backup(b'email fixture')
+                except BaseException:
+                    validate.assert_not_called()
+                    install.assert_not_called()
+                    raise
+                validate.assert_called_once_with(backup, b'email fixture', 'v1.0.4', '1.0.0')
+                install.assert_not_called()
+                self.assertEqual(backup['name'], name)
+                self.assertEqual(backup['object'], archive)
+
+    def test_recovery_accepts_marker_emitted_by_the_actual_backup_producer(self):
+        self._check_producer_marker()
+        self._check_producer_marker(lambda text: text.replace('+08:00', '+00:00'))
+
+    def test_invalid_marker_still_fails_before_backup_validation_or_host_writes(self):
+        for label, mutate, code in (
+                ('missing', lambda text: '\n'.join(line for line in text.splitlines()
+                                                   if not line.startswith('checksum_object=')),
+                 'STABLE_RECOVERY_BACKUP_MARKER_INVALID'),
+                ('unknown', lambda text: text + 'unknown=value\n',
+                 'STABLE_RECOVERY_BACKUP_MARKER_INVALID'),
+                ('checksum', lambda text: text.replace('.tar.age.sha256', '.other.sha256'),
+                 'STABLE_RECOVERY_BACKUP_MARKER_INVALID'),
+                ('timestamp', lambda text: text.replace('2026-10-16T12:39:21+08:00', 'invalid'),
+                 'STABLE_RECOVERY_BACKUP_MARKER_INVALID'),
+                ('status', lambda text: text.replace('COS_UPLOAD_VERIFIED', 'UNVERIFIED'),
+                 'STABLE_RECOVERY_BACKUP_MARKER_INVALID'),
+                ('duplicate', lambda text: text + 'archive_sha256=' + 'a' * 64 + '\n',
+                 'STABLE_RECORD_INVALID'),
+                ('digest', lambda text: text.replace('a' * 64, 'a' * 63),
+                 'STABLE_BACKUP_SHA_INVALID'),
+                ('manifest', lambda text: text.replace('.manifest.json', '.wrong.json'),
+                 'STABLE_BACKUP_VERIFIED_MANIFEST_INVALID')):
+            with self.subTest(label=label), self.assertRaisesRegex(RuntimeError, code):
+                self._check_producer_marker(mutate)
 
 
 class RecoveryReceiptTests(unittest.TestCase):

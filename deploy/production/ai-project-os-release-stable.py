@@ -1007,8 +1007,12 @@ def find_v104_recovery_backup(current_email_bytes):
     require(stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode),
             'RECOVERY_BACKUP_DIRECTORY_INVALID')
     marker = parse_record(path / '.cos-upload-verified')
-    require(set(marker) == {'status', 'archive_object', 'manifest_object',
-                            'latest_manifest_object', 'archive_sha256'},
+    require(set(marker) == {'status', 'verified_at', 'archive_object', 'checksum_object',
+                            'manifest_object', 'latest_manifest_object', 'archive_sha256'}
+            and marker.get('status') == 'COS_UPLOAD_VERIFIED'
+            and marker.get('checksum_object') == marker.get('archive_object', '') + '.sha256'
+            and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})',
+                             marker.get('verified_at', '')) is not None,
             'RECOVERY_BACKUP_MARKER_INVALID')
     line = ('BACKUP_OK reason=pre-deploy-to-v1.0.4 retention_removed=0 source_quiesced=true'
             + ' source=' + str(path)

@@ -13,6 +13,8 @@ test("CI compiles the Next app once and reuses the same release images for brows
   ]);
 
   assert.match(workflow, /build-images:[\s\S]*?name: Build and verify release images/u);
+  assert.doesNotMatch(workflow, /RELEASE_IMAGES_MANIFEST: \$\{\{ runner\.temp \}\}/u);
+  assert.match(workflow, /printf 'RELEASE_IMAGES_MANIFEST=%s\/release-images\.local\.json\\n' "\$RUNNER_TEMP" >> "\$GITHUB_ENV"/u);
   assert.match(workflow, /if: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/u);
   assert.match(workflow, /docker\/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd/u);
   assert.match(workflow, /docker\/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f/u);

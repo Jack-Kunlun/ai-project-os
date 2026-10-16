@@ -181,7 +181,6 @@ jobs:
       POSTGRES_GATE_ADMIN_URL: postgresql://ai_project_os_ci_cluster_admin:AiProjectOsCiAdmin_20260831@127.0.0.1:56432/postgres
       POSTGRES_GATE_TEST_PASSWORD: AiProjectOsCiGate_20260831
       NEXT_TELEMETRY_DISABLED: "1"
-      RELEASE_IMAGES_MANIFEST: ${{ runner.temp }}/release-images.local.json
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -235,7 +234,10 @@ jobs:
       - name: Verify immutable IDs for the built images
         env:
           APP_VERSION: ${{ steps.identity.outputs.version }}
-        run: node scripts/prepare-release-images.mjs "$RUNNER_TEMP/release-images.local.json"
+        run: |
+          set -euo pipefail
+          node scripts/prepare-release-images.mjs "$RUNNER_TEMP/release-images.local.json"
+          printf 'RELEASE_IMAGES_MANIFEST=%s/release-images.local.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - name: Export the already-built Next.js output for performance checks
         uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0

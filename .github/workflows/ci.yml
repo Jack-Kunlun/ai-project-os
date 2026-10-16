@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           node -e 'process.stdout.write(JSON.stringify({token:process.env.RELEASE_REGISTRY_TOKEN,runId:Number(process.env.MAIN_CI_RUN_ID)}))' \
-            | python3 -I -B scripts/verify-release-credentials.py
+            | python3 -I -B scripts/production-stable-credentials.py
 
       - name: Classify cumulative production and test impact
         id: classify

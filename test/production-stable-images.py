@@ -72,7 +72,7 @@ class Images(unittest.TestCase):
             text=True, capture_output=True, check=True)
         value = m.read_release_credentials(io.StringIO(result.stdout))
         self.assertEqual(value, {'token': token, 'runId': 38901002483})
-        checker = Path(__file__).parents[1] / 'scripts/verify-release-credentials.py'
+        checker = Path(__file__).parents[1] / 'scripts/production-stable-credentials.py'
         for raw, expected_run, expected_status in ((result.stdout, '38901002483', 0),
                                                   (result.stdout, '42', 1),
                                                   ('{"token":"SYNTHETIC_SECRET;INVALID","runId":42}', '42', 1)):

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, delimiter } from "node:path";
+import { spawnSync } from "node:child_process";
 import { parseReleaseImageManifest } from "../scripts/release-image-manifest";
 
 const revision = "a".repeat(40);
@@ -10,6 +14,40 @@ const repositories = {
   worker: "ghcr.io/jack-kunlun/ai-project-os-worker",
   migrate: "ghcr.io/jack-kunlun/ai-project-os-migrate",
 };
+
+test("the real ESM publisher loads its TypeScript contract and writes registry digests", () => {
+  const directory = mkdtempSync(join(tmpdir(), "release-publisher-"));
+  try {
+    const docker = join(directory, "docker");
+    writeFileSync(docker, `#!/usr/bin/env node
+const args=process.argv.slice(2);
+if(args[0]==="image" && args[1]==="inspect") process.stdout.write(JSON.stringify({
+ "org.opencontainers.image.version":"1.0.6",
+ "org.opencontainers.image.revision":"${revision}",
+ "org.opencontainers.image.source":"https://github.com/Jack-Kunlun/ai-project-os"
+}));
+else if(args[0]==="push") process.stdout.write("digest: ${digest} size: 1234\\n");
+else if(args[0]!=="tag") process.exit(2);
+`);
+    chmodSync(docker, 0o700);
+    const input = join(directory, "local.json");
+    const output = join(directory, "release-images.json");
+    const images = Object.fromEntries(Object.keys(repositories).map((name) => [name, {
+      ref: `ai-project-os-ci/${name}:${revision}`, id: imageId,
+    }]));
+    writeFileSync(input, JSON.stringify({ schema: 1, revision, version: "1.0.6", runId: 42, images }));
+    const result = spawnSync(process.execPath, ["--import", "tsx", "scripts/publish-release-images.mjs", input, output], {
+      encoding: "utf8", env: { ...process.env, PATH: `${directory}${delimiter}${process.env.PATH}`,
+        GITHUB_SHA: revision, GITHUB_RUN_ID: "42", APP_VERSION: "1.0.6" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const published = JSON.parse(readFileSync(output, "utf8"));
+    for (const [name, repository] of Object.entries(repositories)) {
+      assert.deepEqual(published.images[name], { ref: `${repository}@${digest}`, id: imageId });
+    }
+    assert.equal(parseReleaseImageManifest(published, { expectedRevision: revision, expectedVersion: "1.0.6", expectedRunId: 42 }).runId, 42);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 function manifest() {
   return {

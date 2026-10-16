@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { parseReleaseImageManifest, expectedReleaseImageRepository } from "./release-image-manifest.ts";
+import { createRequire } from "node:module";
+const { parseReleaseImageManifest, expectedReleaseImageRepository } = createRequire(import.meta.url)("./release-image-manifest.ts");
 
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 

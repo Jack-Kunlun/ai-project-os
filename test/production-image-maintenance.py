@@ -158,12 +158,19 @@ class ImageReferenceTests(unittest.TestCase):
                     ('repoDigests', [item['digest'][:-1] + ('0' if item['digest'][-1] != '0' else '1')]),
                     ('source', 'https://foreign.invalid/project'),
                     ('project', 'foreign-project'),
+                    ('repoTags', []), ('repoDigests', []),
+                    ('repoTags', [item['tag'], 'ai-project-os-' + item['service'] + ':latest']),
+                    ('repoDigests', [item['digest'], item['digest']]),
                 ):
                     changed = dict(raw)
                     changed[field] = value
                     retained = DEPLOYER._image_record(item['id'], changed, [])
                     self.assertFalse(retained['eligible'], (field, item['id']))
                     self.assertEqual(retained['ownership'], 'unconfirmed')
+                changed_raw = dict(raw, repoTags=[], repoDigests=[])
+                retained = DEPLOYER._image_record(item['id'], changed_raw, [])
+                self.assertFalse(retained['eligible'])
+                self.assertEqual(retained['ownership'], 'unconfirmed')
                 changed = DEPLOYER._image_record(OTHER_IMAGE_ID, raw, [])
                 self.assertFalse(changed['eligible'])
                 self.assertIn('repository-reference-unrecognized', changed['ownershipReasons'])

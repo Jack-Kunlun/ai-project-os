@@ -179,6 +179,15 @@ test("legacy reference reports require the exact inspected ID, version, service 
       (candidate: ReturnType<typeof inspect>) => { candidate.images[0].version = "0.0.1"; },
       (candidate: ReturnType<typeof inspect>) => { candidate.images[0].service = "principal-bootstrap"; },
       (candidate: ReturnType<typeof inspect>) => { candidate.images[0].recognizedRepoTags[0] += "-unverified"; },
+      (candidate: ReturnType<typeof inspect>) => { candidate.images[0].recognizedRepoTags = []; },
+      (candidate: ReturnType<typeof inspect>) => { candidate.images[0].recognizedRepoDigests = []; },
+      (candidate: ReturnType<typeof inspect>) => {
+        candidate.images[0].recognizedRepoTags = []; candidate.images[0].recognizedRepoDigests = [];
+      },
+      (candidate: ReturnType<typeof inspect>) => {
+        candidate.images[0].recognizedRepoTags.push(`ai-project-os-${fixture.service}:latest`);
+      },
+      (candidate: ReturnType<typeof inspect>) => { candidate.images[0].recognizedRepoDigests.push(fixture.digest); },
       (candidate: ReturnType<typeof inspect>) => {
         candidate.images[0].recognizedRepoDigests[0] = fixture.digest.slice(0, -1) + (fixture.digest.endsWith("0") ? "1" : "0");
       },

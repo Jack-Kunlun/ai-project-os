@@ -134,6 +134,7 @@ function knownImageReference(reference, kind, item) {
   if (!match) return false;
   const historical = HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS.get(item.id);
   const exactHistorical = historical && item.version === historical[0] && item.service === historical[1]
+    && same(item.recognizedRepoTags, [historical[2]]) && same(item.recognizedRepoDigests, [historical[3]])
     && reference === historical[kind === "tag" ? 2 : 3];
   return exactHistorical || IMAGE_SERVICES.some((service) => ["", "docker.io/library/"]
     .some((prefix) => match[1] === `${prefix}ai-project-os-${service}`))
@@ -145,6 +146,11 @@ function validateImageRecords(images, scopeIds, protection) {
   requireValue(Array.isArray(images) && images.length === 17
     && same(images.map((item) => item?.id), scopeIds), "IMAGE_INVENTORY_INVALID");
   for (const item of images) {
+    const historical = HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS.get(item.id);
+    requireValue(!historical || !item.present || item.ownership !== "confirmed"
+      || (item.version === historical[0] && item.service === historical[1]
+        && same(item.recognizedRepoTags, [historical[2]]) && same(item.recognizedRepoDigests, [historical[3]])
+        && item.unknownRefCount === 0), "IMAGE_HISTORICAL_EVIDENCE_INVALID");
     requireValue(typeof item.present === "boolean" && typeof item.eligible === "boolean"
       && ["confirmed", "unconfirmed", "missing"].includes(item.ownership)
       && ["legacy", "canonical", "unknown"].includes(item.sourceKind)

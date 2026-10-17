@@ -1698,6 +1698,14 @@ def _image_record(identifier, raw, container_references):
     if version_key is None:
         ownership_reasons.append('version-unrecognized')
 
+    historical = HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS.get(identifier)
+    historical_matches = (historical is not None
+                          and (version, service) == historical[:2]
+                          and raw['repoTags'] == [historical[2]]
+                          and raw['repoDigests'] == [historical[3]])
+    if historical is not None and not historical_matches:
+        ownership_reasons.append('repository-reference-unrecognized')
+
     recognized_tags = []
     recognized_digests = []
     unknown_references = []
@@ -1708,9 +1716,7 @@ def _image_record(identifier, raw, container_references):
     ):
         for reference in refs:
             valid, referenced_service = _image_ref_repo(reference, kind)
-            historical = HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS.get(identifier)
-            if (not valid and historical is not None
-                    and (version, service) == historical[:2]
+            if (not valid and historical_matches
                     and reference == historical[2 if kind == 'tag' else 3]):
                 valid, referenced_service = True, historical[1]
             if not valid:

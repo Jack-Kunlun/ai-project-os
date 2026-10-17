@@ -65,7 +65,7 @@ export function r02ProjectRoutes(projectId: string, projectName: string): readon
   return [
     { path: `/projects/${projectId}`, heading: projectName, terminal: { kind: "heading", name: "项目当前状态" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/plan`, heading: projectName, terminal: { kind: "heading", name: "项目目标" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
-    { path: `/projects/${projectId}/materials`, heading: `${projectName} · 原始资料`, terminal: { kind: "heading", name: "原始资料来源库" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/materials`, heading: `${projectName} · 项目资料`, terminal: { kind: "heading", name: "原始资料来源库" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/materials/review`, heading: "审核 AI 候选", terminal: { kind: "text", name: "当前没有待审核 AI 候选", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/intelligence`, heading: `${projectName} · AI 工作台`, terminal: { kind: "heading", name: "当前 AI 能力" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/memory`, heading: projectName, terminal: { kind: "heading", name: "项目语义索引" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },

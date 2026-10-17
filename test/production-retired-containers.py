@@ -148,6 +148,36 @@ class RetiredContainerTests(unittest.TestCase):
         self.assertNotIn('secret-fixture-command', json.dumps(record))
         self.assertIn('writable-business-path-unconfirmed', record['retainReasons'])
 
+    def test_prisma_tool_policy_matches_the_observed_unexpected_diff_hash(self):
+        self.assertEqual(len(D._RETIRED_MIGRATE_TOOL_DIFF), 9)
+        self.assertEqual(D.sha256(D._cache_json_bytes(list(D._RETIRED_MIGRATE_TOOL_DIFF))),
+                         'bdc281930ce215fb7c80d334448899a2d1a42c809b94a0e10112b55e18d2f6a7')
+        self.assertEqual(D._RETIRED_MIGRATE_DIFF_SHA256,
+                         'b790780259e0b451726fc79834aabcf299222b170e6cfd300f93cb0283bde33d')
+
+    def test_prisma_tool_exception_requires_exact_job_paths_operations_count_and_full_hash(self):
+        lines = sorted(list(D._RETIRED_MIGRATE_TOOL_DIFF)
+                       + ['A /tmp/prisma-fixture-' + str(index) for index in range(18)])
+        digest = D.sha256(D._cache_json_bytes(lines))
+        with patch.object(D, '_RETIRED_MIGRATE_DIFF_SHA256', digest):
+            for identifier, candidate, expected in (
+                    (IDS[1], lines, 0),
+                    (IDS[0], lines, 9),
+                    (IDS[1], lines + ['A /app/uploads/private-fixture'], 10),
+                    (IDS[1], lines[:-1], 8),
+                    (IDS[1], [line.replace('schema-engine-debian-openssl-3.0.x', 'business-data')
+                              for line in lines], 9),
+                    (IDS[1], [line.replace('A /home/node/.config/prisma-nodejs/commands.json',
+                                          'D /home/node/.config/prisma-nodejs/commands.json')
+                              for line in lines], 9),
+                    (IDS[1], [line.replace('/tmp/prisma-fixture-0', '/tmp/changed')
+                              for line in lines], 9)):
+                with patch.object(D, 'docker', return_value='\n'.join(candidate)):
+                    self.assertEqual(D._retired_diff(identifier)['unexpectedCount'], expected)
+        # The real observed digest, not merely the known nine paths, is required.
+        with patch.object(D, 'docker', return_value='\n'.join(lines)):
+            self.assertEqual(D._retired_diff(IDS[1])['unexpectedCount'], 9)
+
     def test_inspection_template_omits_env_logs_and_full_config(self):
         for forbidden in ('.Config.Env', '.LogPath', '.State.Error', '{{json .}}', '.Config}}'):
             self.assertNotIn(forbidden, D._RETIRED_TEMPLATE)

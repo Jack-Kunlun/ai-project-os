@@ -2325,6 +2325,21 @@ _RETIRED_TEMPLATE = ('{{printf "[' + ','.join(['%s'] * len(_RETIRED_FIELDS)) + '
 _RETIRED_EPHEMERAL_ROOTS = ('/tmp', '/var/tmp', '/dev', '/run', '/home/node/.cache',
                             '/home/node/.npm', '/app/node_modules/.cache')
 _RETIRED_METADATA_PARENTS = ('/etc', '/var', '/home', '/home/node', '/app', '/app/node_modules')
+# The inspected 0.8.0-dev.4 migrate job downloaded Prisma 7.10.0's schema
+# engine and wrote its CLI command state. Match the entire observed diff as
+# well as these exact changes; never exempt a directory tree or another job.
+_RETIRED_MIGRATE_TOOL_DIFF = (
+    'A /app/node_modules/.pnpm/@prisma+engines@7.10.0/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x',
+    'A /home/node/.config',
+    'A /home/node/.config/prisma-nodejs',
+    'A /home/node/.config/prisma-nodejs/commands.json',
+    'C /app/node_modules/.pnpm',
+    'C /app/node_modules/.pnpm/@prisma+engines@7.10.0',
+    'C /app/node_modules/.pnpm/@prisma+engines@7.10.0/node_modules',
+    'C /app/node_modules/.pnpm/@prisma+engines@7.10.0/node_modules/@prisma',
+    'C /app/node_modules/.pnpm/@prisma+engines@7.10.0/node_modules/@prisma/engines',
+)
+_RETIRED_MIGRATE_DIFF_SHA256 = 'b790780259e0b451726fc79834aabcf299222b170e6cfd300f93cb0283bde33d'
 
 
 def _retired_diff(identifier):
@@ -2345,6 +2360,10 @@ def _retired_diff(identifier):
         metadata_only = line[0] == 'C' and path in _RETIRED_METADATA_PARENTS
         if not (ephemeral or metadata_only):
             unexpected.append(line)
+    if (RETIRED_CONTAINER_SCOPE[identifier][0] == 'migrate'
+            and len(lines) == 27 and tuple(unexpected) == _RETIRED_MIGRATE_TOOL_DIFF
+            and sha256(_cache_json_bytes(lines)) == _RETIRED_MIGRATE_DIFF_SHA256):
+        unexpected = []
     return {'count': len(lines), 'unexpectedCount': len(unexpected),
             'sha256': sha256(_cache_json_bytes(lines)),
             'unexpectedSha256': sha256(_cache_json_bytes(unexpected))}

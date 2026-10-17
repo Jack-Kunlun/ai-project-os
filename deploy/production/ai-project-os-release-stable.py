@@ -2369,7 +2369,8 @@ def _retired_diff(identifier):
             'unexpectedSha256': sha256(_cache_json_bytes(unexpected))}
 
 
-def _retired_details(containers):
+def _retired_details(containers, _attempt=0):
+    require(type(_attempt) is int and 0 <= _attempt <= 3, 'RETIRED_INSPECT_ATTEMPT_INVALID')
     identifiers = [item['id'] for item in containers]
     if not identifiers:
         return {}
@@ -2396,12 +2397,17 @@ def _retired_details(containers):
         require(value[24] is None or (isinstance(value[24], list) and len(value[24]) <= 128
                 and all(isinstance(item, str) and HEX64.fullmatch(item) is not None
                         for item in value[24])), 'RETIRED_EXEC_IDS_INVALID')
-        # Live health probes create transient exec sessions. Only the two
-        # deletion targets must have no sessions; their nonempty IDs stay bound.
-        if value[0] not in RETIRED_CONTAINER_SCOPE or not value[24]:
+        if not value[24]:
             value[24] = None
         result[value[0]] = value
     require(set(result) == set(identifiers), 'RETIRED_INSPECT_INVALID')
+    # Never discard an active session, regardless of provenance. Give brief
+    # probes time to finish, then require a completely idle live exec snapshot.
+    if any(value[24] for identifier, value in result.items()
+           if identifier not in RETIRED_CONTAINER_SCOPE):
+        require(_attempt < 3, 'RETIRED_LIVE_EXEC_ACTIVE')
+        time.sleep(2)
+        return _retired_details(containers, _attempt + 1)
     return result
 
 

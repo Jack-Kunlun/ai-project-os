@@ -204,9 +204,13 @@ class RetiredContainerTests(unittest.TestCase):
         raw[18] = [{'Type': 'bind', 'Source': '/fixture/a', 'Destination': '/data/a'},
                    {'Type': 'volume', 'Name': 'fixture-b', 'Destination': '/data/b'}]
         raw[24] = ['e' * 64]
-        with patch.object(D, 'docker', return_value=json.dumps(raw)):
+        active = json.dumps(raw); raw[24] = []
+        with patch.object(D, 'docker', side_effect=[active, json.dumps(raw)]), \
+             patch.object(D.time, 'sleep') as sleep:
             before = D._retired_details([{'id': OTHER}])
-        raw[18].reverse(); raw[24] = ['d' * 64]
+        sleep.assert_called_once_with(2)
+        self.assertIsNone(before[OTHER][24])
+        raw[18].reverse(); raw[24] = None
         with patch.object(D, 'docker', return_value=json.dumps(raw)):
             self.assertEqual(D._retired_details([{'id': OTHER}]), before)
         raw[18][0]['Name'] = 'changed-business-volume'
@@ -230,6 +234,15 @@ class RetiredContainerTests(unittest.TestCase):
             raw = detail(IDS[0]); raw[0] = OTHER; raw[24] = invalid
             with patch.object(D, 'docker', return_value=json.dumps(raw)), self.assertRaises(RuntimeError):
                 D._retired_details([{'id': OTHER}])
+        raw = detail(IDS[0]); raw[0] = OTHER; raw[24] = ['e' * 64]
+        with patch.object(D, 'docker', return_value=json.dumps(raw)) as inspect, \
+             patch.object(D.time, 'sleep') as sleep, \
+             patch.object(D, '_retired_remove_id') as remove, \
+             self.assertRaisesRegex(RuntimeError, 'RETIRED_LIVE_EXEC_ACTIVE'):
+            D._retired_details([{'id': OTHER}])
+        self.assertEqual(inspect.call_count, 4)
+        self.assertEqual(sleep.call_count, 3)
+        remove.assert_not_called()
 
     def test_plan_binds_digest_source_tooling_scope_and_lifetime(self):
         value, data, digest = plan()

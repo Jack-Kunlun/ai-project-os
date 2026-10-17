@@ -40,6 +40,8 @@ ARTIFACT_HELPER = Path('/usr/local/libexec/ai-project-os/backup-artifact.py')
 DEPLOYER = Path('/usr/local/sbin/ai-project-os-release-stable')
 GATEWAY = Path('/usr/local/sbin/ai-project-os-actions-gateway')
 SUDOERS = Path('/etc/sudoers.d/ai-project-os-deploy')
+CACHE_MAINTENANCE_PLAN = Path('/var/lib/ai-project-os/cache-maintenance-plan.json')
+CACHE_MAINTENANCE_AUDIT = Path('/var/lib/ai-project-os/cache-maintenance-last.json')
 BACKUP_SOURCE = 'deploy/production/ai-project-os-backup'
 ARTIFACT_SOURCE = 'deploy/production/ai_project_os_backup_artifact.py'
 DEPLOYER_SOURCE = 'deploy/production/ai-project-os-release-stable.py'
@@ -97,6 +99,20 @@ STABLE_TAG = re.compile(r'^v([1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
 MIGRATION_NAME = re.compile(r'^\d{14}_[a-z0-9_]+$')
 HEX64 = re.compile(r'^[a-f0-9]{64}$')
 HEX40 = re.compile(r'^[a-f0-9]{40}$')
+CACHE_RECORD_ID = re.compile(r'^[a-z0-9][a-z0-9_:-]{0,127}$')
+CACHE_TYPES = frozenset(('regular', 'internal', 'frontend', 'source.local',
+                         'source.git.checkout', 'source.http', 'source.image',
+                         'exec.cachemount'))
+IMAGE_SOURCE = 'https://github.com/Jack-Kunlun/ai-project-os'
+LEGACY_IMAGE_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-dev\.[0-9]+)?')
+LEGACY_IMAGE_TAG = re.compile(r'ai-project-os-[a-z-]+(?::[^/]+)?')
+LEGACY_IMAGE_SERVICES = frozenset(('app', 'worker', 'git-worker', 'migrate',
+                                   'reconcile', 'principal-bootstrap'))
+CACHE_PLAN_TTL_SECONDS = 15 * 60
+CACHE_MAX_RECORDS = 2048
+CACHE_MAX_CONTAINERS = 1024
+CACHE_MAX_VOLUMES = 1024
+CACHE_MAX_IMAGES = 1024
 HELPER = None
 
 
@@ -728,6 +744,605 @@ def prune_build_cache():
     if not budget_met:
         print('STABLE_CACHE_BUDGET_DEFERRED protected_or_remaining_bytes=' + str(after), flush=True)
     return budget_met
+
+
+def _cache_json_bytes(value):
+    return json.dumps(value, ensure_ascii=True, sort_keys=True,
+                      separators=(',', ':'), allow_nan=False).encode('ascii')
+
+
+def _cache_unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, 'CACHE_USAGE_DUPLICATE_KEY')
+        result[key] = value
+    return result
+
+
+def _cache_size_bytes(size):
+    units = {'B': 1, 'kB': 1000, 'MB': 1000 ** 2, 'GB': 1000 ** 3,
+             'TB': 1000 ** 4, 'PB': 1000 ** 5, 'EB': 1000 ** 6}
+    require(type(size) in (str, int), 'CACHE_USAGE_INVALID')
+    match = re.fullmatch(r'([0-9]+(?:\.[0-9]+)?)(B|kB|MB|GB|TB|PB|EB)?', str(size))
+    require(match is not None and (match[2] is not None or '.' not in match[1]),
+            'CACHE_USAGE_INVALID')
+    value = Decimal(match[1]) * units.get(match[2], 1)
+    require(value <= 2 ** 63 - 1, 'CACHE_USAGE_INVALID')
+    return int(value), match[2] not in (None, 'B')
+
+
+def parse_cache_records(output):
+    """Parse bounded buildx du NDJSON without retaining provider descriptions."""
+    require(isinstance(output, str) and len(output.encode('utf-8')) <= 2 * 1024 * 1024,
+            'CACHE_USAGE_TOO_LARGE')
+    records = []
+    seen = set()
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        require(len(records) < CACHE_MAX_RECORDS and len(line) <= 65536,
+                'CACHE_USAGE_TOO_LARGE')
+        try:
+            row = json.loads(line, object_pairs_hook=_cache_unique_json_object)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError) as error:
+            raise RuntimeError('STABLE_CACHE_USAGE_INVALID') from error
+        require(isinstance(row, dict), 'CACHE_USAGE_INVALID')
+        identifier = row.get('ID')
+        cache_type = row.get('Type')
+        require(isinstance(identifier, str) and CACHE_RECORD_ID.fullmatch(identifier) is not None
+                and identifier not in seen, 'CACHE_USAGE_ID_INVALID')
+        require(isinstance(cache_type, str) and cache_type in CACHE_TYPES,
+                'CACHE_USAGE_TYPE_INVALID')
+        require(type(row.get('Shared')) is bool and type(row.get('Reclaimable')) is bool
+                and type(row.get('Mutable')) is bool, 'CACHE_USAGE_FLAGS_INVALID')
+        size_bytes, estimated = _cache_size_bytes(row.get('Size'))
+        eligible = row['Reclaimable']
+        bucket = ('shared' if row['Shared'] else 'private') + ('Reclaimable' if eligible else 'Protected')
+        records.append({
+            'id': identifier, 'type': cache_type, 'sizeBytes': size_bytes,
+            'estimated': estimated, 'shared': row['Shared'],
+            'reclaimable': row['Reclaimable'], 'mutable': row['Mutable'],
+            'eligible': eligible, 'bucket': bucket,
+        })
+        seen.add(identifier)
+    records.sort(key=lambda item: item['id'])
+    require(sum(record['sizeBytes'] for record in records) <= 2 ** 63 - 1,
+            'CACHE_USAGE_INVALID')
+    return records
+
+
+def cache_summary(records):
+    buckets = ('privateReclaimable', 'privateProtected',
+               'sharedReclaimable', 'sharedProtected')
+    result = {
+        'builder': 'default', 'recordCount': len(records),
+        'sumRecordBytes': sum(record['sizeBytes'] for record in records),
+        'estimated': any(record['estimated'] for record in records),
+    }
+    for bucket in buckets:
+        items = [record for record in records if record['bucket'] == bucket]
+        result[bucket + 'Bytes'] = sum(record['sizeBytes'] for record in items)
+        result[bucket + 'Count'] = len(items)
+    return result
+
+
+def _cache_read_records():
+    output = docker('buildx', 'du', '--builder', 'default', '--format=json', timeout=120)
+    return parse_cache_records(output)
+
+
+def _cache_validate_image_id(value):
+    require(isinstance(value, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', value) is not None,
+            'CACHE_IMAGE_ID_INVALID')
+    return value
+
+
+def _cache_safe_json_list(value, code):
+    require(value is None or isinstance(value, list), code)
+    if value is None:
+        return []
+    require(len(value) <= 256 and all(isinstance(item, str) and 0 < len(item) <= 512
+                                      and not any(ord(char) < 32 for char in item)
+                                      for item in value), code)
+    return sorted(set(value))
+
+
+def _cache_owned_images():
+    listed = docker('image', 'ls', '--quiet', '--no-trunc', '--filter',
+                    'label=org.opencontainers.image.title=AI Project OS')
+    identifiers = sorted(set(listed.splitlines()))
+    require(len(identifiers) <= CACHE_MAX_IMAGES
+            and all(re.fullmatch(r'sha256:[a-f0-9]{64}', item) is not None for item in identifiers),
+            'CACHE_IMAGE_INVENTORY_INVALID')
+    template = ('{{.Id}}|{{index .Config.Labels "org.opencontainers.image.title"}}|'
+                '{{index .Config.Labels "org.opencontainers.image.source"}}|'
+                '{{index .Config.Labels "org.opencontainers.image.version"}}|'
+                '{{index .Config.Labels "org.opencontainers.image.revision"}}|'
+                '{{index .Config.Labels "com.docker.compose.project"}}|'
+                '{{index .Config.Labels "com.docker.compose.service"}}|'
+                '{{json .RepoTags}}|{{json .RepoDigests}}')
+    images = []
+    for identifier in identifiers:
+        output = docker('image', 'inspect', '--format', template, identifier)
+        lines = output.splitlines()
+        require(len(lines) == 1, 'CACHE_IMAGE_INSPECT_INVALID')
+        parts = lines[0].split('|', 8)
+        require(len(parts) == 9, 'CACHE_IMAGE_INSPECT_INVALID')
+        (image_id, title, source, version, revision, project, service,
+         raw_tags, raw_digests) = parts
+        title = '' if title == '<no value>' else title
+        source = '' if source == '<no value>' else source
+        version = '' if version == '<no value>' else version
+        revision = '' if revision == '<no value>' else revision
+        project = '' if project == '<no value>' else project
+        service = '' if service == '<no value>' else service
+        try:
+            tags = _cache_safe_json_list(json.loads(raw_tags), 'CACHE_IMAGE_REFS_INVALID')
+            digests = _cache_safe_json_list(json.loads(raw_digests), 'CACHE_IMAGE_REFS_INVALID')
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            raise RuntimeError('STABLE_CACHE_IMAGE_REFS_INVALID') from error
+        require(image_id == identifier and title == 'AI Project OS'
+                and source in ('', IMAGE_SOURCE)
+                and all(len(value) <= 512 and not any(ord(char) < 32 for char in value)
+                        for value in (project, service)), 'CACHE_IMAGE_IDENTITY_INVALID')
+        legacy = source == ''
+        if legacy:
+            require(project == PROJECT and service in LEGACY_IMAGE_SERVICES
+                    and LEGACY_IMAGE_VERSION.fullmatch(version) is not None
+                    and all(LEGACY_IMAGE_TAG.fullmatch(tag) is not None for tag in tags)
+                    and all(ref.startswith('ghcr.io/jack-kunlun/ai-project-os-')
+                            for ref in digests), 'CACHE_IMAGE_IDENTITY_INVALID')
+        else:
+            if version:
+                stable_version('v' + version)
+            if revision:
+                require(HEX40.fullmatch(revision) is not None,
+                        'CACHE_IMAGE_IDENTITY_INVALID')
+        images.append({'id': image_id, 'title': title, 'source': source,
+                       'version': version, 'revision': revision,
+                       'project': project, 'service': service, 'legacy': legacy,
+                       'repoTags': tags, 'repoDigests': digests})
+    return images
+
+
+def _cache_volume_snapshot():
+    output = docker('volume', 'ls', '--quiet')
+    names = sorted(set(output.splitlines()))
+    require(len(names) <= CACHE_MAX_VOLUMES
+            and all(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,254}', name) is not None
+                    for name in names), 'CACHE_VOLUME_INVENTORY_INVALID')
+    template = ('{{.Name}}|{{.Driver}}|{{.Scope}}|{{.CreatedAt}}|'
+                '{{json .Labels}}|{{json .Options}}')
+    result = []
+    for name in names:
+        line = docker('volume', 'inspect', '--format', template, name)
+        parts = line.split('|', 5)
+        require(len(parts) == 6 and parts[0] == name, 'CACHE_VOLUME_INSPECT_INVALID')
+        driver, scope, created_at = parts[1:4]
+        require(re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', driver) is not None
+                and scope in ('local', 'global') and len(created_at) <= 100
+                and not any(ord(char) < 32 for char in created_at),
+                'CACHE_VOLUME_INSPECT_INVALID')
+        try:
+            labels = json.loads(parts[4])
+            options = json.loads(parts[5])
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            raise RuntimeError('STABLE_CACHE_VOLUME_INSPECT_INVALID') from error
+        require(labels is None or isinstance(labels, dict), 'CACHE_VOLUME_INSPECT_INVALID')
+        require(options is None or isinstance(options, dict), 'CACHE_VOLUME_INSPECT_INVALID')
+        identity = {'labels': labels, 'options': options}
+        result.append({'name': name, 'driver': driver, 'scope': scope,
+                       'createdAt': created_at,
+                       'identitySha256': sha256(_cache_json_bytes(identity))})
+    return result
+
+
+def _cache_protected_resource_snapshot(source):
+    container_output = docker('ps', '-aq', '--no-trunc')
+    container_ids = sorted(set(container_output.splitlines()))
+    require(len(container_ids) <= CACHE_MAX_CONTAINERS
+            and all(HEX64.fullmatch(item) is not None for item in container_ids),
+            'CACHE_CONTAINER_INVENTORY_INVALID')
+    containers = []
+    if container_ids:
+        output = docker('inspect', '--format', '{{.Id}}|{{.Image}}', *container_ids)
+        rows = output.splitlines()
+        require(len(rows) == len(container_ids), 'CACHE_CONTAINER_INSPECT_INVALID')
+        for row in rows:
+            fields = row.split('|')
+            require(len(fields) == 2 and HEX64.fullmatch(fields[0]) is not None
+                    and fields[0] in container_ids
+                    and re.fullmatch(r'sha256:[a-f0-9]{64}', fields[1]) is not None,
+                    'CACHE_CONTAINER_INSPECT_INVALID')
+            containers.append({'id': fields[0], 'image': fields[1]})
+        require(len({item['id'] for item in containers}) == len(containers),
+                'CACHE_CONTAINER_INSPECT_INVALID')
+    containers.sort(key=lambda item: item['id'])
+    volumes = _cache_volume_snapshot()
+    images = _cache_owned_images()
+    owned_ids = sorted(image['id'] for image in images)
+    receipt = source['receipt']
+    require(receipt.get('release_protocol') == 'stable-v2-images',
+            'CACHE_STABLE_IMAGE_RECEIPT_REQUIRED')
+    try:
+        receipt_images = json.loads(receipt.get('target_image_ids', 'null'),
+                                    object_pairs_hook=_cache_unique_json_object)
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise RuntimeError('STABLE_CACHE_IMAGE_RECEIPT_INVALID') from error
+    require(isinstance(receipt_images, dict) and set(receipt_images) == {'app', 'worker', 'migrate'},
+            'CACHE_IMAGE_RECEIPT_INVALID')
+    current_receipt_ids = sorted({_cache_validate_image_id(value)
+                                  for value in receipt_images.values()})
+    current_runtime_ids = sorted({_cache_validate_image_id(value)
+                                  for value in source['writer_images'].values()})
+    current_version = source['version']
+    current_owned_ids = sorted({image['id'] for image in images
+                                if image['source'] == IMAGE_SOURCE
+                                and image['version'] == current_version
+                                and image['revision'] == source['revision']})
+    previous_tag = receipt.get('source_tag', '')
+    previous_revision = receipt.get('source_revision', '')
+    require(STABLE_TAG.fullmatch(previous_tag) is not None
+            and stable_version(previous_tag) < stable_version(source['tag'])
+            and HEX40.fullmatch(previous_revision) is not None,
+            'CACHE_PREVIOUS_RELEASE_IDENTITY_INVALID')
+    previous_version = version_text(previous_tag)
+    previous_ids = sorted({image['id'] for image in images
+                           if image['source'] == IMAGE_SOURCE
+                           and image['version'] == previous_version
+                           and image['revision'] == previous_revision})
+    require(bool(owned_ids) and bool(current_owned_ids) and bool(previous_ids)
+            and set(current_receipt_ids).issubset(current_owned_ids)
+            and set(current_runtime_ids).issubset(current_owned_ids)
+            and set(previous_ids).issubset(owned_ids),
+            'CACHE_PROTECTED_IMAGES_MISSING')
+    config_hashes_value = source['config_hashes']
+    require(isinstance(config_hashes_value, dict)
+            and all(isinstance(key, str) and HEX64.fullmatch(value) is not None
+                    for key, value in config_hashes_value.items()), 'CACHE_CONFIG_HASHES_INVALID')
+    docker_root = docker('info', '--format', '{{.DockerRootDir}}')
+    docker_root_path = Path(docker_root)
+    require(docker_root_path.is_absolute() and len(docker_root) <= 4096
+            and not any(ord(char) < 32 for char in docker_root), 'CACHE_DOCKER_ROOT_INVALID')
+    HELPER.trusted(docker_root_path)
+    os.statvfs(docker_root_path)
+    return {
+        'containers': containers,
+        'volumes': volumes,
+        'ownedImages': images,
+        'ownedImageIds': owned_ids,
+        'currentImageIds': current_owned_ids,
+        'currentReceiptImageIds': current_receipt_ids,
+        'previousImageIds': previous_ids,
+        'previousTag': previous_tag,
+        'previousRevision': previous_revision,
+        'postgresId': source['postgres_id'],
+        'migrationCount': len(source['source_manifest']),
+        'migrationManifestSha256': migration_manifest_sha256(source['source_manifest']),
+        'configHashes': dict(sorted(config_hashes_value.items())),
+        'checkoutRevision': source['revision'],
+        'deploymentReceiptSha256': hash_file(RESULT),
+        'dockerRoot': str(docker_root_path),
+    }
+
+
+def _cache_protection_report(snapshot, plan_digest):
+    return {
+        'planDigest': plan_digest,
+        'containerCount': len(snapshot['containers']),
+        'containerSnapshotSha256': sha256(_cache_json_bytes(snapshot['containers'])),
+        'volumeCount': len(snapshot['volumes']),
+        'volumeSnapshotSha256': sha256(_cache_json_bytes(snapshot['volumes'])),
+        'ownedImageIds': snapshot['ownedImageIds'],
+        'ownedImageCount': len(snapshot['ownedImageIds']),
+        'currentImageIds': snapshot['currentImageIds'],
+        'previousImageIds': snapshot['previousImageIds'],
+        'previousTag': snapshot['previousTag'],
+        'previousRevision': snapshot['previousRevision'],
+        'postgresId': snapshot['postgresId'],
+        'migrationCount': snapshot['migrationCount'],
+        'migrationManifestSha256': snapshot['migrationManifestSha256'],
+        'configHashes': snapshot['configHashes'],
+        'checkoutRevision': snapshot['checkoutRevision'],
+        'deploymentReceiptSha256': snapshot['deploymentReceiptSha256'],
+    }
+
+
+def _cache_installed_tooling():
+    state = validate_state_file()
+    require(sha256(Path(__file__).read_bytes()) == state['files']['deployer'],
+            'INSTALLED_TOOL_HASH_INVALID')
+    return state
+
+
+def _cache_current_source(target_tag, target_revision):
+    source = source_runtime_state(require_checkout=True)
+    require(source['tag'] == target_tag and source['revision'] == target_revision,
+            'CACHE_SOURCE_RELEASE_MISMATCH')
+    return source
+
+
+def _cache_plan_bytes(plan):
+    data = _cache_json_bytes(plan)
+    require(0 < len(data) <= 1024 * 1024, 'CACHE_PLAN_TOO_LARGE')
+    return data
+
+
+def _cache_validate_plan(plan_bytes, plan_digest, target_tag, target_revision,
+                         tooling_revision, now=None):
+    require(HEX64.fullmatch(plan_digest) is not None and sha256(plan_bytes) == plan_digest,
+            'CACHE_PLAN_DIGEST_INVALID')
+    try:
+        plan = json.loads(plan_bytes, object_pairs_hook=_cache_unique_json_object)
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise RuntimeError('STABLE_CACHE_PLAN_INVALID') from error
+    expected = {'schema', 'operation', 'tag', 'revision', 'toolingRevision',
+                'createdAt', 'expiresAt', 'protection', 'inventoryIds',
+                'selectedRecords', 'summary'}
+    require(isinstance(plan, dict) and set(plan) == expected
+            and type(plan.get('schema')) is int and plan['schema'] == 1
+            and plan.get('operation') == 'cache-maintenance-plan'
+            and plan.get('tag') == target_tag and plan.get('revision') == target_revision
+            and plan.get('toolingRevision') == tooling_revision,
+            'CACHE_PLAN_IDENTITY_INVALID')
+    created = plan.get('createdAt')
+    expires = plan.get('expiresAt')
+    current_time = int(time.time()) if now is None else now
+    require(type(created) is int and type(expires) is int
+            and created <= current_time <= expires
+            and 0 < expires - created <= CACHE_PLAN_TTL_SECONDS,
+            'CACHE_PLAN_EXPIRED_OR_INVALID')
+    inventory_ids = plan.get('inventoryIds')
+    require(isinstance(plan.get('protection'), dict)
+            and isinstance(plan.get('summary'), dict)
+            and isinstance(inventory_ids, list)
+            and len(inventory_ids) <= CACHE_MAX_RECORDS
+            and all(isinstance(item, str) and CACHE_RECORD_ID.fullmatch(item) is not None
+                    for item in inventory_ids), 'CACHE_PLAN_CONTENT_INVALID')
+    require(inventory_ids == sorted(set(inventory_ids)), 'CACHE_PLAN_CONTENT_INVALID')
+    selected = plan.get('selectedRecords')
+    require(isinstance(selected, list) and len(selected) <= CACHE_MAX_RECORDS,
+            'CACHE_PLAN_CONTENT_INVALID')
+    selected_ids = []
+    for item in selected:
+        require(isinstance(item, dict) and set(item) == {
+            'id', 'type', 'sizeBytes', 'estimated', 'shared', 'reclaimable',
+            'mutable', 'eligible', 'bucket'}, 'CACHE_PLAN_CONTENT_INVALID')
+        identifier = item.get('id')
+        cache_type = item.get('type')
+        shared = item.get('shared')
+        bucket = item.get('bucket')
+        require(isinstance(identifier, str)
+                and CACHE_RECORD_ID.fullmatch(identifier) is not None
+                and identifier in inventory_ids
+                and isinstance(cache_type, str) and cache_type in CACHE_TYPES
+                and type(item.get('sizeBytes')) is int and item['sizeBytes'] >= 0
+                and type(item.get('estimated')) is bool
+                and type(shared) is bool
+                and item.get('reclaimable') is True and type(item.get('mutable')) is bool
+                and item.get('eligible') is True
+                and bucket == ('shared' if shared else 'private') + 'Reclaimable',
+                'CACHE_PLAN_CONTENT_INVALID')
+        selected_ids.append(identifier)
+    require(selected_ids == sorted(set(selected_ids)), 'CACHE_PLAN_CONTENT_INVALID')
+    return plan
+
+
+def _cache_candidate_selection(selected_records, inventory_ids, fresh_records):
+    frozen = {item['id']: item for item in selected_records}
+    current = {item['id']: item for item in fresh_records}
+    selected, vanished, protected, changed = [], [], [], []
+    for identifier, expected in sorted(frozen.items()):
+        actual = current.get(identifier)
+        if actual is None:
+            vanished.append(identifier)
+        elif not actual['eligible']:
+            protected.append(identifier)
+        elif actual != expected:
+            changed.append(identifier)
+        else:
+            selected.append(identifier)
+    appeared = sorted(set(current) - set(inventory_ids))
+    return {'selected': selected, 'vanished': vanished, 'newlyProtected': protected,
+            'changed': changed, 'newlyAppeared': appeared}
+
+
+def _cache_prune_ids(identifiers):
+    require(isinstance(identifiers, list) and 0 < len(identifiers) <= 32
+            and len(set(identifiers)) == len(identifiers)
+            and all(isinstance(item, str) and CACHE_RECORD_ID.fullmatch(item) is not None
+                    for item in identifiers), 'CACHE_PRUNE_ID_INVALID')
+    filter_value = 'id~=^(' + '|'.join(identifiers) + ')$'
+    require(len(filter_value) <= 4096, 'CACHE_PRUNE_FILTER_TOO_LARGE')
+    docker('buildx', 'prune', '--builder', 'default', '--all', '--force',
+           '--filter', filter_value, timeout=600)
+
+
+def _cache_runtime_state(target_tag, target_revision):
+    installed = _cache_installed_tooling()
+    source = _cache_current_source(target_tag, target_revision)
+    snapshot = _cache_protected_resource_snapshot(source)
+    require(snapshot['checkoutRevision'] == target_revision,
+            'CACHE_SOURCE_CHECKOUT_INVALID')
+    return source, installed, snapshot
+
+
+def _cache_write_audit(value):
+    data = _cache_json_bytes(value)
+    require(0 < len(data) <= 256 * 1024, 'CACHE_AUDIT_TOO_LARGE')
+    atomic_install(CACHE_MAINTENANCE_AUDIT, data, 0o600)
+
+
+def _cache_emit_report(value):
+    data = _cache_json_bytes(value)
+    require(len(data) <= 512 * 1024, 'CACHE_REPORT_TOO_LARGE')
+    print('CACHE_MAINTENANCE_REPORT ' + data.decode('ascii'), flush=True)
+
+
+def cache_inspect(target_tag, target_revision):
+    source, installed, protection = _cache_runtime_state(target_tag, target_revision)
+    records = _cache_read_records()
+    summary = cache_summary(records)
+    inventory_ids = [item['id'] for item in records]
+    selected_records = [item for item in records if item['eligible']]
+    now = int(time.time())
+    plan = {
+        'schema': 1, 'operation': 'cache-maintenance-plan',
+        'tag': target_tag, 'revision': target_revision,
+        'toolingRevision': installed['toolingRevision'],
+        'createdAt': now, 'expiresAt': now + CACHE_PLAN_TTL_SECONDS,
+        'protection': protection, 'inventoryIds': inventory_ids,
+        'selectedRecords': selected_records, 'summary': summary,
+    }
+    plan_bytes = _cache_plan_bytes(plan)
+    plan_digest = sha256(plan_bytes)
+    report = {
+        'schema': 1, 'operation': 'inspect', 'tag': target_tag,
+        'revision': target_revision, 'summary': summary, 'records': records,
+        'planDigest': plan_digest,
+        'protection': _cache_protection_report(protection, plan_digest),
+    }
+    require(len(_cache_json_bytes(report)) <= 512 * 1024, 'CACHE_REPORT_TOO_LARGE')
+    atomic_install(CACHE_MAINTENANCE_PLAN, plan_bytes, 0o600)
+    _cache_write_audit({
+        'schema': 1, 'operation': 'inspect', 'status': 'OK',
+        'tag': target_tag, 'revision': target_revision,
+        'toolingRevision': installed['toolingRevision'], 'planDigest': plan_digest,
+        'createdAt': now, 'summary': summary,
+        'selectedRecordIds': [item['id'] for item in selected_records],
+        'protectionVerified': True,
+    })
+    _cache_emit_report(report)
+
+
+def _cache_available_bytes(docker_root):
+    info = os.statvfs(docker_root)
+    return info.f_bavail * info.f_frsize
+
+
+def cache_clean(target_tag, target_revision, plan_digest):
+    require(HEX64.fullmatch(plan_digest) is not None, 'CACHE_PLAN_DIGEST_INVALID')
+    plan_bytes = _read_trusted_host_file(CACHE_MAINTENANCE_PLAN, 0o600,
+                                         1024 * 1024, 'CACHE_PLAN_INVALID')
+    installed = _cache_installed_tooling()
+    plan = _cache_validate_plan(plan_bytes, plan_digest, target_tag,
+                                target_revision, installed['toolingRevision'])
+    source, installed, protection_before = _cache_runtime_state(target_tag, target_revision)
+    require(protection_before == plan['protection'], 'CACHE_PROTECTED_RESOURCE_DRIFT')
+    records_before = _cache_read_records()
+    summary_before = cache_summary(records_before)
+    selection = _cache_candidate_selection(plan['selectedRecords'],
+                                           plan['inventoryIds'], records_before)
+    docker_root = protection_before['dockerRoot']
+    available_before = _cache_available_bytes(docker_root)
+    attempted = []
+    vanished = set(selection['vanished'])
+    newly_protected = set(selection['newlyProtected'])
+    changed = set(selection['changed'])
+    newly_appeared = set(selection['newlyAppeared'])
+    pending = list(selection['selected'])
+    protection_verified = True
+    final_protection = protection_before
+    try:
+        while pending:
+            _source_now, _installed_now, current_protection = _cache_runtime_state(
+                target_tag, target_revision)
+            if current_protection != plan['protection']:
+                protection_verified = False
+                break
+            fresh_records = _cache_read_records()
+            fresh_selection = _cache_candidate_selection(
+                plan['selectedRecords'], plan['inventoryIds'], fresh_records)
+            fresh_candidates = [item for item in fresh_selection['selected'] if item in pending]
+            vanished.update(item for item in fresh_selection['vanished'] if item in pending)
+            newly_protected.update(item for item in fresh_selection['newlyProtected'] if item in pending)
+            changed.update(item for item in fresh_selection['changed'] if item in pending)
+            newly_appeared.update(fresh_selection['newlyAppeared'])
+            if not fresh_candidates:
+                break
+            batch = fresh_candidates[:32]
+            attempted.extend(batch)
+            _cache_prune_ids(batch)
+            pending = [item for item in pending if item not in batch]
+            _source_after, _installed_after, final_protection = _cache_runtime_state(
+                target_tag, target_revision)
+            if final_protection != plan['protection']:
+                protection_verified = False
+                break
+            after_batch_records = _cache_read_records()
+            newly_appeared.update(set(item['id'] for item in after_batch_records)
+                                  - set(plan['inventoryIds']))
+        final_records = _cache_read_records()
+        summary_after = cache_summary(final_records)
+        _source_final, _installed_final, final_protection = _cache_runtime_state(
+            target_tag, target_revision)
+        if final_protection != plan['protection']:
+            protection_verified = False
+        after_ids = {item['id'] for item in final_records}
+        frozen_by_id = {item['id']: item for item in plan['selectedRecords']}
+        final_by_id = {item['id']: item for item in final_records}
+        for identifier in attempted:
+            actual = final_by_id.get(identifier)
+            if actual is not None and not actual['eligible']:
+                newly_protected.add(identifier)
+            elif actual is not None and actual != frozen_by_id[identifier]:
+                changed.add(identifier)
+        pruned_ids = sorted(set(attempted) - after_ids)
+        remaining_ids = sorted(set(attempted) & after_ids)
+        vanished.update(item for item in pending if item not in after_ids)
+        newly_appeared.update(after_ids - set(plan['inventoryIds']))
+        available_after = _cache_available_bytes(docker_root)
+        checks = {
+            'localHealth': True, 'publicHealth': True, 'database': True,
+            'worker': True, 'migrationLedger': True,
+        }
+        report = {
+            'schema': 1, 'operation': 'clean', 'tag': target_tag,
+            'revision': target_revision, 'planDigest': plan_digest,
+            'summaryBefore': summary_before, 'summaryAfter': summary_after,
+            'prunedIds': pruned_ids, 'remainingIds': remaining_ids,
+            'vanishedIds': sorted(vanished),
+            'newlyProtectedIds': sorted(newly_protected),
+            'changedIds': sorted(changed),
+            'newlyAppearedIds': sorted(newly_appeared),
+            'availableBytesBefore': available_before,
+            'availableBytesAfter': available_after,
+            'netAvailableBytesDelta': available_after - available_before,
+            'protectionVerified': protection_verified,
+            'checks': checks,
+            'protection': _cache_protection_report(final_protection, plan_digest),
+        }
+        completed_at = int(time.time())
+        _cache_write_audit({
+            'schema': 1, 'operation': 'clean',
+            'status': 'OK' if protection_verified else 'FAILED',
+            'tag': target_tag, 'revision': target_revision,
+            'toolingRevision': installed['toolingRevision'],
+            'planDigest': plan_digest, 'completedAt': completed_at,
+            'summaryBefore': summary_before, 'summaryAfter': summary_after,
+            'attemptedIds': sorted(set(attempted)), 'prunedIds': pruned_ids,
+            'remainingIds': remaining_ids, 'vanishedIds': sorted(vanished),
+            'newlyProtectedIds': sorted(newly_protected),
+            'changedIds': sorted(changed), 'newlyAppearedIds': sorted(newly_appeared),
+            'availableBytesBefore': available_before,
+            'availableBytesAfter': available_after,
+            'netAvailableBytesDelta': available_after - available_before,
+            'protectionVerified': protection_verified,
+            'checks': checks,
+        })
+        _cache_emit_report(report)
+        require(protection_verified, 'CACHE_PROTECTED_RESOURCE_DRIFT')
+    except BaseException as error:
+        _cache_write_audit({
+            'schema': 1, 'operation': 'clean', 'status': 'FAILED',
+            'tag': target_tag, 'revision': target_revision,
+            'toolingRevision': installed['toolingRevision'],
+            'planDigest': plan_digest, 'completedAt': int(time.time()),
+            'attemptedIds': sorted(set(attempted)),
+            'failureCode': safe_failure_code(error),
+            'protectionVerified': protection_verified,
+        })
+        raise
 
 
 def _ci_runs(revision, event):
@@ -2725,6 +3340,17 @@ def main(args):
         if command == 'refresh':
             require(confirmation == 'CONFIRM_STABLE_TOOLING_FROM_CI', 'TOOLING_CONFIRMATION_INVALID')
             install_bootstrap(target_tag, revision, from_workflow=True)
+            return
+        if command in ('cache-inspect', 'cache-clean'):
+            _cache_installed_tooling()
+            if command == 'cache-inspect':
+                require(confirmation == 'CONFIRM_CACHE_INSPECT',
+                        'CACHE_INSPECT_CONFIRMATION_INVALID')
+                cache_inspect(target_tag, revision)
+                return
+            require(HEX64.fullmatch(confirmation) is not None,
+                    'CACHE_PLAN_DIGEST_INVALID')
+            cache_clean(target_tag, revision, confirmation)
             return
         require(command == 'deploy' and confirmation == 'CONFIRM_STABLE_CI_IMAGES',
                 'DEPLOY_CONFIRMATION_INVALID')

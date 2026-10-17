@@ -29,7 +29,7 @@ test("impact planning selects cumulative PostgreSQL gates and client delivery ch
 });
 
 test("impact planning treats release infrastructure as image checks without PostgreSQL gates", () => {
-  const planned = planCiImpact([".github/workflows/ci.yml", "docker-bake.hcl", "scripts/production-stable-credentials.py"]);
+  const planned = planCiImpact([".github/workflows/ci.yml", "docker-bake.hcl", "scripts/production-stable-credentials.py", "scripts/production-cache-maintenance.mjs"]);
   assert.equal(planned.mode, "none");
   assert.equal(planned.gateFilter, "none");
   assert.equal(planned.browser, false);

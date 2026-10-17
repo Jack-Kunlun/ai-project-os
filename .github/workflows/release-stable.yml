@@ -1,8 +1,18 @@
 name: 发布正式版本
-run-name: 发布正式版本 ${{ github.ref_name }}
+run-name: ${{ inputs.operation == 'cache-inspect' && '检查生产缓存' || inputs.operation == 'cache-clean' && '清理生产缓存' || '发布正式版本' }} ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: 发布正式版本或维护当前生产缓存
+        type: choice
+        required: true
+        default: release
+        options:
+          - release
+          - cache-inspect
+          - cache-clean
 
 permissions:
   contents: read
@@ -14,6 +24,7 @@ concurrency:
 
 jobs:
   prepare:
+    if: ${{ (inputs.operation || 'release') == 'release' }}
     name: Verify candidate and create immutable tag
     runs-on: ubuntu-24.04
     timeout-minutes: 100
@@ -66,6 +77,7 @@ jobs:
         run: node scripts/production-stable-release.mjs export-context
 
   release:
+    if: ${{ (inputs.operation || 'release') == 'release' }}
     needs: prepare
     name: Deploy verified images and accept production
     runs-on: ubuntu-24.04
@@ -175,6 +187,7 @@ jobs:
         run: rm -f -- "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts"
 
   publish:
+    if: ${{ (inputs.operation || 'release') == 'release' }}
     needs: [prepare, release]
     name: Publish accepted GitHub release
     runs-on: ubuntu-24.04
@@ -217,3 +230,118 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/production-stable-release.mjs publish-release "$RUNNER_TEMP/stable-deploy.log"
+
+  cache-maintenance:
+    if: ${{ inputs.operation == 'cache-inspect' || inputs.operation == 'cache-clean' }}
+    name: Inspect or clean current production cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    environment:
+      name: production
+      url: https://ai-project-os.com
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+      CACHE_MAINTENANCE_OPERATION: ${{ inputs.operation }}
+      NODE_OPTIONS: --max-old-space-size=512
+    steps:
+      - name: Check out exact maintenance candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.19.0
+
+      - name: Validate main maintenance candidate
+        run: node scripts/production-stable-release.mjs validate-candidate
+
+      - name: Verify current live source before maintenance
+        run: node scripts/production-stable-release.mjs verify-source-health
+
+      - name: Require exact successful main CI before tooling changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/production-stable-release.mjs wait-main-ci
+
+      - name: Freeze current production identity for cache maintenance
+        run: node scripts/production-cache-maintenance.mjs prepare
+
+      - name: Prepare the existing pinned production SSH identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
+          test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
+          install -d -m 700 "$RUNNER_TEMP/cache-maintenance-ssh" "$RUNNER_TEMP/cache-maintenance"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/cache-maintenance-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" "$RUNNER_TEMP/cache-maintenance-ssh/known_hosts"
+          ssh-keygen -y -f "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/cache-maintenance-ssh/known_hosts" >/dev/null
+
+      - name: Refresh verified fixed tooling without deploying the application
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/cache-maintenance-ssh/known_hosts" \
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "refresh-stable-tooling $RELEASE_TAG $GITHUB_SHA CONFIRM_STABLE_TOOLING_FROM_CI"
+          ssh -i "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/cache-maintenance-ssh/known_hosts" \
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "stable-tooling-status" > "$RUNNER_TEMP/cache-maintenance/tooling.json"
+          node scripts/production-stable-release.mjs verify-tooling "$RUNNER_TEMP/cache-maintenance/tooling.json"
+
+      - name: Inspect and freeze exact reclaimable cache records
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/cache-maintenance-ssh/known_hosts" \
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "inspect-cache $CACHE_CURRENT_TAG $CACHE_CURRENT_REVISION CONFIRM_CACHE_INSPECT" \
+            | tee "$RUNNER_TEMP/cache-maintenance/inspect.log"
+          node scripts/production-cache-maintenance.mjs parse-inspect \
+            "$RUNNER_TEMP/cache-maintenance/inspect.log" "$RUNNER_TEMP/cache-maintenance/inspect.json"
+
+      - name: Clean only the inspected and still-reclaimable record IDs
+        if: ${{ inputs.operation == 'cache-clean' }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/cache-maintenance-ssh/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=45 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "clean-cache $CACHE_CURRENT_TAG $CACHE_CURRENT_REVISION $CACHE_PLAN_DIGEST" \
+            | tee "$RUNNER_TEMP/cache-maintenance/clean.log"
+          node scripts/production-cache-maintenance.mjs parse-clean \
+            "$RUNNER_TEMP/cache-maintenance/clean.log" "$RUNNER_TEMP/cache-maintenance/clean.json"
+
+      - name: Verify unchanged public application health
+        run: node scripts/production-cache-maintenance.mjs health "$RUNNER_TEMP/cache-maintenance/public-health.json"
+
+      - name: Save cache classifications and maintenance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-cache-maintenance
+          path: ${{ runner.temp }}/cache-maintenance/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove the temporary maintenance SSH identity
+        if: ${{ always() }}
+        run: rm -f -- "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" "$RUNNER_TEMP/cache-maintenance-ssh/known_hosts"

@@ -14,6 +14,14 @@ if [[ "$original_command" =~ ^refresh-stable-tooling\ (v[1-9][0-9]*\.(0|[1-9][0-
   exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
     refresh "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
 fi
+if [[ "$original_command" =~ ^inspect-cache\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ (CONFIRM_CACHE_INSPECT)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
+    cache-inspect "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+if [[ "$original_command" =~ ^clean-cache\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ ([0-9a-f]{64})$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
+    cache-clean "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
 if [[ "$original_command" =~ ^deploy-stable\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ (CONFIRM_STABLE_CI_IMAGES)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
     deploy "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"

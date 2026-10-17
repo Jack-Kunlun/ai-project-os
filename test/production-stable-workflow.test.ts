@@ -86,7 +86,7 @@ test("production receives a read-only token and only publishing jobs can write t
   const workflow = readFileSync(".github/workflows/release-stable.yml", "utf8");
   const prepare = workflow.slice(workflow.indexOf("  prepare:"), workflow.indexOf("  release:"));
   const deploy = workflow.slice(workflow.indexOf("  release:"), workflow.indexOf("  publish:"));
-  const publish = workflow.slice(workflow.indexOf("  publish:"));
+  const publish = workflow.slice(workflow.indexOf("  publish:"), workflow.indexOf("  cache-maintenance:"));
   assert.match(deploy, /permissions:\n      contents: read\n      actions: read\n      packages: read/u);
   assert.doesNotMatch(deploy, /contents: write/u);
   assert.match(prepare, /contents: write/u);
@@ -94,7 +94,7 @@ test("production receives a read-only token and only publishing jobs can write t
   assert.doesNotMatch(prepare + publish, /PRODUCTION_SSH_PRIVATE_KEY|RELEASE_REGISTRY_TOKEN/u);
   assert.match(publish, /needs: \[prepare, release\]/u);
   assert.match(publish, /name: production-deployment-receipt/u);
-  assert.equal((workflow.match(/name: production\n/gu) ?? []).length, 1);
+  assert.equal((workflow.match(/name: production\n/gu) ?? []).length, 2);
 });
 
 test("stable versions and release identity are canonical across artifacts", () => {

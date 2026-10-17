@@ -48,7 +48,7 @@ const DOMAIN_GATES = Object.freeze([
 
 const SENSITIVE_SOURCE_PATH = /^src\/(?:app\/admin\/|app\/(?:auth|login)\/|.*(?:auth|login|account|permission|authorization|role|entitlement|credits?|quotas?|billing|security|credential|secret|provider|grant|consent|approval|external|model|connection|mcp|action|oauth|oidc))/iu;
 const VERSION_METADATA_PATHS = new Set(["package.json", "src/lib/version.ts"]);
-const INFRA_PATH = /^(?:\.github\/|deploy\/|scripts\/(?:ci-|production-stable-|prepare-stable-|prepare-release-images|publish-release-images|release-image-manifest|run-local-release|run-browser-e2e|local-release-candidate|release-image|run-postgres-gates|postgres-gate-contract|run-phone-auth-postgres|run-database-principal-oid10-gate)|Dockerfile$|\.dockerignore$|docker-bake\.hcl$|compose(?:\.[^/]*)?\.ya?ml$|next\.config\.[^/]+$|config\/performance-budgets\.json$)/u;
+const INFRA_PATH = /^(?:\.github\/|deploy\/|scripts\/(?:ci-|production-stable-|production-cache-maintenance\.mjs$|prepare-stable-|prepare-release-images|publish-release-images|release-image-manifest|run-local-release|run-browser-e2e|local-release-candidate|release-image|run-postgres-gates|postgres-gate-contract|run-phone-auth-postgres|run-database-principal-oid10-gate)|Dockerfile$|\.dockerignore$|docker-bake\.hcl$|compose(?:\.[^/]*)?\.ya?ml$|next\.config\.[^/]+$|config\/performance-budgets\.json$)/u;
 const CLIENT_PATH = /^(?:src\/components\/.*\.tsx?$|src\/app\/.*(?:-client\.tsx|\.css)$|public\/.*\.svg$|e2e\/.*\.spec\.tsx?$)/u;
 const PUBLIC_PASSIVE_ASSET_PATH = /^public\/.*\.(?:avif|eot|gif|ico|jpe?g|otf|png|ttf|woff2?)$/iu;
 

@@ -6,7 +6,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-源码候选版本为 `1.0.11`，见 [v1.0.11 版本说明](docs/releases/v1.0.11.md)。此候选串联个人知识到项目的资料、AI 整理、问答和计划入口，并包含受限发布资源保护。维护模式只更新工具和缓存，不切换线上应用。CI 按生产源版本到候选提交的累计差异选择测试，构建并验证镜像；发布镜像后会从注册表拉回，核对运行配置、文件系统和容器镜像身份。用户手动点击「发布正式版本」后，生产复用同一摘要镜像并自动验收，不再构建。常规发布不执行备份/恢复流程，迁移清单未变则跳过迁移。验收成功后自动清理过期应用镜像和闲置构建缓存。当前实际线上版本以公网 `/api/health` 和生产回执为准；永久发布工具已安装，后续工具更新由受限 Workflow 完成。
+源码候选版本为 `1.0.12`，见 [v1.0.12 版本说明](docs/releases/v1.0.12.md)。此候选修复 DeepSeek 自动整理的结构化输出设置，并明确处理输出截断；个人知识到项目的真实模型流程以本版本线上验收结果为准。维护模式只更新工具和缓存，不切换线上应用。CI 按生产源版本到候选提交的累计差异选择测试，构建并验证镜像；发布镜像后会从注册表拉回，核对运行配置、文件系统和容器镜像身份。用户手动点击「发布正式版本」后，生产复用同一摘要镜像并自动验收，不再构建。常规发布不执行备份/恢复流程，迁移清单未变则跳过迁移。验收成功后自动清理过期应用镜像和闲置构建缓存。当前实际线上版本以公网 `/api/health` 和生产回执为准；永久发布工具已安装，后续工具更新由受限 Workflow 完成。
 
 `v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
 
@@ -56,7 +56,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 当前版本说明：[v1.0.11](docs/releases/v1.0.11.md)；上一正式版记录见 [v1.0.9](docs/releases/v1.0.9.md)，历史受控预发布记录见 [docs/releases/next.md](docs/releases/next.md)。
+- 当前版本说明：[v1.0.12](docs/releases/v1.0.12.md)；上一正式版记录见 [v1.0.11](docs/releases/v1.0.11.md)，历史受控预发布记录见 [docs/releases/next.md](docs/releases/next.md)。
 - V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
 - V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。

@@ -19,7 +19,8 @@ function requireValue(value, code) {
 export function sourceContext(env = process.env) {
   requireValue(env.GITHUB_REPOSITORY === "Jack-Kunlun/ai-project-os"
     && env.GITHUB_REF === "refs/heads/main" && SHA.test(env.GITHUB_SHA ?? ""), "MAIN_CONTEXT_INVALID");
-  requireValue(["cache-inspect", "cache-clean"].includes(env.CACHE_MAINTENANCE_OPERATION), "OPERATION_INVALID");
+  requireValue(["cache-inspect", "cache-clean", "images-inspect", "images-clean"]
+    .includes(env.CACHE_MAINTENANCE_OPERATION), "OPERATION_INVALID");
   requireValue(VERSION.test(env.PRODUCTION_SOURCE_VERSION ?? "")
     && SHA.test(env.PRODUCTION_SOURCE_SHA ?? "") && VERSION.test(env.RELEASE_VERSION ?? ""), "SOURCE_INVALID");
   const transition = compareStableVersions(env.RELEASE_VERSION, env.PRODUCTION_SOURCE_VERSION);
@@ -49,14 +50,7 @@ function validateImageIds(values) {
     && new Set(values).size === values.length && values.every((value) => typeof value === "string" && IMAGE.test(value));
 }
 
-export function parseMaintenanceReport(log, operation, context, expectedPlanDigest) {
-  requireValue(typeof log === "string" && Buffer.byteLength(log) <= 2 * 1024 * 1024, "LOG_INVALID");
-  const lines = log.split(/\r?\n/u).filter((line) => line.startsWith(PREFIX));
-  requireValue(lines.length === 1, "REPORT_COUNT_INVALID");
-  let value;
-  try { value = JSON.parse(lines[0].slice(PREFIX.length)); } catch { throw new Error("CACHE_MAINTENANCE_REPORT_JSON_INVALID"); }
-  requireValue(value?.schema === 1 && value.operation === operation && value.tag === context.tag
-    && value.revision === context.revision && DIGEST.test(value.planDigest ?? ""), "REPORT_IDENTITY_INVALID");
+function validateProtection(value, context) {
   const protection = value.protection;
   requireValue(protection && validateImageIds(protection.currentImageIds)
     && validateImageIds(protection.previousImageIds) && validateImageIds(protection.ownedImageIds)
@@ -76,6 +70,17 @@ export function parseMaintenanceReport(log, operation, context, expectedPlanDige
     && DIGEST.test(protection.migrationManifestSha256 ?? "")
     && DIGEST.test(protection.deploymentReceiptSha256 ?? "")
     && protection.planDigest === value.planDigest, "PROTECTION_INVALID");
+}
+
+export function parseMaintenanceReport(log, operation, context, expectedPlanDigest) {
+  requireValue(typeof log === "string" && Buffer.byteLength(log) <= 2 * 1024 * 1024, "LOG_INVALID");
+  const lines = log.split(/\r?\n/u).filter((line) => line.startsWith(PREFIX));
+  requireValue(lines.length === 1, "REPORT_COUNT_INVALID");
+  let value;
+  try { value = JSON.parse(lines[0].slice(PREFIX.length)); } catch { throw new Error("CACHE_MAINTENANCE_REPORT_JSON_INVALID"); }
+  requireValue(value?.schema === 1 && value.operation === operation && value.tag === context.tag
+    && value.revision === context.revision && DIGEST.test(value.planDigest ?? ""), "REPORT_IDENTITY_INVALID");
+  validateProtection(value, context);
   if (operation === "inspect") {
     validateSummary(value.summary);
     requireValue(Array.isArray(value.records) && value.records.length === value.summary.recordCount, "INVENTORY_INVALID");
@@ -91,6 +96,128 @@ export function parseMaintenanceReport(log, operation, context, expectedPlanDige
       && value.netAvailableBytesDelta === value.availableBytesAfter - value.availableBytesBefore, "DISK_DELTA_INVALID");
     requireValue(["prunedIds", "remainingIds", "newlyProtectedIds", "newlyAppearedIds", "changedIds", "vanishedIds"]
       .every((key) => Array.isArray(value[key]) && value[key].every((id) => typeof id === "string" && /^[a-z0-9][a-z0-9_:-]{0,127}$/u.test(id))), "CLEAN_IDS_INVALID");
+  }
+  return value;
+}
+
+const IMAGE_PREFIX = "IMAGE_MAINTENANCE_REPORT ";
+const IMAGE_SERVICES = ["app", "worker", "git-worker", "migrate", "reconcile", "principal-bootstrap", "production-upgrade-preflight"];
+const CONTAINER_STATUSES = ["created", "restarting", "running", "removing", "paused", "exited", "dead"];
+const IMAGE_REASONS = new Set(["image-missing", "title-invalid", "source-invalid", "version-invalid",
+  "revision-invalid", "project-invalid", "service-invalid", "title-unrecognized", "source-unrecognized",
+  "legacy-project-unrecognized", "compose-project-unrecognized", "service-unrecognized", "version-unrecognized",
+  "repository-service-mismatch", "duplicate-repository-reference", "repository-service-unrecognized",
+  "repository-reference-count-limit", "repository-reference-unrecognized", "ownership-unconfirmed",
+  "previous-release-boundary-unavailable", "not-older-than-previous-release", "current-release-image",
+  "previous-release-image", "container-referenced"]);
+const imageIdsOrEmpty = (values) => Array.isArray(values) && values.length <= 1024
+  && new Set(values).size === values.length && values.every((id) => typeof id === "string" && IMAGE.test(id));
+const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
+function knownImageReference(reference, kind) {
+  if (typeof reference !== "string" || reference.length > 512) return false;
+  const match = kind === "digest" ? reference.match(/^(.*)@sha256:[a-f0-9]{64}$/u)
+    : reference.match(/^(.*):[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/u);
+  if (!match) return false;
+  return IMAGE_SERVICES.some((service) => ["", "docker.io/library/"]
+    .some((prefix) => match[1] === `${prefix}ai-project-os-${service}`))
+    || ["ghcr.io/jack-kunlun/ai-project-os", ...["app", "worker", "migrate"]
+      .map((service) => `ghcr.io/jack-kunlun/ai-project-os-${service}`)].includes(match[1]);
+}
+
+function validateImageRecords(images, scopeIds, protection) {
+  requireValue(Array.isArray(images) && images.length === 17
+    && same(images.map((item) => item?.id), scopeIds), "IMAGE_INVENTORY_INVALID");
+  for (const item of images) {
+    requireValue(typeof item.present === "boolean" && typeof item.eligible === "boolean"
+      && ["confirmed", "unconfirmed", "missing"].includes(item.ownership)
+      && ["legacy", "canonical", "unknown"].includes(item.sourceKind)
+      && (item.version === null || /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-dev\.(?:0|[1-9]\d*))?$/u.test(item.version))
+      && (item.service === null || IMAGE_SERVICES.includes(item.service))
+      && safeCount(item.sizeBytes) && safeCount(item.unknownRefCount)
+      && DIGEST.test(item.fingerprint ?? "") && DIGEST.test(item.unknownRefsSha256 ?? "")
+      && [item.ownershipReasons, item.retainReasons].every((reasons) => Array.isArray(reasons)
+        && reasons.length <= IMAGE_REASONS.size && reasons.every((reason) => IMAGE_REASONS.has(reason)))
+      && ["recognizedRepoTags", "recognizedRepoDigests"].every((key) => Array.isArray(item[key])
+        && item[key].length <= 8 && item[key].every((ref) => knownImageReference(ref, key === "recognizedRepoTags" ? "tag" : "digest")))
+      && Array.isArray(item.containerReferences) && item.containerReferences.length <= 1024
+      && new Set(item.containerReferences.map((ref) => ref?.id)).size === item.containerReferences.length
+      && item.containerReferences.every((ref) => DIGEST.test(ref?.id ?? "") && CONTAINER_STATUSES.includes(ref.status)),
+    "IMAGE_RECORD_INVALID");
+    requireValue(item.present === protection.allImageIds.includes(item.id)
+      && (item.present || (item.ownership === "missing" && !item.eligible && item.sizeBytes === 0 && item.containerReferences.length === 0))
+      && (!item.eligible || (item.present && item.ownership === "confirmed" && item.unknownRefCount === 0
+        && item.ownershipReasons.length === 0 && item.retainReasons.length === 0 && item.containerReferences.length === 0
+        && !protection.currentImageIds.includes(item.id) && !protection.previousImageIds.includes(item.id))),
+    "IMAGE_ELIGIBILITY_INVALID");
+  }
+}
+
+function validateImageSummary(summary, images) {
+  const keys = ["scopeCount", "presentCount", "missingCount", "ownershipConfirmedCount", "eligibleCount",
+    "referencedCount", "retainedCount", "sumImageSizeBytes"];
+  requireValue(summary && keys.every((key) => safeCount(summary[key])) && summary.scopeCount === 17
+    && summary.presentCount + summary.missingCount === 17 && summary.eligibleCount + summary.retainedCount === 17
+    && [summary.eligibleCount, summary.ownershipConfirmedCount, summary.referencedCount].every((count) => count <= summary.presentCount),
+  "IMAGE_SUMMARY_INVALID");
+  if (!images) return;
+  const computed = { scopeCount: 17, presentCount: images.filter((item) => item.present).length,
+    missingCount: images.filter((item) => !item.present).length,
+    ownershipConfirmedCount: images.filter((item) => item.ownership === "confirmed").length,
+    eligibleCount: images.filter((item) => item.eligible).length,
+    referencedCount: images.filter((item) => item.containerReferences.length > 0).length,
+    retainedCount: images.filter((item) => !item.eligible).length,
+    sumImageSizeBytes: images.reduce((sum, item) => sum + (item.present ? item.sizeBytes : 0), 0) };
+  requireValue(keys.every((key) => summary[key] === computed[key]), "IMAGE_SUMMARY_TOTAL_INVALID");
+}
+
+export function parseImageMaintenanceReport(log, operation, context, expectedPlanDigest, inspected) {
+  requireValue(typeof log === "string" && Buffer.byteLength(log) <= 2 * 1024 * 1024, "LOG_INVALID");
+  const lines = log.split(/\r?\n/u).filter((line) => line.startsWith(IMAGE_PREFIX));
+  requireValue(lines.length === 1, "REPORT_COUNT_INVALID");
+  let value;
+  try { value = JSON.parse(lines[0].slice(IMAGE_PREFIX.length)); } catch { throw new Error("CACHE_MAINTENANCE_REPORT_JSON_INVALID"); }
+  requireValue(value?.schema === 1 && value.operation === operation && value.tag === context.tag
+    && value.revision === context.revision && DIGEST.test(value.planDigest ?? "")
+    && imageIdsOrEmpty(value.scopeIds) && value.scopeIds.length === 17, "IMAGE_REPORT_IDENTITY_INVALID");
+  validateProtection(value, context);
+  const protection = value.protection;
+  requireValue(validateImageIds(protection.allImageIds) && DIGEST.test(protection.containerReferencesSha256 ?? "")
+    && same(protection.scopeIds, value.scopeIds)
+    && [...protection.currentImageIds, ...protection.previousImageIds, ...protection.ownedImageIds,
+      ...protection.unverifiedImages.map((item) => item.id)].every((id) => protection.allImageIds.includes(id)), "IMAGE_PROTECTION_INVALID");
+  const images = operation === "image-inspect" ? value.images : value.imagesAfter;
+  validateImageRecords(images, value.scopeIds, protection);
+  if (operation === "image-inspect") {
+    validateImageSummary(value.summary, images);
+    return value;
+  }
+  requireValue(operation === "image-clean" && value.planDigest === expectedPlanDigest && value.protectionVerified === true
+    && value.expiredBeforeNextDelete === false && value.allImageInventoryDrift === false, "IMAGE_CLEAN_PLAN_INVALID");
+  validateImageSummary(value.summaryBefore);
+  validateImageSummary(value.summaryAfter, images);
+  const idKeys = ["removedIds", "retainedIds", "changedIds", "newlyReferencedIds", "vanishedIds", "newlyAppearedIds", "engineRefusedIds", "attemptedIds"];
+  requireValue(idKeys.every((key) => imageIdsOrEmpty(value[key]) && value[key].every((id) => value.scopeIds.includes(id)))
+    && value.removedIds.every((id) => value.attemptedIds.includes(id) && !protection.allImageIds.includes(id))
+    && value.retainedIds.every((id) => protection.allImageIds.includes(id))
+    && value.engineRefusedIds.every((id) => value.attemptedIds.includes(id) && value.retainedIds.includes(id))
+    && value.failureReasons && Object.keys(value.failureReasons).every((id) => value.engineRefusedIds.includes(id))
+    && Object.values(value.failureReasons).every((reason) => ["command-timeout", "engine-refused", "image-remains-after-remove"].includes(reason)),
+  "IMAGE_CLEAN_IDS_INVALID");
+  requireValue(["localHealth", "publicHealth", "database", "worker", "migrationLedger"]
+    .every((key) => value.checks?.[key] === true), "HEALTH_CHECK_FAILED");
+  requireValue(safeCount(value.availableBytesBefore) && safeCount(value.availableBytesAfter)
+    && Number.isSafeInteger(value.netAvailableBytesDelta)
+    && value.netAvailableBytesDelta === value.availableBytesAfter - value.availableBytesBefore, "DISK_DELTA_INVALID");
+  if (inspected) {
+    requireValue(inspected.planDigest === value.planDigest && same(inspected.scopeIds, value.scopeIds)
+      && same(inspected.protection.allImageIds.filter((id) => !value.removedIds.includes(id)), protection.allImageIds)
+      && value.removedIds.every((id) => inspected.images.some((item) => item.id === id && item.eligible)), "IMAGE_TRANSITION_INVALID");
+    for (const key of ["currentImageIds", "previousImageIds", "previousTag", "previousRevision", "containerCount",
+      "containerSnapshotSha256", "containerReferencesSha256", "volumeCount", "volumeSnapshotSha256", "postgresId",
+      "migrationCount", "migrationManifestSha256", "configHashes", "checkoutRevision", "deploymentReceiptSha256"]) {
+      requireValue(same(inspected.protection[key], protection[key]), "IMAGE_PROTECTED_RESOURCE_DRIFT");
+    }
   }
   return value;
 }
@@ -131,6 +258,28 @@ async function main(args) {
     healthyProductionPayload(payload, context.version);
     writeFileSync(args[1], `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     console.log(`CACHE_MAINTENANCE_PUBLIC_HEALTH_OK version=${context.version}`);
+    return;
+  }
+  if ((args.length === 3 && args[0] === "parse-image-inspect") || (args.length === 4 && args[0] === "parse-image-clean")) {
+    const operation = args[0] === "parse-image-inspect" ? "image-inspect" : "image-clean";
+    const inspected = operation === "image-clean" ? parseImageMaintenanceReport(
+      IMAGE_PREFIX + JSON.stringify(JSON.parse(readFileSync(args[3], "utf8"))), "image-inspect", context) : undefined;
+    const report = parseImageMaintenanceReport(readFileSync(args[1], "utf8"), operation,
+      context, process.env.IMAGE_PLAN_DIGEST, inspected);
+    writeFileSync(args[2], `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    if (operation === "image-inspect") writeEnv({ IMAGE_PLAN_DIGEST: report.planDigest });
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      const summary = operation === "image-inspect" ? report.summary : report.summaryAfter;
+      const lines = [`### 历史镜像${operation === "image-inspect" ? "检查" : "清理"}`, "",
+        `运行版本：${report.tag} / ${report.revision}`, `固定范围：17 个 ID；现存 ${summary.presentCount} 个；可回收 ${summary.eligibleCount} 个。`,
+        "", "| 镜像 ID | 版本 | 服务 | 归属 | 容器引用数 | 可回收 |", "| --- | --- | --- | --- | ---: | --- |"];
+      for (const item of operation === "image-inspect" ? report.images : report.imagesAfter) {
+        lines.push(`| ${item.id} | ${item.version ?? "-"} | ${item.service ?? "-"} | ${item.ownership} | ${item.containerReferences.length} | ${item.eligible} |`);
+      }
+      if (operation === "image-clean") lines.push("", `删除 ${report.removedIds.length} 个镜像；引擎拒绝 ${report.engineRefusedIds.length} 个；磁盘可用空间净变化 ${report.netAvailableBytesDelta} bytes。`);
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n\n`);
+    }
+    console.log(`IMAGE_MAINTENANCE_REPORT_VERIFIED operation=${operation} tag=${context.tag} revision=${context.revision}`);
     return;
   }
   requireValue(args.length === 3 && ["parse-inspect", "parse-clean"].includes(args[0]), "ARGUMENTS_INVALID");

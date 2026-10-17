@@ -1,11 +1,11 @@
 name: 发布正式版本
-run-name: ${{ inputs.operation == 'cache-inspect' && '检查生产缓存' || inputs.operation == 'cache-clean' && '清理生产缓存' || '发布正式版本' }} ${{ github.ref_name }}
+run-name: ${{ inputs.operation == 'cache-inspect' && '检查生产缓存' || inputs.operation == 'cache-clean' && '清理生产缓存' || inputs.operation == 'images-inspect' && '检查历史镜像' || inputs.operation == 'images-clean' && '清理历史镜像' || '发布正式版本' }} ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 发布正式版本或维护当前生产缓存
+        description: 发布正式版本或维护当前生产缓存及历史镜像
         type: choice
         required: true
         default: release
@@ -13,6 +13,8 @@ on:
           - release
           - cache-inspect
           - cache-clean
+          - images-inspect
+          - images-clean
 
 permissions:
   contents: read
@@ -232,8 +234,8 @@ jobs:
         run: node scripts/production-stable-release.mjs publish-release "$RUNNER_TEMP/stable-deploy.log"
 
   cache-maintenance:
-    if: ${{ inputs.operation == 'cache-inspect' || inputs.operation == 'cache-clean' }}
-    name: Inspect or clean current production cache
+    if: ${{ inputs.operation == 'cache-inspect' || inputs.operation == 'cache-clean' || inputs.operation == 'images-inspect' || inputs.operation == 'images-clean' }}
+    name: Inspect or clean production cache and images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -282,7 +284,7 @@ jobs:
           umask 077
           test -n "$PRODUCTION_SSH_PRIVATE_KEY"
           test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
-          install -d -m 700 "$RUNNER_TEMP/cache-maintenance-ssh" "$RUNNER_TEMP/cache-maintenance"
+          install -d -m 700 "$RUNNER_TEMP/cache-maintenance-ssh" "$RUNNER_TEMP/cache-maintenance" "$RUNNER_TEMP/image-maintenance"
           printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519"
           printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/cache-maintenance-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" "$RUNNER_TEMP/cache-maintenance-ssh/known_hosts"
@@ -303,8 +305,12 @@ jobs:
             -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
             "stable-tooling-status" > "$RUNNER_TEMP/cache-maintenance/tooling.json"
           node scripts/production-stable-release.mjs verify-tooling "$RUNNER_TEMP/cache-maintenance/tooling.json"
+          if [[ "$CACHE_MAINTENANCE_OPERATION" == images-* ]]; then
+            cp "$RUNNER_TEMP/cache-maintenance/tooling.json" "$RUNNER_TEMP/image-maintenance/tooling.json"
+          fi
 
       - name: Inspect and freeze exact reclaimable cache records
+        if: ${{ inputs.operation == 'cache-inspect' || inputs.operation == 'cache-clean' }}
         run: |
           set -euo pipefail
           ssh -i "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" \
@@ -330,15 +336,57 @@ jobs:
           node scripts/production-cache-maintenance.mjs parse-clean \
             "$RUNNER_TEMP/cache-maintenance/clean.log" "$RUNNER_TEMP/cache-maintenance/clean.json"
 
+      - name: Inspect ownership and references for the fixed historical image IDs
+        if: ${{ inputs.operation == 'images-inspect' || inputs.operation == 'images-clean' }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/cache-maintenance-ssh/known_hosts" \
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "inspect-images $CACHE_CURRENT_TAG $CACHE_CURRENT_REVISION CONFIRM_IMAGE_INSPECT" \
+            | tee "$RUNNER_TEMP/image-maintenance/inspect.log"
+          node scripts/production-cache-maintenance.mjs parse-image-inspect \
+            "$RUNNER_TEMP/image-maintenance/inspect.log" "$RUNNER_TEMP/image-maintenance/inspect.json"
+
+      - name: Clean confirmed old unreferenced images by immutable ID
+        if: ${{ inputs.operation == 'images-clean' }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/cache-maintenance-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/cache-maintenance-ssh/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=45 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "clean-images $CACHE_CURRENT_TAG $CACHE_CURRENT_REVISION $IMAGE_PLAN_DIGEST" \
+            | tee "$RUNNER_TEMP/image-maintenance/clean.log"
+          node scripts/production-cache-maintenance.mjs parse-image-clean \
+            "$RUNNER_TEMP/image-maintenance/clean.log" "$RUNNER_TEMP/image-maintenance/clean.json" \
+            "$RUNNER_TEMP/image-maintenance/inspect.json"
+
       - name: Verify unchanged public application health
+        if: ${{ inputs.operation == 'cache-inspect' || inputs.operation == 'cache-clean' }}
         run: node scripts/production-cache-maintenance.mjs health "$RUNNER_TEMP/cache-maintenance/public-health.json"
 
+      - name: Verify unchanged public application health after image maintenance
+        if: ${{ inputs.operation == 'images-inspect' || inputs.operation == 'images-clean' }}
+        run: node scripts/production-cache-maintenance.mjs health "$RUNNER_TEMP/image-maintenance/public-health.json"
+
       - name: Save cache classifications and maintenance evidence
-        if: ${{ always() }}
+        if: ${{ always() && (inputs.operation == 'cache-inspect' || inputs.operation == 'cache-clean') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: production-cache-maintenance
           path: ${{ runner.temp }}/cache-maintenance/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Save historical image ownership and cleanup evidence
+        if: ${{ always() && (inputs.operation == 'images-inspect' || inputs.operation == 'images-clean') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-image-maintenance
+          path: ${{ runner.temp }}/image-maintenance/
           if-no-files-found: ignore
           retention-days: 30
 

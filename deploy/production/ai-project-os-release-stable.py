@@ -42,6 +42,8 @@ GATEWAY = Path('/usr/local/sbin/ai-project-os-actions-gateway')
 SUDOERS = Path('/etc/sudoers.d/ai-project-os-deploy')
 CACHE_MAINTENANCE_PLAN = Path('/var/lib/ai-project-os/cache-maintenance-plan.json')
 CACHE_MAINTENANCE_AUDIT = Path('/var/lib/ai-project-os/cache-maintenance-last.json')
+IMAGE_MAINTENANCE_PLAN = Path('/var/lib/ai-project-os/image-maintenance-plan.json')
+IMAGE_MAINTENANCE_AUDIT = Path('/var/lib/ai-project-os/image-maintenance-last.json')
 BACKUP_SOURCE = 'deploy/production/ai-project-os-backup'
 ARTIFACT_SOURCE = 'deploy/production/ai_project_os_backup_artifact.py'
 DEPLOYER_SOURCE = 'deploy/production/ai-project-os-release-stable.py'
@@ -108,7 +110,37 @@ LEGACY_IMAGE_VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-dev\.[0
 LEGACY_IMAGE_TAG = re.compile(r'ai-project-os-[a-z-]+(?::[^/]+)?')
 LEGACY_IMAGE_SERVICES = frozenset(('app', 'worker', 'git-worker', 'migrate',
                                    'reconcile', 'principal-bootstrap'))
+HISTORICAL_IMAGE_SERVICES = LEGACY_IMAGE_SERVICES | frozenset(
+    ('production-upgrade-preflight',)
+)
 CACHE_PLAN_TTL_SECONDS = 15 * 60
+CACHE_MAX_IMAGE_REFS = 256
+IMAGE_REF_DISPLAY_LIMIT = 8
+IMAGE_VERSION = re.compile(
+    r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+    r'(?:-dev\.(0|[1-9][0-9]*))?$'
+)
+HISTORICAL_IMAGE_SCOPE = (
+    'sha256:08e388bbb6f8ca08dfcdd431dd3655f1c669dd5e390284bd41e89965278f9678',
+    'sha256:31f6f10638e8c2f24c3be075a5ead6219839b833aaf311b726ba86efcf3f2cae',
+    'sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266',
+    'sha256:4aaa76f6d6a9ec3d81929a91b493e74f197bd66a45bb340be2c48124a16f3e41',
+    'sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9',
+    'sha256:5016fe4fbd59e436f5c881515f460c0dd2d27fd69d2cb67ea7099338f2210192',
+    'sha256:507fb49a9b0fb572df87bb79e73f2f8df62de4c0d85ff01524219cd969f8edd2',
+    'sha256:5f811cabe49b87ef3e49c986cd26d72609852eb093dcdd23fa910f6d1262140e',
+    'sha256:6060a7c9dd640c1702fdd3383bf5b5609ea18c8cceb71e1831cb94f47fc37ac6',
+    'sha256:717905ac3b6cd0ae2be747d976e3adb7b74647f68664f4ed285fdaf4051533b9',
+    'sha256:71b9491d66dfc809163e3e0111161f5dc167a9868f9d8e552612f959791e05a7',
+    'sha256:8620b13bfc6046074e8e13d4c5b09f528e09730d3c2f6d689c2351c464864a9c',
+    'sha256:acfa880db67ae93c56ef5cf5e97e9530972a371b881677dc248214a09bba3452',
+    'sha256:b97d07cbed2494b0369c8200003430515ff2e9caabc757d0b3f5ff03a34eb6d1',
+    'sha256:c4ff0bc5c0bdf7d74949cb3ede45293d38f81cae7c87ce873cb79c5404ee0681',
+    'sha256:d06e997947ee545296f29933ce95c9a97f8b4c95807557c8f497e49eb270a270',
+    'sha256:e0952e811202fb5952561ae5bca82f4668b32144dbea4559e73602716894ba1c',
+)
+CACHE_CONTAINER_STATUSES = frozenset(('created', 'restarting', 'running', 'removing',
+                                      'paused', 'exited', 'dead'))
 CACHE_MAX_RECORDS = 2048
 CACHE_MAX_CONTAINERS = 1024
 CACHE_MAX_VOLUMES = 1024
@@ -1379,6 +1411,813 @@ def cache_clean(target_tag, target_revision, plan_digest):
             'protectionVerified': protection_verified,
         })
         raise
+
+
+_IMAGE_INSPECT_TEMPLATE = (
+    '{{printf "[%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s]" '
+    '(json .Id) '
+    '(json (index .Config.Labels "org.opencontainers.image.title")) '
+    '(json (index .Config.Labels "org.opencontainers.image.source")) '
+    '(json (index .Config.Labels "org.opencontainers.image.version")) '
+    '(json (index .Config.Labels "org.opencontainers.image.revision")) '
+    '(json (index .Config.Labels "com.docker.compose.project")) '
+    '(json (index .Config.Labels "com.docker.compose.service")) '
+    '(json .RepoTags) (json .RepoDigests) (json .Size) (json .Os) (json .Architecture)}}'
+)
+_IMAGE_CONTAINER_TEMPLATE = (
+    '{{printf "[%s,%s,%s]" (json .Id) (json .Image) (json .State.Status)}}'
+)
+
+
+def _image_parse_json(value, code):
+    require(isinstance(value, str) and len(value) <= 256 * 1024
+            and not any(ord(char) < 32 and char not in '\n\r\t' for char in value), code)
+    try:
+        return json.loads(value, object_pairs_hook=_cache_unique_json_object,
+                          parse_constant=lambda _item: (_ for _ in ()).throw(ValueError()))
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise RuntimeError('STABLE_' + code) from error
+
+
+def _image_label_text(value, code):
+    if value is None or value == '':
+        return None, None
+    if (not isinstance(value, str) or len(value) > 512
+            or any(ord(char) < 32 for char in value)):
+        return None, code
+    return value, None
+
+
+def _image_version_key(value):
+    if not isinstance(value, str):
+        return None
+    match = IMAGE_VERSION.fullmatch(value)
+    if match is None:
+        return None
+    major, minor, patch, development = match.groups()
+    return (int(major), int(minor), int(patch), 0 if development is not None else 1,
+            int(development) if development is not None else 0)
+
+
+def _image_ref_repo(reference, kind):
+    if not isinstance(reference, str) or not reference or len(reference) > 512:
+        return False, None
+    if kind == 'digest':
+        if reference.count('@') != 1:
+            return False, None
+        repository, digest = reference.split('@', 1)
+        if re.fullmatch(r'sha256:[a-f0-9]{64}', digest) is None:
+            return False, None
+    else:
+        if '@' in reference or ':' not in reference:
+            return False, None
+        repository, tag = reference.rsplit(':', 1)
+        if re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}', tag) is None:
+            return False, None
+    service_repositories = {}
+    for service in HISTORICAL_IMAGE_SERVICES:
+        service_repositories['ai-project-os-' + service] = service
+        service_repositories['docker.io/library/ai-project-os-' + service] = service
+    ghcr_repositories = {
+        'ghcr.io/jack-kunlun/ai-project-os': None,
+        'ghcr.io/jack-kunlun/ai-project-os-app': 'app',
+        'ghcr.io/jack-kunlun/ai-project-os-worker': 'worker',
+        'ghcr.io/jack-kunlun/ai-project-os-migrate': 'migrate',
+    }
+    if repository in service_repositories:
+        return True, service_repositories[repository]
+    if repository in ghcr_repositories:
+        return True, ghcr_repositories[repository]
+    return False, None
+
+
+def _image_safe_reference_values(value, code):
+    if value is None:
+        return [], False
+    require(isinstance(value, list) and len(value) <= CACHE_MAX_IMAGE_REFS, code)
+    require(all(isinstance(item, str) and 0 < len(item) <= 65536
+                and not any(ord(char) < 32 for char in item) for item in value), code)
+    return value, len(value) != len(set(value))
+
+
+def _image_inventory_ids():
+    output = docker('image', 'ls', '--all', '--quiet', '--no-trunc', timeout=120)
+    identifiers = output.splitlines() if output else []
+    require(len(identifiers) <= CACHE_MAX_IMAGES * 8
+            and all(re.fullmatch(r'sha256:[a-f0-9]{64}', item) is not None
+                    for item in identifiers), 'IMAGE_INVENTORY_INVALID')
+    unique = sorted(set(identifiers))
+    require(len(unique) <= CACHE_MAX_IMAGES, 'IMAGE_INVENTORY_INVALID')
+    return unique
+
+
+def _image_container_inventory():
+    output = docker('ps', '--all', '--quiet', '--no-trunc', timeout=120)
+    identifiers = output.splitlines() if output else []
+    require(len(identifiers) <= CACHE_MAX_CONTAINERS
+            and all(HEX64.fullmatch(item) is not None for item in identifiers),
+            'IMAGE_CONTAINER_INVENTORY_INVALID')
+    require(len(identifiers) == len(set(identifiers)), 'IMAGE_CONTAINER_INVENTORY_INVALID')
+    identifiers = sorted(set(identifiers))
+    containers = []
+    if identifiers:
+        output = docker('inspect', '--format', _IMAGE_CONTAINER_TEMPLATE,
+                        *identifiers, timeout=120)
+        require(len(output) <= 512 * 1024, 'IMAGE_CONTAINER_INSPECT_INVALID')
+        rows = output.splitlines()
+        require(len(rows) == len(identifiers), 'IMAGE_CONTAINER_INSPECT_INVALID')
+        for row in rows:
+            value = _image_parse_json(row, 'IMAGE_CONTAINER_INSPECT_INVALID')
+            require(isinstance(value, list) and len(value) == 3,
+                    'IMAGE_CONTAINER_INSPECT_INVALID')
+            identifier, image_id, status = value
+            require(isinstance(identifier, str) and HEX64.fullmatch(identifier) is not None
+                    and identifier in identifiers
+                    and isinstance(image_id, str)
+                    and re.fullmatch(r'sha256:[a-f0-9]{64}', image_id) is not None
+                    and isinstance(status, str) and status in CACHE_CONTAINER_STATUSES,
+                    'IMAGE_CONTAINER_INSPECT_INVALID')
+            containers.append({'id': identifier, 'image': image_id, 'status': status})
+        require(len({item['id'] for item in containers}) == len(containers),
+                'IMAGE_CONTAINER_INSPECT_INVALID')
+    containers.sort(key=lambda item: item['id'])
+    return containers
+
+
+def _image_raw_inspect(identifier):
+    output = docker('image', 'inspect', '--format', _IMAGE_INSPECT_TEMPLATE,
+                    identifier, timeout=120)
+    require(len(output) <= 256 * 1024 and len(output.splitlines()) == 1,
+            'IMAGE_INSPECT_INVALID')
+    value = _image_parse_json(output, 'IMAGE_INSPECT_INVALID')
+    require(isinstance(value, list) and len(value) == 12 and value[0] == identifier,
+            'IMAGE_INSPECT_INVALID')
+    (image_id, raw_title, raw_source, raw_version, raw_revision, raw_project,
+     raw_service, raw_tags, raw_digests, size_bytes, operating_system,
+     architecture) = value
+    title, title_error = _image_label_text(raw_title, 'title-invalid')
+    source, source_error = _image_label_text(raw_source, 'source-invalid')
+    version, version_error = _image_label_text(raw_version, 'version-invalid')
+    revision, revision_error = _image_label_text(raw_revision, 'revision-invalid')
+    project, project_error = _image_label_text(raw_project, 'project-invalid')
+    service, service_error = _image_label_text(raw_service, 'service-invalid')
+    tags, duplicate_tags = _image_safe_reference_values(raw_tags, 'IMAGE_REFS_INVALID')
+    digests, duplicate_digests = _image_safe_reference_values(raw_digests, 'IMAGE_REFS_INVALID')
+    require(type(size_bytes) is int and 0 <= size_bytes <= 2 ** 63 - 1,
+            'IMAGE_SIZE_INVALID')
+    for platform_value in (operating_system, architecture):
+        require(platform_value is None or (isinstance(platform_value, str)
+                and re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', platform_value) is not None),
+                'IMAGE_PLATFORM_INVALID')
+    return {
+        'id': image_id,
+        'rawLabels': [raw_title, raw_source, raw_version, raw_revision,
+                      raw_project, raw_service],
+        'title': title, 'source': source, 'version': version,
+        'revision': revision, 'project': project, 'service': service,
+        'labelErrors': [error for error in (title_error, source_error, version_error,
+                                            revision_error, project_error, service_error)
+                        if error is not None],
+        'repoTags': tags, 'repoDigests': digests,
+        'duplicateTags': duplicate_tags, 'duplicateDigests': duplicate_digests,
+        'sizeBytes': size_bytes,
+        'platform': {'os': operating_system, 'architecture': architecture},
+    }
+
+
+def _image_scope_snapshot():
+    all_ids = _image_inventory_ids()
+    container_inventory = _image_container_inventory()
+    references_by_image = {}
+    for container in container_inventory:
+        references_by_image.setdefault(container['image'], []).append(
+            {'id': container['id'], 'status': container['status']}
+        )
+    present_ids = set(all_ids)
+    images = []
+    for identifier in HISTORICAL_IMAGE_SCOPE:
+        raw = _image_raw_inspect(identifier) if identifier in present_ids else None
+        if raw is None:
+            images.append(_image_record(identifier, None, []))
+        else:
+            images.append({'id': identifier, 'present': True,
+                           'containerReferences': references_by_image.get(identifier, []),
+                           '_raw': raw})
+    return {'allImageIds': all_ids, 'containers': container_inventory, 'images': images}
+
+
+def _image_record(identifier, raw, container_references):
+    container_references = sorted(container_references, key=lambda item: (item['id'], item['status']))
+    if raw is None:
+        fingerprint = sha256(_cache_json_bytes({'id': identifier, 'present': False}))
+        return {
+            'id': identifier, 'present': False, 'version': None, 'service': None,
+            'sourceKind': 'unknown', 'ownership': 'missing',
+            'ownershipReasons': ['image-missing'], 'recognizedRepoTags': [],
+            'recognizedRepoDigests': [], 'unknownRefCount': 0,
+            'unknownRefsSha256': sha256(_cache_json_bytes([])),
+            'containerReferences': [], 'sizeBytes': 0, 'platform': None,
+            'eligible': False, 'retainReasons': ['image-missing'],
+            'fingerprint': fingerprint,
+        }
+
+    ownership_reasons = list(raw['labelErrors'])
+    source = raw['source']
+    version = raw['version']
+    service = raw['service']
+    project = raw['project']
+    if raw['title'] != 'AI Project OS':
+        ownership_reasons.append('title-unrecognized')
+    if source not in (None, '', IMAGE_SOURCE):
+        ownership_reasons.append('source-unrecognized')
+    legacy = source in (None, '')
+    if legacy and project != PROJECT:
+        ownership_reasons.append('legacy-project-unrecognized')
+    if not legacy and project not in (None, '', PROJECT):
+        ownership_reasons.append('compose-project-unrecognized')
+    if service not in HISTORICAL_IMAGE_SERVICES:
+        service = None
+    if raw['service'] not in (None, '') and service is None:
+        ownership_reasons.append('service-unrecognized')
+    if raw['revision'] is not None and HEX40.fullmatch(raw['revision']) is None:
+        ownership_reasons.append('revision-invalid')
+    version_key = _image_version_key(version)
+    if version_key is None:
+        ownership_reasons.append('version-unrecognized')
+
+    recognized_tags = []
+    recognized_digests = []
+    unknown_references = []
+    reference_services = []
+    for kind, refs, recognized in (
+        ('tag', raw['repoTags'], recognized_tags),
+        ('digest', raw['repoDigests'], recognized_digests),
+    ):
+        for reference in refs:
+            valid, referenced_service = _image_ref_repo(reference, kind)
+            if not valid:
+                unknown_references.append(reference)
+                continue
+            recognized.append(reference)
+            if referenced_service is not None:
+                reference_services.append(referenced_service)
+                if service is not None and referenced_service != service:
+                    ownership_reasons.append('repository-service-mismatch')
+    if raw['duplicateTags'] or raw['duplicateDigests']:
+        ownership_reasons.append('duplicate-repository-reference')
+        unknown_references.extend(raw['repoTags'] if raw['duplicateTags'] else [])
+        unknown_references.extend(raw['repoDigests'] if raw['duplicateDigests'] else [])
+    recognized_tags[:] = sorted(set(recognized_tags))
+    recognized_digests[:] = sorted(set(recognized_digests))
+    inferred_services = sorted(set(reference_services))
+    if service is None and len(inferred_services) == 1 and not legacy:
+        service = inferred_services[0]
+    if service not in HISTORICAL_IMAGE_SERVICES:
+        ownership_reasons.append('service-unrecognized')
+        service = None
+    if len(inferred_services) > 1:
+        ownership_reasons.append('repository-service-mismatch')
+    if any(item not in HISTORICAL_IMAGE_SERVICES for item in reference_services):
+        ownership_reasons.append('repository-service-unrecognized')
+    if len(recognized_tags) > IMAGE_REF_DISPLAY_LIMIT:
+        unknown_references.extend(recognized_tags[IMAGE_REF_DISPLAY_LIMIT:])
+        recognized_tags = recognized_tags[:IMAGE_REF_DISPLAY_LIMIT]
+        ownership_reasons.append('repository-reference-count-limit')
+    if len(recognized_digests) > IMAGE_REF_DISPLAY_LIMIT:
+        unknown_references.extend(recognized_digests[IMAGE_REF_DISPLAY_LIMIT:])
+        recognized_digests = recognized_digests[:IMAGE_REF_DISPLAY_LIMIT]
+        ownership_reasons.append('repository-reference-count-limit')
+    if unknown_references:
+        ownership_reasons.append('repository-reference-unrecognized')
+
+    ownership_reasons = sorted(set(ownership_reasons))
+    ownership = 'unconfirmed' if ownership_reasons else 'confirmed'
+    version_threshold = None
+    if version_key is not None:
+        previous_tag = raw.get('previousTag')
+        version_threshold = _image_version_key(previous_tag[1:]) if isinstance(previous_tag, str) \
+            and STABLE_TAG.fullmatch(previous_tag) is not None else None
+    retain_reasons = []
+    if ownership != 'confirmed':
+        retain_reasons.append('ownership-unconfirmed')
+    if version_threshold is None:
+        retain_reasons.append('previous-release-boundary-unavailable')
+    elif version_key is not None and version_key >= version_threshold:
+        retain_reasons.append('not-older-than-previous-release')
+    if identifier in raw.get('currentImageIds', []):
+        retain_reasons.append('current-release-image')
+    if identifier in raw.get('previousImageIds', []):
+        retain_reasons.append('previous-release-image')
+    if container_references:
+        retain_reasons.append('container-referenced')
+    eligible = (ownership == 'confirmed' and version_key is not None
+                and version_threshold is not None and version_key < version_threshold
+                and identifier not in raw.get('currentImageIds', [])
+                and identifier not in raw.get('previousImageIds', [])
+                and not container_references)
+    if eligible:
+        retain_reasons = []
+    raw_identity = {
+        'id': identifier, 'present': True,
+        'labels': raw['rawLabels'], 'repoTags': raw['repoTags'],
+        'repoDigests': raw['repoDigests'], 'sizeBytes': raw['sizeBytes'],
+        'platform': raw['platform'], 'containerReferences': container_references,
+    }
+    unknown_references = sorted(unknown_references)
+    return {
+        'id': identifier, 'present': True,
+        'version': version if version_key is not None else None,
+        'service': service,
+        'sourceKind': ('legacy' if legacy else
+                       'canonical' if source == IMAGE_SOURCE else 'unknown'),
+        'ownership': ownership, 'ownershipReasons': ownership_reasons,
+        'recognizedRepoTags': sorted(recognized_tags),
+        'recognizedRepoDigests': sorted(recognized_digests),
+        'unknownRefCount': len(unknown_references),
+        'unknownRefsSha256': sha256(_cache_json_bytes(unknown_references)),
+        'containerReferences': container_references,
+        'sizeBytes': raw['sizeBytes'], 'platform': raw['platform'],
+        'eligible': eligible, 'retainReasons': sorted(set(retain_reasons)),
+        'fingerprint': sha256(_cache_json_bytes(raw_identity)),
+    }
+
+
+def _image_summary(records):
+    return {
+        'scopeCount': len(HISTORICAL_IMAGE_SCOPE),
+        'presentCount': sum(1 for item in records if item['present']),
+        'missingCount': sum(1 for item in records if not item['present']),
+        'ownershipConfirmedCount': sum(1 for item in records
+                                       if item['ownership'] == 'confirmed'),
+        'eligibleCount': sum(1 for item in records if item['eligible']),
+        'referencedCount': sum(1 for item in records if item['containerReferences']),
+        'retainedCount': sum(1 for item in records if not item['eligible']),
+        'sumImageSizeBytes': sum(item['sizeBytes'] for item in records if item['present']),
+    }
+
+
+def _image_plan_bytes(plan):
+    data = _cache_json_bytes(plan)
+    require(0 < len(data) <= 1024 * 1024, 'IMAGE_PLAN_TOO_LARGE')
+    return data
+
+
+def _image_validate_plan(plan_bytes, plan_digest, target_tag, target_revision,
+                         tooling_revision, now=None):
+    require(HEX64.fullmatch(plan_digest) is not None and sha256(plan_bytes) == plan_digest,
+            'IMAGE_PLAN_DIGEST_INVALID')
+    try:
+        plan = json.loads(plan_bytes, object_pairs_hook=_cache_unique_json_object)
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise RuntimeError('STABLE_IMAGE_PLAN_INVALID') from error
+    expected = {'schema', 'operation', 'tag', 'revision', 'toolingRevision',
+                'createdAt', 'expiresAt', 'scopeIds', 'protection', 'images',
+                'eligibleIds', 'summary'}
+    require(isinstance(plan, dict) and set(plan) == expected
+            and type(plan.get('schema')) is int and plan['schema'] == 1
+            and plan.get('operation') == 'image-maintenance-plan'
+            and plan.get('tag') == target_tag and plan.get('revision') == target_revision
+            and plan.get('toolingRevision') == tooling_revision
+            and plan.get('scopeIds') == list(HISTORICAL_IMAGE_SCOPE),
+            'IMAGE_PLAN_IDENTITY_INVALID')
+    created = plan.get('createdAt')
+    expires = plan.get('expiresAt')
+    current_time = time.time() if now is None else now
+    require(type(created) is int and type(expires) is int
+            and created <= current_time < expires
+            and 0 < expires - created <= CACHE_PLAN_TTL_SECONDS,
+            'IMAGE_PLAN_EXPIRED_OR_INVALID')
+    protection = plan.get('protection')
+    require(isinstance(protection, dict)
+            and set(protection) == {'base', 'allImageIds', 'containers'}
+            and isinstance(protection.get('base'), dict)
+            and isinstance(protection.get('allImageIds'), list)
+            and protection['allImageIds'] == sorted(set(protection['allImageIds']))
+            and all(re.fullmatch(r'sha256:[a-f0-9]{64}', item) is not None
+                    for item in protection['allImageIds'])
+            and isinstance(protection.get('containers'), list),
+            'IMAGE_PLAN_CONTENT_INVALID')
+    images = plan.get('images')
+    require(isinstance(images, list) and len(images) == len(HISTORICAL_IMAGE_SCOPE),
+            'IMAGE_PLAN_CONTENT_INVALID')
+    expected_image_keys = {'id', 'present', 'version', 'service', 'sourceKind',
+                           'ownership', 'ownershipReasons', 'recognizedRepoTags',
+                           'recognizedRepoDigests', 'unknownRefCount', 'unknownRefsSha256',
+                           'containerReferences', 'sizeBytes', 'platform', 'eligible',
+                           'retainReasons', 'fingerprint'}
+    for identifier, item in zip(HISTORICAL_IMAGE_SCOPE, images):
+        require(isinstance(item, dict) and set(item) == expected_image_keys
+                and item.get('id') == identifier and type(item.get('present')) is bool
+                and type(item.get('eligible')) is bool
+                and item.get('ownership') in ('confirmed', 'unconfirmed', 'missing')
+                and type(item.get('unknownRefCount')) is int and item['unknownRefCount'] >= 0
+                and all(HEX64.fullmatch(item.get(field, '')) is not None for field in
+                        ('unknownRefsSha256', 'fingerprint'))
+                and (type(item.get('sizeBytes')) is int and item['sizeBytes'] >= 0),
+                'IMAGE_PLAN_CONTENT_INVALID')
+    eligible_ids = plan.get('eligibleIds')
+    require(isinstance(eligible_ids, list)
+            and eligible_ids == sorted(set(eligible_ids))
+            and eligible_ids == sorted(item['id'] for item in images if item['eligible']),
+            'IMAGE_PLAN_CONTENT_INVALID')
+    previous_tag = protection['base'].get('previousTag')
+    require(STABLE_TAG.fullmatch(previous_tag or '') is not None,
+            'IMAGE_PLAN_CONTENT_INVALID')
+    previous_key = _image_version_key(version_text(previous_tag))
+    protected_ids = set(protection['base'].get('currentImageIds', [])) | set(
+        protection['base'].get('previousImageIds', [])
+    )
+    for item in images:
+        if item['eligible']:
+            image_key = _image_version_key(item['version'])
+            require(item['ownership'] == 'confirmed' and item['present']
+                    and not item['containerReferences'] and item['id'] not in protected_ids
+                    and image_key is not None and image_key < previous_key,
+                    'IMAGE_PLAN_CONTENT_INVALID')
+    require(isinstance(plan.get('summary'), dict), 'IMAGE_PLAN_CONTENT_INVALID')
+    return plan
+
+
+def _image_cache_protection_after_removals(protection, removed_ids):
+    expected = json.loads(_cache_json_bytes(protection))
+    removed = set(removed_ids)
+    for key in ('ownedImages', 'unverifiedImages'):
+        expected[key] = [item for item in expected.get(key, []) if item.get('id') not in removed]
+    for key in ('ownedImageIds', 'currentImageIds', 'currentReceiptImageIds',
+                'previousImageIds'):
+        expected[key] = [item for item in expected.get(key, []) if item not in removed]
+    return expected
+
+
+def _image_plan_protection(base_protection, snapshot):
+    return {
+        'base': base_protection,
+        'allImageIds': snapshot['allImageIds'],
+        'containers': snapshot['containers'],
+    }
+
+
+def _image_protection_matches(plan_protection, planned_images, base_protection,
+                              snapshot, removed_ids):
+    expected_base = _image_cache_protection_after_removals(
+        plan_protection['base'], removed_ids,
+    )
+    expected_ids = sorted(set(plan_protection['allImageIds']) - set(removed_ids))
+    expected_by_id = {item['id']: item for item in planned_images}
+    actual_by_id = {item['id']: item for item in snapshot['images']}
+    scope_matches = True
+    for identifier in HISTORICAL_IMAGE_SCOPE:
+        expected = expected_by_id[identifier]
+        actual = actual_by_id[identifier]
+        if identifier in removed_ids:
+            scope_matches = scope_matches and not actual['present']
+        else:
+            scope_matches = scope_matches and actual == expected
+    return (base_protection == expected_base
+            and snapshot['allImageIds'] == expected_ids
+            and snapshot['containers'] == plan_protection['containers']
+            and scope_matches)
+
+
+def _image_public_protection(base_protection, snapshot, plan_digest):
+    report = _cache_protection_report(base_protection, plan_digest)
+    report['allImageIds'] = snapshot['allImageIds']
+    report['containerReferencesSha256'] = sha256(_cache_json_bytes(snapshot['containers']))
+    report['scopeIds'] = list(HISTORICAL_IMAGE_SCOPE)
+    return report
+
+
+def _image_runtime_snapshot(target_tag, target_revision):
+    source, installed, base_protection = _cache_runtime_state(target_tag, target_revision)
+    scope_snapshot = _image_scope_snapshot()
+    classified = []
+    previous_tag = base_protection.get('previousTag')
+    require(STABLE_TAG.fullmatch(previous_tag or '') is not None,
+            'IMAGE_PREVIOUS_RELEASE_IDENTITY_INVALID')
+    previous_key = _image_version_key(version_text(previous_tag))
+    current_key = _image_version_key(source.get('version'))
+    require(previous_key is not None and current_key is not None and previous_key < current_key,
+            'IMAGE_RELEASE_BOUNDARY_INVALID')
+    for record in scope_snapshot['images']:
+        raw = record.pop('_raw', None)
+        if raw is None:
+            classified.append(record)
+            continue
+        raw['previousTag'] = previous_tag
+        raw['currentImageIds'] = base_protection['currentImageIds']
+        raw['previousImageIds'] = base_protection['previousImageIds']
+        classified.append(_image_record(record['id'], raw, record['containerReferences']))
+    scope_snapshot['images'] = classified
+    return source, installed, base_protection, scope_snapshot
+
+
+def image_inspect(target_tag, target_revision):
+    source, installed, base_protection, snapshot = _image_runtime_snapshot(
+        target_tag, target_revision,
+    )
+    summary = _image_summary(snapshot['images'])
+    now = int(time.time())
+    protection = _image_plan_protection(base_protection, snapshot)
+    eligible_ids = sorted(item['id'] for item in snapshot['images'] if item['eligible'])
+    plan = {
+        'schema': 1, 'operation': 'image-maintenance-plan',
+        'tag': target_tag, 'revision': target_revision,
+        'toolingRevision': installed['toolingRevision'],
+        'createdAt': now, 'expiresAt': now + CACHE_PLAN_TTL_SECONDS,
+        'scopeIds': list(HISTORICAL_IMAGE_SCOPE), 'protection': protection,
+        'images': snapshot['images'], 'eligibleIds': eligible_ids,
+        'summary': summary,
+    }
+    plan_bytes = _image_plan_bytes(plan)
+    plan_digest = sha256(plan_bytes)
+    report = {
+        'schema': 1, 'operation': 'image-inspect', 'tag': target_tag,
+        'revision': target_revision, 'scopeIds': list(HISTORICAL_IMAGE_SCOPE),
+        'summary': summary, 'images': snapshot['images'],
+        'planDigest': plan_digest,
+        'protection': _image_public_protection(base_protection, snapshot, plan_digest),
+    }
+    require(len(_cache_json_bytes(report)) <= 512 * 1024, 'IMAGE_REPORT_TOO_LARGE')
+    atomic_install(IMAGE_MAINTENANCE_PLAN, plan_bytes, 0o600)
+    _image_write_audit({
+        'schema': 1, 'operation': 'image-inspect', 'status': 'OK',
+        'tag': target_tag, 'revision': target_revision,
+        'toolingRevision': installed['toolingRevision'], 'planDigest': plan_digest,
+        'createdAt': now, 'summary': summary, 'eligibleIds': eligible_ids,
+        'protectionVerified': True,
+    })
+    _image_emit_report(report)
+
+
+def _image_available_bytes(docker_root):
+    info = os.statvfs(docker_root)
+    return info.f_bavail * info.f_frsize
+
+
+def _image_remove_id(identifier, *, timeout_seconds):
+    require(isinstance(identifier, str) and identifier in HISTORICAL_IMAGE_SCOPE
+            and type(timeout_seconds) in (int, float) and 0 < timeout_seconds <= 600,
+            'IMAGE_REMOVE_ARGUMENT_INVALID')
+    executable = BINARIES['docker']
+    HELPER.trusted(executable)
+    require(stat.S_ISREG(Path(executable).stat().st_mode)
+            and os.access(executable, os.X_OK), 'EXECUTABLE_INVALID')
+    try:
+        result = subprocess.run(
+            [executable, 'image', 'rm', '--no-prune', identifier],
+            env=PROCESS_ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=timeout_seconds, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return 'timeout'
+    return 'removed-command-succeeded' if result.returncode == 0 else 'engine-refused'
+
+
+def _image_write_audit(value):
+    data = _cache_json_bytes(value)
+    require(0 < len(data) <= 256 * 1024, 'IMAGE_AUDIT_TOO_LARGE')
+    atomic_install(IMAGE_MAINTENANCE_AUDIT, data, 0o600)
+
+
+def _image_emit_report(value):
+    data = _cache_json_bytes(value)
+    require(len(data) <= 512 * 1024, 'IMAGE_REPORT_TOO_LARGE')
+    print('IMAGE_MAINTENANCE_REPORT ' + data.decode('ascii'), flush=True)
+
+
+def image_clean(target_tag, target_revision, plan_digest):
+    require(HEX64.fullmatch(plan_digest) is not None, 'IMAGE_PLAN_DIGEST_INVALID')
+    plan_bytes = _read_trusted_host_file(IMAGE_MAINTENANCE_PLAN, 0o600,
+                                         1024 * 1024, 'IMAGE_PLAN_INVALID')
+    installed = _cache_installed_tooling()
+    plan = _image_validate_plan(plan_bytes, plan_digest, target_tag,
+                                target_revision, installed['toolingRevision'])
+    monotonic_deadline = time.monotonic() + _cache_plan_remaining(plan)
+    source, installed, base_protection, snapshot = _image_runtime_snapshot(
+        target_tag, target_revision,
+    )
+    docker_root = base_protection['dockerRoot']
+    available_before = _image_available_bytes(docker_root)
+    summary_before = _image_summary(snapshot['images'])
+    removed = set()
+    retained = set()
+    changed = set()
+    newly_referenced = set()
+    vanished = set()
+    newly_appeared = set()
+    engine_refused = set()
+    attempted = []
+    failure_reasons = {}
+    protection_verified = _image_protection_matches(
+        plan['protection'], plan['images'], base_protection, snapshot, removed,
+    )
+    all_image_inventory_drift = (
+        snapshot['allImageIds'] != plan['protection']['allImageIds']
+    )
+    planned_by_id = {item['id']: item for item in plan['images']}
+    fresh_by_id = {item['id']: item for item in snapshot['images']}
+    for identifier in HISTORICAL_IMAGE_SCOPE:
+        if planned_by_id[identifier]['present'] and not fresh_by_id[identifier]['present']:
+            vanished.add(identifier)
+    newly_appeared.update(
+        item['id'] for item in snapshot['images']
+        if item['present'] and not planned_by_id[item['id']]['present']
+    )
+    if not protection_verified:
+        changed.update(
+            item['id'] for item in snapshot['images']
+            if item != planned_by_id[item['id']]
+            and item['present'] and planned_by_id[item['id']]['present']
+        )
+        for identifier in HISTORICAL_IMAGE_SCOPE:
+            if snapshot['images'][HISTORICAL_IMAGE_SCOPE.index(identifier)]['containerReferences'] \
+                    and not planned_by_id[identifier]['containerReferences']:
+                newly_referenced.add(identifier)
+    checks = {
+        'localHealth': True, 'publicHealth': True, 'database': True,
+        'worker': True, 'migrationLedger': True,
+    }
+    expired_before_next_delete = False
+    try:
+        if protection_verified:
+            for identifier in plan['eligibleIds']:
+                try:
+                    _cache_plan_remaining(plan, monotonic_deadline)
+                except RuntimeError as error:
+                    if safe_failure_code(error) != 'STABLE_CACHE_PLAN_EXPIRED_OR_INVALID':
+                        raise
+                    expired_before_next_delete = True
+                    break
+                _source_now, _installed_now, current_base, current_snapshot = \
+                    _image_runtime_snapshot(target_tag, target_revision)
+                if not _image_protection_matches(
+                        plan['protection'], plan['images'], current_base,
+                        current_snapshot, removed):
+                    protection_verified = False
+                    expected_image_ids = sorted(
+                        set(plan['protection']['allImageIds']) - removed,
+                    )
+                    if current_snapshot['allImageIds'] != expected_image_ids:
+                        all_image_inventory_drift = True
+                    current_by_id = {item['id']: item for item in current_snapshot['images']}
+                    frozen = planned_by_id[identifier]
+                    actual = current_by_id[identifier]
+                    if actual['containerReferences'] and not frozen['containerReferences']:
+                        newly_referenced.add(identifier)
+                    if actual['present'] and frozen['present'] \
+                            and actual['fingerprint'] != frozen['fingerprint']:
+                        changed.add(identifier)
+                    for scope_id in HISTORICAL_IMAGE_SCOPE:
+                        if scope_id in plan['protection']['allImageIds'] \
+                                and scope_id not in current_snapshot['allImageIds'] \
+                                and scope_id not in removed:
+                            vanished.add(scope_id)
+                        if scope_id in current_snapshot['allImageIds'] \
+                                and scope_id not in plan['protection']['allImageIds']:
+                            newly_appeared.add(scope_id)
+                    break
+                current_by_id = {item['id']: item for item in current_snapshot['images']}
+                frozen = planned_by_id[identifier]
+                actual = current_by_id[identifier]
+                if not actual['present']:
+                    vanished.add(identifier)
+                    protection_verified = False
+                    break
+                if actual['fingerprint'] != frozen['fingerprint'] or not actual['eligible']:
+                    retained.add(identifier)
+                    changed.add(identifier)
+                    if actual['containerReferences'] and not frozen['containerReferences']:
+                        newly_referenced.add(identifier)
+                    protection_verified = False
+                    break
+                remaining = _cache_plan_remaining(plan, monotonic_deadline)
+                attempted.append(identifier)
+                outcome = _image_remove_id(identifier, timeout_seconds=min(600, remaining))
+                # Always take a fresh protected snapshot after a removal attempt, including
+                # timeout/refusal, so a successful side effect is never inferred from exit code.
+                _source_after, _installed_after, after_base, after_snapshot = \
+                    _image_runtime_snapshot(target_tag, target_revision)
+                after_by_id = {item['id']: item for item in after_snapshot['images']}
+                is_gone = not after_by_id[identifier]['present']
+                expected_removed = set(removed)
+                if is_gone:
+                    expected_removed.add(identifier)
+                if not _image_protection_matches(
+                        plan['protection'], plan['images'], after_base,
+                        after_snapshot, expected_removed):
+                    protection_verified = False
+                    changed.update(
+                        item['id'] for item in after_snapshot['images']
+                        if item['present'] and planned_by_id[item['id']]['present']
+                        and item['fingerprint'] != planned_by_id[item['id']]['fingerprint']
+                    )
+                    for scope_id in HISTORICAL_IMAGE_SCOPE:
+                        if scope_id not in removed and scope_id != identifier \
+                                and scope_id in plan['protection']['allImageIds'] \
+                                and scope_id not in after_snapshot['allImageIds']:
+                            vanished.add(scope_id)
+                        if scope_id not in plan['protection']['allImageIds'] \
+                                and scope_id in after_snapshot['allImageIds']:
+                            newly_appeared.add(scope_id)
+                    if after_by_id[identifier]['containerReferences'] \
+                            and not frozen['containerReferences']:
+                        newly_referenced.add(identifier)
+                    if is_gone:
+                        removed.add(identifier)
+                    break
+                if is_gone:
+                    removed.add(identifier)
+                else:
+                    retained.add(identifier)
+                    engine_refused.add(identifier)
+                    failure_reasons[identifier] = (
+                        'command-timeout' if outcome == 'timeout' else
+                        'engine-refused' if outcome == 'engine-refused' else
+                        'image-remains-after-remove'
+                    )
+    except BaseException as error:
+        checks = {key: False for key in checks}
+        _image_write_audit({
+            'schema': 1, 'operation': 'image-clean', 'status': 'FAILED',
+            'tag': target_tag, 'revision': target_revision,
+            'toolingRevision': installed['toolingRevision'],
+            'planDigest': plan_digest, 'completedAt': int(time.time()),
+            'removedIds': sorted(removed), 'retainedIds': sorted(retained),
+            'changedIds': sorted(changed), 'newlyReferencedIds': sorted(newly_referenced),
+            'vanishedIds': sorted(vanished), 'engineRefusedIds': sorted(engine_refused),
+            'attemptedIds': sorted(set(attempted)),
+            'failureReasons': failure_reasons, 'failureCode': safe_failure_code(error),
+            'protectionVerified': False,
+        })
+        raise
+
+    _source_final, _installed_final, final_base, final_snapshot = _image_runtime_snapshot(
+        target_tag, target_revision,
+    )
+    if not _image_protection_matches(plan['protection'], plan['images'], final_base,
+                                     final_snapshot, removed):
+        protection_verified = False
+    if final_snapshot['allImageIds'] != sorted(
+            set(plan['protection']['allImageIds']) - removed):
+        all_image_inventory_drift = True
+    final_by_id = {item['id']: item for item in final_snapshot['images']}
+    for identifier in plan['eligibleIds']:
+        if identifier not in removed and not final_by_id[identifier]['present']:
+            vanished.add(identifier)
+            protection_verified = False
+    newly_appeared.update(
+        item['id'] for item in final_snapshot['images']
+        if item['present'] and not planned_by_id[item['id']]['present']
+    )
+    for identifier in plan['eligibleIds']:
+        if identifier not in removed and final_by_id[identifier]['present'] \
+                and final_by_id[identifier]['fingerprint'] != planned_by_id[identifier]['fingerprint']:
+            changed.add(identifier)
+            retained.add(identifier)
+    summary_after = _image_summary(final_snapshot['images'])
+    available_after = _image_available_bytes(final_base['dockerRoot'])
+    checks = {key: bool(value) for key, value in checks.items()}
+    report = {
+        'schema': 1, 'operation': 'image-clean', 'tag': target_tag,
+        'revision': target_revision, 'scopeIds': list(HISTORICAL_IMAGE_SCOPE),
+        'planDigest': plan_digest, 'summaryBefore': summary_before,
+        'summaryAfter': summary_after, 'removedIds': sorted(removed),
+        'retainedIds': sorted((set(retained) | (set(plan['eligibleIds']) - removed)) - vanished),
+        'changedIds': sorted(changed), 'newlyReferencedIds': sorted(newly_referenced),
+        'vanishedIds': sorted(vanished), 'newlyAppearedIds': sorted(newly_appeared),
+        'engineRefusedIds': sorted(engine_refused),
+        'attemptedIds': sorted(set(attempted)),
+        'failureReasons': failure_reasons,
+        'expiredBeforeNextDelete': expired_before_next_delete,
+        'allImageInventoryDrift': all_image_inventory_drift,
+        'imagesAfter': final_snapshot['images'],
+        'availableBytesBefore': available_before,
+        'availableBytesAfter': available_after,
+        'netAvailableBytesDelta': available_after - available_before,
+        'protectionVerified': protection_verified,
+        'checks': checks,
+        'protection': _image_public_protection(final_base, final_snapshot, plan_digest),
+    }
+    completed_at = int(time.time())
+    _image_write_audit({
+        'schema': 1, 'operation': 'image-clean',
+        'status': 'OK' if protection_verified else 'FAILED',
+        'tag': target_tag, 'revision': target_revision,
+        'toolingRevision': installed['toolingRevision'],
+        'planDigest': plan_digest, 'completedAt': completed_at,
+        'summaryBefore': summary_before, 'summaryAfter': summary_after,
+        'removedIds': sorted(removed), 'retainedIds': report['retainedIds'],
+        'changedIds': sorted(changed), 'newlyReferencedIds': sorted(newly_referenced),
+        'vanishedIds': sorted(vanished), 'newlyAppearedIds': sorted(newly_appeared),
+        'engineRefusedIds': sorted(engine_refused), 'attemptedIds': sorted(set(attempted)),
+        'failureReasons': failure_reasons,
+        'availableBytesBefore': available_before,
+        'availableBytesAfter': available_after,
+        'netAvailableBytesDelta': available_after - available_before,
+        'protectionVerified': protection_verified, 'checks': checks,
+    })
+    _image_emit_report(report)
+    require(protection_verified, 'IMAGE_PROTECTED_RESOURCE_DRIFT')
 
 
 def _ci_runs(revision, event):
@@ -3387,6 +4226,17 @@ def main(args):
             require(HEX64.fullmatch(confirmation) is not None,
                     'CACHE_PLAN_DIGEST_INVALID')
             cache_clean(target_tag, revision, confirmation)
+            return
+        if command in ('image-inspect', 'image-clean'):
+            _cache_installed_tooling()
+            if command == 'image-inspect':
+                require(confirmation == 'CONFIRM_IMAGE_INSPECT',
+                        'IMAGE_INSPECT_CONFIRMATION_INVALID')
+                image_inspect(target_tag, revision)
+                return
+            require(HEX64.fullmatch(confirmation) is not None,
+                    'IMAGE_PLAN_DIGEST_INVALID')
+            image_clean(target_tag, revision, confirmation)
             return
         require(command == 'deploy' and confirmation == 'CONFIRM_STABLE_CI_IMAGES',
                 'DEPLOY_CONFIRMATION_INVALID')

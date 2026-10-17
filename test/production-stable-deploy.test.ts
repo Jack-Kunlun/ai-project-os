@@ -9,7 +9,12 @@ test("only CI and the manual stable release remain executable workflows", () => 
     .sort();
   assert.deepEqual(workflows, ["ci.yml", "release-stable.yml"]);
   const release = readFileSync(".github/workflows/release-stable.yml", "utf8");
-  assert.match(release, /^on:\n  workflow_dispatch:\s*\n\npermissions:/mu);
+  const trigger = release.match(/^on:\n([\s\S]*?)^permissions:/mu)?.[1] ?? "";
+  assert.deepEqual(
+    [...trigger.matchAll(/^ {2}([a-z_]+):/gmu)].map((match) => match[1]),
+    ["workflow_dispatch"],
+  );
+  assert.match(trigger, /^ {8}default: release$/mu);
 });
 
 test("stable deploy gate preserves its recovery boundary", () => {

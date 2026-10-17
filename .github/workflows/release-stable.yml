@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
@@ -13,20 +13,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Validate, deploy, and publish stable release
+  prepare:
+    name: Verify candidate and create immutable tag
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
-    environment:
-      name: production
-      url: https://ai-project-os.com
-    env:
-      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+    timeout-minutes: 100
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      RELEASE_VERSION: ${{ steps.context.outputs.release_version }}
+      RELEASE_TAG: ${{ steps.context.outputs.release_tag }}
+      MIGRATION_COUNT: ${{ steps.context.outputs.migration_count }}
+      SOURCE_MIGRATION_COUNT: ${{ steps.context.outputs.source_migration_count }}
+      MAIN_CI_RUN_ID: ${{ steps.context.outputs.main_ci_run_id }}
+      MAIN_CI_RUN_URL: ${{ steps.context.outputs.main_ci_run_url }}
+      MAIN_CI_SOURCE_BASE: ${{ steps.context.outputs.main_ci_source_base }}
+      MAIN_CI_ATTESTED_RISK: ${{ steps.context.outputs.main_ci_attested_risk }}
+      RELEASE_RISK: ${{ steps.context.outputs.release_risk }}
+      RELEASE_DATABASE_REQUIRED: ${{ steps.context.outputs.release_database_required }}
+      RELEASE_BROWSER_REQUIRED: ${{ steps.context.outputs.release_browser_required }}
     steps:
-      - name: Check out current main
+      - name: Check out exact candidate
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -46,6 +56,53 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/production-stable-release.mjs wait-main-ci
 
+      - name: Create or reuse the immutable annotated version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/production-stable-release.mjs ensure-tag
+
+      - name: Export validated release context
+        id: context
+        run: node scripts/production-stable-release.mjs export-context
+
+  release:
+    needs: prepare
+    name: Deploy verified images and accept production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    environment:
+      name: production
+      url: https://ai-project-os.com
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.RELEASE_VERSION }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.RELEASE_TAG }}
+      MIGRATION_COUNT: ${{ needs.prepare.outputs.MIGRATION_COUNT }}
+      SOURCE_MIGRATION_COUNT: ${{ needs.prepare.outputs.SOURCE_MIGRATION_COUNT }}
+      MAIN_CI_RUN_ID: ${{ needs.prepare.outputs.MAIN_CI_RUN_ID }}
+      MAIN_CI_RUN_URL: ${{ needs.prepare.outputs.MAIN_CI_RUN_URL }}
+      MAIN_CI_SOURCE_BASE: ${{ needs.prepare.outputs.MAIN_CI_SOURCE_BASE }}
+      MAIN_CI_ATTESTED_RISK: ${{ needs.prepare.outputs.MAIN_CI_ATTESTED_RISK }}
+      RELEASE_RISK: ${{ needs.prepare.outputs.RELEASE_RISK }}
+      RELEASE_DATABASE_REQUIRED: ${{ needs.prepare.outputs.RELEASE_DATABASE_REQUIRED }}
+      RELEASE_BROWSER_REQUIRED: ${{ needs.prepare.outputs.RELEASE_BROWSER_REQUIRED }}
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+
       - name: Prepare the pinned production SSH identity
         env:
           PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
@@ -61,7 +118,16 @@ jobs:
           ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" >/dev/null
           ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts" >/dev/null
 
-      - name: Require the permanent server tooling before creating a tag
+      - name: Refresh fixed server tooling from the verified main CI
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts" \
+            -o ConnectTimeout=15 "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "refresh-stable-tooling $RELEASE_TAG $GITHUB_SHA CONFIRM_STABLE_TOOLING_FROM_CI"
+
+      - name: Require the permanent server tooling before deployment
         run: |
           set -euo pipefail
           ssh -i "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" \
@@ -73,35 +139,81 @@ jobs:
       - name: Verify all permanent tooling hashes and bootstrap ancestry
         run: node scripts/production-stable-release.mjs verify-tooling "$RUNNER_TEMP/stable-tooling.json"
 
-      - name: Create or reuse the immutable annotated version tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node scripts/production-stable-release.mjs ensure-tag
-
       - name: Recheck main and immutable tag before production deployment
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/production-stable-release.mjs assert-current-target
 
       - name: Deploy through the permanent restricted server gateway
+        env:
+          RELEASE_REGISTRY_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          node -e 'process.stdout.write(JSON.stringify({token:process.env.RELEASE_REGISTRY_TOKEN,runId:Number(process.env.MAIN_CI_RUN_ID)}))' \
+            | \
           ssh -i "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts" \
             -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=90 \
             "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
-            "deploy-stable $RELEASE_TAG $GITHUB_SHA CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI" \
+            "deploy-stable $RELEASE_TAG $GITHUB_SHA CONFIRM_STABLE_CI_IMAGES" \
             | tee "$RUNNER_TEMP/stable-deploy.log"
 
-      - name: Verify the exact backup and migration receipt
+      - name: Verify the exact image deployment and migration receipt
         run: node scripts/production-stable-release.mjs verify-deployment "$RUNNER_TEMP/stable-deploy.log"
+
+      - name: Save the verified production receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-deployment-receipt
+          path: ${{ runner.temp }}/stable-deploy.log
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove the temporary production SSH identity
+        if: ${{ always() }}
+        run: rm -f -- "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts"
+
+  publish:
+    needs: [prepare, release]
+    name: Publish accepted GitHub release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.RELEASE_VERSION }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.RELEASE_TAG }}
+      MIGRATION_COUNT: ${{ needs.prepare.outputs.MIGRATION_COUNT }}
+      SOURCE_MIGRATION_COUNT: ${{ needs.prepare.outputs.SOURCE_MIGRATION_COUNT }}
+      MAIN_CI_RUN_ID: ${{ needs.prepare.outputs.MAIN_CI_RUN_ID }}
+      MAIN_CI_RUN_URL: ${{ needs.prepare.outputs.MAIN_CI_RUN_URL }}
+      MAIN_CI_SOURCE_BASE: ${{ needs.prepare.outputs.MAIN_CI_SOURCE_BASE }}
+      MAIN_CI_ATTESTED_RISK: ${{ needs.prepare.outputs.MAIN_CI_ATTESTED_RISK }}
+      RELEASE_RISK: ${{ needs.prepare.outputs.RELEASE_RISK }}
+      RELEASE_DATABASE_REQUIRED: ${{ needs.prepare.outputs.RELEASE_DATABASE_REQUIRED }}
+      RELEASE_BROWSER_REQUIRED: ${{ needs.prepare.outputs.RELEASE_BROWSER_REQUIRED }}
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+
+      - name: Read this run's successful deployment receipt
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: production-deployment-receipt
+          path: ${{ runner.temp }}
 
       - name: Verify public target health and publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/production-stable-release.mjs publish-release "$RUNNER_TEMP/stable-deploy.log"
-
-      - name: Remove the temporary production SSH identity
-        if: ${{ always() }}
-        run: rm -f -- "$RUNNER_TEMP/ai-project-os-stable-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-stable-ssh/known_hosts"

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import fcntl
+from decimal import Decimal
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -18,6 +20,9 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import urllib.error
+import urllib.parse
+import zipfile
 
 ROOT = Path('/srv/ai-project-os/repository')
 ENV = Path('/etc/ai-project-os/production.env')
@@ -266,8 +271,11 @@ def _is_version_only_change(repository, path, source_revision, target_revision):
                 and source_normalized == target_normalized)
     if path == 'Dockerfile':
         pattern = re.compile(rb'(org\.opencontainers\.image\.version=")([^"\r\n]+)(")')
-        source_version, source_normalized = _replace_one_version(before, pattern)
-        target_version, target_normalized = _replace_one_version(after, pattern)
+        argument = re.compile(rb'(?m)^(ARG APP_VERSION=")([^"\r\n]+)(")$')
+        source_version, source_normalized = _replace_one_version(
+            before, argument if b'org.opencontainers.image.version="${APP_VERSION}"' in before else pattern)
+        target_version, target_normalized = _replace_one_version(
+            after, argument if b'org.opencontainers.image.version="${APP_VERSION}"' in after else pattern)
         return (source_version != target_version
                 and _stable_version_bytes(source_version) and _stable_version_bytes(target_version)
                 and source_normalized == target_normalized)
@@ -432,9 +440,7 @@ def deployment_flow(ops, preflight_source=None) -> None:
         ops.revalidate_source(source)
         ops.stop_nginx()
         ops.stop_source_writers(source)
-        backup = ops.create_and_validate_backup(source)
-        # Production releases keep the verified backup but skip the isolated drill.
-        # Migration and failure boundaries below still apply to database releases.
+        backup = None  # Routine releases do not create backups or run restore drills.
         ops.install_and_test_target_nginx()
         if database_required:
             migration_started = True  # Set before the first migration process can run.
@@ -448,6 +454,12 @@ def deployment_flow(ops, preflight_source=None) -> None:
         ops.cleanup_restore_drill()
         ops.cleanup_pin_file()
         ops.write_receipt(source, backup, images)
+        # Cleanup is maintenance after successful acceptance, never a reason to
+        # stop a healthy release or delete its receipt.
+        try:
+            ops.cleanup_old_images(source)
+        except Exception:
+            print('STABLE_IMAGE_CLEANUP_DEFERRED', flush=True)
     except BaseException:
         if migration_started:
             ops.quiesce_for_manual_recovery(source)
@@ -542,6 +554,182 @@ def healthy(version, public=False):
     return payload
 
 
+def read_release_credentials(stream):
+    """Receive opaque Workflow credentials over encrypted stdin, never argv."""
+    raw = stream.read(4097)
+    require(len(raw) <= 4096, 'WORKFLOW_INPUT_TOO_LARGE')
+    value = json.loads(raw, object_pairs_hook=_unique_json_object)
+    require(isinstance(value, dict) and set(value) == {'token', 'runId'}
+            and type(value['runId']) is int and value['runId'] > 0,
+            'WORKFLOW_INPUT_INVALID')
+    # Installation tokens are opaque, variable-length values (including JWTs).
+    # Bound transport size and HTTP Bearer characters, not a provider token format.
+    token = value['token']
+    require(isinstance(token, str) and 0 < len(token) <= 3800
+            and re.fullmatch(r'[A-Za-z0-9._~+/-]+=*', token) is not None,
+            'WORKFLOW_TOKEN_INVALID')
+    return value
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def github_artifact_request(url, token, redirect=False):
+    parsed = urllib.parse.urlsplit(url)
+    require(parsed.scheme == 'https' and parsed.hostname == 'api.github.com'
+            and not parsed.username and not parsed.password,
+            'ARTIFACT_API_URL_INVALID')
+    request = urllib.request.Request(url, headers={
+        'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + token,
+        'X-GitHub-Api-Version': '2022-11-28',
+    })
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        response = opener.open(request, timeout=30)
+    except urllib.error.HTTPError as error:
+        require(redirect and error.code == 302, 'ARTIFACT_API_STATUS_INVALID')
+        location = error.headers.get('Location', '')
+        target = urllib.parse.urlsplit(location)
+        require(target.scheme == 'https' and not target.username and not target.password
+                and target.hostname is not None
+                and (target.hostname.endswith('.blob.core.windows.net')
+                     or target.hostname.endswith('.githubusercontent.com')),
+                'ARTIFACT_REDIRECT_INVALID')
+        # The signed storage URL is fetched separately, without GitHub credentials.
+        response = opener.open(urllib.request.Request(location), timeout=30)
+    with response:
+        require(response.status == 200, 'ARTIFACT_HTTP_STATUS_INVALID')
+        body = response.read(1024 * 1024 + 1)
+    require(len(body) <= 1024 * 1024, 'ARTIFACT_TOO_LARGE')
+    return body
+
+
+def validate_image_manifest(value, revision, version, run_id):
+    require(isinstance(value, dict)
+            and set(value) == {'schema', 'revision', 'version', 'runId', 'images'}
+            and type(value['schema']) is int and value['schema'] == 1
+            and value['revision'] == revision and value['version'] == version
+            and type(value['runId']) is int and value['runId'] == run_id,
+            'IMAGE_MANIFEST_IDENTITY_INVALID')
+    images = value['images']
+    require(isinstance(images, dict) and set(images) == {'app', 'worker', 'migrate'},
+            'IMAGE_MANIFEST_SERVICES_INVALID')
+    for service, record in images.items():
+        prefix = 'ghcr.io/jack-kunlun/ai-project-os-' + service + '@sha256:'
+        require(isinstance(record, dict) and set(record) == {'ref', 'id'}
+                and isinstance(record['ref'], str) and record['ref'].startswith(prefix)
+                and HEX64.fullmatch(record['ref'][len(prefix):]) is not None
+                and isinstance(record['id'], str)
+                and re.fullmatch(r'sha256:[a-f0-9]{64}', record['id']) is not None,
+                'IMAGE_MANIFEST_REFERENCE_INVALID')
+    return value
+
+
+def load_ci_images(run, credentials, revision, version):
+    require(run['id'] == credentials['runId'], 'IMAGE_CI_RUN_MISMATCH')
+    api = 'https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions'
+    listing = json.loads(github_artifact_request(
+        api + '/runs/' + str(run['id']) + '/artifacts?per_page=100', credentials['token']))
+    artifacts = [item for item in listing.get('artifacts', []) if item.get('name') == 'release-images']
+    require(len(artifacts) == 1, 'IMAGE_ARTIFACT_MISSING_OR_AMBIGUOUS')
+    artifact = artifacts[0]
+    identity = artifact.get('workflow_run', {})
+    require(not artifact.get('expired', True) and type(artifact.get('id')) is int
+            and identity.get('id') == run['id'] and identity.get('head_sha') == revision
+            and identity.get('head_branch') == 'main'
+            and artifact.get('size_in_bytes', 1024 * 1024 + 1) <= 1024 * 1024
+            and re.fullmatch(r'sha256:[a-f0-9]{64}', artifact.get('digest', '')) is not None,
+            'IMAGE_ARTIFACT_IDENTITY_INVALID')
+    archive = github_artifact_request(api + '/artifacts/' + str(artifact['id']) + '/zip',
+                                      credentials['token'], redirect=True)
+    require('sha256:' + sha256(archive) == artifact['digest'], 'IMAGE_ARTIFACT_DIGEST_INVALID')
+    with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+        require(bundle.namelist() == ['release-images.json'], 'IMAGE_ARTIFACT_CONTENT_INVALID')
+        info = bundle.getinfo('release-images.json')
+        require(info.file_size <= 64 * 1024, 'IMAGE_MANIFEST_TOO_LARGE')
+        value = json.loads(bundle.read(info), object_pairs_hook=_unique_json_object)
+    return validate_image_manifest(value, revision, version, run['id'])
+
+
+def parse_cache_usage(output):
+    """Buildx JSON Size can be raw bytes or a rounded SI display value."""
+    total, estimated = 0, False
+    units = {'B': 1, 'kB': 1000, 'MB': 1000 ** 2, 'GB': 1000 ** 3,
+             'TB': 1000 ** 4, 'PB': 1000 ** 5, 'EB': 1000 ** 6}
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        require(isinstance(row, dict) and type(row.get('Reclaimable')) is bool
+                and type(row.get('Shared')) is bool, 'CACHE_USAGE_INVALID')
+        size = row.get('Size')
+        require(type(size) in (str, int), 'CACHE_USAGE_INVALID')
+        match = re.fullmatch(r'([0-9]+(?:\.[0-9]+)?)(B|kB|MB|GB|TB|PB|EB)?', str(size))
+        require(match is not None and (match[2] is not None or '.' not in match[1]),
+                'CACHE_USAGE_INVALID')
+        value = Decimal(match[1]) * units.get(match[2], 1)
+        require(value <= 2 ** 63 - 1, 'CACHE_USAGE_INVALID')
+        total += int(value)
+        estimated = estimated or match[2] not in (None, 'B')
+    return total, estimated
+
+
+def validate_pulled_image(info, record, version, revision):
+    """Bind a local engine ID to the exact CI registry artifact on either store."""
+    require(isinstance(info, dict), 'TARGET_IMAGE_IDENTITY_INVALID')
+    config = info.get('Config') or {}
+    require(isinstance(config, dict), 'TARGET_IMAGE_IDENTITY_INVALID')
+    labels = config.get('Labels') or {}
+    digests = info.get('RepoDigests') or []
+    descriptor = info.get('Descriptor')
+    registry_digest = record['ref'].split('@', 1)[1]
+    descriptor_valid = (isinstance(descriptor, dict)
+                        and descriptor.get('digest') == registry_digest
+                        and descriptor.get('mediaType') in (
+                            'application/vnd.docker.distribution.manifest.v2+json',
+                            'application/vnd.oci.image.manifest.v1+json'))
+    # Classic stores identify images by config digest; containerd uses the
+    # manifest digest. The immutable registry reference binds both to CI.
+    local_id = info.get('Id')
+    require(isinstance(labels, dict) and isinstance(digests, list)
+            and record['ref'] in digests
+            and ((local_id == record['id'] and (descriptor is None or descriptor_valid))
+                 or (local_id == registry_digest and descriptor_valid))
+            and info.get('Os') == 'linux' and info.get('Architecture') == 'amd64'
+            and labels.get('org.opencontainers.image.version') == version
+            and labels.get('org.opencontainers.image.revision') == revision
+            and labels.get('org.opencontainers.image.source')
+            == 'https://github.com/Jack-Kunlun/ai-project-os',
+            'TARGET_IMAGE_IDENTITY_INVALID')
+    return local_id
+
+
+def prune_build_cache():
+    """Measure the actual default builder used by historical Compose builds."""
+    def usage():
+        return parse_cache_usage(docker(
+            'buildx', 'du', '--builder', 'default', '--format=json'))
+    before, before_estimated = usage()
+    disk_before = os.statvfs('/')
+    docker('buildx', 'prune', '--builder', 'default', '--force',
+           '--max-used-space', '2GB', capture=False, timeout=600)
+    after, after_estimated = usage()
+    disk_after = os.statvfs('/')
+    budget_met = after <= 2_000_000_000
+    print('STABLE_CACHE_CLEANUP ' + json.dumps({
+        'builder': 'default', 'beforeBytes': before, 'afterBytes': after,
+        'beforeEstimated': before_estimated, 'afterEstimated': after_estimated,
+        'targetBytes': 2_000_000_000, 'budgetMet': budget_met,
+        'availableBeforeBytes': disk_before.f_bavail * disk_before.f_frsize,
+        'availableAfterBytes': disk_after.f_bavail * disk_after.f_frsize,
+    }, sort_keys=True, separators=(',', ':')), flush=True)
+    if not budget_met:
+        print('STABLE_CACHE_BUDGET_DEFERRED protected_or_remaining_bytes=' + str(after), flush=True)
+    return budget_met
+
+
 def _ci_runs(revision, event):
     api = 'https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions'
     payload = request_json(api + '/workflows/ci.yml/runs?event=' + event + '&status=success&head_sha='
@@ -560,13 +748,15 @@ def _run_has_jobs(run, required_names):
     return set(required_names).issubset(successful)
 
 
-def require_ci(target_tag, revision, bootstrap=False, source_revision=None, classification=None):
+def require_ci(target_tag, revision, bootstrap=False, source_revision=None, classification=None, run_id=None):
     main_runs = [run for run in _ci_runs(revision, 'push')
                  if run.get('head_branch') == 'main' and run.get('head_sha') == revision
                  and run.get('event') == 'push' and run.get('status') == 'completed'
-                 and run.get('conclusion') == 'success']
+                 and run.get('conclusion') == 'success'
+                 and (run_id is None or run.get('id') == run_id)]
     if bootstrap:
-        require(any(_run_has_jobs(run, ('Verify database and release candidate',)) for run in main_runs),
+        require(any(_run_has_jobs(run, ('Verify source and client', 'Build and verify release images',
+                                       'Verify database and release candidate')) for run in main_runs),
                 'EXACT_MAIN_FULL_CI_REQUIRED')
         return
 
@@ -590,13 +780,12 @@ def require_ci(target_tag, revision, bootstrap=False, source_revision=None, clas
             continue
         attestation = (f'Verify internal delivery gates [risk={attested_risk} '
                        f'base={source_revision}]')
-        required_jobs = ['Verify source and client', attestation]
+        required_jobs = ['Verify source and client', 'Build and verify release images', attestation]
         if attested_risk == 'high':
             required_jobs.append('Verify database and release candidate')
-        elif attested_risk == 'medium':
-            required_jobs.append('Verify browser and release client')
-        if any(_run_has_jobs(run, required_jobs) for run in main_runs):
-            return
+        for candidate in main_runs:
+            if _run_has_jobs(candidate, required_jobs):
+                return candidate
     require(False, 'EXACT_MAIN_APPLICABLE_CI_REQUIRED')
 
 
@@ -722,7 +911,10 @@ def validate_target_tree(revision, source, target_tag):
     require(package.get('version') == target_version, 'PACKAGE_VERSION_INVALID')
     require(re.search(r'APP_VERSION\s*=\s*"' + re.escape(target_version) + r'"', version_source) is not None,
             'APP_VERSION_INVALID')
-    require(len(re.findall(r'org\.opencontainers\.image\.version="' + re.escape(target_version) + r'"', dockerfile)) == 1,
+    literal_version = re.findall(r'org\.opencontainers\.image\.version="([^"]+)"', dockerfile)
+    require(literal_version == [target_version]
+            or (literal_version == ['${APP_VERSION}']
+                and re.findall(r'^ARG APP_VERSION="([^"]+)"$', dockerfile, re.M) == [target_version]),
             'OCI_VERSION_INVALID')
     require(release_notes.startswith('# ' + target_tag + ' — '), 'RELEASE_NOTES_INVALID')
     target = git_manifest(revision)
@@ -1333,7 +1525,7 @@ def source_runtime_state(require_checkout=True):
         require(source_revision == INITIAL_SOURCE_REVISION and 'release_protocol' not in result,
                 'INITIAL_SOURCE_RECEIPT_INVALID')
     else:
-        require(result.get('release_protocol') == 'stable-v1', 'STABLE_SOURCE_RECEIPT_INVALID')
+        require(result.get('release_protocol') in ('stable-v1', 'stable-v2-images'), 'STABLE_SOURCE_RECEIPT_INVALID')
         stable_version(result.get('source_tag', ''))
         require(HEX40.fullmatch(result.get('source_revision', '')) is not None
                 and stable_version(result['source_tag']) < stable_version(source_tag),
@@ -1345,7 +1537,7 @@ def source_runtime_state(require_checkout=True):
         require(git(['cat-file', '-t', 'refs/tags/' + source_tag]) == 'tag', 'SOURCE_TAG_NOT_ANNOTATED')
         require(git(['rev-parse', 'refs/tags/' + source_tag + '^{}']) == source_revision,
                 'SOURCE_TAG_REVISION_MISMATCH')
-        if result.get('release_protocol') == 'stable-v1':
+        if result.get('release_protocol') in ('stable-v1', 'stable-v2-images'):
             verify_prior_stable_tag(result, source_revision)
     package = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))
     require(package.get('version') == source_version, 'SOURCE_PACKAGE_VERSION_INVALID')
@@ -1382,13 +1574,32 @@ def source_runtime_state(require_checkout=True):
     migration_ledger(postgres_id, manifest)
     require(git_manifest(source_revision) == manifest, 'SOURCE_GIT_MANIFEST_MISMATCH')
     database = readonly_database_snapshot(postgres_id)
-    if result.get('release_protocol') == 'stable-v1':
+    if result.get('release_protocol') in ('stable-v1', 'stable-v2-images'):
         require(re.fullmatch(r'0|[1-9][0-9]*', result.get('migration_count', '')) is not None
                 and int(result['migration_count']) == len(manifest), 'SOURCE_RECEIPT_MIGRATION_COUNT_INVALID')
-        backup_name = result.get('backup_name', '')
-        require(backup_name_pattern(source_tag).fullmatch(backup_name) is not None,
-                'SOURCE_RECEIPT_BACKUP_INVALID')
-        validate_source_restore_receipt(result, manifest)
+        if result['release_protocol'] == 'stable-v1':
+            backup_name = result.get('backup_name', '')
+            if backup_name.startswith('"'):
+                backup_name = json.loads(backup_name)
+            require(backup_name_pattern(source_tag).fullmatch(backup_name) is not None,
+                    'SOURCE_RECEIPT_BACKUP_INVALID')
+            validate_source_restore_receipt(result, manifest)
+        else:
+            require(result.get('backup_name') == 'not-required'
+                    and result.get('restore_policy') == 'disabled'
+                    and result.get('migration_manifest_sha256') == migration_manifest_sha256(manifest),
+                    'SOURCE_RECEIPT_POLICY_INVALID')
+            recorded_images = json.loads(result.get('target_image_ids', 'null'))
+            recorded_manifest = json.loads(result.get('ci_image_manifest', 'null'))
+            require(isinstance(recorded_manifest, dict), 'SOURCE_IMAGE_MANIFEST_INVALID')
+            validate_image_manifest(recorded_manifest, source_revision, source_version,
+                                    recorded_manifest.get('runId'))
+            require(isinstance(recorded_images, dict)
+                    and all(writer['Image'] == recorded_images.get(service)
+                            and writer['Config'].get('Labels', {}).get('org.opencontainers.image.revision')
+                            == source_revision
+                            for service, writer in zip(('app', 'worker', 'git-worker'), writers)),
+                    'SOURCE_IMAGE_RECEIPT_MISMATCH')
     else:
         validate_default_signup_policy(database)
     return {
@@ -1414,9 +1625,13 @@ def source_runtime_state(require_checkout=True):
 
 def already_current_line(source, target_tag, target_revision):
     receipt = source['receipt']
-    require(receipt.get('release_protocol') == 'stable-v1'
+    require(receipt.get('release_protocol') in ('stable-v1', 'stable-v2-images')
             and receipt.get('tag') == target_tag and receipt.get('revision') == target_revision,
             'ALREADY_CURRENT_RECEIPT_INVALID')
+    if receipt['release_protocol'] == 'stable-v2-images':
+        return ('STABLE_DEPLOY_ALREADY_CURRENT tag=' + target_tag + ' revision=' + target_revision
+                + ' migration_count=' + str(len(source['source_manifest']))
+                + ' backup=not-required restore=not-required')
     restore = validate_source_restore_receipt(receipt, source['source_manifest'])
     if restore.get('required') is False:
         restore_text = ('not-required' if restore['reason'] == 'no-database-change' else
@@ -1546,10 +1761,12 @@ def create_backup(source, target_tag):
 
 
 class HostDeployment:
-    def __init__(self, target_tag, target_revision):
+    def __init__(self, target_tag, target_revision, credentials=None):
         self.target_tag = target_tag
         self.target_version = version_text(target_tag)
         self.target_revision = target_revision
+        self.credentials = credentials
+        self.image_manifest = None
         self.already_current = False
         self.release_classification = None
         self.database_required = True
@@ -1589,16 +1806,22 @@ class HostDeployment:
                 and self.release_classification.get('databaseRequired')
                 == (self.release_classification['risk'] == 'high'),
                 'RELEASE_CI_CLASSIFICATION_INVALID')
-        self.database_required = self.release_classification['databaseRequired']
         manifest_changed = self.target_manifest != self.source['source_manifest']
-        require(not manifest_changed or self.database_required,
+        require(not manifest_changed or self.release_classification['databaseRequired'],
                 'NO_DATABASE_RELEASE_MIGRATION_CHANGED')
+        # CI risk and production migration are separate decisions. Tooling or
+        # ordinary server changes do not rerun 146 unchanged migrations/grants.
+        self.database_required = manifest_changed
         self._validate_installed_state(self.target_files)
         self.already_current = self.target_tag == self.source['tag'] \
             and self.target_revision == self.source['revision']
         if not self.already_current:
-            require_ci(self.target_tag, self.target_revision, source_revision=self.source['revision'],
-                       classification=self.release_classification)
+            require(self.credentials is not None, 'WORKFLOW_CREDENTIALS_REQUIRED')
+            ci_run = require_ci(self.target_tag, self.target_revision, source_revision=self.source['revision'],
+                                classification=self.release_classification,
+                                run_id=self.credentials['runId'])
+            self.image_manifest = load_ci_images(ci_run, self.credentials,
+                                                 self.target_revision, self.target_version)
         return self.source
 
     def _validate_installed_state(self, target_files):
@@ -1632,37 +1855,99 @@ class HostDeployment:
         require((ROOT / ARTIFACT_SOURCE).read_bytes() == files['artifact_helper'], 'TARGET_ARTIFACT_SOURCE_MISMATCH')
 
     def build_target_images(self):
+        """Pull CI artifacts by digest. The production host never builds source."""
         compose('config', '--quiet')
-        all_service_names = {
-            'migrate': 'ai-project-os-migrate',
-            'reconcile': 'ai-project-os-reconcile',
-            'app': 'ai-project-os-app',
-            'worker': 'ai-project-os-worker',
-            'git-worker': 'ai-project-os-git-worker',
-        }
-        service_names = all_service_names if self.database_required else {
-            service: all_service_names[service] for service in ('app', 'worker', 'git-worker')
-        }
-        for service in service_names:
-            compose('build', service, capture=False, timeout=7200)
+        require(self.image_manifest is not None and self.credentials is not None,
+                'CI_IMAGES_REQUIRED')
+        manifest = validate_image_manifest(self.image_manifest, self.target_revision,
+                                           self.target_version, self.credentials['runId'])
         images = {}
-        for service, image_name in service_names.items():
-            image_id = docker('image', 'inspect', '--format', '{{.Id}}', image_name)
-            require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id) is not None, 'TARGET_IMAGE_ID_INVALID')
-            inspected = json.loads(docker('image', 'inspect', image_id))[0]
-            require(inspected.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.version')
-                    == self.target_version, 'TARGET_IMAGE_VERSION_INVALID')
-            images[service] = image_id
+        with tempfile.TemporaryDirectory(prefix='.stable-registry-', dir='/var/lib/ai-project-os') as temporary:
+            os.chmod(temporary, 0o700)
+            # GITHUB_TOKEN expires with this Workflow; no permanent registry secret.
+            executable = BINARIES['docker']
+            HELPER.trusted(executable)
+            login = subprocess.run(
+                [executable, '--config', temporary, 'login', 'ghcr.io',
+                 '--username', 'Jack-Kunlun', '--password-stdin'],
+                input=self.credentials['token'] + '\n', env=PROCESS_ENV, text=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60, check=False)
+            require(login.returncode == 0, 'REGISTRY_LOGIN_FAILED')
+            for service, record in manifest['images'].items():
+                docker('--config', temporary, 'pull', record['ref'], capture=False, timeout=1800)
+                info = json.loads(docker('image', 'inspect', record['ref']))[0]
+                images[service] = validate_pulled_image(
+                    info, record, self.target_version, self.target_revision)
+        # All worker roles use the identical worker image tested in CI.
+        images.update({service: images['worker'] for service in
+                       ('git-worker', 'reconcile', 'principal-bootstrap')})
         pin_path = Path('/var/lib/ai-project-os/.stable-images-' + secrets.token_hex(12) + '.yaml')
         self.pin_file = pin_path
         text = 'services:\n'
         for service, image_id in images.items():
-            text += '  ' + service + ":\n    image: '" + image_id + "'\n    build: null\n"
+            text += '  ' + service + ":\n    image: '" + image_id + "'\n    build: !reset null\n"
         HELPER.atomic_write(pin_path, text.encode('ascii'), 0o600)
         HELPER.trusted(pin_path, 0o600)
         compose('config', '--quiet', pin_file=pin_path)
+        pinned = json.loads(compose('config', '--format', 'json', pin_file=pin_path))['services']
+        require(all(pinned.get(service, {}).get('image') == image_id
+                    and 'build' not in pinned[service] for service, image_id in images.items()),
+                'PINNED_COMPOSE_BUILD_PRESENT')
         self.images = images
         return images
+
+    def cleanup_old_images(self, source):
+        # Called only after target health, ledger and receipt all succeeded.
+        keep = set(self.images.values()) | set(source['writer_images'].values())
+        previous = json.loads(source['receipt'].get('target_image_ids', '{}'))
+        require(isinstance(previous, dict), 'IMAGE_HISTORY_INVALID')
+        keep.update(previous.values())
+        require(all(isinstance(value, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', value)
+                    for value in keep), 'IMAGE_HISTORY_INVALID')
+        before_containers = docker('ps', '-aq', '--no-trunc').splitlines()
+        before_volumes = docker('volume', 'ls', '-q').splitlines()
+        if before_containers:
+            infos = json.loads(docker('inspect', *before_containers))
+            keep.update(info['Image'] for info in infos)
+        candidates = set(docker('image', 'ls', '--quiet', '--no-trunc',
+                                '--filter', 'label=org.opencontainers.image.title=AI Project OS').splitlines())
+        removed = 0
+        for identifier in sorted(candidates - keep):
+            require(re.fullmatch(r'sha256:[a-f0-9]{64}', identifier) is not None,
+                    'CLEANUP_IMAGE_ID_INVALID')
+            info = json.loads(docker('image', 'inspect', identifier))[0]
+            labels = info.get('Config', {}).get('Labels', {})
+            tags = info.get('RepoTags') or []
+            digests = info.get('RepoDigests') or []
+            legacy = (labels.get('org.opencontainers.image.source') is None
+                      and labels.get('org.opencontainers.image.title') == 'AI Project OS'
+                      and labels.get('com.docker.compose.project') == PROJECT
+                      and labels.get('com.docker.compose.service') in
+                      ('app', 'worker', 'git-worker', 'migrate', 'reconcile', 'principal-bootstrap')
+                      and re.fullmatch(r'(?:0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-dev\.[0-9]+)?',
+                                       labels.get('org.opencontainers.image.version', '')) is not None
+                      and all(re.fullmatch(r'ai-project-os-[a-z-]+(?::[^/]+)?', tag) for tag in tags))
+            owned = (labels.get('org.opencontainers.image.source')
+                     == 'https://github.com/Jack-Kunlun/ai-project-os' or legacy)
+            require(info.get('Id') == identifier, 'CLEANUP_IMAGE_CHANGED')
+            if not owned or any(not ref.startswith('ghcr.io/jack-kunlun/ai-project-os-') for ref in digests):
+                continue
+            # Removing explicit references without force leaves any newly referenced
+            # image protected by Docker, including concurrent unrelated containers.
+            try:
+                docker('image', 'rm', *(tags + digests or [identifier]), capture=False)
+                removed += 1
+            except RuntimeError:
+                print('STABLE_IMAGE_CLEANUP_IN_USE_SKIPPED', flush=True)
+        cache_budget_met = prune_build_cache()
+        require(docker('ps', '-aq', '--no-trunc').splitlines() == before_containers
+                and docker('volume', 'ls', '-q').splitlines() == before_volumes,
+                'CLEANUP_RESOURCE_IDENTITIES_CHANGED')
+        filesystem = os.statvfs('/')
+        print('STABLE_IMAGE_CLEANUP_OK removed=' + str(removed)
+              + ' available_bytes=' + str(filesystem.f_bavail * filesystem.f_frsize)
+              + ' retained=current-and-previous cache_target=2GB cache_budget_met='
+              + str(cache_budget_met).lower(), flush=True)
 
     def revalidate_source(self, source):
         require(git(['rev-parse', 'HEAD']) == self.target_revision, 'TARGET_CHECKOUT_CHANGED')
@@ -1911,31 +2196,24 @@ class HostDeployment:
         if not self.database_required:
             require(self.target_manifest == source['source_manifest'],
                     'NO_DATABASE_RELEASE_MIGRATION_CHANGED')
-        restore_drill = {
-            'required': False,
-            'reason': ('disabled-by-release-policy' if self.database_required else 'no-database-change'),
-            'source_migration_count': len(source['source_manifest']),
-            'target_migration_count': len(self.target_manifest),
-        }
         record = {
             'tag': self.target_tag, 'revision': self.target_revision,
             'source_tag': source['tag'], 'source_revision': source['revision'],
-            'release_protocol': 'stable-v1',
+            'release_protocol': 'stable-v2-images',
             'source_postgres_container_id': source['postgres_id'],
             'target_writer_ids': self.target_writer_ids,
             'migration_count': len(self.target_manifest),
             'migration_manifest_sha256': migration_manifest_sha256(self.target_manifest),
-            'backup_name': backup['name'], 'backup_object': backup['object'],
-            'backup_verified_manifest': backup['verified_manifest'],
-            'backup_sha256': backup['sha256'], 'source_config_hashes': source['config_hashes'],
+            'backup_name': 'not-required', 'restore_policy': 'disabled',
+            'source_config_hashes': source['config_hashes'],
             'target_nginx_sha256': sha256(self.target_files['nginx']),
-            'target_image_ids': images, 'restore_drill': restore_drill,
+            'target_image_ids': images, 'ci_image_manifest': self.image_manifest,
             'readonly_source_snapshot': source['database_snapshot'],
             'health': self.target_health,
             'completed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         }
         plain_string_keys = {'tag', 'revision', 'source_tag', 'source_revision', 'release_protocol',
-                             'migration_manifest_sha256'}
+                             'migration_manifest_sha256', 'backup_name', 'restore_policy'}
         text = 'DEPLOY_OK\n' + ''.join(
             key + '=' + (value if key in plain_string_keys else
                          json.dumps(value, separators=(',', ':'), sort_keys=True)) + '\n'
@@ -1944,10 +2222,7 @@ class HostDeployment:
         HELPER.atomic_write(RESULT, text.encode('utf-8'), 0o600)
         print('STABLE_DEPLOY_OK tag=' + self.target_tag + ' revision=' + self.target_revision
               + ' migration_count=' + str(len(self.target_manifest))
-              + ' backup=' + backup['name'] + ' restore='
-              + ('skipped-by-policy-' + str(restore_drill['source_migration_count']) + '-to-'
-                 + str(restore_drill['target_migration_count'])
-                 if self.database_required else 'not-required'), flush=True)
+              + ' backup=not-required restore=not-required', flush=True)
 
     def restore_exact_source(self, source):
         failures = []
@@ -2231,11 +2506,15 @@ def restore_stale_recovery_receipt_after_bootstrap_failure(previous_receipt_byte
             == previous_receipt_bytes, 'BOOTSTRAP_RECEIPT_ROLLBACK_VERIFY_FAILED')
 
 
-def install_bootstrap(target_tag, target_revision):
+def install_bootstrap(target_tag, target_revision, from_workflow=False):
     require(os.geteuid() == 0, 'ROOT_REQUIRED')
     stable_version(target_tag)
     self_path = Path(__file__).absolute()
-    HELPER.trusted(self_path, 0o755)
+    HELPER.trusted(self_path, 0o700 if from_workflow else 0o755)
+    if from_workflow:
+        installed = validate_state_file()
+        require(self_path == DEPLOYER and sha256(self_path.read_bytes()) == installed['files']['deployer'],
+                'INSTALLED_TOOL_HASH_INVALID')
     require(git(['status', '--porcelain', '--untracked-files=all']) == '', 'MANAGED_CHECKOUT_DIRTY')
     current_receipt_bytes = _read_trusted_host_file(RESULT, 0o600, 256 * 1024,
                                                     'SOURCE_RECEIPT_INVALID')
@@ -2275,13 +2554,23 @@ def install_bootstrap(target_tag, target_revision):
     validate_transition(source_tag, source_revision, target_tag, target_revision)
     fetch_main(target_revision)
     require_ancestor(source_revision, target_revision)
+    if from_workflow and source_revision == target_revision:
+        _, files = validate_target_tree(target_revision, source_manifest, target_tag)
+        require(all(installed['files'][name] == sha256(files[name]) for name in installed['files']),
+                'ALREADY_CURRENT_TOOLING_MISMATCH')
+        print('STABLE_TOOLING_ALREADY_READY tooling_revision=' + installed['toolingRevision'])
+        return
     if stale_v104_receipt or recovered_source:
         require_ci(target_tag, target_revision, source_revision=RECOVERY_SOURCE_REVISION,
                    classification=_risk_result('high', ['recovery-receipt-reconciliation']))
+    elif from_workflow:
+        require_ci(target_tag, target_revision, source_revision=source_revision,
+                   classification=classify_release_risk(ROOT, source_revision, target_revision))
     else:
         require_ci(target_tag, target_revision, bootstrap=True)
     _, files = validate_target_tree(target_revision, source_manifest, target_tag)
-    require(self_path.read_bytes() == files['deployer'], 'BOOTSTRAP_SOURCE_BYTES_UNTRUSTED')
+    if not from_workflow:
+        require(self_path.read_bytes() == files['deployer'], 'BOOTSTRAP_SOURCE_BYTES_UNTRUSTED')
     existing_is_consistent = True
     if stale_v104_receipt or recovered_source:
         existing, existing_is_consistent = validate_recovery_bootstrap_state(target_revision, files)
@@ -2433,7 +2722,11 @@ def main(args):
             require(confirmation == 'CONFIRM_INSTALL_STABLE_TOOLING', 'BOOTSTRAP_CONFIRMATION_INVALID')
             install_bootstrap(target_tag, revision)
             return
-        require(command == 'deploy' and confirmation == 'CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI',
+        if command == 'refresh':
+            require(confirmation == 'CONFIRM_STABLE_TOOLING_FROM_CI', 'TOOLING_CONFIRMATION_INVALID')
+            install_bootstrap(target_tag, revision, from_workflow=True)
+            return
+        require(command == 'deploy' and confirmation == 'CONFIRM_STABLE_CI_IMAGES',
                 'DEPLOY_CONFIRMATION_INVALID')
         state = validate_state_file()
         for name, path in (
@@ -2442,7 +2735,8 @@ def main(args):
         ):
             require(sha256(path.read_bytes()) == state['files'][name], 'TOOLING_FILE_HASH_INVALID')
         require(sha256(Path(__file__).read_bytes()) == state['files']['deployer'], 'INSTALLED_TOOL_HASH_INVALID')
-        host = HostDeployment(target_tag, revision)
+        credentials = read_release_credentials(sys.stdin)
+        host = HostDeployment(target_tag, revision, credentials)
         source = host.preflight()
         if host.already_current:
             print(already_current_line(source, target_tag, revision), flush=True)

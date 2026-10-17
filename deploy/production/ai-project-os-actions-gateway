@@ -6,11 +6,15 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 original_command=${SSH_ORIGINAL_COMMAND-}
 
 # Stable release tooling is installed once by an administrator and thereafter
-# accepts only canonical stable tags, exact source SHAs, and the fixed deploy confirmation.
+# accepts only canonical stable tags, exact source SHAs, and fixed confirmations.
 if [[ "$original_command" == stable-tooling-status ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-release-stable --status
 fi
-if [[ "$original_command" =~ ^deploy-stable\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ (CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI)$ ]]; then
+if [[ "$original_command" =~ ^refresh-stable-tooling\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ (CONFIRM_STABLE_TOOLING_FROM_CI)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
+    refresh "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+if [[ "$original_command" =~ ^deploy-stable\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ (CONFIRM_STABLE_CI_IMAGES)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
     deploy "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
 fi

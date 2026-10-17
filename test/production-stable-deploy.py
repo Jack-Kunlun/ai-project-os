@@ -97,86 +97,13 @@ class DeploymentMethodTests(unittest.TestCase):
             ):
                 DEPLOYER.validate_default_signup_policy(snapshot)
 
-    def test_build_target_images_excludes_drill_bootstrap_but_pins_migration_and_writers(self):
-        services = ('migrate', 'reconcile', 'app', 'worker', 'git-worker')
-        service_images = {
-            service: 'ai-project-os-' + service for service in services
-        }
-        ids = {service: 'sha256:' + format(index + 1, '064x')
-               for index, service in enumerate(services)}
-        reverse_images = {image: service for service, image in service_images.items()}
-        compose_calls = []
-
-        def fake_compose(*args, **kwargs):
-            compose_calls.append((args, kwargs))
-            return ''
-
-        def fake_docker(*args, **_kwargs):
-            if args[:2] == ('image', 'inspect') and args[2] == '--format':
-                return ids[reverse_images[args[4]]]
-            if args[:2] == ('image', 'inspect'):
-                return json.dumps([{'Config': {'Labels': {
-                    'org.opencontainers.image.version': DEPLOYER.version_text(TARGET_TAG),
-                }}}])
-            self.fail('unexpected docker call: ' + repr(args))
-
-        class FixtureHelper:
-            @staticmethod
-            def atomic_write(_path, _content, _mode):
-                return None
-
-            @staticmethod
-            def trusted(_path, _mode=None):
-                return None
-
+    def test_production_refuses_missing_ci_images_before_any_build_or_writer_stop(self):
         host = DEPLOYER.HostDeployment(TARGET_TAG, 'a' * 40)
-        with patch.object(DEPLOYER, 'compose', side_effect=fake_compose), \
-                patch.object(DEPLOYER, 'docker', side_effect=fake_docker), \
-                patch.object(DEPLOYER, 'HELPER', FixtureHelper()):
-            result = host.build_target_images()
-
-        builds = [args[1:] for args, _kwargs in compose_calls if args[0] == 'build']
-        self.assertEqual(builds, [(service,) for service in services])
-        self.assertEqual(tuple(result), services)
-        self.assertEqual(host.images, result)
-
-    def test_non_database_release_builds_only_target_writers(self):
-        services = ('app', 'worker', 'git-worker')
-        service_images = {service: 'ai-project-os-' + service for service in services}
-        ids = {service: 'sha256:' + format(index + 1, '064x')
-               for index, service in enumerate(services)}
-        reverse_images = {image: service for service, image in service_images.items()}
-        compose_calls = []
-
-        def fake_compose(*args, **kwargs):
-            compose_calls.append((args, kwargs))
-            return ''
-
-        def fake_docker(*args, **_kwargs):
-            if args[:2] == ('image', 'inspect') and args[2] == '--format':
-                return ids[reverse_images[args[4]]]
-            if args[:2] == ('image', 'inspect'):
-                return json.dumps([{'Config': {'Labels': {
-                    'org.opencontainers.image.version': DEPLOYER.version_text(TARGET_TAG),
-                }}}])
-            self.fail('unexpected docker call: ' + repr(args))
-
-        class FixtureHelper:
-            @staticmethod
-            def atomic_write(_path, _content, _mode): return None
-            @staticmethod
-            def trusted(_path, _mode=None): return None
-
-        host = DEPLOYER.HostDeployment(TARGET_TAG, 'a' * 40)
-        host.database_required = False
-        with patch.object(DEPLOYER, 'compose', side_effect=fake_compose), \
-                patch.object(DEPLOYER, 'docker', side_effect=fake_docker), \
-                patch.object(DEPLOYER, 'HELPER', FixtureHelper()):
-            result = host.build_target_images()
-
-        builds = [args[1:] for args, _kwargs in compose_calls if args[0] == 'build']
-        self.assertEqual(builds, [('app',), ('worker',), ('git-worker',)])
-        self.assertEqual(tuple(result), services)
+        with patch.object(DEPLOYER, 'compose') as compose, patch.object(DEPLOYER, 'docker') as docker:
+            with self.assertRaisesRegex(RuntimeError, 'STABLE_CI_IMAGES_REQUIRED'):
+                host.build_target_images()
+        compose.assert_called_once_with('config', '--quiet')
+        docker.assert_not_called()
 
     def test_revalidate_source_allows_live_data_counts_to_change(self):
         services = ('app', 'worker', 'git-worker')
@@ -355,26 +282,14 @@ class DeploymentMethodTests(unittest.TestCase):
         self.assertEqual(json.loads(record['target_writer_ids']), host.target_writer_ids)
         self.assertNotIn('status=', receipt_text)
 
-        restore = DEPLOYER.validate_source_restore_receipt(record, host.target_manifest)
-        self.assertEqual(restore, {
-            'required': False, 'reason': 'disabled-by-release-policy',
-            'source_migration_count': 143, 'target_migration_count': 144,
-        })
-        self.assertIn('restore=skipped-by-policy-143-to-144', stdout.getvalue())
+        self.assertEqual(record['release_protocol'], 'stable-v2-images')
+        self.assertEqual(record['backup_name'], 'not-required')
+        self.assertEqual(record['restore_policy'], 'disabled')
+        self.assertNotIn('restore_drill', record)
+        self.assertIn('backup=not-required restore=not-required', stdout.getvalue())
         retry_source = {'receipt': record, 'source_manifest': host.target_manifest}
-        self.assertIn('restore=skipped-by-policy-143-to-144',
+        self.assertIn('restore=not-required',
                       DEPLOYER.already_current_line(retry_source, TARGET_TAG, 'f' * 40))
-        for overrides in (
-                {'reason': 'unknown'}, {'source_migration_count': 142},
-                {'source_migration_count': 145}, {'source_migration_count': True},
-                {'target_migration_count': 145}, {'extra': 'unexpected'}):
-            with self.subTest(overrides=overrides):
-                malformed = {**record, 'restore_drill': json.dumps({**restore, **overrides})}
-                with self.assertRaisesRegex(RuntimeError, 'STABLE_SOURCE_RECEIPT_RESTORE_INVALID'):
-                    DEPLOYER.validate_source_restore_receipt(malformed, host.target_manifest)
-        with self.assertRaisesRegex(RuntimeError, 'STABLE_SOURCE_RECEIPT_RESTORE_INVALID'):
-            DEPLOYER.validate_source_restore_receipt(
-                {**record, 'migration_manifest_sha256': '0' * 64}, host.target_manifest)
 
     def test_no_database_receipt_is_explicit_and_supports_same_release_retry(self):
         class FixtureHelper:
@@ -412,27 +327,12 @@ class DeploymentMethodTests(unittest.TestCase):
                 host.write_receipt(source, backup, {'app': 'sha256:' + '1' * 64})
             record = DEPLOYER.parse_record(result_path)
 
-        restore = json.loads(record['restore_drill'])
-        self.assertEqual(restore, {
-            'required': False, 'reason': 'no-database-change',
-            'source_migration_count': 1, 'target_migration_count': 1,
-        })
+        self.assertEqual(record['backup_name'], 'not-required')
+        self.assertEqual(record['restore_policy'], 'disabled')
         self.assertEqual(record['migration_manifest_sha256'], DEPLOYER.migration_manifest_sha256(manifest))
         self.assertIn('restore=not-required', stdout.getvalue())
-        same_release = {
-            'tag': TARGET_TAG, 'revision': 'f' * 40,
-            'receipt': record, 'source_manifest': manifest,
-        }
-        line = DEPLOYER.already_current_line(same_release, TARGET_TAG, 'f' * 40)
-        self.assertIn('restore=not-required', line)
-
-        malformed = dict(record)
-        malformed['restore_drill'] = json.dumps({
-            'required': False, 'reason': 'no-database-change',
-            'source_migration_count': 1, 'target_migration_count': 2,
-        })
-        with self.assertRaisesRegex(RuntimeError, 'STABLE_SOURCE_RECEIPT_RESTORE_INVALID'):
-            DEPLOYER.validate_source_restore_receipt(malformed, manifest)
+        same_release = {'receipt': record, 'source_manifest': manifest}
+        self.assertIn('restore=not-required', DEPLOYER.already_current_line(same_release, TARGET_TAG, 'f' * 40))
 
 class BackupValidationTests(unittest.TestCase):
     def test_backup_receipt_accepts_only_quiesced_stable_backup_in_expected_root(self):
@@ -1035,7 +935,7 @@ class StableSemVerAndManifestTests(unittest.TestCase):
                 DEPLOYER.parse_record(path)
 
     def test_pre_migration_failures_restore_exact_source(self):
-        for failure in ('build', 'backup', 'nginx_candidate'):
+        for failure in ('build', 'nginx_candidate'):
             with self.subTest(failure=failure):
                 ops = FakeDeployment(failure)
                 with self.assertRaisesRegex(RuntimeError, 'injected_' + failure):
@@ -1055,11 +955,11 @@ class StableSemVerAndManifestTests(unittest.TestCase):
                 self.assertNotIn('restore_source', ops.events)
                 self.assertIn('cleanup_restore', ops.events)
 
-    def test_high_risk_success_skips_drill_but_keeps_backup_migration_and_health(self):
+    def test_schema_change_skips_backup_and_drill_but_keeps_migration_and_health(self):
         ops = FakeDeployment()
         DEPLOYER.deployment_flow(ops)
         self.assertNotIn('restore', ops.events)
-        self.assertLess(ops.events.index('backup'), ops.events.index('migrate'))
+        self.assertNotIn('backup', ops.events)
         self.assertLess(ops.events.index('migrate'), ops.events.index('reconcile'))
         self.assertLess(ops.events.index('reconcile'), ops.events.index('health'))
         self.assertLess(ops.events.index('health'), ops.events.index('cleanup_restore'))
@@ -1068,12 +968,12 @@ class StableSemVerAndManifestTests(unittest.TestCase):
         self.assertNotIn('restore_source', ops.events)
         self.assertNotIn('quiesce', ops.events)
 
-    def test_low_and_medium_deployments_keep_backup_but_skip_database_restore_and_migration(self):
+    def test_unchanged_schema_skips_backup_restore_and_migration(self):
         ops = FakeDeployment(database_required=False)
 
         DEPLOYER.deployment_flow(ops)
 
-        self.assertIn('backup', ops.events)
+        self.assertNotIn('backup', ops.events)
         self.assertIn('health', ops.events)
         self.assertIn('receipt', ops.events)
         self.assertNotIn('restore', ops.events)
@@ -1082,9 +982,9 @@ class StableSemVerAndManifestTests(unittest.TestCase):
         self.assertNotIn('quiesce', ops.events)
 
     def test_low_and_medium_failure_before_writer_cutover_restores_exact_source(self):
-        ops = FakeDeployment('backup', database_required=False)
+        ops = FakeDeployment('nginx_candidate', database_required=False)
 
-        with self.assertRaisesRegex(RuntimeError, 'injected_backup'):
+        with self.assertRaisesRegex(RuntimeError, 'injected_nginx_candidate'):
             DEPLOYER.deployment_flow(ops)
 
         self.assertIn('restore_source', ops.events)
@@ -1134,15 +1034,16 @@ class ProductionResourceContractTests(unittest.TestCase):
         tag = 'v1.0.3'
         database_job = 'Verify database and release candidate'
         source_job = 'Verify source and client'
+        image_job = 'Build and verify release images'
         attestation = f'Verify internal delivery gates [risk=low base={source_revision}]'
         main = {'id': 1, 'head_sha': revision, 'event': 'push', 'head_branch': 'main',
                 'status': 'completed', 'conclusion': 'success',
-                'jobs': [source_job, attestation]}
+                'jobs': [source_job, image_job, attestation]}
 
         def has_jobs(run, required):
             return set(required).issubset(run['jobs'])
 
-        full_main = dict(main, jobs=[source_job, database_job])
+        full_main = dict(main, jobs=[source_job, image_job, database_job])
         with patch.object(DEPLOYER, '_ci_runs', side_effect=lambda _sha, event: [full_main]), \
                 patch.object(DEPLOYER, '_run_has_jobs', side_effect=has_jobs):
             DEPLOYER.require_ci(tag, revision, bootstrap=True)
@@ -1175,7 +1076,7 @@ class ProductionResourceContractTests(unittest.TestCase):
         medium = DEPLOYER._risk_result('medium', ['frontend'])
         medium_run = dict(main, jobs=[source_job,
                                      'Verify internal delivery gates [risk=medium base=' + source_revision + ']',
-                                     'Verify browser and release client'])
+                                     image_job])
         with patch.object(DEPLOYER, '_ci_runs', return_value=[medium_run]), \
                 patch.object(DEPLOYER, '_run_has_jobs', side_effect=has_jobs):
             # Higher-tier proof on the same source base is reusable for a lower-risk diff.
@@ -1188,12 +1089,12 @@ class ProductionResourceContractTests(unittest.TestCase):
 
         high = DEPLOYER._risk_result('high', ['migration'])
         high_attestation = 'Verify internal delivery gates [risk=high base=' + source_revision + ']'
-        high_run = dict(main, jobs=[source_job, high_attestation])
+        high_run = dict(main, jobs=[source_job, image_job, high_attestation])
         with patch.object(DEPLOYER, '_ci_runs', return_value=[medium_run]), \
                 patch.object(DEPLOYER, '_run_has_jobs', side_effect=has_jobs), \
                 self.assertRaisesRegex(RuntimeError, 'STABLE_EXACT_MAIN_APPLICABLE_CI_REQUIRED'):
             DEPLOYER.require_ci(tag, revision, source_revision=source_revision, classification=high)
-        lower_tier_run = dict(main, jobs=[source_job, attestation, database_job])
+        lower_tier_run = dict(main, jobs=[source_job, image_job, attestation, database_job])
         with patch.object(DEPLOYER, '_ci_runs', return_value=[lower_tier_run]), \
                 patch.object(DEPLOYER, '_run_has_jobs', side_effect=has_jobs), \
                 self.assertRaisesRegex(RuntimeError, 'STABLE_EXACT_MAIN_APPLICABLE_CI_REQUIRED'):
@@ -1324,7 +1225,7 @@ class ProductionResourceContractTests(unittest.TestCase):
         hosts = []
 
         class AlreadyCurrentHost:
-            def __init__(self, _tag, _revision):
+            def __init__(self, _tag, _revision, _credentials):
                 self.already_current = False
                 self.preflight_calls = 0
                 hosts.append(self)
@@ -1353,10 +1254,11 @@ class ProductionResourceContractTests(unittest.TestCase):
                     patch.object(DEPLOYER, 'secure_lock', return_value=9), \
                     patch.object(DEPLOYER.signal, 'signal') as signal_mock, \
                     patch.object(DEPLOYER, 'HostDeployment', AlreadyCurrentHost), \
+                    patch.object(DEPLOYER, 'read_release_credentials', return_value={'token': 'ghs_' + 'x' * 40, 'runId': 42}), \
                     patch.object(DEPLOYER, 'deployment_flow') as deployment_flow, \
                     redirect_stdout(io.StringIO()) as stdout:
                 os_module.geteuid.return_value = 0
-                DEPLOYER.main(['deploy', TARGET_TAG, revision, 'CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI'])
+                DEPLOYER.main(['deploy', TARGET_TAG, revision, 'CONFIRM_STABLE_CI_IMAGES'])
             self.assertEqual(len(hosts), 1)
             self.assertEqual(hosts[0].preflight_calls, 1)
             deployment_flow.assert_not_called()

@@ -23,7 +23,7 @@ test("stable deploy gate preserves its recovery boundary", () => {
   assert.match(output, /OK/u);
 });
 
-test("forced gateway exposes only the stable status and deploy protocol", () => {
+test("forced gateway exposes fixed stable status, refresh and deploy protocols", () => {
   const gatewayPath = "deploy/production/ai-project-os-actions-gateway";
   const gateway = readFileSync(gatewayPath, "utf8");
   const sudoers = readFileSync("deploy/production/ai-project-os-deploy.sudoers", "utf8");
@@ -32,17 +32,17 @@ test("forced gateway exposes only the stable status and deploy protocol", () => 
   assert.match(gateway, /original_command.*== stable-tooling-status/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-release-stable --status/u);
   assert.ok(gateway.includes("^deploy-stable\\ (v[1-9][0-9]*\\."));
-  assert.ok(gateway.includes("([0-9a-f]{40})\\ (CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI)$"));
+  assert.ok(gateway.includes("([0-9a-f]{40})\\ (CONFIRM_STABLE_CI_IMAGES)$"));
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-release-stable/u);
   assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-release-stable$/mu);
 
   const sha = "a".repeat(40);
   for (const command of [
-    `deploy-stable v1.0.3 ${"a".repeat(39)} CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI`,
-    `deploy-stable v1.0.3 ${sha} CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI; id`,
-    `deploy-stable v1.0.3 ${sha} CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI extra`,
+    `deploy-stable v1.0.3 ${"a".repeat(39)} CONFIRM_STABLE_CI_IMAGES`,
+    `deploy-stable v1.0.3 ${sha} CONFIRM_STABLE_CI_IMAGES; id`,
+    `deploy-stable v1.0.3 ${sha} CONFIRM_STABLE_CI_IMAGES extra`,
     `deploy-stable v1.0.3 ${sha} CONFIRM_STABLE_WITHOUT_BACKUP`,
-    `deploy-stable v1.0.3.0 ${sha} CONFIRM_STABLE_WITH_BACKUP_AND_FULL_CI`,
+    `deploy-stable v1.0.3.0 ${sha} CONFIRM_STABLE_CI_IMAGES`,
   ]) {
     const result = spawnSync("bash", [gatewayPath], {
       encoding: "utf8",

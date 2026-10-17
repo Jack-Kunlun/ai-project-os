@@ -1,13 +1,61 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   assertSafeCandidateIdentity,
   createCandidateIdentity,
+  createPrebuiltComposeOverride,
   evaluateCandidateReadiness,
   parseComposePs,
   readCoherentVersion,
 } from "../scripts/local-release-candidate";
+
+test("prebuilt candidate Compose override removes inherited builds for every service", (context) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "ai-project-os-compose-override-"));
+  const basePath = join(temporaryDirectory, "compose.base.yaml");
+  const overridePath = join(temporaryDirectory, "compose.override.yaml");
+  try {
+    writeFileSync(basePath, [
+      "services:",
+      ...["principal-bootstrap", "migrate", "reconcile", "app", "worker", "git-worker"].flatMap((name) => [
+        `  ${name}:`,
+        "    image: local/base:latest",
+        "    build: .",
+        ...(name === "app" ? ["    env_file:", "      - candidate.env"] : []),
+      ]),
+      "",
+    ].join("\n"));
+    const imageId = (digit: string) => `sha256:${digit.repeat(64)}`;
+    const override = createPrebuiltComposeOverride({
+      app: { ref: "local/app:current", id: imageId("a") },
+      worker: { ref: "local/worker:current", id: imageId("b") },
+      migrate: { ref: "local/migrate:current", id: imageId("c") },
+    });
+    writeFileSync(overridePath, override);
+
+    const version = spawnSync("docker", ["compose", "version"], { encoding: "utf8" });
+    if (version.error || version.status !== 0) {
+      context.skip("Docker Compose is unavailable for the merge integration check");
+      return;
+    }
+    const result = spawnSync("docker", [
+      "compose", "--ansi", "never", "--project-directory", process.cwd(),
+      "--file", basePath, "--file", overridePath, "config", "--format", "json",
+    ], { cwd: process.cwd(), encoding: "utf8", maxBuffer: 2 * 1024 * 1024 });
+    assert.equal(result.status, 0, result.stderr);
+    const configured = JSON.parse(result.stdout) as { services: Record<string, Record<string, unknown>> };
+    for (const service of ["principal-bootstrap", "migrate", "reconcile", "app", "worker", "git-worker"]) {
+      assert.equal("build" in configured.services[service]!, false, service);
+    }
+    assert.equal("env_file" in configured.services.app!, false);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
 
 test("candidate identity scopes every destructive target to one generated project", () => {
   const identity = createCandidateIdentity("m8abcdeffeed", "0.6.0-dev.8");
@@ -59,21 +107,28 @@ test("release version must agree across package, application, and OCI metadata",
 });
 
 test("local release command is wired to CI without tag, push, or broad cleanup", async () => {
-  const [packageJsonSource, workflow, runner, dockerfile] = await Promise.all([
+  const [packageJsonSource, workflow, runner, dockerfile, candidateHelpers] = await Promise.all([
     readFile("package.json", "utf8"),
     readFile(".github/workflows/ci.yml", "utf8"),
     readFile("scripts/run-local-release.ts", "utf8"),
     readFile("Dockerfile", "utf8"),
+    readFile("scripts/local-release-candidate.ts", "utf8"),
   ]);
   const packageJson = JSON.parse(packageJsonSource) as { scripts: Record<string, string> };
   assert.equal(packageJson.scripts["release:local"], "node --import tsx scripts/run-local-release.ts");
-  assert.match(runner, /env_file: !reset \[\]/u);
-  assert.match(runner, /AI_PROJECT_OS_EMAIL_AUTH_ENABLED: "false"/u);
-  assert.match(runner, /for \(const service of \["app", "worker", "git-worker", "principal-bootstrap", "migrate", "reconcile"\]\)/u);
+  assert.match(candidateHelpers, /env_file: !reset \[\]/u);
+  assert.match(candidateHelpers, /build: !reset null/u);
+  assert.equal([...candidateHelpers.matchAll(/build: !reset null/gu)].length, 6);
+  assert.match(candidateHelpers, /AI_PROJECT_OS_EMAIL_AUTH_ENABLED: "false"/u);
   assert.match(workflow, /pnpm release:local/u);
+  assert.match(runner, /prepareReleaseImagesForCheck\(version, revision\)/u);
+  assert.match(runner, /manifest\.images\.app\.id/u);
+  assert.match(runner, /manifest\.images\.worker\.id/u);
+  assert.match(runner, /"--no-build"/u);
+  assert.match(runner, /createPrebuiltComposeOverride\(imageManifest\.images\)/u);
+  assert.doesNotMatch(runner, /docker",\s*\["build"/u);
   assert.match(runner, /LOCAL_RELEASE_WORKTREE_DIRTY/u);
   assert.match(runner, /restart", "postgres", "app", "worker", "git-worker/u);
-  assert.match(runner, /LOCAL_RELEASE_IMAGE_PREFIX\}-reconcile/u);
   assert.match(runner, /verifyMigrations/u);
   assert.match(runner, /verifyImageLabels/u);
   assert.match(runner, /seedBusinessFixture/u);

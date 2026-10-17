@@ -72,7 +72,8 @@ test("tag CI attests identity and main proof while branch jobs follow risk tier"
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");
   const scope = workflow.split("\n  scope:\n")[1]?.split("\n  source:\n")[0];
   assert.ok(scope);
-  const tagScopeScript = scope.split("        run: |\n")[1]?.split("\n").map((line) => line.replace(/^          /u, "")).join("\n");
+  const tagScopeScript = scope.split("        id: classify\n")[1]?.split("        run: |\n")[1]
+    ?.split("\n      - name:")[0]?.split("\n").map((line) => line.replace(/^          /u, "")).join("\n");
   assert.ok(tagScopeScript);
   const directory = await mkdtemp(path.join(tmpdir(), "ai-project-os-tag-ci-"));
   try {
@@ -82,19 +83,25 @@ test("tag CI attests identity and main proof while branch jobs follow risk tier"
       env: { ...process.env, GITHUB_REF: "refs/tags/v0.7.3", GITHUB_OUTPUT: output },
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(await readFile(output, "utf8"), "risk=tag\nbase=unknown\ndatabase=false\nbrowser=false\ncoverage=false\n");
+    const fields = Object.fromEntries((await readFile(output, "utf8")).trim().split("\n").map((line) => line.split("=")));
+    assert.equal(fields.risk, "tag");
+    assert.equal(fields.base, "unknown");
+    for (const key of ["database", "browser", "coverage", "impact_phone_auth", "impact_oid10", "impact_browser", "impact_candidate", "impact_schema_validation"]) {
+      assert.equal(fields[key], "false", key);
+    }
+    assert.equal(fields.impact_gate_filter, "none");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
   assert.match(workflow, /tag-attestation:/u);
   assert.match(workflow, /node scripts\/production-stable-release\.mjs attest-tag/u);
-  assert.match(workflow, /database:\n    needs: scope\n    if: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) && needs\.scope\.outputs\.database == 'true' \}\}/u);
-  assert.match(workflow, /browser:\n    needs: scope\n    if: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) && needs\.scope\.outputs\.database != 'true' && needs\.scope\.outputs\.browser == 'true' \}\}/u);
+  assert.match(workflow, /database:\n    needs: scope\n    if: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) && needs\.scope\.outputs\.risk == 'high' \}\}/u);
+  assert.match(workflow, /build-images:\n    needs: scope\n    if: \$\{\{ !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/u);
   assert.match(workflow, /name: Verify internal delivery gates \[risk=\$\{\{ needs\.scope\.outputs\.risk \}\} base=\$\{\{ needs\.scope\.outputs\.base \}\}\]/u);
-  assert.match(workflow, /needs: \[scope, source, database, browser\]/u);
+  assert.match(workflow, /needs: \[scope, source, database, build-images\]/u);
   assert.doesNotMatch(workflow.split("  source:\n")[1]?.split("  database:\n")[0], /services:/u);
-  assert.match(workflow, /verify:\n    needs: \[scope, source, database, browser\]/u);
-  assert.match(workflow, /verify:\n    needs: \[scope, source, database, browser\]\n    if: \$\{\{ always\(\) && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/u);
+  assert.match(workflow, /verify:\n    needs: \[scope, source, database, build-images\]/u);
+  assert.match(workflow, /verify:\n    needs: \[scope, source, database, build-images\]\n    if: \$\{\{ always\(\) && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/u);
   assert.match(workflow, /test "\$DATABASE_RESULT" = success/u);
 });
 

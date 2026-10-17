@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { planRepositoryImpact } from "./ci-impact-plan.mjs";
 
 const shaPattern = /^[a-f0-9]{40}$/u;
 const stableVersionPattern = /^([1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
@@ -137,10 +138,23 @@ async function fetchProductionHealth() {
   return response.json();
 }
 
-function writeScope(scope) {
-  const output = `risk=${scope.risk}\nbase=${scope.base}\ndatabase=${scope.database}\nbrowser=${scope.browser}\ncoverage=${scope.coverage}\n`;
+function writeScope(scope, impact = planRepositoryImpact(process.cwd(), scope.base, process.env.CI_HEAD_SHA ?? "")) {
+  if (impact.mode === "full" && scope.risk !== "high") scope = conservativeRiskScope(scope.base);
+  const output = [
+    `risk=${scope.risk}`,
+    `base=${scope.base}`,
+    `database=${scope.database}`,
+    `browser=${scope.browser}`,
+    `coverage=${scope.coverage}`,
+    `impact_gate_filter=${impact.gateFilter}`,
+    `impact_phone_auth=${impact.phoneAuth}`,
+    `impact_oid10=${impact.oid10}`,
+    `impact_browser=${impact.browser}`,
+    `impact_candidate=${impact.candidate}`,
+    `impact_schema_validation=${impact.schemaValidation}`,
+  ].join("\n") + "\n";
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output, { mode: 0o600 });
-  process.stdout.write(`CI_CHANGE_SCOPE risk=${scope.risk} base=${scope.base} database=${scope.database} browser=${scope.browser} coverage=${scope.coverage}\n`);
+  process.stdout.write(`CI_CHANGE_SCOPE risk=${scope.risk} base=${scope.base} database=${scope.database} browser=${scope.browser} coverage=${scope.coverage} gates=${impact.gateFilter} phone=${impact.phoneAuth} oid10=${impact.oid10} imageBrowser=${impact.browser} candidate=${impact.candidate} reason=${impact.reason}\n`);
 }
 
 async function main() {

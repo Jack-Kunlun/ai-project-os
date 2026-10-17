@@ -8,7 +8,7 @@ import { classifyProductionChange, invokePinnedRiskClassifier } from "./ci-chang
 export const CANONICAL_REPOSITORY = "Jack-Kunlun/ai-project-os";
 export const MAIN_SOURCE_JOB = "Verify source and client";
 export const MAIN_DATABASE_JOB = "Verify database and release candidate";
-export const MAIN_BROWSER_JOB = "Verify browser and release client";
+export const MAIN_IMAGE_JOB = "Build and verify release images";
 export const TOOLING_PATHS = Object.freeze({
   deployer: "deploy/production/ai-project-os-release-stable.py",
   backup: "deploy/production/ai-project-os-backup",
@@ -60,7 +60,10 @@ export function assertReleaseIdentity({ packageVersion, appVersionSource, docker
   );
   requireCondition(
     new RegExp(`org\\.opencontainers\\.image\\.version\\s*=\\s*["']${escapeRegExp(packageVersion)}["']`, "u")
-      .test(dockerfile),
+      .test(dockerfile)
+      || (new RegExp(`^ARG APP_VERSION="${escapeRegExp(packageVersion)}"$`, "mu").test(dockerfile)
+        && [...dockerfile.matchAll(/org\.opencontainers\.image\.version="([^"]+)"/gu)]
+          .map((match) => match[1]).join(",") === "${APP_VERSION}"),
     "DOCKER_VERSION_MISMATCH",
   );
   requireCondition(
@@ -119,7 +122,8 @@ export function mainCiRunHasRiskProof(run, jobs, sha, scope, {
       || !["low", "medium", "high"].includes(attestedRisk)
       || riskRank(attestedRisk) < riskRank(scope.risk)
       || !sha40Pattern.test(attestedBase ?? "")
-      || !hasSuccessfulJob(jobs, MAIN_SOURCE_JOB)) {
+      || !hasSuccessfulJob(jobs, MAIN_SOURCE_JOB)
+      || !hasSuccessfulJob(jobs, MAIN_IMAGE_JOB)) {
     return false;
   }
   const attestation = (Array.isArray(jobs) ? jobs : [])
@@ -128,9 +132,7 @@ export function mainCiRunHasRiskProof(run, jobs, sha, scope, {
     .find((proof) => proof?.base === attestedBase && proof.risk === attestedRisk);
   if (!attestation) return false;
   const databaseRequired = scope.database || attestedRisk === "high";
-  const browserRequired = scope.browser || attestedRisk !== "low";
   if (databaseRequired) return hasSuccessfulJob(jobs, MAIN_DATABASE_JOB);
-  if (browserRequired) return hasSuccessfulJob(jobs, MAIN_BROWSER_JOB);
   return true;
 }
 
@@ -210,7 +212,7 @@ export function parseDeploymentReceipt(stdout, tag, sha, {
   requireCondition(["low", "medium", "high"].includes(risk) && typeof databaseRequired === "boolean", "RELEASE_RISK_INVALID");
   const escapedTag = escapeRegExp(tag);
   const pattern = new RegExp(
-    `^(STABLE_DEPLOY_OK|STABLE_DEPLOY_ALREADY_CURRENT) tag=${escapedTag} revision=${sha} migration_count=(\\d+) backup=(\\d{8}T\\d{6}Z-pre-deploy-to-${escapedTag}\\.[A-Za-z0-9]{6}) restore=(not-required|(?:skipped-by-policy-)?\\d+-to-\\d+)$`,
+    `^(STABLE_DEPLOY_OK|STABLE_DEPLOY_ALREADY_CURRENT) tag=${escapedTag} revision=${sha} migration_count=(\\d+) backup=(not-required|\\d{8}T\\d{6}Z-pre-deploy-to-${escapedTag}\\.[A-Za-z0-9]{6}) restore=(not-required|(?:skipped-by-policy-)?\\d+-to-\\d+)$`,
     "u",
   );
   const matches = String(stdout).split(/\r?\n/u).filter((line) => line.startsWith("STABLE_DEPLOY_OK ") || line.startsWith("STABLE_DEPLOY_ALREADY_CURRENT "));
@@ -221,6 +223,16 @@ export function parseDeploymentReceipt(stdout, tag, sha, {
   const restore = match[4];
   const targetCount = expectedMigrationCount;
   let sourceCount = sourceMigrationCount;
+  if (match[3] === "not-required") {
+    requireCondition(restore === "not-required"
+      && migrationCount === expectedMigrationCount
+      && sourceMigrationCount <= expectedMigrationCount,
+    "DEPLOY_RECEIPT_MIGRATION_MISMATCH");
+    return {
+      status: match[1], tag, revision: sha, migrationCount,
+      backup: "not-required", sourceCount, targetCount, restore, line: matches[0],
+    };
+  }
   if (restore === "not-required") {
     requireCondition(
       migrationCount === expectedMigrationCount
@@ -717,7 +729,7 @@ function releaseEvidenceBody({ notesPath, tag, sha, receiptPath }) {
   for (const url of [workflowUrl, mainUrl]) {
     requireCondition(/^https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\/actions\/runs\/\d+$/u.test(url ?? ""), "CI_EVIDENCE_URL_INVALID");
   }
-  return `${notes}\n\n## 生产发布回执\n\n- 版本：\`${tag}\`\n- 提交：\`${sha}\`\n- 本次发布风险等级：\`${actualRisk}\`\n- 主分支 CI 验证等级：\`${attestedRisk}\`\n- 主分支分层 CI：[运行记录](${mainUrl})\n- 生产发布工作流：[运行记录](${workflowUrl})\n- 备份与迁移回执：\`${receipt}\`\n`;
+  return `${notes}\n\n## 生产发布回执\n\n- 版本：\`${tag}\`\n- 提交：\`${sha}\`\n- 本次发布风险等级：\`${actualRisk}\`\n- 主分支 CI 验证等级：\`${attestedRisk}\`\n- 主分支分层 CI：[运行记录](${mainUrl})\n- 生产发布工作流：[运行记录](${workflowUrl})\n- 镜像发布与迁移回执：\`${receipt}\`\n`;
 }
 
 async function createReleaseAfterDeployment(tag, sha, version, receiptPath) {
@@ -746,7 +758,6 @@ async function main() {
   switch (command) {
     case "validate-candidate": {
       const candidate = candidateContext();
-      validateSshHost(process.env.PRODUCTION_SSH_HOST);
       writeGitHubEnv({
         RELEASE_VERSION: candidate.version,
         RELEASE_TAG: candidate.tag,
@@ -771,7 +782,18 @@ async function main() {
     }
     case "verify-tooling": {
       requireCondition(args.length === 1, "ARGUMENTS_INVALID");
+      validateSshHost(process.env.PRODUCTION_SSH_HOST);
       await validateToolingFile(resolve(args[0]), process.env.GITHUB_SHA);
+      return;
+    }
+    case "export-context": {
+      const fields = ["RELEASE_VERSION", "RELEASE_TAG", "MIGRATION_COUNT", "SOURCE_MIGRATION_COUNT",
+        "MAIN_CI_RUN_ID", "MAIN_CI_RUN_URL", "MAIN_CI_SOURCE_BASE", "MAIN_CI_ATTESTED_RISK",
+        "RELEASE_RISK", "RELEASE_DATABASE_REQUIRED", "RELEASE_BROWSER_REQUIRED"];
+      const values = Object.fromEntries(fields.map((field) => [field, process.env[field]]));
+      requireCondition(Object.values(values).every((value) => typeof value === "string" && value.length > 0
+        && !/[\r\n]/u.test(value)), "RELEASE_CONTEXT_INVALID");
+      githubOutput(Object.fromEntries(Object.entries(values).map(([name, value]) => [name.toLowerCase(), value])));
       return;
     }
     case "ensure-tag": {

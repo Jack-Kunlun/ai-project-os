@@ -1,6 +1,6 @@
 # 本地持续交付候选门禁
 
-`pnpm release:local` 用于在当前机器上构建并验收一个可整体丢弃的 Compose 候选。它是 CI 之后的容器交付门禁，不会更新正式实例，不会创建 Git tag、push 分支或镜像，也不会执行托管部署。
+`pnpm release:local` 用于在当前机器上构建并验收一个可整体丢弃的 Compose 候选。设置 `RELEASE_IMAGES_MANIFEST` 时复用该次 CI 的精确镜像 ID，不再构建；清理隔离资源时保留这些共享镜像。它是容器交付门禁，不会更新正式实例，不会创建 Git tag、push 分支或镜像，也不会执行托管部署。
 
 ## 前置条件
 

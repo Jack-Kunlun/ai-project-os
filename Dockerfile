@@ -1,8 +1,5 @@
 FROM node:24.19.0-bookworm-slim AS base
 
-LABEL org.opencontainers.image.title="AI Project OS" \
-      org.opencontainers.image.version="1.0.5"
-
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
@@ -29,21 +26,30 @@ COPY . .
 RUN pnpm db:generate
 RUN NODE_OPTIONS=--max-old-space-size=6144 pnpm build
 
-FROM base AS migrate
+FROM base AS runtime-metadata
+
+ARG APP_VERSION="1.0.9"
+ARG APP_REVISION=unknown
+LABEL org.opencontainers.image.title="AI Project OS" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${APP_REVISION}" \
+      org.opencontainers.image.source="https://github.com/Jack-Kunlun/ai-project-os"
+
+FROM runtime-metadata AS migrate
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=deps --chown=node:node /app/package.json ./package.json
-COPY --from=builder --chown=node:node /app/prisma ./prisma
-COPY --from=builder --chown=node:node /app/prisma.config.ts ./prisma.config.ts
+COPY --chown=node:node prisma ./prisma
+COPY --chown=node:node prisma.config.ts ./prisma.config.ts
 
 USER node
 
 CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "prisma.config.ts"]
 
-FROM deps AS worker
+FROM runtime-metadata AS worker
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -52,6 +58,7 @@ ENV AI_PROJECT_OS_MASTER_KEY_FILE=/var/lib/ai-project-os-secrets/master.key
 # non-secret build-only URL with the real runtime connection.
 ENV DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build"
 
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY . .
 RUN pnpm db:generate
 RUN mkdir -p /var/lib/ai-project-os-secrets /var/lib/ai-project-os/uploads \
@@ -61,7 +68,7 @@ USER node
 
 CMD ["node", "node_modules/tsx/dist/cli.mjs", "scripts/automation-worker.ts"]
 
-FROM base AS runner
+FROM runtime-metadata AS runner
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -80,3 +87,7 @@ USER node
 EXPOSE 3000
 
 CMD ["node", "server.js"]
+
+FROM scratch AS performance-export
+
+COPY --from=builder /app/.next /.next

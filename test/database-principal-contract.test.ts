@@ -595,7 +595,8 @@ test("the isolated OID10 PostgreSQL gate runs after the shared PostgreSQL gates"
   const oid10Gate = ci.indexOf("run: pnpm test:database-principal-oid10");
   assert.ok(sharedGate >= 0);
   assert.ok(oid10Gate > sharedGate);
-  assert.match(ci, /name: Run isolated PostgreSQL 18 OID10 gate/u);
+  assert.match(ci, /name: Run PostgreSQL 18 OID10 gate when affected/u);
+  assert.match(ci, /needs\.scope\.outputs\.impact_oid10 == 'true'/u);
 });
 
 test("protected entitlement relations require the real session principal", () => {

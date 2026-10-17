@@ -8,4 +8,15 @@ coverage
 test-results
 playwright-report
 .data
+test/**
+!test/fixtures
+!test/fixtures/**
+e2e
+docs
+.github
+.agents
+evidence
+playwright-report
+test-results
+playwright/.cache
 *.log

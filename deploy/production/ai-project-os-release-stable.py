@@ -2539,6 +2539,8 @@ def _retired_matches(plan, base, snapshot, inventory, records, removed):
         diagnostic = {'schema': 1, 'operation': 'retired-container-drift',
                       'baseDifferences': base_differences,
                       'allImageIdsChanged': expected['allImageIds'] != snapshot['allImageIds'],
+                      'expectedAllImageIdsSha256': fingerprint(expected['allImageIds']),
+                      'actualAllImageIdsSha256': fingerprint(snapshot['allImageIds']),
                       'containerDifferences': container_differences,
                       'recordDifferences': record_differences}
         data = _cache_json_bytes(diagnostic)
@@ -2549,7 +2551,8 @@ def _retired_matches(plan, base, snapshot, inventory, records, removed):
 
 def _retired_public_protection(base, snapshot, inventory, digest):
     value = _image_public_protection(base, snapshot, digest)
-    value['containerInventory'] = inventory
+    value['containerInventory'] = [{key: item[key] for key in ('id', 'image', 'status', 'fingerprint')}
+                                    for item in inventory]
     return value
 
 

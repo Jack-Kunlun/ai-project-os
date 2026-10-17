@@ -248,8 +248,12 @@ class RetiredContainerTests(unittest.TestCase):
         self.assertEqual(receipt['baseDifferences'][0]['field'], 'ownedImages')
         self.assertEqual(receipt['containerDifferences'][0]['fields'][0]['field'], '.ExecIDs')
         self.assertNotIn('secret-fixture', text)
+        self.assertEqual(receipt['expectedAllImageIdsSha256'], receipt['actualAllImageIdsSha256'])
         self.assertTrue(all(len(item['expectedSha256']) == len(item['actualSha256']) == 64
                             for item in receipt['baseDifferences']))
+        with patch.object(D, '_image_public_protection', return_value={}):
+            public = D._retired_public_protection(after[2], after[3], after[4], HASH)
+        self.assertNotIn('fieldFingerprints', json.dumps(public))
 
     def test_read_only_inspection_refuses_unstable_snapshot_before_installing_plan(self):
         first, second = state(), state()

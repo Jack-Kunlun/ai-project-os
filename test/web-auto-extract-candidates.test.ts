@@ -104,3 +104,15 @@ test("auto extract still rejects a malformed response envelope", () => {
     (error: unknown) => error instanceof WebAutoExtractError && error.code === "AUTO_EXTRACT_INVALID_MODEL_OUTPUT",
   );
 });
+
+test("auto extract rejects truncated output and extra top-level envelope fields", () => {
+  const validResponse = JSON.stringify({ candidates: [] });
+  assert.throws(
+    () => parseAutoExtractCandidates(validResponse, "原文", [], true),
+    (error: unknown) => error instanceof WebAutoExtractError && error.code === "AUTO_EXTRACT_OUTPUT_TRUNCATED",
+  );
+  assert.throws(
+    () => parseAutoExtractCandidates(JSON.stringify({ candidates: [], extra: true }), "原文"),
+    (error: unknown) => error instanceof WebAutoExtractError && error.code === "AUTO_EXTRACT_INVALID_MODEL_OUTPUT",
+  );
+});

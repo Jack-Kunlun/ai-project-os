@@ -89,6 +89,7 @@ export type WebAutoExtractErrorCode =
   | "AUTO_EXTRACT_SOURCE_NOT_FOUND"
   | "AUTO_EXTRACT_SOURCE_TOO_LARGE"
   | "AUTO_EXTRACT_INVALID_MODEL_OUTPUT"
+  | "AUTO_EXTRACT_OUTPUT_TRUNCATED"
   | "AUTO_EXTRACT_SOURCE_EXCERPT_MISMATCH"
   | "AUTO_EXTRACT_CANDIDATE_CONFLICT";
 
@@ -191,7 +192,9 @@ export function parseAutoExtractCandidates(
   content: string,
   sourceText: string,
   evidenceBlocks: ReadonlyArray<AutoExtractEvidenceBlock> = [],
+  outputTruncated = false,
 ): ParsedAutoExtractCandidates {
+  if (outputTruncated) return fail("AUTO_EXTRACT_OUTPUT_TRUNCATED");
   let raw: unknown;
   try {
     raw = JSON.parse(content) as unknown;
@@ -458,6 +461,8 @@ export async function runAutoExtractJob(input: Readonly<{
             modelId: dispatch.modelId,
             maxOutputTokens: dispatch.maxOutputTokens,
             temperature: 0,
+            disableThinking: true,
+            jsonOutput: true,
             messages: [
               {
                 role: "system",
@@ -482,7 +487,7 @@ export async function runAutoExtractJob(input: Readonly<{
             ],
           }),
         }, db);
-        const parsedCandidates = parseAutoExtractCandidates(response.content, source.contentText, evidenceBlocks);
+        const parsedCandidates = parseAutoExtractCandidates(response.content, source.contentText, evidenceBlocks, response.outputTruncated);
         returnedCandidateCount += parsedCandidates.returnedCandidateCount;
         rejectedCandidateCount += parsedCandidates.rejectedCandidateCount;
         recoveredExcerptCount += parsedCandidates.recoveredExcerptCount;

@@ -49,6 +49,7 @@ export type ChatResult = Readonly<{
   outputTokens: number;
   usageKnown: boolean;
   providerRequestId: string | null;
+  outputTruncated?: boolean;
 }>;
 
 export type EmbeddingResult = Readonly<{
@@ -257,8 +258,10 @@ export async function invokeChatCompletion(input: Readonly<{
   messages: readonly ChatMessage[];
   maxOutputTokens: number;
   temperature?: number;
-  /** Disable provider reasoning only for bounded connectivity probes. */
+  /** Disable provider reasoning for bounded probes or bounded extraction calls. */
   disableThinking?: boolean;
+  /** Request a JSON object response from providers that support JSON mode. */
+  jsonOutput?: boolean;
   absoluteDeadlineAt?: Date;
 }>): Promise<ChatResult> {
   const { payload, requestId } = await providerPost(input.connection, "/chat/completions", {
@@ -268,6 +271,7 @@ export async function invokeChatCompletion(input: Readonly<{
     temperature: input.temperature ?? 0,
     stream: false,
     ...(input.connection.kind === "deepseek" && input.disableThinking ? { thinking: { type: "disabled" } } : {}),
+    ...(input.connection.kind === "deepseek" && input.jsonOutput ? { response_format: { type: "json_object" } } : {}),
   }, input.absoluteDeadlineAt);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
@@ -275,10 +279,18 @@ export async function invokeChatCompletion(input: Readonly<{
   if (!Array.isArray(choices) || choices.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const first = choices[0];
   if (typeof first !== "object" || first === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
-  const message = (first as Record<string, unknown>).message;
+  const choice = first as Record<string, unknown>;
+  const outputTruncated = choice.finish_reason === "length";
+  const message = choice.message;
   if (typeof message !== "object" || message === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
-  const content = (message as Record<string, unknown>).content;
-  if (typeof content !== "string" || content.trim().length === 0 || content.length > 1_000_000) {
+  const responseContent = (message as Record<string, unknown>).content;
+  const acceptsEmptyTruncatedJson = input.connection.kind === "deepseek" && input.jsonOutput === true && outputTruncated;
+  const content = responseContent === null && acceptsEmptyTruncatedJson ? "" : responseContent;
+  if (
+    typeof content !== "string"
+    || (content.trim().length === 0 && !acceptsEmptyTruncatedJson)
+    || content.length > 1_000_000
+  ) {
     return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   }
   const usage = usageCounts(record);
@@ -288,6 +300,7 @@ export async function invokeChatCompletion(input: Readonly<{
     outputTokens: usage.output,
     usageKnown: usage.known,
     providerRequestId: requestId,
+    outputTruncated,
   });
 }
 

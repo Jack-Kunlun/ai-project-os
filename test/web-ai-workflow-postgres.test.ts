@@ -68,6 +68,10 @@ test(
     let longSourceId: string | null = null;
     let longFact = "";
     let retireDuringLongExtraction = false;
+    let truncatedSourceId: string | null = null;
+    let truncatedDispatchCount = 0;
+    let partialSourceId: string | null = null;
+    const partialDispatchRanges: Array<{ start: number; end: number }> = [];
 
     await unlink(masterKeyPath).catch(() => undefined);
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
@@ -88,8 +92,34 @@ test(
         const system = messages[0]!.content;
         const user = JSON.parse(messages[1]!.content) as Record<string, unknown>;
         let content: string;
+        let finishReason: string | undefined;
         if (system.includes("extract project-memory candidates")) {
-          if (user.sourceId === longSourceId && longSourceId !== null) {
+          if (user.sourceId === partialSourceId && partialSourceId !== null) {
+            const sourceRange = user.sourceRange as { start: number; end: number };
+            const evidenceBlocks = user.evidenceBlocks as Array<{ id: string; text: string }>;
+            partialDispatchRanges.push({ start: sourceRange.start, end: sourceRange.end });
+            const excerpt = sourceRange.start === 0
+              ? "前段事实：项目编号为青禾-2026。"
+              : "后段事实：验收日期为2026年10月20日。";
+            assert.equal(evidenceBlocks.some((block) => block.text.includes(excerpt)), true);
+            content = JSON.stringify({ candidates: [{
+              type: "decision",
+              title: sourceRange.start === 0 ? "前段编号" : "后段验收日期",
+              content: excerpt,
+              sourceExcerpt: excerpt,
+            }] });
+            if (sourceRange.start !== 0) finishReason = "length";
+          } else if (user.sourceId === truncatedSourceId && truncatedSourceId !== null) {
+            truncatedDispatchCount += 1;
+            const excerpt = "本次验收确认使用统一归档规范。";
+            content = JSON.stringify({ candidates: [{
+              type: "decision",
+              title: "归档规范",
+              content: excerpt,
+              sourceExcerpt: excerpt,
+            }] });
+            finishReason = "length";
+          } else if (user.sourceId === longSourceId && longSourceId !== null) {
             const longRequest = user as unknown as typeof longAutoExtractRequests[number];
             longAutoExtractRequests.push(longRequest);
             if (retireDuringLongExtraction) {
@@ -136,7 +166,7 @@ test(
           });
         }
         return new Response(JSON.stringify({
-          choices: [{ message: { content } }],
+          choices: [{ message: { content }, ...(finishReason === undefined ? {} : { finish_reason: finishReason }) }],
           usage: { prompt_tokens: 20, completion_tokens: 10 },
         }), { status: 200, headers: { "content-type": "application/json", "x-request-id": `chat-${suffix}` } });
       }
@@ -464,6 +494,109 @@ test(
       assert.equal(audits.every((audit) => audit.status === "succeeded"), true);
       assert.equal(audits.length >= 5, true);
       assert.equal(await db.webAiGrant.count({ where: { projectId } }) >= 4, true);
+
+      const truncatedSourceText = "本次验收确认使用统一归档规范。";
+      const truncatedSource = await db.projectSource.create({ data: {
+        projectId,
+        kind: "manual",
+        originScope: "project",
+        contentText: truncatedSourceText,
+        contentHash: hashSourceContent(truncatedSourceText),
+        manualContentDedupeKey: null,
+      } });
+      truncatedSourceId = truncatedSource.id;
+      const truncatedClientKey = `extract-truncated-${suffix}`;
+      const truncatedConfirmation = await prepareAutoExtractConfirmation({
+        projectId, requestedBy: user, clientKey: truncatedClientKey, sourceIds: [truncatedSource.id], db,
+      });
+      await assert.rejects(runAutoExtractJob({
+        projectId,
+        requestedBy: user,
+        clientKey: truncatedClientKey,
+        challengeId: truncatedConfirmation.challengeId,
+        request: { sourceIds: [truncatedSource.id] },
+      }, db), (error: unknown) => error instanceof Error && "code" in error && error.code === "AUTO_EXTRACT_OUTPUT_TRUNCATED");
+      assert.equal(truncatedDispatchCount, 1, "truncated provider output is not automatically retried");
+      assert.equal(await db.projectItem.count({ where: { projectId, sourceId: truncatedSource.id } }), 0);
+      assert.equal(await db.webAiCandidate.count({ where: { projectId, sourceId: truncatedSource.id } }), 0);
+
+      const truncatedChallenge = await db.webAiConfirmationChallenge.findUniqueOrThrow({
+        where: { id: truncatedConfirmation.challengeId },
+        select: { consumedJobId: true },
+      });
+      assert.ok(truncatedChallenge.consumedJobId);
+      const truncatedJob = await db.backgroundJob.findUniqueOrThrow({
+        where: { id: truncatedChallenge.consumedJobId },
+        select: { status: true, failureCode: true },
+      });
+      assert.equal(truncatedJob.status, "failed");
+      assert.equal(truncatedJob.failureCode, "AUTO_EXTRACT_OUTPUT_TRUNCATED");
+      const truncatedAudits = await db.providerCallAudit.findMany({
+        where: { jobId: truncatedChallenge.consumedJobId, operation: "autoExtract" },
+        select: { status: true, safeErrorCode: true, inputTokens: true, outputTokens: true, usageKnown: true, providerRequestId: true },
+      });
+      assert.equal(truncatedAudits.length, 1);
+      assert.deepEqual(truncatedAudits[0], {
+        status: "succeeded",
+        safeErrorCode: null,
+        inputTokens: 20,
+        outputTokens: 10,
+        usageKnown: true,
+        providerRequestId: `chat-${suffix}`,
+      });
+
+      const partialFirstExcerpt = "前段事实：项目编号为青禾-2026。";
+      const partialSecondExcerpt = "后段事实：验收日期为2026年10月20日。";
+      const partialSourceText = `${"a".repeat(10_000)}${partialFirstExcerpt}${"b".repeat(30_000 - partialFirstExcerpt.length)}${"c".repeat(20_000)}${partialSecondExcerpt}${"d".repeat(100_000 - 60_000 - partialSecondExcerpt.length)}`;
+      assert.equal(partialSourceText.length, 100_000);
+      const partialSource = await db.projectSource.create({ data: {
+        projectId,
+        kind: "manual",
+        originScope: "project",
+        contentText: partialSourceText,
+        contentHash: hashSourceContent(partialSourceText),
+        manualContentDedupeKey: null,
+      } });
+      partialSourceId = partialSource.id;
+      const partialClientKey = `extract-partial-truncated-${suffix}`;
+      const partialConfirmation = await prepareAutoExtractConfirmation({
+        projectId, requestedBy: user, clientKey: partialClientKey, sourceIds: [partialSource.id], db,
+      });
+      await assert.rejects(runAutoExtractJob({
+        projectId,
+        requestedBy: user,
+        clientKey: partialClientKey,
+        challengeId: partialConfirmation.challengeId,
+        request: { sourceIds: [partialSource.id] },
+      }, db), (error: unknown) => error instanceof Error && "code" in error && error.code === "AUTO_EXTRACT_OUTPUT_TRUNCATED");
+      assert.deepEqual(partialDispatchRanges.map((range) => range.start), [0, 48_800]);
+      assert.equal(partialDispatchRanges.length, 2, "later chunks are not dispatched after a truncated response");
+      const partialItems = await db.projectItem.findMany({
+        where: { projectId, sourceId: partialSource.id },
+        select: { content: true, sourceExcerpt: true },
+      });
+      assert.deepEqual(partialItems, [{ content: partialFirstExcerpt, sourceExcerpt: partialFirstExcerpt }]);
+
+      const partialChallenge = await db.webAiConfirmationChallenge.findUniqueOrThrow({
+        where: { id: partialConfirmation.challengeId },
+        select: { consumedJobId: true },
+      });
+      assert.ok(partialChallenge.consumedJobId);
+      const partialJob = await db.backgroundJob.findUniqueOrThrow({
+        where: { id: partialChallenge.consumedJobId },
+        select: { status: true, failureCode: true },
+      });
+      assert.equal(partialJob.status, "failed");
+      assert.equal(partialJob.failureCode, "AUTO_EXTRACT_OUTPUT_TRUNCATED");
+      const partialAudits = await db.providerCallAudit.findMany({
+        where: { jobId: partialChallenge.consumedJobId, operation: "autoExtract" },
+        orderBy: { createdAt: "asc" },
+        select: { status: true, inputTokens: true, outputTokens: true, usageKnown: true },
+      });
+      assert.deepEqual(partialAudits, [
+        { status: "succeeded", inputTokens: 20, outputTokens: 10, usageKnown: true },
+        { status: "succeeded", inputTokens: 20, outputTokens: 10, usageKnown: true },
+      ]);
 
       // A selected excerpt cannot omit the server-owned section context, and
       // automatic import admission must not widen external-source policies.

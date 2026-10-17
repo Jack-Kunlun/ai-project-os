@@ -1288,6 +1288,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AUTO_EXTRACT_SOURCE_NOT_FOUND: "一个或多个资料不存在",
       AUTO_EXTRACT_SOURCE_TOO_LARGE: "所选资料超过单次抽取上限",
       AUTO_EXTRACT_INVALID_MODEL_OUTPUT: "模型返回的 JSON 结构不完整或无法验证；可减少单次资料量、缩短资料或切换生成模型后重试",
+      AUTO_EXTRACT_OUTPUT_TRUNCATED: "模型输出达到长度上限，系统未采用不完整结果；请减少单次资料量或缩短资料后重试",
       AUTO_EXTRACT_SOURCE_EXCERPT_MISMATCH: "模型候选无法精确回溯到原文；系统未写入这些候选，请缩小资料范围或切换生成模型后重试",
       AUTO_EXTRACT_CANDIDATE_CONFLICT: "候选已被其他操作更新，请刷新",
     } as const;

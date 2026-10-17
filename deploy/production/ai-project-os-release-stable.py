@@ -2576,7 +2576,8 @@ def _retired_remove_id(identifier, timeout_seconds):
 
 def retired_container_clean(target_tag, target_revision, digest):
     installed = _cache_installed_tooling()
-    data = _read_trusted_host_file(RETIRED_CONTAINER_PLAN, 0o600, 1024 * 1024)
+    data = _read_trusted_host_file(RETIRED_CONTAINER_PLAN, 0o600, 1024 * 1024,
+                                   'RETIRED_PLAN_FILE_INVALID')
     plan = _retired_validate_plan(data, digest, target_tag, target_revision, installed['toolingRevision'])
     deadline = time.monotonic() + _cache_plan_remaining(plan)
     _source, _installed, base, snapshot, inventory, records = _retired_runtime(target_tag, target_revision)

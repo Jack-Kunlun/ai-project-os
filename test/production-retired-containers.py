@@ -256,7 +256,7 @@ class RetiredContainerTests(unittest.TestCase):
             removed.add(identifier)
             return 'command-succeeded'
         with patch.object(D, '_cache_installed_tooling', return_value={'toolingRevision': H.TOOLING_REVISION}), \
-             patch.object(D, '_read_trusted_host_file', return_value=data), \
+             patch.object(D, '_read_trusted_host_file', autospec=True, return_value=data) as read_plan, \
              patch.object(D.time, 'time', return_value=NOW), \
              patch.object(D, '_cache_plan_remaining', side_effect=remaining), \
              patch.object(D, '_retired_runtime', side_effect=runtime), \
@@ -268,6 +268,8 @@ class RetiredContainerTests(unittest.TestCase):
                     D.retired_container_clean(H.TAG, H.REVISION, digest)
             else:
                 D.retired_container_clean(H.TAG, H.REVISION, digest)
+        read_plan.assert_called_once_with(D.RETIRED_CONTAINER_PLAN, 0o600, 1024 * 1024,
+                                          'RETIRED_PLAN_FILE_INVALID')
         return reports[-1], calls
 
     def test_clean_actual_ids_and_preserved_image_and_volume_snapshot(self):

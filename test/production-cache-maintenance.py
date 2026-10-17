@@ -48,7 +48,7 @@ def selected(identifier, *, size=100, shared=False):
 
 def protection_snapshot():
     return {
-        'containers': [], 'volumes': [], 'ownedImages': [],
+        'containers': [], 'volumes': [], 'ownedImages': [], 'unverifiedImages': [],
         'ownedImageIds': ['sha256:' + '1' * 64],
         'currentImageIds': ['sha256:' + '2' * 64],
         'currentReceiptImageIds': ['sha256:' + '2' * 64],
@@ -219,7 +219,9 @@ class CacheCommandTests(unittest.TestCase):
         current_ids = ['sha256:' + str(index) * 64 for index in (1, 2, 3)]
         previous_ids = ['sha256:' + str(index) * 64 for index in (4, 5, 6)]
         legacy_ids = ['sha256:' + str(index) * 64 for index in (7, 8)]
-        all_ids = current_ids + previous_ids + legacy_ids
+        unverified_id = 'sha256:' + '9' * 64
+        all_ids = current_ids + previous_ids + legacy_ids + [unverified_id]
+        unverified_current = [False]
         container_id = 'a' * 64
         container_image = current_ids[0]
         image_template = ('{{.Id}}|{{index .Config.Labels "org.opencontainers.image.title"}}|'
@@ -254,6 +256,10 @@ class CacheCommandTests(unittest.TestCase):
                     revision, image_source = '<no value>', '<no value>'
                 project, service = (('ai-project-os', 'app') if index >= 6
                                     else ('<no value>', '<no value>'))
+                if identifier == unverified_id:
+                    project, service = '<no value>', '<no value>'
+                if unverified_current[0] and identifier == current_ids[0]:
+                    image_source = 'https://foreign.invalid/repo'
                 tags = (['ai-project-os-app:' + version] if index >= 6 else
                         ['ghcr.io/jack-kunlun/ai-project-os-app:' + version])
                 digests = ([] if index >= 6 else
@@ -286,7 +292,14 @@ class CacheCommandTests(unittest.TestCase):
                 patch.object(DEPLOYER.os, 'statvfs'):
             helper.trusted.return_value = None
             snapshot = DEPLOYER._cache_protected_resource_snapshot(source)
-        self.assertEqual(snapshot['ownedImageIds'], sorted(all_ids))
+            unverified_current[0] = True
+            with self.assertRaisesRegex(RuntimeError, 'CACHE_PROTECTED_IMAGES_MISSING'):
+                DEPLOYER._cache_protected_resource_snapshot(source)
+        self.assertEqual(snapshot['ownedImageIds'], sorted(current_ids + previous_ids + legacy_ids))
+        self.assertEqual(snapshot['unverifiedImages'][0]['id'], unverified_id)
+        self.assertEqual(snapshot['unverifiedImages'][0]['reasons'], ['legacy-project', 'legacy-service'])
+        self.assertRegex(snapshot['unverifiedImages'][0]['identitySha256'], r'^[a-f0-9]{64}$')
+        self.assertNotIn(unverified_id, snapshot['currentImageIds'] + snapshot['previousImageIds'])
         self.assertEqual(snapshot['currentImageIds'], sorted(current_ids))
         self.assertEqual(snapshot['previousImageIds'], sorted(previous_ids))
         self.assertTrue(set(legacy_ids).issubset(snapshot['ownedImageIds']))
@@ -297,13 +310,22 @@ class CacheCommandTests(unittest.TestCase):
         self.assertEqual([item['name'] for item in snapshot['volumes']], ['business-data'])
         self.assertEqual(snapshot['checkoutRevision'], REVISION)
 
-    def test_unknown_source_title_image_is_rejected(self):
+    def test_unverified_images_are_preserved_without_claiming_release_ownership(self):
         identifier = 'sha256:' + '1' * 64
-        output = '|'.join((identifier, 'AI Project OS', 'https://foreign.invalid/repo',
-                           '1.0.9', REVISION, '<no value>', '<no value>', '[]', '[]'))
-        with patch.object(DEPLOYER, 'docker', side_effect=[identifier, output]):
-            with self.assertRaisesRegex(RuntimeError, 'CACHE_IMAGE_IDENTITY_INVALID'):
-                DEPLOYER._cache_owned_images()
+        for source, version, revision, reasons in (
+            ('https://foreign.invalid/repo', '1.0.9', REVISION, ['source-unrecognized']),
+            ('<no value>', '0.7.18', '', ['legacy-project', 'legacy-service']),
+            (DEPLOYER.IMAGE_SOURCE, '1.0.9', 'bad', ['canonical-revision']),
+        ):
+            output = '|'.join((identifier, 'AI Project OS', source,
+                               version, revision, '<no value>', '<no value>', '[]', '[]'))
+            with self.subTest(reasons=reasons), patch.object(
+                    DEPLOYER, 'docker', side_effect=[identifier, output]):
+                inventory = DEPLOYER._cache_protected_image_inventory()
+            self.assertEqual(inventory['ownedImages'], [])
+            self.assertEqual(inventory['unverifiedImages'][0]['id'], identifier)
+            self.assertEqual(inventory['unverifiedImages'][0]['reasons'], reasons)
+            self.assertNotIn('foreign.invalid', json.dumps(inventory['unverifiedImages']))
 
     def test_prune_uses_only_default_builder_and_frozen_anchored_id_filter(self):
         with patch.object(DEPLOYER, 'docker') as docker_mock:
@@ -462,7 +484,10 @@ class CacheCommandTests(unittest.TestCase):
         installed = {'toolingRevision': TOOLING_REVISION}
         good = ({'tag': TAG, 'revision': REVISION}, installed, plan['protection'])
         drifted = ({'tag': TAG, 'revision': REVISION}, installed,
-                   {**plan['protection'], 'changed': 'snapshot'})
+                   {**plan['protection'], 'unverifiedImages': [{
+                       'id': 'sha256:' + '9' * 64, 'reasons': ['legacy-service'],
+                       'identitySha256': 'f' * 64,
+                   }]})
         reports = []
         with patch.object(DEPLOYER, '_read_trusted_host_file', return_value=encoded), \
                 patch.object(DEPLOYER, '_cache_installed_tooling', return_value=installed), \

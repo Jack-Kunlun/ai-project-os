@@ -847,7 +847,7 @@ def _cache_safe_json_list(value, code):
     return sorted(set(value))
 
 
-def _cache_owned_images():
+def _cache_protected_image_inventory():
     listed = docker('image', 'ls', '--quiet', '--no-trunc', '--filter',
                     'label=org.opencontainers.image.title=AI Project OS')
     identifiers = sorted(set(listed.splitlines()))
@@ -862,6 +862,7 @@ def _cache_owned_images():
                 '{{index .Config.Labels "com.docker.compose.service"}}|'
                 '{{json .RepoTags}}|{{json .RepoDigests}}')
     images = []
+    unverified = []
     for identifier in identifiers:
         output = docker('image', 'inspect', '--format', template, identifier)
         lines = output.splitlines()
@@ -882,27 +883,38 @@ def _cache_owned_images():
         except (json.JSONDecodeError, TypeError, ValueError) as error:
             raise RuntimeError('STABLE_CACHE_IMAGE_REFS_INVALID') from error
         require(image_id == identifier and title == 'AI Project OS'
-                and source in ('', IMAGE_SOURCE)
                 and all(len(value) <= 512 and not any(ord(char) < 32 for char in value)
-                        for value in (project, service)), 'CACHE_IMAGE_IDENTITY_INVALID')
+                        for value in (source, version, revision, project, service)),
+                'CACHE_IMAGE_IDENTITY_INVALID')
         legacy = source == ''
+        checks = [('source-unrecognized', source in ('', IMAGE_SOURCE))]
         if legacy:
-            require(project == PROJECT and service in LEGACY_IMAGE_SERVICES
-                    and LEGACY_IMAGE_VERSION.fullmatch(version) is not None
-                    and all(LEGACY_IMAGE_TAG.fullmatch(tag) is not None for tag in tags)
-                    and all(ref.startswith('ghcr.io/jack-kunlun/ai-project-os-')
-                            for ref in digests), 'CACHE_IMAGE_IDENTITY_INVALID')
+            checks.extend([
+                ('legacy-project', project == PROJECT),
+                ('legacy-service', service in LEGACY_IMAGE_SERVICES),
+                ('legacy-version', LEGACY_IMAGE_VERSION.fullmatch(version) is not None),
+                ('legacy-tags', all(LEGACY_IMAGE_TAG.fullmatch(tag) is not None for tag in tags)),
+                ('legacy-digests', all(ref.startswith('ghcr.io/jack-kunlun/ai-project-os-')
+                                       for ref in digests)),
+            ])
+        elif source == IMAGE_SOURCE:
+            checks.extend([
+                ('canonical-version', not version or STABLE_TAG.fullmatch('v' + version) is not None),
+                ('canonical-revision', not revision or HEX40.fullmatch(revision) is not None),
+            ])
+        image = {'id': image_id, 'title': title, 'source': source,
+                 'version': version, 'revision': revision,
+                 'project': project, 'service': service, 'legacy': legacy,
+                 'repoTags': tags, 'repoDigests': digests}
+        reasons = [reason for reason, valid in checks if not valid]
+        if reasons:
+            # Unknown ownership never authorizes deletion or satisfies release identity.
+            # Preserve its ID and metadata hash in the same before/after drift guard.
+            unverified.append({'id': image_id, 'reasons': reasons,
+                               'identitySha256': sha256(_cache_json_bytes(image))})
         else:
-            if version:
-                stable_version('v' + version)
-            if revision:
-                require(HEX40.fullmatch(revision) is not None,
-                        'CACHE_IMAGE_IDENTITY_INVALID')
-        images.append({'id': image_id, 'title': title, 'source': source,
-                       'version': version, 'revision': revision,
-                       'project': project, 'service': service, 'legacy': legacy,
-                       'repoTags': tags, 'repoDigests': digests})
-    return images
+            images.append(image)
+    return {'ownedImages': images, 'unverifiedImages': unverified}
 
 
 def _cache_volume_snapshot():
@@ -959,7 +971,8 @@ def _cache_protected_resource_snapshot(source):
                 'CACHE_CONTAINER_INSPECT_INVALID')
     containers.sort(key=lambda item: item['id'])
     volumes = _cache_volume_snapshot()
-    images = _cache_owned_images()
+    image_inventory = _cache_protected_image_inventory()
+    images = image_inventory['ownedImages']
     owned_ids = sorted(image['id'] for image in images)
     receipt = source['receipt']
     require(receipt.get('release_protocol') == 'stable-v2-images',
@@ -1010,6 +1023,7 @@ def _cache_protected_resource_snapshot(source):
         'containers': containers,
         'volumes': volumes,
         'ownedImages': images,
+        'unverifiedImages': image_inventory['unverifiedImages'],
         'ownedImageIds': owned_ids,
         'currentImageIds': current_owned_ids,
         'currentReceiptImageIds': current_receipt_ids,
@@ -1035,6 +1049,9 @@ def _cache_protection_report(snapshot, plan_digest):
         'volumeSnapshotSha256': sha256(_cache_json_bytes(snapshot['volumes'])),
         'ownedImageIds': snapshot['ownedImageIds'],
         'ownedImageCount': len(snapshot['ownedImageIds']),
+        'unverifiedImageCount': len(snapshot['unverifiedImages']),
+        'unverifiedImages': [{'id': item['id'], 'reasons': item['reasons']}
+                             for item in snapshot['unverifiedImages']],
         'currentImageIds': snapshot['currentImageIds'],
         'previousImageIds': snapshot['previousImageIds'],
         'previousTag': snapshot['previousTag'],

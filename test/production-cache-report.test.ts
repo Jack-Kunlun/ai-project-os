@@ -18,6 +18,7 @@ const summary = {
 const protection = {
   planDigest: digest, currentImageIds: [current], previousImageIds: [previous],
   ownedImageIds: [current, previous], ownedImageCount: 2,
+  unverifiedImages: [] as { id: string; reasons: string[] }[], unverifiedImageCount: 0,
   checkoutRevision: revision, migrationCount: 146,
   migrationManifestSha256: "e".repeat(64), deploymentReceiptSha256: "f".repeat(64),
 };
@@ -52,6 +53,14 @@ test("maintenance context requires main, a verified live source, typed host and 
 
 test("inspection report binds the source, four buckets, protected images and plan", () => {
   assert.equal(parseMaintenanceReport(line(inspect()), "inspect", context).planDigest, digest);
+  const extraProtected = inspect();
+  extraProtected.protection.unverifiedImages = [{ id: `sha256:${"9".repeat(64)}`, reasons: ["legacy-project"] }];
+  extraProtected.protection.unverifiedImageCount = 1;
+  assert.equal(parseMaintenanceReport(line(extraProtected), "inspect", context).protection.unverifiedImageCount, 1);
+  extraProtected.protection.unverifiedImages[0].reasons = ["arbitrary diagnostic"];
+  assert.throws(() => parseMaintenanceReport(line(extraProtected), "inspect", context));
+  extraProtected.protection.unverifiedImages[0] = { id: current, reasons: ["legacy-project"] };
+  assert.throws(() => parseMaintenanceReport(line(extraProtected), "inspect", context));
   const mutations = [
     (value: ReturnType<typeof inspect>) => { value.revision = "0".repeat(40); },
     (value: ReturnType<typeof inspect>) => { value.tag = "v1.0.8"; },
@@ -60,6 +69,7 @@ test("inspection report binds the source, four buckets, protected images and pla
     (value: ReturnType<typeof inspect>) => { value.protection.previousImageIds = []; },
     (value: ReturnType<typeof inspect>) => { value.protection.ownedImageIds = [current]; },
     (value: ReturnType<typeof inspect>) => { value.protection.migrationCount = 145; },
+    (value: ReturnType<typeof inspect>) => { value.protection.unverifiedImageCount = 1; },
   ];
   for (const mutate of mutations) { const value = inspect(); mutate(value); assert.throws(() => parseMaintenanceReport(line(value), "inspect", context)); }
   assert.throws(() => parseMaintenanceReport(line(inspect()) + line(inspect()), "inspect", context));

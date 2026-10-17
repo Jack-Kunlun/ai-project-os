@@ -9,6 +9,8 @@ const IMAGE = /^sha256:[a-f0-9]{64}$/u;
 const VERSION = /^[1-9]\d*\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const PREFIX = "CACHE_MAINTENANCE_REPORT ";
 const BUCKETS = ["privateReclaimable", "privateProtected", "sharedReclaimable", "sharedProtected"];
+const IMAGE_OWNERSHIP_REASONS = ["source-unrecognized", "legacy-project", "legacy-service",
+  "legacy-version", "legacy-tags", "legacy-digests", "canonical-version", "canonical-revision"];
 
 function requireValue(value, code) {
   if (!value) throw new Error(`CACHE_MAINTENANCE_${code}`);
@@ -61,6 +63,13 @@ export function parseMaintenanceReport(log, operation, context, expectedPlanDige
     && protection.currentImageIds.every((id) => protection.ownedImageIds.includes(id))
     && protection.previousImageIds.every((id) => protection.ownedImageIds.includes(id))
     && protection.ownedImageCount === protection.ownedImageIds.length
+    && Array.isArray(protection.unverifiedImages) && protection.unverifiedImages.length <= 1024
+    && protection.unverifiedImageCount === protection.unverifiedImages.length
+    && new Set(protection.unverifiedImages.map((item) => item?.id)).size === protection.unverifiedImages.length
+    && protection.unverifiedImages.every((item) => IMAGE.test(item?.id ?? "")
+      && !protection.ownedImageIds.includes(item.id) && Array.isArray(item.reasons)
+      && item.reasons.length > 0 && item.reasons.length <= IMAGE_OWNERSHIP_REASONS.length
+      && item.reasons.every((reason) => IMAGE_OWNERSHIP_REASONS.includes(reason)))
     && protection.checkoutRevision === context.revision
     && protection.migrationCount === context.migrationCount
     && Number.isSafeInteger(context.migrationCount) && context.migrationCount >= 143
@@ -100,6 +109,7 @@ function writeSummary(report) {
     "| 缓存记录分类 | 数量 | 记录标称大小（GB） |", "| --- | ---: | ---: |"];
   for (const bucket of BUCKETS) lines.push(`| ${bucket} | ${summary[`${bucket}Count`]} | ${gb(summary[`${bucket}Bytes`])} |`);
   lines.push("", `记录大小之和：${gb(summary.sumRecordBytes)} GB；此值不等于可释放的物理磁盘空间。`);
+  lines.push(`额外保护归属未确认的镜像：${report.protection.unverifiedImageCount} 个；不用于满足当前/上一版本身份。`);
   if (report.operation === "clean") {
     lines.push(`删除缓存记录：${report.prunedIds.length}；文件系统可用空间净变化：${report.netAvailableBytesDelta} bytes。`,
       `当前镜像 ${report.protection.currentImageIds.length} 个、上一版镜像 ${report.protection.previousImageIds.length} 个；保护校验通过。`);

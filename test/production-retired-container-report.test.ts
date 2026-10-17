@@ -139,7 +139,7 @@ test("existing Actions provides only fixed container maintenance modes with seri
 });
 
 test("retired maintenance context accepts only the existing main repository and forward tooling version", () => {
-  const env = { GITHUB_REPOSITORY: "Jack-Kunlun/ai-project-os", GITHUB_REF: "refs/heads/main", GITHUB_SHA: "c".repeat(40),
+  const env: NodeJS.ProcessEnv = { NODE_ENV: "test", GITHUB_REPOSITORY: "Jack-Kunlun/ai-project-os", GITHUB_REF: "refs/heads/main", GITHUB_SHA: "c".repeat(40),
     CACHE_MAINTENANCE_OPERATION: "retired-containers-inspect", PRODUCTION_SOURCE_VERSION: "1.0.9",
     PRODUCTION_SOURCE_SHA: context.revision, SOURCE_MIGRATION_COUNT: "146", RELEASE_VERSION: "1.0.10", PRODUCTION_SSH_HOST: "38.76.205.30" };
   assert.equal(sourceContext(env).version, "1.0.9");

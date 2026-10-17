@@ -37,7 +37,8 @@ function clean() {
 const line = (value: unknown) => `CACHE_MAINTENANCE_REPORT ${JSON.stringify(value)}\n`;
 
 test("maintenance context requires main, a verified live source, typed host and forward tooling", () => {
-  const env = { GITHUB_REPOSITORY: "Jack-Kunlun/ai-project-os", GITHUB_REF: "refs/heads/main",
+  const env: NodeJS.ProcessEnv = { NODE_ENV: "test",
+    GITHUB_REPOSITORY: "Jack-Kunlun/ai-project-os", GITHUB_REF: "refs/heads/main",
     GITHUB_SHA: "1".repeat(40), CACHE_MAINTENANCE_OPERATION: "cache-inspect",
     PRODUCTION_SOURCE_VERSION: "1.0.9", PRODUCTION_SOURCE_SHA: revision,
     RELEASE_VERSION: "1.0.10", SOURCE_MIGRATION_COUNT: "146", PRODUCTION_SSH_HOST: "192.0.2.1" };

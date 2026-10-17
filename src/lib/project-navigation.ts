@@ -87,6 +87,9 @@ const FOCUS_ANCHORS = new Set([
   "confirmed-facts",
   "items-heading",
   "project-item-form",
+  "memory-index",
+  "memory-extract",
+  "memory-query",
 ]);
 const AUTOMATION_KIND_VALUES = ["repositorySync", "memoryQuality", "memoryIndex", "projectBrief", "webSourceSync", "projectPlanHealth"] as const;
 const OPERATION_KIND_VALUES = [

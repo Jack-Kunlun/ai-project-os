@@ -84,7 +84,8 @@ function formatScore(value: number): string {
  */
 export function PersonalSemanticSearchPanel({
   onError,
-}: Readonly<{ onError?: (message: string) => void }>): React.JSX.Element {
+  onManageIndex,
+}: Readonly<{ onError?: (message: string) => void; onManageIndex?: () => void }>): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [state, setState] = useState<SemanticSearchState>("idle");
   const [confirmation, setConfirmation] = useState<SemanticConfirmation | null>(null);
@@ -205,6 +206,7 @@ export function PersonalSemanticSearchPanel({
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Semantic search</p>
           <h3 id="personal-semantic-search-title" className="mt-2 text-lg font-semibold text-slate-900">搜索我的知识库</h3>
           <p className="mt-1 text-xs leading-5 text-slate-600">只检索当前个人知识版本。发送前会列出完整文档范围、片段数量和向量模型，并需要你单独确认。</p>
+          {onManageIndex ? <button type="button" onClick={onManageIndex} className="mt-2 min-h-9 text-left text-xs font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-900">第一次使用或索引失效？先去检查索引</button> : null}
         </div>
         <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700">{selectedProvider?.billingMode === "platform" ? "平台模型 · 使用平台额度" : "BYOK · 不扣平台额度"}</span>
       </div>

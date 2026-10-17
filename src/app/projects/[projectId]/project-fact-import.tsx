@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { buildProjectHref } from "@/lib/project-navigation";
 import { useEffect, useRef, useState } from "react";
 
 type Confirmation = {
@@ -32,6 +33,18 @@ export function ProjectFactImport({ projectId, sourceIds, onChanged }: {
   const [retry, setRetry] = useState(0);
   const flight = useRef(false);
   const prepareVersion = useRef(0);
+  const panelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if ((JSON.parse(sourceKey) as string[]).length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel || panel.getClientRects().length === 0) return;
+      panel.scrollIntoView({ block: "start" });
+      panel.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sourceKey]);
 
   useEffect(() => {
     const ids = JSON.parse(sourceKey) as string[];
@@ -106,12 +119,20 @@ export function ProjectFactImport({ projectId, sourceIds, onChanged }: {
     const route = confirmation.safeSummary.route;
     return [route?.provider?.name ?? route?.provider?.kind ?? "项目配置的模型", route?.model].filter(Boolean).join(" · ");
   }))];
-  return <section aria-label="导入资料自动整理" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
+  return <section ref={panelRef} tabIndex={-1} aria-label="导入资料自动整理" className="mt-5 scroll-mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
     <h3 className="font-semibold text-indigo-950">资料已保存，继续交给 AI 整理</h3>
     <p className="mt-2 text-sm leading-6 text-indigo-900">本次 {JSON.parse(sourceKey).length} 条资料将发送给{routes.length > 0 ? routes.join("、") : "当前项目模型"}。有逐字原文证据的内容会自动形成事实；冲突、改写或不确定内容单独待处理，每条记录保留来源与修改历史。</p>
     {preparing ? <p role="status" className="mt-3 text-sm text-indigo-700">正在核对本次资料范围和模型…</p> : null}
     {batches.length > 0 ? <button type="button" onClick={() => void organize()} disabled={running} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{running ? "AI 正在整理…" : "确认发送并自动整理"}</button> : null}
     {result ? <div role="status" className="mt-4 text-sm leading-6 text-indigo-900">{result.completed > 0 ? <p>自动形成 {result.confirmed} 条事实 · {result.review} 条待处理 · 跳过 {result.duplicates} 条重复记录</p> : <p>本次整理结果尚未核实，请查看任务状态。</p>}<div className="mt-2 flex flex-wrap gap-4"><Link href={`/projects/${projectId}/materials?focus=confirmed-facts`} className="font-semibold underline">查看事实</Link>{result.review > 0 ? <Link href={`/projects/${projectId}/materials/review`} className="font-semibold underline">处理不确定内容</Link> : null}{result.jobs.map((id, index) => <Link key={id} href={`/projects/${projectId}/jobs/${id}`} className="underline">查看整理任务{result.jobs.length > 1 ? ` ${index + 1}` : ""}</Link>)}</div></div> : null}
+    {result && result.completed > 0 ? <div className="mt-4 border-t border-indigo-200 pt-4">
+      <p className="text-sm leading-6 text-indigo-900">{result.review > 0 ? "下一步：先核对待处理内容，或查看已形成的事实。" : "整理结果已保存，下一步可更新索引并提问，或手动安排任务。"} 问答索引需要单独确认更新。</p>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <Link href={buildProjectHref(projectId, "memory", { focus: "memory-index", from: "materials" })} className="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">下一步：更新索引并问答</Link>
+        <Link href={buildProjectHref(projectId, "overview", { focus: "current-state", from: "materials" })} className="inline-flex min-h-11 items-center px-3 text-sm font-semibold text-indigo-700 underline">查看项目概览</Link>
+        <Link href={buildProjectHref(projectId, "plan", { from: "materials" })} className="inline-flex min-h-11 items-center px-3 text-sm font-semibold text-indigo-700 underline">安排任务</Link>
+      </div>
+    </div> : null}
     {error ? <div role="alert" className="mt-3 text-sm text-rose-700"><p>原始资料已保留。{error}</p>{!running ? <button type="button" onClick={() => setRetry((value) => value + 1)} className="mt-2 font-semibold underline">重新核对整理范围</button> : null}<Link href={`/projects/${projectId}/control`} className="ml-4 underline">查看模型配置</Link></div> : null}
   </section>;
 }

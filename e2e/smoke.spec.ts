@@ -560,7 +560,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials/review\\?focus=review-queue&from=materials&returnTo=`, "u"));
   await expect(page.locator("#review-queue")).toBeFocused();
   await expect(page.getByRole("heading", { name: "审核 AI 候选", exact: true }).first()).toBeVisible();
-  await expect(page.getByText("当前没有待审核 AI 候选。", { exact: true })).toBeVisible();
+  await expect(page.locator("#review-queue").getByText(/^当前没有待审核 AI 候选。/u)).toBeVisible();
   await page.getByRole("link", { name: /返回来源页面/u }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=manual&focus=sources-heading$`, "u"));
   await expect(page.getByPlaceholder("搜索正文、来源链接或内容哈希")).toHaveValue("Browser smoke");

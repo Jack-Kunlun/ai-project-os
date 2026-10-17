@@ -37,14 +37,18 @@ import {
 import { assertWebAiProjectAccess, WebAiAccessError, type WebAiActor } from "@/lib/web-ai-access";
 import {
   claimProjectJob,
+  claimQueuedProjectProcessingJob,
+  failQueuedProjectProcessingJob,
   failProjectJob,
   finishProjectJob,
+  getProjectJobInternal,
   toPublicProjectJob,
   isUncertainProviderDispatch,
   markProjectJobUnknown,
   markProviderAcknowledged,
   markProviderNotDispatched,
   withProjectJobAccessTransaction,
+  ProjectWorkflowError,
   type JobAttemptClaim,
   updateProjectJobProgress,
 } from "@/lib/project-workflow";
@@ -65,7 +69,8 @@ const clientKeySchema = z.string().min(8).max(200).regex(/^[A-Za-z0-9._:-]+$/);
 export type WebAiGovernanceErrorCode =
   | "WEB_AI_CONSENT_REQUIRED"
   | "WEB_AI_JOB_INVALID_STATE"
-  | "WEB_AI_JOB_NOT_FOUND";
+  | "WEB_AI_JOB_NOT_FOUND"
+  | "WEB_AI_QUEUE_LIMIT_REACHED";
 
 export class WebAiGovernanceError extends Error {
   constructor(readonly code: WebAiGovernanceErrorCode) {
@@ -759,6 +764,66 @@ function runtimeGrantSelect() {
   } as const;
 }
 
+export async function assertQueuedProjectWebAiGrant(input: Readonly<{
+  projectId: string;
+  jobId: string;
+  grantId: string | null;
+  requestedById: string;
+  kind: "assetExtract" | "autoExtract";
+  route: RuntimeRoute;
+  scopeKind: WebAiScopeKind;
+  scopeIds: unknown;
+  manifestFingerprint: string;
+}>, db: PrismaClient | Prisma.TransactionClient): Promise<void> {
+  assertRuntimeRoute(input.route);
+  if (input.grantId === null) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  const billing = await assertRuntimeBilling({
+    projectId: input.projectId,
+    requestedById: input.requestedById,
+    route: input.route,
+    operation: input.route.operation,
+    db,
+    enforceConcurrency: false,
+  });
+  const grant = await db.webAiGrant.findUnique({ where: { id: input.grantId }, select: runtimeGrantSelect() });
+  if (
+    grant === null
+    || !grantMatchesRuntimeTuple(grant, {
+      projectId: input.projectId,
+      jobId: input.jobId,
+      route: input.route,
+      billingUserId: billing.billingUserId,
+      billingMode: billing.billingMode,
+      scopeKind: input.scopeKind,
+      scopeIds: input.scopeIds,
+      manifestFingerprint: input.manifestFingerprint,
+    })
+    || grant.confirmationChallengeId === null
+  ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  const challenge = await db.webAiConfirmationChallenge.findUnique({
+    where: { id: grant.confirmationChallengeId },
+    select: {
+      projectId: true,
+      actorId: true,
+      actorAccountAccessVersion: true,
+      targetAction: true,
+      consumedAt: true,
+      consumedJobId: true,
+    },
+  });
+  if (
+    challenge === null
+    || challenge.projectId !== input.projectId
+    || challenge.actorId !== input.requestedById
+    || challenge.actorAccountAccessVersion !== (await db.appUser.findUnique({
+      where: { id: input.requestedById }, select: { accountAccessVersion: true },
+    }))?.accountAccessVersion
+    || challenge.targetAction !== confirmationActionForBackgroundJobKind(input.kind)
+    || challenge.consumedAt === null
+    || challenge.consumedJobId !== input.jobId
+  ) throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_STALE");
+}
+
 /**
  * Rejoin the access/job/provider fences after the durable dispatch marker has
  * committed and immediately before a provider transport reads a credential or
@@ -777,6 +842,8 @@ async function revalidateProviderDispatchBeforeTransport(input: Readonly<{
   callKey: string;
   billing: RuntimeBilling;
   personalDefaultFingerprint?: string;
+  /** Kind-specific immutable input must still be active before dispatch. */
+  resourceFence?: (tx: Prisma.TransactionClient) => Promise<void>;
 }>, db: PrismaClient): Promise<void> {
   try {
     const additionalActorIds = typeof input.route.providerConnection.ownerUserId !== "string"
@@ -806,6 +873,7 @@ async function revalidateProviderDispatchBeforeTransport(input: Readonly<{
       if (marker === null || marker.jobId !== input.jobId || marker.dispatchState !== "dispatched") {
         throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
       }
+      await input.resourceFence?.(tx);
 
       // Reload the effective route and provider under their lifecycle locks;
       // the object captured at admission is only a routing hint. This also
@@ -900,6 +968,8 @@ export async function createGrantedWebAiJob(input: Readonly<{
   scopeIds: unknown;
   manifestFingerprint: string;
   payload: Record<string, unknown>;
+  /** Internal-only marker for the durable project processing worker queue. */
+  queueForWorker?: boolean;
   /** Internal-only cap; public HTTP routes never derive or forward this field. */
   grantExpiresAtCap?: Date;
   confirmation?: WebAiConfirmationExecuteInput;
@@ -930,6 +1000,9 @@ export async function createGrantedWebAiJob(input: Readonly<{
   afterCreate?: (tx: Prisma.TransactionClient, jobId: string, grantId: string) => Promise<void>;
 }>, db: PrismaClient = getDb()): Promise<Readonly<{ jobId: string; grantId: string; created: boolean }>> {
   assertRuntimeRoute(input.route);
+  if (input.queueForWorker === true && input.kind !== "assetExtract" && input.kind !== "autoExtract") {
+    throw new WebAiGovernanceError("WEB_AI_JOB_INVALID_STATE");
+  }
   return withWebAiProjectAccessTransaction(db, {
     actor: input.requestedBy,
     projectId: input.projectId,
@@ -1047,12 +1120,25 @@ export async function createGrantedWebAiJob(input: Readonly<{
       await consumeWebAiConfirmation(tx, confirmation, existing.id, transactionActor.id);
       return Object.freeze({ jobId: existing.id, grantId: existing.webAiGrant.id, created: false });
     }
+    if (input.queueForWorker === true) {
+      const pendingCount = await tx.backgroundJob.count({
+        where: {
+          requestedById: transactionActor.id,
+          kind: { in: ["assetExtract", "autoExtract"] },
+          OR: [
+            { status: { in: ["queued", "waitingConsent", "running"] } },
+            { status: "unknown", reconciliationRequired: true },
+          ],
+        },
+      });
+      if (pendingCount >= 20) throw new WebAiGovernanceError("WEB_AI_QUEUE_LIMIT_REACHED");
+    }
     const billing = await assertRuntimeBilling({
       projectId: input.projectId,
       requestedById: transactionActor.id,
       route,
       db: tx,
-      enforceConcurrency: true,
+      enforceConcurrency: input.queueForWorker !== true,
     });
     const jobId = randomUUID();
     const job = await tx.backgroundJob.create({
@@ -1061,9 +1147,12 @@ export async function createGrantedWebAiJob(input: Readonly<{
         projectId: input.projectId,
         kind: input.kind,
         requestedById: transactionActor.id,
+        stage: input.queueForWorker === true ? "worker_queued" : "queued",
         webAiGrantId: null,
         idempotencyKey: key,
-        payload: jsonValue(input.payload),
+        payload: jsonValue(input.queueForWorker === true
+          ? { ...input.payload, queueMode: "persistentWorker" }
+          : input.payload),
       },
     });
     const grant = await tx.webAiGrant.create({
@@ -1127,6 +1216,93 @@ export async function createGrantedWebAiJob(input: Readonly<{
     if (input.afterCreate !== undefined) await input.afterCreate(tx, job.id, grant.id);
     await consumeWebAiConfirmation(tx, confirmation, job.id, transactionActor.id);
     return Object.freeze({ jobId: job.id, grantId: grant.id, created: true });
+  });
+}
+
+export async function claimQueuedWebAiProjectJob<T>(input: Readonly<{
+  projectId: string;
+  jobId: string;
+  actor: WebAiActor;
+  kind: "assetExtract" | "autoExtract";
+  verify: Parameters<typeof claimQueuedProjectProcessingJob<T>>[0]["verify"];
+}>, db: PrismaClient = getDb()): Promise<Readonly<{ claim: JobAttemptClaim; verified: T }> | null> {
+  return claimQueuedProjectProcessingJob(input, db);
+}
+
+export async function failQueuedWebAiProjectJob(input: Readonly<{
+  projectId: string;
+  jobId: string;
+  actor: WebAiActor;
+  kind: "assetExtract" | "autoExtract";
+  error: unknown;
+}>, db: PrismaClient = getDb()): Promise<boolean> {
+  return failQueuedProjectProcessingJob(input, db);
+}
+
+export async function cancelQueuedWebAiProjectJob(
+  projectId: string,
+  jobId: string,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  return withProjectJobAccessTransaction(db, { actor, projectId, jobId, required: "edit" }, async (tx, admission) => {
+    const { job } = admission;
+    if ((job.kind !== "assetExtract" && job.kind !== "autoExtract") || job.projectId !== projectId) {
+      throw new ProjectWorkflowError("PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED");
+    }
+    if (job.status !== "queued" && job.status !== "running") {
+      throw new ProjectWorkflowError("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
+    }
+    const persisted = await tx.backgroundJob.findUnique({ where: { id: jobId }, select: { payload: true } });
+    const queueMode = persisted?.payload !== null && typeof persisted?.payload === "object" && !Array.isArray(persisted.payload)
+      ? (persisted.payload as Record<string, unknown>).queueMode
+      : null;
+    if (queueMode !== "persistentWorker") throw new ProjectWorkflowError("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
+    const latestAttempt = await tx.backgroundJobAttempt.findFirst({
+      where: { jobId }, orderBy: { attemptNumber: "desc" },
+      select: { id: true, status: true, dispatchState: true },
+    });
+    const auditCount = await tx.providerCallAudit.count({ where: { jobId } });
+    if (job.status === "queued" && latestAttempt !== null) {
+      throw new ProjectWorkflowError("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
+    }
+    if (job.status === "running" && (
+      latestAttempt === null || latestAttempt.status !== "running" || latestAttempt.dispatchState !== "pending" || auditCount !== 0
+    )) {
+      throw new ProjectWorkflowError("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
+    }
+    if (auditCount !== 0) throw new ProjectWorkflowError("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
+
+    const reservations = await tx.platformTokenReservation.findMany({
+      where: { jobId },
+      select: { userId: true, callKey: true, status: true, reconciliationRequired: true },
+    });
+    if (reservations.some((reservation) => reservation.status !== "reserved" || reservation.reconciliationRequired)) {
+      throw new ProjectWorkflowError("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
+    }
+    for (const reservation of reservations) {
+      await releasePlatformTokenReservation({ userId: reservation.userId, callKey: reservation.callKey }, tx);
+    }
+    const completedAt = new Date();
+    if (latestAttempt !== null) {
+      const attemptUpdated = await tx.backgroundJobAttempt.updateMany({
+        where: { id: latestAttempt.id, jobId, status: "running", dispatchState: "pending" },
+        data: { status: "cancelled", safeFailureCode: "PROJECT_PROCESSING_CANCELLED", completedAt, heartbeatAt: completedAt },
+      });
+      if (attemptUpdated.count !== 1) throw new ProjectWorkflowError("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
+    }
+    await tx.backgroundJob.update({
+      where: { id: jobId },
+      data: { status: "cancelled", stage: "cancelled", failureCode: null, completedAt },
+    });
+    await tx.webAiGrant.updateMany({ where: { boundJobId: jobId, revokedAt: null }, data: { revokedAt: completedAt } });
+    if (job.kind === "assetExtract") {
+      await tx.projectAssetExtractionRun.updateMany({
+        where: { projectId, jobId, status: { in: ["queued", "running"] } },
+        data: { status: "cancelled", failureCode: "PROJECT_PROCESSING_CANCELLED", completedAt },
+      });
+    }
+    return getProjectJobInternal(projectId, jobId, tx);
   });
 }
 
@@ -1290,6 +1466,11 @@ export async function auditedProviderCall<T>(input: Readonly<{
   personalMemoryGeneration?: PersonalMemoryDispatchEvidence;
   /** Exact caller-owned defaults included in the outbound prompt, if any. */
   personalDefaultFingerprint?: string;
+  /**
+   * Revalidate the exact kind-specific input in both dispatch transactions.
+   * This callback must perform database-only checks and must fail closed.
+   */
+  resourceFence?: (tx: Prisma.TransactionClient) => Promise<void>;
   call: (dispatch: ProviderDispatchContext) => Promise<Readonly<T & {
     inputTokens: number;
     providerRequestId: string | null;
@@ -1386,6 +1567,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
           input.route.projectId, accessAdmission.access.actor, input.personalDefaultFingerprint, tx,
         );
       }
+      await input.resourceFence?.(tx);
       // The persisted project route and provider configuration are reloaded
       // only after the shared access and job locks. The provider lock is the
       // same namespace used by control-plane lifecycle writes.
@@ -1572,6 +1754,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
       callKey: input.callKey,
       billing: admitted.billing,
       personalDefaultFingerprint: input.personalDefaultFingerprint,
+      resourceFence: input.resourceFence,
     }, db);
     const dispatch: ProviderDispatchContext = Object.freeze({
       ...admitted.dispatch,

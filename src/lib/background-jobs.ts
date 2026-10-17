@@ -379,10 +379,11 @@ export async function listProjectJobs(
   projectId: string,
   actor: WebAiActor,
   db: PrismaClient = getDb(),
+  jobIds?: readonly string[],
 ) {
   await assertWebAiProjectAccess(actor, projectId, "view", db);
   const jobs = await db.backgroundJob.findMany({
-    where: { projectId },
+    where: { projectId, ...(jobIds === undefined ? {} : { id: { in: [...jobIds] } }) },
     orderBy: { createdAt: "desc" },
     take: 30,
     select: {
@@ -390,6 +391,7 @@ export async function listProjectJobs(
       kind: true,
       status: true,
       stage: true,
+      payload: true,
       result: true,
       progressCurrent: true,
       progressTotal: true,
@@ -398,6 +400,7 @@ export async function listProjectJobs(
       startedAt: true,
       completedAt: true,
       reconciliationRequired: true,
+      _count: { select: { providerCalls: true } },
       attempts: {
         orderBy: { attemptNumber: "desc" },
         take: 1,

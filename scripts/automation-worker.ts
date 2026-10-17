@@ -9,6 +9,7 @@ import { reconcileStaleProjectMcpActionDispatchReservations } from "@/lib/projec
 import { reconcilePlatformProviderProbeAttempts } from "@/lib/platform-provider-probe-service";
 import { reconcileStaleProjectAssetUploadReservations } from "@/lib/project-assets/quota";
 import { runProjectAssetParsingWorkerCycle } from "@/lib/project-assets/service";
+import { runProjectProcessingWorkerCycle } from "@/lib/project-processing-worker";
 import {
   getWorkerName,
   recordWorkerHeartbeat,
@@ -158,6 +159,17 @@ async function main() {
       } catch {
         cycleFailures += 1;
         writeLog("error", "worker.asset_parse_cycle_failed", { errorCode: "ASSET_PARSE_CYCLE_FAILED" });
+      }
+
+      try {
+        const result = await runProjectProcessingWorkerCycle({ maximumJobs: 5 }, db);
+        claimed += result.claimed;
+        if (result.claimed > 0 || result.failed > 0) {
+          writeLog(result.failed > 0 ? "warn" : "info", "worker.project_processing_cycle_completed", result);
+        }
+      } catch {
+        cycleFailures += 1;
+        writeLog("error", "worker.project_processing_cycle_failed", { errorCode: "PROJECT_PROCESSING_CYCLE_FAILED" });
       }
 
       try {

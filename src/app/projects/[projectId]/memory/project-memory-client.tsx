@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { OperationPanel } from "@/components/operation-panel";
 import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { parseProjectPageState } from "@/lib/project-navigation";
@@ -210,7 +210,7 @@ export function ProjectMemoryClient({ username, isSystemAdmin }: { username: str
     return () => window.clearTimeout(timer);
   }, [loading, hasIndexStatus, requestedFocus]);
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">查看项目记忆状态，通过语义检索和引用式问答找到答案。整理资料、维护索引和处理不确定内容均在独立操作区完成。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><ProjectFlowGuide projectId={projectId} stage="memory" sourceCount={index.inputs.projectSourceCount + index.inputs.repositoryMaterialGenerationCount + (index.inputs.hasCodeSnapshot ? 1 : 0)} pendingCount={candidates.filter((candidate) => candidate.reviewStatus === "candidate").length} indexReady={index.readiness === "ready"} /><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">查看项目记忆状态，通过语义检索和引用式问答找到答案。整理资料、维护索引和处理不确定内容均在独立操作区完成。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><ProjectFlowGuide projectId={projectId} stage="memory" sourceCount={index.inputs.projectSourceCount + index.inputs.repositoryMaterialGenerationCount + (index.inputs.hasCodeSnapshot ? 1 : 0)} pendingCount={candidates.filter((candidate) => candidate.reviewStatus === "candidate").length} indexReady={index.readiness === "ready"} /><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} index={index} answers={answers} onReload={reload} /></>}</div></main>;
 }
 
 function IndexPanel({ projectId, index, onReload }: { projectId: string; index: IndexStatus; onReload: () => Promise<IndexStatus | null> }) {
@@ -513,7 +513,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
         }
         throw new Error(nextStep ?? failure.message ?? "自动抽取失败");
       }
-      const payload = await response.json() as { job?: { result?: {
+      const payload = await response.json() as { job?: { status?: string; result?: {
         candidateCount?: number;
         confirmedCount?: number;
         reviewRequiredCount?: number;
@@ -523,6 +523,14 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
         recoveredExcerptCount?: number;
         anchoredExcerptCount?: number;
       } | null } };
+      if (payload.job?.status === "queued" || payload.job?.status === "running") {
+        setSelected([]);
+        setConfirmation(null);
+        setClientKey(null);
+        setMessage("资料整理任务已进入后台，可继续添加资料。在项目资料的「识别任务」栏目查看进度和已保存结果。");
+        await onReload();
+        return;
+      }
       const result = payload.job?.result;
       const created = result?.candidateCount ?? 0;
       const confirmed = result?.confirmedCount ?? 0;
@@ -687,104 +695,144 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
   );
 }
 
-function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: string; indexReady: boolean; answers: Answer[]; onReload: () => Promise<unknown> }) {
+/** The ordinary project question entry, also embedded in the materials workspace. */
+export function ProjectQuestionWorkspace({ projectId }: { projectId: string }) {
+  const [workspace, setWorkspace] = useState<{ index: IndexStatus; answers: Answer[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async (): Promise<IndexStatus | null> => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/memory/status`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await readError(response, "项目资料读取失败"));
+      const payload = await response.json() as { index: IndexStatus; answers: Answer[] };
+      setWorkspace(payload); setError(null); return payload.index;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "项目资料读取失败"); return null; }
+  }, [projectId]);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  if (error) return <div role="alert" className="mt-6 rounded-2xl bg-rose-50 p-5 text-sm text-rose-800">{error}<button type="button" onClick={() => void load()} className="ml-3 font-semibold underline">重新读取</button></div>;
+  if (!workspace) return <p role="status" className="mt-6 p-5 text-sm text-slate-600">正在读取项目资料…</p>;
+  return <QueryPanel projectId={projectId} index={workspace.index} answers={workspace.answers} onReload={load} />;
+}
+
+function questionRouteLabel(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "当前项目模型";
+  const route = value as Record<string, unknown>;
+  const provider = typeof route.provider === "object" && route.provider !== null && !Array.isArray(route.provider) ? route.provider as Record<string, unknown> : {};
+  return [provider.name ?? provider.kind, route.model ?? provider.model ?? route.modelId].filter((entry): entry is string => typeof entry === "string" && entry.length > 0).join(" · ") || "当前项目模型";
+}
+
+function QueryPanel({ projectId, index, answers, onReload }: { projectId: string; index: IndexStatus; answers: Answer[]; onReload: () => Promise<IndexStatus | null> }) {
   const [question, setQuestion] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [clientKey, setClientKey] = useState<string | null>(null);
-  const prepareSequence = useRef(0);
-  const prepareController = useRef<AbortController | null>(null);
-  const flightRef = useRef<symbol | null>(null);
-  const [preparedMode, setPreparedMode] = useState<"search" | "answer" | null>(null);
-  const [pending, setPending] = useState<"prepare" | "search" | "answer" | null>(null);
+  const [preparedMode, setPreparedMode] = useState<"index" | "search" | "answer" | null>(null);
+  const [indexPlan, setIndexPlan] = useState<IndexPlan | null>(null);
+  const [pending, setPending] = useState<"prepare" | "execute" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult[]>([]);
+  const sequence = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
+  const flightRef = useRef<symbol | null>(null);
+  const questionRef = useRef(question);
+  const continuation = useRef<"search" | "answer">("answer");
+  const indexReady = index.readiness === "ready" && index.activeIndex !== null && index.compatible;
+  const hasInputs = index.inputs.projectSourceCount + index.inputs.repositoryMaterialGenerationCount + Number(index.inputs.hasCodeSnapshot) > 0;
 
   function resetConfirmation() {
-    prepareSequence.current += 1;
-    prepareController.current?.abort();
-    prepareController.current = null;
-    setConfirmation(null);
-    setClientKey(null);
-    setPreparedMode(null);
+    sequence.current += 1; controllerRef.current?.abort(); controllerRef.current = null;
+    setConfirmation(null); setClientKey(null); setPreparedMode(null); setIndexPlan(null);
   }
+  useEffect(() => () => { sequence.current += 1; controllerRef.current?.abort(); }, []);
 
-  async function prepare(mode: "search" | "answer", event?: FormEvent) {
-    event?.preventDefault();
-    if (!indexReady || !question.trim()) return;
-    const preparedClientKey = crypto.randomUUID();
-    const flightToken = beginFlight(flightRef);
-    if (flightToken === null) return;
-    prepareSequence.current += 1;
-    prepareController.current?.abort();
-    const sequence = prepareSequence.current;
-    const controller = new AbortController();
-    prepareController.current = controller;
-    setPending("prepare");
-    setMessage(null);
+  async function prepare(mode: "search" | "answer", currentIndex: IndexStatus = index) {
+    if (!questionRef.current.trim() || !hasInputs) return;
+    const flight = beginFlight(flightRef); if (!flight) return;
+    resetConfirmation();
+    const requestSequence = sequence.current;
+    const controller = new AbortController(); controllerRef.current = controller;
+    const key = crypto.randomUUID(); const submittedQuestion = questionRef.current;
+    setPending("prepare"); setMessage(null);
     try {
-      const endpoint = mode === "search" ? "search" : "answers";
-      const response = await fetch(`/api/projects/${projectId}/memory/${endpoint}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey, question }),
-        signal: controller.signal,
-      });
-      if (sequence !== prepareSequence.current || controller.signal.aborted) return;
-      if (!response.ok) {
-        const failure = await readApiFailure(response, "外发摘要读取失败");
-        throw new Error(failure.message ?? "外发摘要读取失败");
+      let endpoint: string; let body: Record<string, unknown>; let nextMode: "index" | "search" | "answer" = mode;
+      if (currentIndex.readiness !== "ready" || !currentIndex.activeIndex || !currentIndex.compatible) {
+        const planResponse = await fetch(`/api/projects/${projectId}/memory/index?mode=full`, { cache: "no-store", signal: controller.signal });
+        if (!planResponse.ok) throw new Error(await readError(planResponse, "暂时无法准备项目资料"));
+        const plan = (await planResponse.json() as { plan: IndexPlan }).plan;
+        if (!plan.deadlineEligible || plan.ineligibleCode !== null) throw new Error("本次资料暂时无法准备，请到识别任务查看运行状态或联系管理员核对模型配置。");
+        if (requestSequence !== sequence.current || controller.signal.aborted) return;
+        setIndexPlan(plan); continuation.current = mode; nextMode = "index";
+        endpoint = "index"; body = { phase: "prepare", clientKey: key, mode: "full", planFingerprint: plan.planFingerprint };
+      } else {
+        endpoint = mode === "search" ? "search" : "answers";
+        body = { phase: "prepare", clientKey: key, question: submittedQuestion };
       }
+      const response = await fetch(`/api/projects/${projectId}/memory/${endpoint}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
+      if (requestSequence !== sequence.current || controller.signal.aborted) return;
+      if (!response.ok) throw new Error(await readError(response, "本次发送范围读取失败"));
       const payload = await response.json() as { confirmation: Confirmation };
-      setConfirmation(payload.confirmation);
-      setClientKey(preparedClientKey);
-      setPreparedMode(mode);
-      setMessage("已读取本次外发摘要。请核对路由和范围后，点击确认并执行。");
-    } catch (prepareError) {
-      if (controller.signal.aborted || sequence !== prepareSequence.current) return;
-      setMessage(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
+      setConfirmation(payload.confirmation); setClientKey(key); setPreparedMode(nextMode);
+    } catch (cause) {
+      if (!controller.signal.aborted && requestSequence === sequence.current) setMessage(cause instanceof Error ? cause.message : "暂时无法提问");
     } finally {
-      if (sequence === prepareSequence.current) {
-        setPending(null);
-        if (prepareController.current === controller) prepareController.current = null;
-      }
-      endFlight(flightRef, flightToken);
+      if (requestSequence === sequence.current) { setPending(null); if (controllerRef.current === controller) controllerRef.current = null; }
+      endFlight(flightRef, flight);
     }
   }
 
   async function run() {
-    if (confirmation === null || clientKey === null || preparedMode === null) {
-      setMessage("请先读取本次外发摘要。");
-      return;
-    }
-    const flightToken = beginFlight(flightRef);
-    if (flightToken === null) return;
-    const mode = preparedMode;
-    setPending(mode);
-    setMessage(null);
+    if (!confirmation || !clientKey || !preparedMode) return;
+    const flight = beginFlight(flightRef); if (!flight) return;
+    const mode = preparedMode; const submittedQuestion = questionRef.current; const requestSequence = sequence.current;
+    let preparedIndex: IndexStatus | null = null;
+    setPending("execute"); setMessage(null);
     try {
-      const endpoint = mode === "search" ? "search" : "answers";
-      const response = await fetch(`/api/projects/${projectId}/memory/${endpoint}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey, question }),
-      });
+      const endpoint = mode === "index" ? "index" : mode === "search" ? "search" : "answers";
+      const body = mode === "index"
+        ? { phase: "execute", challengeId: confirmation.challengeId, clientKey, mode: "full", planFingerprint: indexPlan?.planFingerprint }
+        : { phase: "execute", challengeId: confirmation.challengeId, clientKey, question: submittedQuestion };
+      const response = await fetch(`/api/projects/${projectId}/memory/${endpoint}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) {
-        const failure = await readApiFailure(response, mode === "search" ? "语义检索失败" : "引用式问答失败");
-        const nextStep = confirmationMessage(failure.code);
-        if (nextStep !== null) resetConfirmation();
-        throw new Error(nextStep ?? failure.message ?? "请求失败");
+        const failure = await readApiFailure(response, "本次操作未完成");
+        resetConfirmation();
+        throw new Error(confirmationMessage(failure.code) ?? failure.message ?? "本次操作未完成");
       }
-      const payload = await response.json() as { job: { result?: { results?: SearchResult[] } } };
+      const payload = await response.json() as { job: { status: string; result?: { results?: SearchResult[]; indexGenerationId?: string } } };
       resetConfirmation();
+      if (payload.job.status !== "succeeded") throw new Error("任务尚未成功完成，请到识别任务查看状态；系统不会自动重试模型请求。");
       if (mode === "search") setResults(payload.job.result?.results ?? []);
-      else { await onReload(); setMessage("回答已生成并保存；每条引用都来自当前索引。"); }
-    } catch (runError) {
-      setMessage(runError instanceof Error ? runError.message : "请求失败");
-    } finally {
-      setPending(null);
-      endFlight(flightRef, flightToken);
-    }
+      else {
+        const refreshed = await onReload();
+        if (mode === "index") {
+          if (refreshed?.readiness !== "ready" || refreshed.activeIndex?.generation.id !== payload.job.result?.indexGenerationId) throw new Error("资料准备状态已变化，请重新提问以核对本次范围。");
+          // Reading the answer summary is local preparation. The next model send still needs its own click.
+          if (submittedQuestion === questionRef.current && requestSequence + 1 === sequence.current) preparedIndex = refreshed;
+          setMessage("资料已准备好。核对下方发送范围后，即可继续提问。");
+        } else setMessage("回答已保存，可展开引用核对原文。");
+      }
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "本次操作未完成"); }
+    finally { setPending(null); endFlight(flightRef, flight); }
+    if (preparedIndex) await prepare(continuation.current, preparedIndex);
   }
 
-  return <section id="memory-query" tabIndex={-1} className="scroll-mt-28 mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Semantic search & grounded RAG</p><h2 className="mt-2 text-2xl font-semibold">检索与引用式问答</h2><p className="mt-2 text-sm leading-6 text-slate-500">语义分数与关键词分数混合排序；生成回答只能引用本次检索命中的记录 ID。</p></div>{!indexReady ? <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">请先建立或更新索引，完成后回到这里提问。<a href="#memory-index" className="ml-2 font-semibold underline">去更新索引 →</a></p> : <p className="mt-5 text-sm text-emerald-800">索引已可用，可以在下方输入问题；确认发送后才会生成回答。</p>}<form onSubmit={(event) => void prepare("answer", event)} className="mt-6"><label className="text-sm font-semibold" htmlFor="memory-question">你想了解什么？</label><textarea id="memory-question" value={question} onChange={(event) => { setQuestion(event.target.value); resetConfirmation(); }} rows={3} maxLength={2000} required className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="例如：当前项目最重要的技术风险是什么？哪些代码和资料支持这个判断？" />{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending !== null} executeLabel={preparedMode === "search" ? "仅做语义检索" : "生成带引用回答"} onExecute={() => void run()} /> : <div className="mt-4 flex gap-3"><button type="button" onClick={() => void prepare("search")} disabled={!indexReady || !question.trim() || pending !== null} className="rounded-xl border border-indigo-200 px-5 py-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">{pending === "prepare" ? "读取摘要中…" : "仅做语义检索"}</button><button type="submit" disabled={!indexReady || !question.trim() || pending !== null} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending === "prepare" ? "读取摘要中…" : "生成带引用回答"}</button></div>}</form>{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{results.length > 0 ? <div className="mt-7"><h3 className="text-sm font-semibold">语义检索结果</h3><div className="mt-3 space-y-3">{results.map((result, index) => <article key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><div className="flex items-center justify-between gap-4"><span className="text-xs font-semibold text-indigo-700">#{index + 1} · {result.scope}{result.path ? ` · ${result.path}` : ""}</span><span className="text-xs text-slate-400">综合 {result.score.toFixed(3)}</span></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{result.contentText}</p></article>)}</div></div> : null}<div className="mt-9 border-t border-slate-100 pt-7"><h3 className="text-sm font-semibold">回答历史</h3>{answers.length === 0 ? <p className="mt-3 text-sm text-slate-500">还没有引用式回答。</p> : <div className="mt-3 space-y-5">{answers.map((answer) => <article key={answer.id} className="rounded-2xl border border-slate-200 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">{answer.question}</p><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">{answer.answer}</p><div className="mt-5 space-y-2 border-t border-slate-100 pt-4"><p className="text-xs font-semibold text-slate-500">引用证据</p>{Array.isArray(answer.citations) ? answer.citations.map((citation) => <details key={citation.id} className="rounded-xl bg-slate-50 px-4 py-3"><summary className="cursor-pointer text-xs font-medium text-slate-600">{citation.scope}{citation.path ? ` · ${citation.path}` : ""}{citation.frozenCommitSha ? ` @ ${citation.frozenCommitSha.slice(0, 8)}` : ""}</summary><blockquote className="mt-3 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500">{citation.excerpt}</blockquote></details>) : null}</div><p className="mt-4 text-[12px] text-slate-400">{answer.providerConnection?.name ?? answer.providerConnection?.kind ?? "个人连接"} · {answer.modelId ?? "模型信息受限"} · {dateLabel(answer.createdAt)}</p></article>)}</div>}</div></section>;
+  const scope = confirmation?.safeSummary.scope as { personalDefaultCount?: number; inputCount?: number } | undefined;
+  const route = confirmation?.safeSummary.route as Record<string, unknown> | undefined;
+  return <section id="memory-query" tabIndex={-1} className="mt-6 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm outline-none sm:p-8">
+    <h2 className="text-2xl font-semibold">问项目</h2>
+    <p className="mt-2 text-sm leading-6 text-slate-600">直接输入问题，回答会附上项目资料的原文引用。资料有更新时，系统会在这里引导准备。</p>
+    {!hasInputs ? <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">项目还没有资料。<Link href={`/projects/${projectId}/materials`} className="ml-2 font-semibold underline">先去放资料</Link></p> : null}
+    <form className="mt-6" onSubmit={(event) => { event.preventDefault(); void prepare("answer"); }}>
+      <label className="text-sm font-semibold" htmlFor="memory-question">你想了解什么？</label>
+      <textarea id="memory-question" value={question} onChange={(event) => { questionRef.current = event.target.value; setQuestion(event.target.value); resetConfirmation(); setPending(null); }} rows={3} maxLength={2000} required disabled={pending === "execute"} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="例如：这次交付包含哪些内容，还有哪些问题没确认？" />
+      {confirmation ? <div role="region" aria-label="确认本次发送" className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+        <h3 className="font-semibold text-amber-950">{preparedMode === "index" ? "先准备项目资料" : "确认本次提问"}</h3>
+        <p className="mt-2 text-sm leading-6 text-amber-900">{preparedMode === "index" ? `本次会将 ${indexPlan?.generateCount ?? scope?.inputCount ?? 0} 份资料片段发送给 ${questionRouteLabel(route)} 做提问准备，完成后继续在这里提问。` : `本次会把问题和命中的项目资料片段发送给 ${questionRouteLabel(route?.generation ?? route)}，生成带原文引用的回答。`}</p>
+        {(scope?.personalDefaultCount ?? 0) > 0 ? <p className="mt-2 text-xs leading-5 text-amber-900">还会使用你标记的 {scope?.personalDefaultCount} 条个人通用记忆；项目约定优先，项目成员可查看生成结果。</p> : null}
+        <p className="mt-2 text-xs text-amber-800">本次确认有效期至 {dateLabel(confirmation.expiresAt)}。模型用量按项目当前路由计入额度或供应商账单。</p>
+        <div className="mt-4 flex flex-wrap gap-3"><button type="button" onClick={() => void run()} disabled={pending !== null} className="min-h-11 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : preparedMode === "index" ? "确认并准备资料" : preparedMode === "search" ? "确认查找原文" : "确认提问"}</button><button type="button" onClick={resetConfirmation} disabled={pending !== null} className="min-h-11 px-3 text-sm font-semibold text-slate-700">返回修改</button></div>
+      </div> : <button type="submit" disabled={!hasInputs || !question.trim() || pending !== null} className="mt-4 min-h-11 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "正在准备…" : "提问"}</button>}
+    </form>
+    {message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">{message}</p> : null}
+    {indexReady ? <details className="mt-5 text-sm text-slate-600"><summary className="cursor-pointer">只查找原文</summary><button type="button" onClick={() => void prepare("search")} disabled={!question.trim() || pending !== null} className="mt-3 min-h-10 rounded-xl border border-slate-200 px-4 py-2 font-semibold">查找原文</button></details> : null}
+    {results.length ? <div className="mt-5 space-y-3">{results.map((result) => <blockquote key={result.id} className="rounded-xl bg-slate-50 p-4 text-sm leading-6">{result.contentText}</blockquote>)}</div> : null}
+    <div className="mt-8 border-t border-slate-100 pt-6"><h3 className="font-semibold">回答记录</h3>{answers.length === 0 ? <p className="mt-3 text-sm text-slate-500">还没有提问。</p> : <div className="mt-4 space-y-5">{answers.map((answer) => <article key={answer.id} className="rounded-2xl border border-slate-200 p-5"><p className="font-semibold text-indigo-700">{answer.question}</p><p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{answer.answer}</p><div className="mt-4 space-y-2">{answer.citations.map((citation, i) => <details key={citation.id} className="rounded-xl bg-slate-50 px-4 py-3"><summary className="cursor-pointer text-sm font-semibold">引用原文 {i + 1}{citation.path ? ` · ${citation.path}` : ""}</summary><blockquote className="mt-3 border-l-2 border-indigo-200 pl-3 text-sm leading-6 text-slate-600">{citation.excerpt}</blockquote></details>)}</div><p className="mt-3 text-xs text-slate-400">{answer.providerConnection?.name ?? answer.providerConnection?.kind ?? "项目模型"} · {answer.modelId} · {dateLabel(answer.createdAt)}</p></article>)}</div>}</div>
+  </section>;
 }

@@ -163,7 +163,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
     const returnTo = buildProjectHref(projectId, "overview", { focus: "current-state" });
     if (data.project._count.sources === 0 && data.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo }), action: "添加资料" };
     if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "有原文依据且符合条件的内容已自动形成事实；这里只核对仍待处理的内容。", href: pendingDetailHref, action: "开始审核" };
-    if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "确认本次资料范围后，建立可检索、可引用的语义索引。", href: buildProjectHref(projectId, "memory", { focus: "memory-index", from: "overview", returnTo }), action: "管理记忆" };
+    if (!data.governance.index.compatible) return { title: "向项目提问", detail: "输入问题，系统会在同一处引导准备项目资料。", href: buildProjectHref(projectId, "materials", { view: "ask", from: "overview", returnTo }), action: "问项目" };
     return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: buildProjectHref(projectId, "intelligence", { focus: "agent-investigation", from: "overview", returnTo }), action: "打开 AI 工作台" };
   })();
 

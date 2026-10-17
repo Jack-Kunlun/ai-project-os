@@ -133,6 +133,12 @@ class FakeEntitlementDb {
   readonly users = new Map<string, { id: string; role: "admin" | "user" }>();
   readonly workspaceMembers = new Map<string, "owner" | "admin" | "member" | "viewer">();
   readonly jobs: Array<{ requestedById: string; status: string; reconciliationRequired?: boolean }> = [];
+  readonly personalQaAudits: Array<{
+    ownerUserId: string;
+    status: "running" | "unknown" | "completed";
+    completedAt: Date | null;
+    providerConnection: { scope: "platform" | "user" };
+  }> = [];
   readonly providerAudits = new Set<string>();
   readonly dispatchedJobs = new Set<string>();
   readonly projectWorkspaceId = randomUUID();
@@ -286,12 +292,33 @@ class FakeEntitlementDb {
   };
 
   readonly backgroundJob = {
-    count: async ({ where }: { where: { requestedById: string; OR: Array<{ status: { in: string[] } } | { status: string; reconciliationRequired: boolean }> } }) => this.jobs.filter((job) => {
+    count: async ({ where }: { where: { requestedById: string; OR: Array<Record<string, unknown>> } }) => this.jobs.filter((job) => {
       if (job.requestedById !== where.requestedById) return false;
-      return where.OR.some((condition) => "reconciliationRequired" in condition
-        ? job.status === condition.status && job.reconciliationRequired === condition.reconciliationRequired
-        : condition.status.in.includes(job.status));
+      return where.OR.some((condition) => {
+        const status = condition.status;
+        const matchesStatus = typeof status === "string"
+          ? job.status === status
+          : typeof status === "object" && status !== null && "in" in status &&
+            Array.isArray((status as { in?: unknown }).in) &&
+            ((status as { in: unknown[] }).in).includes(job.status);
+        return matchesStatus &&
+          (!Object.hasOwn(condition, "reconciliationRequired") ||
+            job.reconciliationRequired === condition.reconciliationRequired);
+      });
     }).length,
+  };
+
+  readonly personalKnowledgeQaAudit = {
+    count: async ({ where }: { where: {
+      ownerUserId: string;
+      providerConnection: { scope: "platform" };
+      OR: Array<{ status: "running" } | { status: "unknown"; completedAt: null }>;
+    } }) => this.personalQaAudits.filter((audit) =>
+      audit.ownerUserId === where.ownerUserId &&
+      audit.providerConnection.scope === where.providerConnection.scope &&
+      where.OR.some((condition) => condition.status === audit.status &&
+        (condition.status === "running" || audit.completedAt === condition.completedAt)),
+    ).length,
   };
 
   readonly backgroundJobAttempt = {
@@ -506,6 +533,45 @@ test("reconciled unknown jobs release the concurrency slot while open reconcilia
     () => assertPlatformConcurrency(user, fake as never),
     entitlementError("AI_PLATFORM_CONCURRENCY_LIMIT"),
   );
+});
+
+test("platform personal QA shares execution concurrency without blocking on terminal unknown audits", async () => {
+  const fake = new FakeEntitlementDb();
+  const userId = randomUUID();
+  const user = { id: userId, role: "user" as const };
+
+  fake.personalQaAudits.push({
+    ownerUserId: userId,
+    status: "running",
+    completedAt: null,
+    providerConnection: { scope: "platform" },
+  });
+  await assert.rejects(() => assertPlatformConcurrency(user, fake as never), entitlementError("AI_PLATFORM_CONCURRENCY_LIMIT"));
+
+  fake.personalQaAudits[0] = {
+    ownerUserId: userId,
+    status: "unknown",
+    completedAt: new Date(),
+    providerConnection: { scope: "platform" },
+  };
+  await assertPlatformConcurrency(user, fake as never);
+
+  fake.personalQaAudits.push({
+    ownerUserId: userId,
+    status: "unknown",
+    completedAt: null,
+    providerConnection: { scope: "platform" },
+  });
+  await assert.rejects(() => assertPlatformConcurrency(user, fake as never), entitlementError("AI_PLATFORM_CONCURRENCY_LIMIT"));
+
+  fake.personalQaAudits.pop();
+  fake.personalQaAudits.push({
+    ownerUserId: userId,
+    status: "running",
+    completedAt: null,
+    providerConnection: { scope: "user" },
+  });
+  await assertPlatformConcurrency(user, fake as never);
 });
 
 test("personal BYOK is unreachable while platform admins follow platform entitlement gates", async () => {

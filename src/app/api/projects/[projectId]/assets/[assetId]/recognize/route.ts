@@ -33,8 +33,9 @@ export async function POST(
       requestedBy: user,
       clientKey: body.clientKey,
       challengeId: body.challengeId,
+      queueForWorker: true,
     });
-    return NextResponse.json({ job });
+    return NextResponse.json({ job }, { status: 202, headers: { "cache-control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

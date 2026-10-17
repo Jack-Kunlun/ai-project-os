@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
-import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { OperationPanel } from "@/components/operation-panel";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
@@ -13,6 +12,9 @@ import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigatio
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { buildMaterialsReturnTo, isAddSourceView, parseMaterialKind, parseProjectItemReviewStatus, type MaterialKind } from "./materials/materials-navigation";
 import { ProjectMaterialIntake } from "./project-material-intake";
+import { ProjectMaterialReviewQueue } from "./project-material-review-queue";
+import { ProjectQuestionWorkspace } from "./memory/project-memory-client";
+import { ProjectProcessingTasks } from "./project-processing-tasks";
 
 type ProjectItem = {
   id: string;
@@ -237,7 +239,10 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   const deferredSourceSearch = useDeferredValue(sourceSearch);
   const sourceKind: MaterialKind = queryMaterialKind;
   const sourcePage = navigation.page ?? 1;
-  const itemStatus = parseProjectItemReviewStatus(navigation.status);
+  const itemStatus = parseProjectItemReviewStatus(navigation.status ?? (navigation.view === "review" ? "confirmed" : undefined));
+  const materialsView = navigation.view === "ask" || navigation.view === "tasks" || navigation.view === "review"
+    ? navigation.view
+    : !navigation.view && ((!focusSourceId && itemStatus !== "all") || focusSourceId === "confirmed-facts" || focusSourceId === "items-heading" || focusSourceId === "review-queue") ? "review" : "materials";
   const [isSourceDetailLoading, setIsSourceDetailLoading] = useState(false);
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [itemCounts, setItemCounts] = useState<ItemCounts>({ candidate: 0, confirmed: 0, dismissed: 0, superseded: 0 });
@@ -329,7 +334,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
     };
   }, [focusSourceId, isItemsLoading, isSourcesLoading, project, sources]);
 
-  function replaceMaterialsQuery(input: { view?: "add" | null; status?: ReturnType<typeof parseProjectItemReviewStatus>; search?: string; kind?: MaterialKind; page?: number }): void {
+  function replaceMaterialsQuery(input: { view?: "add" | "review" | "ask" | "tasks" | null; status?: ReturnType<typeof parseProjectItemReviewStatus>; search?: string; kind?: MaterialKind; page?: number }): void {
     const status = input.status ?? itemStatus;
     const href = buildProjectHref(projectId, "materials", {
       status: status === "all" ? null : status,
@@ -434,21 +439,21 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
     controller?.abort();
   }, []);
 
-  useEffect(() => { const timer = window.setTimeout(() => void loadProject(), 0); return () => window.clearTimeout(timer); }, [loadProject]);
+  useEffect(() => { const timer = window.setTimeout(() => void loadProject(), 0); return () => window.clearTimeout(timer); }, [loadProject, materialsView]);
   useEffect(() => {
     const timer = window.setTimeout(() => void loadSources(), 0);
     return () => {
       window.clearTimeout(timer);
       cancelSourceRequest();
     };
-  }, [cancelSourceRequest, loadSources]);
+  }, [cancelSourceRequest, loadSources, materialsView]);
   useEffect(() => {
     const timer = window.setTimeout(() => void loadItems(), 0);
     return () => {
       window.clearTimeout(timer);
       cancelItemRequest();
     };
-  }, [cancelItemRequest, loadItems]);
+  }, [cancelItemRequest, loadItems, materialsView]);
   useEffect(() => {
     if (!itemForm.sourceId || sourceDetails[itemForm.sourceId]) return;
     const timer = window.setTimeout(() => void loadSourceDetail(itemForm.sourceId), 0);
@@ -696,7 +701,8 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   const selectedSource = sourceDetails[itemForm.sourceId] ?? sources.find((source) => source.id === itemForm.sourceId) ?? null;
   const sourceOptions = selectedSource && !sources.some((source) => source.id === selectedSource.id) ? [selectedSource, ...sources] : sources;
   const isEditingItem = editingItemId !== null;
-  const materialReviewHref = buildProjectHref(projectId, "materialsReview", {
+  const materialReviewHref = buildProjectHref(projectId, "materials", {
+    view: "review",
     focus: "review-queue",
     from: "materials",
     returnTo: buildProjectHref(projectId, "materials", {
@@ -723,19 +729,23 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project materials</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 原始资料</h1>
-            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">添加资料后，在导入窗口继续 AI 整理；符合条件的内容形成事实，冲突与不确定项再核对。需要问答时单独更新索引。</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 项目资料</h1>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">放资料、看整理结果、向项目提问。识别在后台处理，可以随时查看进度。</p>
           </div>
           <div className="flex flex-wrap gap-3" aria-label="资料主要操作">
-            <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">添加来源</button>
-            <Link href={materialReviewHref} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-3 text-sm font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">审核 AI 候选</Link>
+            <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} disabled={Boolean(project.archivedAt)} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:opacity-50">添加资料</button>
           </div>
         </div>
       </div>
 
-      <ProjectFlowGuide projectId={projectId} stage="materials" sourceCount={project._count.sources + project._count.assets} pendingCount={isItemsLoading ? undefined : itemCounts.candidate} confirmedCount={isItemsLoading ? undefined : itemCounts.confirmed} archived={Boolean(project.archivedAt)} />
+      <nav aria-label="项目资料栏目" className="mt-6 flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-2">
+        {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "ask", label: "问项目" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-indigo-500 ${materialsView === tab.view ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:bg-white/70"}`}>{tab.label}{tab.view === "review" && itemCounts.candidate > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900">{itemCounts.candidate}</span> : null}</Link>)}
+      </nav>
 
-      <section id="source-library" aria-labelledby="sources-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      {materialsView === "ask" ? <ProjectQuestionWorkspace projectId={projectId} /> : null}
+      {materialsView === "tasks" ? <ProjectProcessingTasks projectId={projectId} onChanged={reloadProjectAndSources} /> : null}
+
+      {materialsView === "materials" ? <section id="source-library" aria-labelledby="sources-heading" className="mt-6 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source library</p>
@@ -813,9 +823,9 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
             <ListPagination {...sourcePagination} onPageChange={(page) => { replaceMaterialsQuery({ page }); }} disabled={isSourcesLoading} />
           </div>
         </div>
-      </section>
+      </section> : null}
 
-      <section id="confirmed-facts" tabIndex={-1} aria-labelledby="items-heading" className="mt-10 scroll-mt-32 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
+      {materialsView === "review" ? <><ProjectMaterialReviewQueue projectId={projectId} embedded onChanged={reloadProjectAndSources} /><section id="confirmed-facts" tabIndex={-1} aria-labelledby="items-heading" className="mt-6 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Confirmed facts</p>
@@ -1006,7 +1016,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
           )}
           <ListPagination {...itemPagination} onPageChange={setItemPage} disabled={isItemsLoading} />
         </div>
-      </section>
+      </section></> : null}
       <ProjectMaterialIntake projectId={projectId} onChanged={reloadProjectAndSources} open={isAddSourceOpen} kind={intakeKind} onClose={() => replaceMaterialsQuery({ view: null })} />
       {dialog}
     </ProjectShell>

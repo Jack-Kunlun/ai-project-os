@@ -7,13 +7,13 @@ import { buildProjectHref, parseProjectPageState } from "../src/lib/project-navi
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 
-test("next steps distinguish empty input, review, usable facts and stale index", () => {
-  assert.equal(projectFlowNextStep({ stage: "materials", sourceCount: 0 }).state.view, "add");
+test("ordinary navigation never opens creation or requires manual indexing", () => {
+  assert.equal(projectFlowNextStep({ stage: "materials", sourceCount: 0 }).state.view, undefined);
   assert.equal(projectFlowNextStep({ stage: "materials", sourceCount: 1, pendingCount: 2 }).state.status, "candidate");
-  assert.equal(projectFlowNextStep({ stage: "materials", sourceCount: 1, confirmedCount: 2 }).state.focus, "memory-index");
-  assert.equal(projectFlowNextStep({ stage: "review" }).state.focus, "memory-index");
-  assert.equal(projectFlowNextStep({ stage: "memory", indexReady: false }).state.focus, "memory-index");
-  assert.equal(projectFlowNextStep({ stage: "memory", indexReady: true }).state.focus, "memory-query");
+  assert.equal(projectFlowNextStep({ stage: "materials", sourceCount: 1, confirmedCount: 2 }).state.view, "ask");
+  assert.equal(projectFlowNextStep({ stage: "review" }).state.view, "ask");
+  assert.equal(projectFlowNextStep({ stage: "memory", indexReady: false }).state.view, "ask");
+  assert.equal(projectFlowNextStep({ stage: "memory", indexReady: true }).state.view, "ask");
   assert.equal(projectFlowNextStep({ stage: "materials", sourceCount: 0, archived: true }).route, "overview");
 });
 
@@ -29,11 +29,30 @@ test("flow destinations retain canonical same-project anchors", () => {
 
 test("guide renders working entry points without claiming stages are complete", () => {
   const html = renderToStaticMarkup(createElement(ProjectFlowGuide, { projectId, stage: "materials", sourceCount: 1, pendingCount: 2 }));
-  assert.match(html, /aria-current="step"/u);
-  assert.match(html, /view=add/u);
-  assert.match(html, /focus=memory-index/u);
+  assert.match(html, /aria-current="page"/u);
+  assert.doesNotMatch(html, /view=add|memory-index/u);
+  assert.match(html, /view=ask/u);
   assert.match(html, /status=candidate/u);
   assert.match(html, /核对待处理项/u);
   assert.doesNotMatch(html, /已完成|自动创建任务/u);
   assert.doesNotMatch(html, /https?:\/\//u);
+});
+
+test("project section navigation keeps the same four labels across pages", () => {
+  const labels = (["materials", "review", "memory", "overview", "plan"] as const).map((stage) => {
+    const html = renderToStaticMarkup(createElement(ProjectFlowGuide, { projectId, stage, sourceCount: 0 }));
+    const nav = html.match(/<nav[^>]*>([\s\S]*?)<\/nav>/u)?.[1] ?? "";
+    assert.doesNotMatch(nav, /view=add/u);
+    return [...nav.matchAll(/<a[^>]*>([^<]+)<\/a>/gu)].map((match) => match[1]);
+  });
+  for (const actual of labels) assert.deepEqual(actual, ["项目资料", "整理结果", "问项目", "安排任务"]);
+});
+
+test("materials tabs are allowlisted and do not alias creation", () => {
+  for (const view of ["review", "ask", "tasks"]) {
+    const href = buildProjectHref(projectId, "materials", { view });
+    assert.equal(parseProjectPageState("materials", projectId, new URL(href, "https://ai-project-os.invalid").searchParams).view, view);
+    assert.doesNotMatch(href, /view=add/u);
+  }
+  assert.equal(parseProjectPageState("materials", projectId, new URLSearchParams("view=other")).view, null);
 });

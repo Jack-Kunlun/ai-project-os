@@ -89,7 +89,7 @@ export function ProjectSourceDetailClient({ username, isSystemAdmin }: { usernam
           <p className="mt-2 text-sm leading-6 text-slate-600">可直接整理这份资料；有原文依据且符合条件的内容形成事实，其余结果待核对。想查资料时，再单独确认更新问答索引。</p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <OperationPanel title="整理这份资料" triggerLabel="继续 AI 整理"><ProjectFactImport projectId={projectId} sourceIds={[source.id]} onChanged={async () => undefined} /></OperationPanel>
-            <Link href={buildProjectHref(projectId, "memory", { focus: "memory-index", from: "materials" })} className="text-sm font-semibold text-indigo-700 underline">更新索引并问答 →</Link>
+            <Link href={buildProjectHref(projectId, "materials", { view: "ask", from: "materials" })} className="text-sm font-semibold text-indigo-700 underline">向项目提问 →</Link>
           </div>
         </section> : null}
       </div>

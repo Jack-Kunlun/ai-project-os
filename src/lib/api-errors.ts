@@ -152,15 +152,17 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PERSONAL_KNOWLEDGE_QA_DOCUMENT_NOT_FOUND: [404, "个人知识页面不存在或已不可用"],
       PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_FOUND: [404, "所选个人模型连接不存在"],
       PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_VERIFIED: [409, "所选个人模型连接尚未验证通过"],
+      PERSONAL_KNOWLEDGE_QA_PLATFORM_ROUTE_UNAVAILABLE: [503, "平台默认问答模型暂时不可用"],
       PERSONAL_KNOWLEDGE_QA_NO_EVIDENCE: [422, "当前页面没有找到与问题匹配的内容"],
       PERSONAL_KNOWLEDGE_QA_CONFIRMATION_REQUIRED: [409, "请先重新准备并确认本次问答"],
       PERSONAL_KNOWLEDGE_QA_CONFIRMATION_STALE: [409, "页面或模型配置已变化，请重新准备问答"],
       PERSONAL_KNOWLEDGE_QA_CONFIRMATION_EXPIRED: [409, "问答确认已过期，请重新准备"],
       PERSONAL_KNOWLEDGE_QA_CONFIRMATION_CONSUMED: [409, "问答确认已经使用，请重新准备"],
-      PERSONAL_KNOWLEDGE_QA_PROVIDER_UNAVAILABLE: [502, "个人模型当前不可用"],
-      PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN: [502, "个人模型请求结果不确定，请检查供应商状态后再试"],
-      PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT: [502, "个人模型返回内容无法验证"],
-      PERSONAL_KNOWLEDGE_QA_INVALID_CITATION: [502, "个人模型返回了无法验证的引用"],
+      PERSONAL_KNOWLEDGE_QA_PROVIDER_UNAVAILABLE: [502, "问答模型当前不可用"],
+      PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN: [502, "问答请求结果不确定，请稍后检查状态"],
+      PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT: [502, "问答模型返回内容无法验证"],
+      PERSONAL_KNOWLEDGE_QA_OUTPUT_TRUNCATED: [502, "模型回答被截断，请缩小问题范围后重试"],
+      PERSONAL_KNOWLEDGE_QA_INVALID_CITATION: [502, "问答模型返回了无法验证的引用"],
       PERSONAL_KNOWLEDGE_QA_CONFLICT: [409, "个人知识问答状态已变化，请刷新后重试"],
     };
     const [status, message] = mapping[error.code] ?? [500, "个人知识问答处理失败"];
@@ -1240,10 +1242,12 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
   }
 
   if (error instanceof WebAiGovernanceError) {
-    const status = error.code === "WEB_AI_JOB_NOT_FOUND" ? 404 : 409;
+    const status = error.code === "WEB_AI_JOB_NOT_FOUND" ? 404 : error.code === "WEB_AI_QUEUE_LIMIT_REACHED" ? 429 : 409;
     const message = error.code === "WEB_AI_CONSENT_REQUIRED"
       ? "请先确认本次内容会发送给所选模型供应商"
-      : "AI 任务状态已变化，请刷新后重试";
+      : error.code === "WEB_AI_QUEUE_LIMIT_REACHED"
+        ? "项目资料处理队列已满（最多20项），请先等待完成或在任务列表取消待处理项。"
+        : "AI 任务状态已变化，请刷新后重试";
     return { status, body: { error: { code: error.code, message } } };
   }
 

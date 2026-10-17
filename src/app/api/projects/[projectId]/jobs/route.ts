@@ -11,7 +11,9 @@ export async function GET(request: Request, context: { params: Promise<{ project
   try {
     const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
-    return NextResponse.json({ jobs: await listProjectJobs(projectId, user) });
+    const rawIds = new URL(request.url).searchParams.get("ids");
+    const jobIds = rawIds === null ? undefined : z.array(idSchema).max(20).parse(rawIds.split(","));
+    return NextResponse.json({ jobs: await listProjectJobs(projectId, user, undefined, jobIds) }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

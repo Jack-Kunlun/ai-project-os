@@ -28,6 +28,7 @@ async function mockModelFlow(page: Page, projectId: string) {
   const prepared: Array<{ sourceIds: string[]; clientKey: string }> = [];
   const executed: Array<{ sourceIds: string[]; clientKey: string; challengeId: string }> = [];
   const challengeId = randomUUID();
+  const completedJobs = new Map<string, { id: string; status: string; result: { confirmedCount: number; reviewRequiredCount: number; duplicateCount: number } }>();
   await page.route(`**/api/projects/${projectId}/memory/extract`, async (route) => {
     const body = route.request().postDataJSON();
     if (body.phase === "prepare") {
@@ -38,8 +39,14 @@ async function mockModelFlow(page: Page, projectId: string) {
       await route.fulfill({ json: { confirmation: { challengeId: batchChallengeId, expiresAt: new Date(Date.now() + 120_000).toISOString(), safeSummary: { route: { provider: { name: "Isolated browser model" }, model: "fixture" } } } } });
     } else {
       executed.push(body);
-      await route.fulfill({ json: { job: { id: randomUUID(), status: "succeeded", result: { confirmedCount: 2, reviewRequiredCount: 1, duplicateCount: 0 } } } });
+      const jobId = randomUUID();
+      completedJobs.set(jobId, { id: jobId, status: "succeeded", result: { confirmedCount: 2, reviewRequiredCount: 1, duplicateCount: 0 } });
+      await route.fulfill({ status: 202, json: { job: { id: jobId, status: "queued", result: null } } });
     }
+  });
+  await page.route(`**/api/projects/${projectId}/jobs?*`, (route) => {
+    const ids = new URL(route.request().url()).searchParams.get("ids")?.split(",") ?? [];
+    return route.fulfill({ json: { jobs: ids.flatMap((id) => completedJobs.has(id) ? [completedJobs.get(id)!] : []) } });
   });
   return { prepared, executed, challengeId };
 }
@@ -50,6 +57,7 @@ test("materials keep editing separate, retain drafts, and chain text import into
   await page.goto(`/projects/${projectId}/materials`);
   await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
   await expect(page.locator("#project-item-form")).toHaveCount(0);
+  await page.getByRole("navigation", { name: "项目资料栏目" }).getByRole("link", { name: "整理结果", exact: true }).click();
   const editTrigger = page.getByRole("button", { name: "手动补充", exact: true });
   await editTrigger.click();
   const editor = page.getByRole("dialog", { name: "手动补充事实", exact: true });
@@ -67,7 +75,7 @@ test("materials keep editing separate, retain drafts, and chain text import into
   const text = `Browser imported factual source ${randomUUID()}`;
   await intake.locator("#manual-text textarea").fill(text);
   await intake.getByRole("button", { name: "加入原始资料", exact: true }).click();
-  const organize = intake.getByRole("button", { name: "确认发送并自动整理", exact: true });
+  const organize = intake.getByRole("button", { name: "确认发送并加入队列", exact: true });
   await expect(organize).toBeVisible();
   const source = await getDb().projectSource.findFirstOrThrow({ where: { projectId, contentText: text }, select: { id: true } });
   expect(flow.prepared).toHaveLength(1);
@@ -102,7 +110,7 @@ test("long PDF pages use a dedicated import workspace and fit each consent batch
   await expect(intake).toBeVisible();
   await intake.locator('input[type="file"]').first().setInputFiles({ name: "operations-long-pages.pdf", mimeType: "application/pdf", buffer: longTextPdf() });
   await intake.getByRole("button", { name: "上传并解析", exact: true }).click();
-  const organize = intake.getByRole("button", { name: "确认发送并自动整理", exact: true });
+  const organize = intake.getByRole("button", { name: "确认发送并加入队列", exact: true });
   await expect(organize).toBeVisible();
   expect(flow.prepared).toHaveLength(2);
   expect(parsingReads).toBeGreaterThanOrEqual(1);
@@ -116,7 +124,7 @@ test("long PDF pages use a dedicated import workspace and fit each consent batch
   await expectR02NoAccessibilityViolations(page, "dedicated file import workspace");
   await organize.click();
   await expect(intake.getByText("自动形成 4 条事实 · 2 条待处理 · 跳过 0 条重复记录", { exact: true })).toBeVisible();
-  await expect(intake.getByRole("link", { name: "处理不确定内容", exact: true })).toBeVisible();
+  await expect(intake.getByRole("link", { name: "处理待核对内容", exact: true }).first()).toBeVisible();
   expect(flow.executed).toHaveLength(2);
   expect(new Set(flow.executed.map((batch) => batch.challengeId)).size).toBe(2);
   for (const batch of flow.executed) expect(batch.sourceIds).toEqual(flow.prepared.find((prepared) => prepared.clientKey === batch.clientKey)!.sourceIds);

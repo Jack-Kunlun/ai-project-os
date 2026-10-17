@@ -5627,9 +5627,9 @@ model PersonalKnowledgeExtractionAttempt {
   @@index([expiresAt, status])
 }
 
-/// One-use prepare proof for a personal knowledge page question. The question
-/// and page body are represented only by hashes; evidenceManifest contains
-/// citation ranges and hashes, never excerpts.
+/// One-use prepare proof for a private personal knowledge page question. The
+/// question and page body are represented only by hashes; evidenceManifest
+/// contains citation ranges and hashes, never excerpts.
 model PersonalKnowledgeQaChallenge {
   id                           String                             @id @default(uuid()) @db.Uuid
   ownerUserId                  String                             @db.Uuid
@@ -5655,6 +5655,7 @@ model PersonalKnowledgeQaChallenge {
   revision                     PersonalKnowledgeRevision          @relation("PersonalKnowledgeQaChallengeRevision", fields: [documentId, ownerUserId, revisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
   providerConnection           AiProviderConnection               @relation("PersonalKnowledgeQaChallengeProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   audit                        PersonalKnowledgeQaAudit?
+  tokenReservation             PlatformTokenReservation?
 
   @@unique([ownerUserId, id])
   @@unique([ownerUserId, clientKeyHash])
@@ -5664,8 +5665,8 @@ model PersonalKnowledgeQaChallenge {
   @@index([inputFingerprint])
 }
 
-/// Append-only body-free outcome evidence for a personal-page BYOK call.
-/// No question, answer, title, body or credential is persisted here.
+/// Append-only body-free outcome evidence for a personal-page model call. No
+/// question, answer, title, body or credential is persisted here.
 model PersonalKnowledgeQaAudit {
   id                           String                         @id @default(uuid()) @db.Uuid
   ownerUserId                  String                         @db.Uuid
@@ -6174,6 +6175,7 @@ model PlatformTokenReservation {
   /// Stable non-FK evidence identity retained when the project grant is cascaded.
   webAiGrantReferenceId        String?                              @db.Uuid
   webAiGrantProjectId          String?                              @db.Uuid
+  personalKnowledgeQaChallengeId       String?                              @db.Uuid
   personalKnowledgeSemanticChallengeId String? @db.Uuid
   personalKnowledgeExtractionAttemptId String? @db.Uuid
   personalKnowledgeExtractionPageIndex Int?
@@ -6204,6 +6206,7 @@ model PlatformTokenReservation {
   grant                        PlatformTokenGrant                   @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   webAiGrant                   WebAiGrant?                          @relation("WebAiGrantReservations", fields: [webAiGrantId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   providerConnection           AiProviderConnection?                @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  personalKnowledgeQaChallenge         PersonalKnowledgeQaChallenge?        @relation(fields: [userId, personalKnowledgeQaChallengeId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_qa_challenge_fkey")
   personalKnowledgeSemanticChallenge PersonalKnowledgeSemanticChallenge? @relation(fields: [userId, personalKnowledgeSemanticChallengeId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_semantic_challenge_fkey")
   personalKnowledgeExtractionAttempt PersonalKnowledgeExtractionAttempt? @relation(fields: [userId, personalKnowledgeExtractionAttemptId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_extraction_attempt_fkey")
   providerCallAudit            ProviderCallAudit?
@@ -6211,6 +6214,7 @@ model PlatformTokenReservation {
   allocations                  PlatformTokenReservationAllocation[]
 
   @@unique([userId, callKey])
+  @@unique([userId, personalKnowledgeQaChallengeId], map: "PlatformTokenReservation_personal_qa_challenge_key")
   @@unique([userId, personalKnowledgeSemanticChallengeId], map: "PlatformTokenReservation_personal_semantic_challenge_key")
   @@unique([userId, personalKnowledgeExtractionAttemptId, personalKnowledgeExtractionPageIndex], map: "PlatformTokenReservation_personal_extraction_page_key")
   @@index([userId, status, expiresAt])

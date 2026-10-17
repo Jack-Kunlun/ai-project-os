@@ -67,7 +67,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
   assert.equal(DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.length, 7);
   assert.equal(DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX.length, 10);
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 114);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 115);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false
@@ -86,6 +86,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
     ["20261013010000_add_email_auth", ["app_user_email_revision_guard", "email_auth_challenge_binding_guard", "email_graphic_captcha_binding_guard", "app_user_email_auth_proof_guard"]],
     ["20261015020000_bind_personal_semantic_token_reservations", ["personal_semantic_token_reservation_guard"]],
     ["20261015030000_add_personal_vision_platform_billing", ["personal_vision_token_reservation_guard"]],
+    ["20261017010000_add_personal_qa_platform_billing", ["personal_qa_token_reservation_guard"]],
   ] as const) {
     const sql = readFileSync(`prisma/migrations/${directory}/migration.sql`, "utf8");
     for (const name of names) {
@@ -127,6 +128,25 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.match(personalVisionReservationMigration, /REVOKE ALL ON FUNCTION "personal_vision_token_reservation_guard"\(\) FROM PUBLIC/u);
   for (const principal of ["ai_project_os_runtime", "ai_project_os_entitlement_writer"]) {
     assert.match(personalVisionReservationMigration, new RegExp(`IF EXISTS \\(SELECT 1 FROM pg_roles WHERE rolname = '${principal}'\\) THEN\\s+REVOKE ALL ON FUNCTION "personal_vision_token_reservation_guard"\\(\\) FROM ${principal}`, "u"));
+  }
+
+  const personalQaReservationMigration = readFileSync("prisma/migrations/20261017010000_add_personal_qa_platform_billing/migration.sql", "utf8");
+  assert.deepEqual(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.find((entry) => entry.name === "personal_qa_token_reservation_guard"), {
+    name: "personal_qa_token_reservation_guard",
+    identityArguments: "",
+    runtime: false,
+    entitlementWriter: false,
+    securityDefiner: false,
+    reason: "personal QA consent-bound token reservation trigger",
+  });
+  assert.match(personalQaReservationMigration, /CREATE TRIGGER "PlatformTokenReservation_personal_qa_guard"[\s\S]*?BEFORE INSERT OR UPDATE ON "PlatformTokenReservation"/u);
+  assert.match(personalQaReservationMigration, /REVOKE ALL ON FUNCTION "personal_qa_token_reservation_guard"\(\) FROM PUBLIC/u);
+  assert.match(personalQaReservationMigration, /ADD CONSTRAINT "PlatformTokenReservation_personal_qa_challenge_fkey"[\s\S]*?REFERENCES "PersonalKnowledgeQaChallenge" \("ownerUserId", "id"\) ON DELETE NO ACTION/u);
+  assert.match(personalQaReservationMigration, /"operation" = 'generateWithContext'[\s\S]*?"callKey" = 'personal-qa:'/u);
+  assert.match(personalQaReservationMigration, /"status" = 'consumed' AND c\."consumedAt" IS NOT NULL[\s\S]*?a\."status" IN \('running', 'succeeded', 'failed', 'unknown'\)/u);
+  assert.match(personalQaReservationMigration, /CREATE OR REPLACE FUNCTION "runtime_ai_evidence_consistency_guard"\(\)[\s\S]*?personalKnowledgeQaChallengeId[\s\S]*?ProjectDeletionReceipt/u);
+  for (const principal of ["ai_project_os_runtime", "ai_project_os_entitlement_writer"]) {
+    assert.match(personalQaReservationMigration, new RegExp(`IF EXISTS \\(SELECT 1 FROM pg_roles WHERE rolname = '${principal}'\\) THEN\\s+REVOKE ALL ON FUNCTION "personal_qa_token_reservation_guard"\\(\\) FROM ${principal}`, "u"));
   }
 
   assert.ok(DATABASE_PRINCIPAL_RELATIONS.includes("ProjectMcpActionResultImport"));

@@ -224,7 +224,7 @@ function isAllowedFilter(route: ProjectNavigationRoute, value: string | null | u
 
 function isAllowedView(route: ProjectNavigationRoute, value: string | null | undefined): value is string {
   if (value === null || value === undefined) return false;
-  if (route === "materials") return value === "add";
+  if (route === "materials") return ["add", "review", "ask", "tasks"].includes(value);
   if (route === "job" || route === "automations") return NOTIFICATION_VIEW_VALUES.includes(value as (typeof NOTIFICATION_VIEW_VALUES)[number]);
   return false;
 }

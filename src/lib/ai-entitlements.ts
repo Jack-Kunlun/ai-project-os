@@ -340,6 +340,7 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
       callKey: true,
       reservedTokens: true,
       providerCallAudit: { select: { id: true } },
+      personalKnowledgeQaChallengeId: true,
       personalKnowledgeSemanticChallengeId: true,
       personalKnowledgeExtractionAttemptId: true,
       allocations: {
@@ -362,6 +363,7 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
     // cannot prove that no batch reached the provider, so retain their credit
     // hold for reconciliation instead of refunding a potentially billable call.
     const hasDispatchEvidence = reservation.providerCallAudit !== null || dispatchedAttempt !== null
+      || reservation.personalKnowledgeQaChallengeId != null
       || reservation.personalKnowledgeSemanticChallengeId != null
       || reservation.personalKnowledgeExtractionAttemptId != null;
     if (hasDispatchEvidence) {
@@ -1317,16 +1319,47 @@ export async function assertPlatformConcurrency(
   db: EntitlementDb = getDb(),
 ): Promise<void> {
   await lockUser(db, user.id);
-  const count = await db.backgroundJob.count({
+  const [jobCount, personalQaCount] = await Promise.all([
+    db.backgroundJob.count({
     where: {
       requestedById: user.id,
       OR: [
-        { status: { in: ["queued", "waitingConsent", "running"] } },
+        { status: "running" },
         { status: "unknown", reconciliationRequired: true },
+        // The two explicitly confirmed project-processing actions now queue
+        // durably. They do not consume execution concurrency until a worker
+        // atomically claims them. Keep legacy synchronous queued calls in the
+        // gate so their admission/claim window remains protected.
+        {
+          status: { in: ["queued", "waitingConsent"] },
+          OR: [
+            { kind: { notIn: ["assetExtract", "autoExtract"] } },
+            { kind: { in: ["assetExtract", "autoExtract"] }, stage: { not: "worker_queued" } },
+          ],
+        },
       ],
     },
-  });
-  if (count > 0) return fail("AI_PLATFORM_CONCURRENCY_LIMIT");
+    }),
+    Promise.resolve(
+      (db as unknown as {
+        personalKnowledgeQaAudit?: {
+          count: (args: Record<string, unknown>) => Promise<number>;
+        };
+      }).personalKnowledgeQaAudit,
+    ).then((delegate) => delegate?.count({
+      where: {
+        ownerUserId: user.id,
+        OR: [
+          { status: "running" },
+          // Unknown audits with a completion timestamp are terminal evidence:
+          // retain their token hold, but do not deadlock later work forever.
+          { status: "unknown", completedAt: null },
+        ],
+        providerConnection: { scope: "platform" },
+      },
+    }) ?? 0),
+  ]);
+  if (jobCount + personalQaCount > 0) return fail("AI_PLATFORM_CONCURRENCY_LIMIT");
 }
 
 export function estimatePlatformTokens(input: unknown, maxOutputTokens: number): number {

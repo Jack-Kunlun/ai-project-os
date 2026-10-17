@@ -34,8 +34,9 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       clientKey: body.clientKey,
       challengeId: body.challengeId,
       request: { sourceIds: body.sourceIds },
+      queueForWorker: true,
     });
-    return NextResponse.json({ job: toPublicProjectJob(job) });
+    return NextResponse.json({ job: toPublicProjectJob(job) }, { status: 202, headers: { "cache-control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

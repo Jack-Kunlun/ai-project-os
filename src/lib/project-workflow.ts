@@ -7,12 +7,14 @@ import {
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import {
+  lockActorAccess,
   withWebAiProjectAccessTransaction,
   type ProjectAccessAdmission,
   type AccessLinearizationClient,
 } from "@/lib/access-linearization";
 import type { ProjectPermission } from "@/lib/access-control";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
+import { assertPlatformConcurrency } from "@/lib/ai-entitlements";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
 import { persistNotification } from "@/lib/notification-service";
 
@@ -74,11 +76,18 @@ export type PublicProjectJob = Readonly<{
   progressTotal: number;
   failureCode: string | null;
   reconciliationRequired: boolean;
+  canCancel: boolean;
+  inputSummary: PublicProjectJobInputSummary;
   createdAt: Date;
   startedAt: Date | null;
   completedAt: Date | null;
   attempts: readonly PublicJobAttempt[];
 }>;
+
+export type PublicProjectJobInputSummary =
+  | Readonly<{ displayName: string | null; fileName: string | null }>
+  | Readonly<{ sourceCount: number; sourceLabels: readonly string[] }>
+  | null;
 
 type WorkflowDb = PrismaClient | Prisma.TransactionClient;
 
@@ -479,6 +488,16 @@ async function withJobLock<T>(db: WorkflowDb, jobId: string, operation: (tx: Pri
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
+async function withActorJobLock<T>(db: WorkflowDb, actorId: string, jobId: string, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  const run = async (tx: Prisma.TransactionClient) => {
+    await lockActorAccess(tx, actorId);
+    await lockJobInTransaction(tx, jobId);
+    return operation(tx);
+  };
+  if (!("$transaction" in db)) return run(db as Prisma.TransactionClient);
+  return db.$transaction(run, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
 export type ProjectJobAccessInput = Readonly<{
   actor: WebAiActor;
   projectId: string;
@@ -659,6 +678,44 @@ async function verifyAttempt(
   return Object.freeze({ attempt, job });
 }
 
+async function createProjectJobClaim(
+  tx: Prisma.TransactionClient,
+  job: Readonly<{ id: string; kind: BackgroundJobKind; status: string; startedAt: Date | null }>,
+  expectedKind?: BackgroundJobKind,
+  initialStage = "preparing",
+): Promise<JobAttemptClaim | false> {
+  if (expectedKind !== undefined && job.kind !== expectedKind) return fail("PROJECT_WORKFLOW_INVALID_STATE");
+  if (job.status !== "queued") return false;
+  const latest = await tx.backgroundJobAttempt.findFirst({
+    where: { jobId: job.id },
+    orderBy: { attemptNumber: "desc" },
+    select: { attemptNumber: true },
+  });
+  const now = new Date();
+  const claimToken = randomBytes(32).toString("base64url");
+  const attempt = await tx.backgroundJobAttempt.create({
+    data: {
+      jobId: job.id,
+      attemptNumber: (latest?.attemptNumber ?? 0) + 1,
+      leaseTokenHash: hashLeaseToken(claimToken),
+      leasedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + DEFAULT_JOB_LEASE_MS),
+      heartbeatAt: now,
+    },
+    select: { id: true },
+  });
+  await tx.backgroundJob.update({
+    where: { id: job.id },
+    data: {
+      status: "running",
+      stage: initialStage,
+      startedAt: job.startedAt ?? now,
+      reconciliationRequired: false,
+    },
+  });
+  return Object.freeze({ attemptId: attempt.id, claimToken });
+}
+
 export async function claimProjectJob(
   jobId: string,
   db: WorkflowDb = getDb(),
@@ -671,37 +728,114 @@ export async function claimProjectJob(
       select: { id: true, kind: true, status: true, startedAt: true },
     });
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
-    if (expectedKind !== undefined && job.kind !== expectedKind) return fail("PROJECT_WORKFLOW_INVALID_STATE");
-    if (job.status !== "queued") return false;
+    return createProjectJobClaim(tx, job, expectedKind);
+  });
+}
 
-    const latest = await tx.backgroundJobAttempt.findFirst({
-      where: { jobId },
-      orderBy: { attemptNumber: "desc" },
-      select: { attemptNumber: true },
-    });
-    const now = new Date();
-    const claimToken = randomBytes(32).toString("base64url");
-    const attempt = await tx.backgroundJobAttempt.create({
-      data: {
-        jobId,
-        attemptNumber: (latest?.attemptNumber ?? 0) + 1,
-        leaseTokenHash: hashLeaseToken(claimToken),
-        leasedAt: now,
-        leaseExpiresAt: new Date(now.getTime() + DEFAULT_JOB_LEASE_MS),
-        heartbeatAt: now,
+export type QueuedProjectProcessingJob = Readonly<{
+  id: string;
+  projectId: string | null;
+  requestedById: string;
+  kind: BackgroundJobKind;
+  status: string;
+  stage: string;
+  payload: Prisma.JsonValue;
+  webAiGrantId: string | null;
+  startedAt: Date | null;
+}>;
+
+/**
+ * Atomically claim a confirmed project processing job under the same actor,
+ * project, and job fences used by provider admission. The verifier reloads
+ * the frozen inputs and grant while the job is still queued; queued jobs do
+ * not occupy model concurrency until this transition commits.
+ */
+export async function claimQueuedProjectProcessingJob<T>(input: Readonly<{
+  projectId: string;
+  jobId: string;
+  actor: WebAiActor;
+  kind: "assetExtract" | "autoExtract";
+  verify: (tx: Prisma.TransactionClient, job: QueuedProjectProcessingJob, actor: ProjectAccessAdmission["actor"]) => Promise<T>;
+}>, db: WorkflowDb = getDb()): Promise<Readonly<{ claim: JobAttemptClaim; verified: T }> | null> {
+  if (!z.string().uuid().safeParse(input.jobId).success) return fail("PROJECT_WORKFLOW_INVALID_INPUT");
+  return withProjectJobAccessTransaction(db, {
+    actor: input.actor,
+    projectId: input.projectId,
+    jobId: input.jobId,
+    expectedRequestedById: input.actor.id,
+    required: "edit",
+  }, async (tx, admission) => {
+    const job = await tx.backgroundJob.findUnique({
+      where: { id: input.jobId },
+      select: {
+        id: true,
+        projectId: true,
+        requestedById: true,
+        kind: true,
+        status: true,
+        stage: true,
+        payload: true,
+        webAiGrantId: true,
+        startedAt: true,
       },
-      select: { id: true },
     });
-    await tx.backgroundJob.update({
-      where: { id: jobId },
-      data: {
-        status: "running",
-        stage: "preparing",
-        startedAt: job.startedAt ?? now,
-        reconciliationRequired: false,
-      },
+    if (job === null || job.projectId !== input.projectId) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
+    if (job.requestedById !== admission.access.actor.id || job.kind !== input.kind) return fail("PROJECT_WORKFLOW_INVALID_STATE");
+    if (job.stage !== "worker_queued") return fail("PROJECT_WORKFLOW_INVALID_STATE");
+    if (job.status !== "queued") return null;
+    const priorAttempts = await tx.backgroundJobAttempt.count({ where: { jobId: job.id } });
+    if (priorAttempts !== 0) return fail("PROJECT_WORKFLOW_INVALID_STATE");
+    try {
+      await assertPlatformConcurrency(admission.access.actor, tx);
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error
+        && (error as { code?: unknown }).code === "AI_PLATFORM_CONCURRENCY_LIMIT") return null;
+      throw error;
+    }
+    const verified = await input.verify(tx, job, admission.access.actor);
+    const claim = await createProjectJobClaim(tx, job, input.kind, "worker_processing");
+    if (!claim) return null;
+    return Object.freeze({ claim, verified });
+  });
+}
+
+export async function failQueuedProjectProcessingJob(
+  input: Readonly<{ projectId: string; jobId: string; actor: WebAiActor; kind: "assetExtract" | "autoExtract"; error: unknown }>,
+  db: WorkflowDb = getDb(),
+): Promise<boolean> {
+  return withActorJobLock(db, input.actor.id, input.jobId, async (tx) => {
+    const job = await tx.backgroundJob.findUnique({
+      where: { id: input.jobId },
+      select: { id: true, projectId: true, requestedById: true, kind: true, status: true, stage: true, payload: true },
     });
-    return Object.freeze({ attemptId: attempt.id, claimToken });
+    const payload = job?.payload;
+    const queueMode = payload !== null && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).queueMode
+      : null;
+    if (
+      job === null
+      || job.projectId !== input.projectId
+      || job.requestedById !== input.actor.id
+      || job.kind !== input.kind
+      || job.status !== "queued"
+      || job.stage !== "worker_queued"
+      || queueMode !== "persistentWorker"
+    ) return false;
+    const hasAttempt = await tx.backgroundJobAttempt.count({ where: { jobId: input.jobId } });
+    const hasAudit = await tx.providerCallAudit.count({ where: { jobId: input.jobId } });
+    if (hasAttempt !== 0 || hasAudit !== 0) return fail("PROJECT_WORKFLOW_INVALID_STATE");
+    const completedAt = new Date();
+    const updated = await tx.backgroundJob.updateMany({
+      where: { id: input.jobId, projectId: input.projectId, kind: input.kind, status: "queued", stage: "worker_queued" },
+      data: { status: "failed", stage: "failed", failureCode: safeFailureCode(input.error), completedAt },
+    });
+    if (updated.count === 1 && input.kind === "assetExtract") {
+      await tx.projectAssetExtractionRun.updateMany({
+        where: { projectId: input.projectId, jobId: input.jobId, status: "queued" },
+        data: { status: "failed", failureCode: safeFailureCode(input.error), completedAt },
+      });
+    }
+    return updated.count === 1;
   });
 }
 
@@ -913,6 +1047,15 @@ export async function failProjectJob(
       where: { id: input.jobId },
       data,
     });
+    // A valid attempt can finish after its actor loses project access. Keep
+    // the extraction marker consistent without granting fresh resource reads
+    // or requiring the revoked permission to clean up undispatched work.
+    if (job.kind === "assetExtract") {
+      await tx.projectAssetExtractionRun.updateMany({
+        where: { jobId: input.jobId, status: { in: ["queued", "running"] } },
+        data: { status: "failed", failureCode: code, completedAt },
+      });
+    }
     return Object.freeze({ changed: true, job, failureCode: code });
   });
   if (outcome.changed && outcome.job !== null) {
@@ -992,11 +1135,48 @@ type PublicProjectJobSource = Readonly<{
   progressTotal?: number;
   failureCode?: string | null;
   reconciliationRequired?: boolean;
+  payload?: unknown;
+  _count?: Readonly<{ providerCalls?: number }>;
   createdAt: Date;
   startedAt?: Date | null;
   completedAt?: Date | null;
   attempts?: readonly Parameters<typeof publicAttempt>[0][];
 }>;
+
+function canCancelPersistentProjectProcessingJob(job: PublicProjectJobSource): boolean {
+  if (job.kind !== "assetExtract" && job.kind !== "autoExtract") return false;
+  const payload = isRecord(job.payload) ? job.payload : null;
+  if (payload?.queueMode !== "persistentWorker" || (job._count?.providerCalls ?? 0) !== 0) return false;
+  const attempts = job.attempts ?? [];
+  if (job.status === "queued") return attempts.length === 0;
+  const latestAttempt = attempts[0];
+  return job.status === "running" && latestAttempt?.status === "running" && latestAttempt.dispatchState === "pending";
+}
+
+function safeProcessingInputLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const label = value.replace(/[\u0000-\u001f\u007f]/gu, " ").replace(/\s+/gu, " ").trim();
+  return label.length > 0 ? label.slice(0, 255) : null;
+}
+
+function publicProcessingInputSummary(job: PublicProjectJobSource): PublicProjectJobInputSummary {
+  if (job.kind !== "assetExtract" && job.kind !== "autoExtract") return null;
+  const payload = isRecord(job.payload) ? job.payload : null;
+  const summary = payload !== null && isRecord(payload.inputSummary) ? payload.inputSummary : null;
+  if (summary === null) return null;
+  if (job.kind === "assetExtract") {
+    return Object.freeze({
+      displayName: safeProcessingInputLabel(summary.displayName),
+      fileName: safeProcessingInputLabel(summary.fileName),
+    });
+  }
+  const sourceCount = summary.sourceCount;
+  if (!Number.isSafeInteger(sourceCount) || (sourceCount as number) < 1 || (sourceCount as number) > 10) return null;
+  const sourceLabels = Array.isArray(summary.sourceLabels)
+    ? summary.sourceLabels.slice(0, 3).map(safeProcessingInputLabel).filter((label): label is string => label !== null)
+    : [];
+  return Object.freeze({ sourceCount: sourceCount as number, sourceLabels: Object.freeze(sourceLabels) });
+}
 
 /**
  * The only public representation of a BackgroundJob. Keep this mapper
@@ -1015,6 +1195,8 @@ export function toPublicProjectJob(job: PublicProjectJobSource): PublicProjectJo
     progressTotal: Number.isSafeInteger(job.progressTotal) && (job.progressTotal ?? 0) >= 0 ? job.progressTotal ?? 0 : 0,
     failureCode: safeNullableFailureCode(job.failureCode),
     reconciliationRequired: job.reconciliationRequired === true,
+    canCancel: canCancelPersistentProjectProcessingJob(job),
+    inputSummary: publicProcessingInputSummary(job),
     createdAt: job.createdAt,
     startedAt: job.startedAt ?? null,
     completedAt: job.completedAt ?? null,
@@ -1033,6 +1215,8 @@ const jobDetailSelect = {
   progressTotal: true,
   failureCode: true,
   reconciliationRequired: true,
+  payload: true,
+  _count: { select: { providerCalls: true } },
   createdAt: true,
   startedAt: true,
   completedAt: true,

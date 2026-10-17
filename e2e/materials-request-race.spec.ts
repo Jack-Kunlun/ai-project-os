@@ -173,6 +173,7 @@ test("materials lists ignore delayed responses after filter changes and unmount"
   const confirmed = delayedResponse();
   itemHolds.set("candidate", candidate);
   itemHolds.set("confirmed", confirmed);
+  await page.getByRole("navigation", { name: "项目资料栏目" }).getByRole("link", { name: "整理结果", exact: true }).click();
   const statusFilter = page.getByRole("combobox", { name: "按审核状态筛选", exact: true });
   await statusFilter.selectOption("candidate");
   await candidate.requested.promise;
@@ -188,6 +189,7 @@ test("materials lists ignore delayed responses after filter changes and unmount"
   await expect(itemList.getByRole("heading", { name: "confirmed response item", exact: true })).toBeVisible();
   await expect(itemList.getByText("candidate response item", { exact: true })).toHaveCount(0);
 
+  await page.getByRole("navigation", { name: "项目资料栏目" }).getByRole("link", { name: "资料", exact: true }).click();
   const sourceSearch = page.getByLabel("搜索原始资料", { exact: true });
   const staleSearch = delayedResponse();
   const latestSearch = delayedResponse();
@@ -229,6 +231,7 @@ test("materials lists ignore delayed responses after filter changes and unmount"
 
   const unmountedRequest = delayedResponse();
   itemHolds.set("dismissed", unmountedRequest);
+  await page.getByRole("navigation", { name: "项目资料栏目" }).getByRole("link", { name: "整理结果", exact: true }).click();
   await statusFilter.selectOption("dismissed");
   await unmountedRequest.requested.promise;
   await page.goto("/dashboard");

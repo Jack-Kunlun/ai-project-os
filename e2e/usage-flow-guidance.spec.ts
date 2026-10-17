@@ -41,6 +41,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const projectSourcePosts: string[] = [];
   const extractCalls: ExtractCall[] = [];
   const challengeByClientKey = new Map<string, string>();
+  const completedJobs = new Map<string, { id: string; status: string; result: { confirmedCount: number; reviewRequiredCount: number; duplicateCount: number } }>();
 
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -72,15 +73,22 @@ test("personal knowledge hands off explicitly into project materials and guided 
     }
 
     expect(body.challengeId).toBe(challengeByClientKey.get(body.clientKey));
+    const jobId = randomUUID();
+    completedJobs.set(jobId, { id: jobId, status: "succeeded", result: { confirmedCount: 1, reviewRequiredCount: 0, duplicateCount: 0 } });
     await route.fulfill({
+      status: 202,
       json: {
         job: {
-          id: randomUUID(),
-          status: "succeeded",
-          result: { confirmedCount: 1, reviewRequiredCount: 0, duplicateCount: 0 },
+          id: jobId,
+          status: "queued",
+          result: null,
         },
       },
     });
+  });
+  await page.route(`**/api/projects/${projectId}/jobs?*`, (route) => {
+    const ids = new URL(route.request().url()).searchParams.get("ids")?.split(",") ?? [];
+    return route.fulfill({ json: { jobs: ids.flatMap((id) => completedJobs.has(id) ? [completedJobs.get(id)!] : []) } });
   });
 
   await page.addInitScript(() => {
@@ -171,7 +179,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const sourceId = sourcePayload.source.id;
   expect(projectSourcePosts).toHaveLength(1);
 
-  const organize = intake.getByRole("button", { name: "确认发送并自动整理", exact: true });
+  const organize = intake.getByRole("button", { name: "确认发送并加入队列", exact: true });
   await expect(organize).toBeVisible();
   await expect(organize).toBeInViewport();
   await expect.poll(() => extractCalls.filter((call) => call.phase === "prepare").length).toBe(1);
@@ -179,40 +187,36 @@ test("personal knowledge hands off explicitly into project materials and guided 
   expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(0);
 
   await organize.click();
-  const nextStep = intake.getByRole("link", { name: "下一步：更新索引并问答", exact: true });
+  const nextStep = intake.getByRole("link", { name: "向项目提问", exact: true });
   await expect(nextStep).toBeVisible();
   expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(1);
   expect(extractCalls.filter((call) => call.phase === "execute")[0]?.sourceIds).toEqual([sourceId]);
   await nextStep.click();
-
-  await expect.poll(() => new URL(page.url()).searchParams.get("focus")).toBe("memory-index");
-  await expect(page.locator("#memory-index")).toBeInViewport();
-  const queryPanel = page.locator("#memory-query");
-  await expect(queryPanel.getByText(/请先建立或更新索引/u)).toBeVisible();
-  await expectR02NoHorizontalOverflow(page, "project memory 390px");
-  await expectR02NoAccessibilityViolations(page, "project memory 390px");
-
-  await queryPanel.getByRole("link", { name: "去更新索引 →", exact: true }).click();
-  await expect(page).toHaveURL(/#memory-index$/u);
-  await expect(page.locator("#memory-index")).toBeInViewport();
-
-  const projectSteps = page.getByRole("navigation", { name: "项目操作步骤", exact: true });
-  const addFromGuide = projectSteps.getByRole("link", { name: "添加资料", exact: true });
-  await addFromGuide.click();
-  await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("add");
-  await expect.poll(() => new URL(page.url()).searchParams.get("kind")).toBe("manual");
+  await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("ask");
+  const stableHeading = page.getByRole("heading", { name: `${projectName} · 项目资料`, exact: true });
+  await expect(stableHeading).toBeVisible();
+  const columns = page.getByRole("navigation", { name: "项目资料栏目", exact: true });
+  await expect(columns.getByRole("link")).toHaveText(["资料", "整理结果", "问项目", "识别任务"]);
+  await expect(page.locator("#memory-question")).toBeVisible();
+  await expect(intake).toHaveCount(0);
+  await expectR02NoHorizontalOverflow(page, "project question 390px");
+  await expectR02NoAccessibilityViolations(page, "project question 390px");
+  await columns.getByRole("link", { name: "资料", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
+  await expect(stableHeading).toBeVisible();
+  await expect(intake).toHaveCount(0);
+  const addButton = page.getByRole("button", { name: "添加资料", exact: true });
+  await addButton.click();
   await expect(intake).toBeVisible();
   await intake.getByRole("button", { name: "关闭", exact: true }).click();
   await expect(intake).toBeHidden();
-
-  const materialSteps = page.getByRole("navigation", { name: "项目操作步骤", exact: true });
-  const searchFromGuide = materialSteps.getByRole("link", { name: "检索与问答", exact: true });
-  await expect(searchFromGuide).toHaveAttribute("href", new RegExp(`/projects/${projectId}/memory\\?focus=memory-index`));
-  await searchFromGuide.click();
-  await expect.poll(() => new URL(page.url()).searchParams.get("focus")).toBe("memory-index");
-  await expect(page.locator("#memory-index")).toBeInViewport();
-
-  await page.getByRole("link", { name: "项目资料", exact: true }).click();
+  await expect(addButton).toBeFocused();
+  await columns.getByRole("link", { name: "整理结果", exact: true }).click();
+  await expect(stableHeading).toBeVisible();
+  await expect(page.getByRole("heading", { name: "待核对内容", exact: true })).toBeVisible();
+  await expect(intake).toHaveCount(0);
+  expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(1);
+  await columns.getByRole("link", { name: "资料", exact: true }).click();
   await page.locator(`#source-link-${sourceId}`).click();
   await expect(page.getByRole("heading", { name: "项目资料详情", exact: true })).toBeVisible();
   await expect(page.locator("main")).toContainText(body);
@@ -223,10 +227,124 @@ test("personal knowledge hands off explicitly into project materials and guided 
   await page.getByRole("button", { name: "继续 AI 整理", exact: true }).click();
   const sourceOrganizer = page.getByRole("dialog", { name: "整理这份资料", exact: true });
   await expect(sourceOrganizer).toBeVisible();
-  await expect(sourceOrganizer.getByRole("button", { name: "确认发送并自动整理", exact: true })).toBeVisible();
+  await expect(sourceOrganizer.getByRole("button", { name: "确认发送并加入队列", exact: true })).toBeVisible();
   await expect.poll(() => extractCalls.filter((call) => call.phase === "prepare").length).toBe(2);
   expect(extractCalls.filter((call) => call.phase === "prepare")[1]?.sourceIds).toEqual([sourceId]);
   expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(executeCountBeforeDetail);
   await expectR02NoHorizontalOverflow(page, "source organize dialog 390px");
   await expectR02NoAccessibilityViolations(page, "source organize dialog 390px");
+});
+
+test("project questions prepare stale material in place and require separate confirmation before every model send", async ({ page }) => {
+  const { projectId, projectName } = await projectFixture(page);
+  const sourceText = `Synthetic project delivery evidence ${randomUUID()}`;
+  const sourceResponse = await page.request.post(`/api/projects/${projectId}/sources`, {
+    headers: { origin: new URL(page.url()).origin },
+    data: { contentText: sourceText },
+  });
+  expect(sourceResponse.status()).toBe(201);
+  const sourceId = (await sourceResponse.json()).source.id as string;
+  const generationId = randomUUID();
+  let ready = false;
+  const answers: unknown[] = [];
+  const calls: { endpoint: string; phase: string; question?: string }[] = [];
+  const confirmations = new Map<string, string>();
+  const planFingerprint = "a".repeat(64);
+  const index = () => ({
+    activeIndex: ready ? { publishedAt: new Date().toISOString(), generation: { id: generationId, status: "complete", buildMode: "full", modelId: "fixture-embedding", dimensions: 8, recordCount: 1, inputManifestFingerprint: planFingerprint, completedAt: new Date().toISOString(), providerConnection: { name: "浏览器隔离向量模型" } } } : null,
+    latestJob: null, compatible: ready, readiness: ready ? "ready" : "indexMissing",
+    inputs: { projectSourceCount: 1, hasCodeSnapshot: false, repositoryMaterialGenerationCount: 0, manifestFingerprint: planFingerprint },
+    route: { source: "platform_default", modelId: "fixture-embedding", embeddingDimensions: 8, providerConnection: { name: "浏览器隔离向量模型", status: "verified" } },
+  });
+  // Browser interaction fixture only. No provider or production endpoint is called.
+  await page.route(`**/api/projects/${projectId}/memory/status`, (route) => route.fulfill({ json: { index: index(), sources: [], candidates: [], answers } }));
+  await page.route(`**/api/projects/${projectId}/memory/index?*`, (route) => route.fulfill({ json: { plan: { planFingerprint, mode: "full", providerName: "浏览器隔离向量模型", modelId: "fixture-embedding", expectedInputCount: 1, generateCount: 1, reuseCount: 0, deleteCount: 0, deadlineEligible: true, ineligibleCode: null } } }));
+  for (const endpoint of ["index", "answers"]) {
+    await page.route(`**/api/projects/${projectId}/memory/${endpoint}`, async (route) => {
+      const body = route.request().postDataJSON() as { phase: string; clientKey: string; challengeId?: string; question?: string };
+      calls.push({ endpoint, phase: body.phase, question: body.question });
+      if (body.phase === "prepare") {
+        const challengeId = randomUUID(); confirmations.set(body.clientKey, challengeId);
+        await route.fulfill({ json: { confirmation: { challengeId, targetAction: endpoint === "index" ? "memoryIndex" : "memoryAnswer", expiresAt: new Date(Date.now() + 120_000).toISOString(), safeSummary: { route: endpoint === "index" ? { provider: { name: "浏览器隔离向量模型" }, model: "fixture-embedding" } : { generation: { provider: { name: "浏览器隔离生成模型" }, model: "fixture-generation" } }, scope: { inputCount: 1, personalDefaultCount: 0 } } } } });
+      } else {
+        expect(body.challengeId).toBe(confirmations.get(body.clientKey));
+        if (endpoint === "index") ready = true;
+        else answers.push({ id: randomUUID(), question: body.question, answer: `引用资料：${sourceText}`, citations: [{ id: sourceId, scope: "projectSource", path: null, excerpt: sourceText }], providerConnection: { name: "浏览器隔离生成模型" }, modelId: "fixture-generation", createdAt: new Date().toISOString() });
+        await route.fulfill({ json: { job: { id: randomUUID(), status: "succeeded", result: { indexGenerationId: generationId } } } });
+      }
+    });
+  }
+  await page.goto(`/projects/${projectId}/materials`);
+  const columns = page.getByRole("navigation", { name: "项目资料栏目", exact: true });
+  await columns.getByRole("link", { name: "问项目", exact: true }).click();
+  const heading = page.getByRole("heading", { name: `${projectName} · 项目资料`, exact: true });
+  await expect(heading).toBeVisible();
+  const question = page.getByRole("textbox", { name: "你想了解什么？", exact: true });
+  await question.fill("本次交付范围是什么？");
+  await page.getByRole("button", { name: "提问", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "先准备项目资料", exact: true })).toBeVisible();
+  expect(calls.filter((call) => call.phase === "execute")).toHaveLength(0);
+  await question.fill("交付资料的依据是什么？");
+  await expect(page.getByRole("region", { name: "确认本次发送", exact: true })).toHaveCount(0);
+  expect(calls.filter((call) => call.phase === "execute")).toHaveLength(0);
+  await page.getByRole("button", { name: "提问", exact: true }).click();
+  await page.getByRole("button", { name: "确认并准备资料", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "确认本次提问", exact: true })).toBeVisible();
+  expect(calls.filter((call) => call.endpoint === "index" && call.phase === "execute")).toHaveLength(1);
+  expect(calls.filter((call) => call.endpoint === "answers" && call.phase === "execute")).toHaveLength(0);
+  await expect(heading).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "添加来源", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "确认提问", exact: true }).click();
+  await expect(page.getByText(`引用资料：${sourceText}`, { exact: true })).toBeVisible();
+  expect(calls.filter((call) => call.endpoint === "answers" && call.phase === "execute")).toHaveLength(1);
+  await page.getByText("引用原文 1", { exact: true }).click();
+  await expect(page.locator("blockquote").filter({ hasText: sourceText })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(`引用资料：${sourceText}`, { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectR02NoHorizontalOverflow(page, "project question preparation 390px");
+  await expectR02NoAccessibilityViolations(page, "project question preparation 390px");
+  await page.screenshot({ path: "test-results/usage-flow-guidance/project-question-inline-mobile.png" });
+});
+
+test("processing tasks preserve background state and only offer safe cancellation", async ({ page }) => {
+  const { projectId, projectName } = await projectFixture(page);
+  const queuedId = randomUUID();
+  const runningId = randomUUID();
+  const finishedId = randomUUID();
+  const jobs = [
+    { id: queuedId, kind: "autoExtract", status: "queued", stage: "worker_queued", canCancel: true, inputSummary: { sourceCount: 2, sourceLabels: ["青禾交付说明", "青禾会议记录"] }, createdAt: "2026-10-17T12:00:00Z", progressCurrent: 0, progressTotal: 2, result: null },
+    { id: runningId, kind: "assetExtract", status: "running", stage: "recognizing", canCancel: false, inputSummary: { displayName: "交付草图", fileName: "交付草图.png" }, createdAt: "2026-10-17T12:01:00Z", progressCurrent: 1, progressTotal: 3, result: null },
+    { id: finishedId, kind: "autoExtract", status: "succeeded", stage: "succeeded", canCancel: false, inputSummary: { sourceCount: 1, sourceLabels: ["青禾历史约定"] }, createdAt: "2026-10-17T11:00:00Z", progressCurrent: 2, progressTotal: 2, result: { confirmedCount: 1, reviewRequiredCount: 1, duplicateCount: 0 } },
+  ];
+  const cancellations: string[] = [];
+  // UI fixture only; queue admission, dispatch fences and cancellation are covered by PostgreSQL gates.
+  await page.route(`**/api/projects/${projectId}/jobs`, (route) => route.fulfill({ json: { jobs } }));
+  await page.route(`**/api/projects/${projectId}/jobs/${queuedId}`, async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ action: "cancel" });
+    cancellations.push(queuedId);
+    Object.assign(jobs[0]!, { status: "cancelled", stage: "cancelled", canCancel: false });
+    await route.fulfill({ json: { job: jobs[0] } });
+  });
+  await page.goto(`/projects/${projectId}/materials?view=tasks`);
+  await expect(page.getByRole("heading", { name: `${projectName} · 项目资料`, exact: true })).toBeVisible();
+  const tasks = page.getByRole("region", { name: "识别与整理任务", exact: true });
+  await expect(tasks.getByRole("article")).toHaveCount(3);
+  await expect(tasks.getByRole("article").filter({ hasText: "青禾交付说明" }).getByRole("button", { name: "取消任务", exact: true })).toBeVisible();
+  await expect(tasks.getByRole("article").filter({ hasText: "青禾历史约定" }).getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
+  await expect(tasks.getByText(/创建于/u)).toHaveCount(3);
+  await expect(tasks.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(1);
+  await expect(tasks.getByText("1/3（33%）", { exact: true })).toBeVisible();
+  await expect(tasks.getByRole("link", { name: "查看整理结果", exact: true })).toHaveAttribute("href", `/projects/${projectId}/materials?view=review&from=materials`);
+  await tasks.getByRole("button", { name: "取消任务", exact: true }).click();
+  await expect(tasks.getByText("任务已取消，尚未发送的请求不会继续执行。", { exact: true })).toBeVisible();
+  expect(cancellations).toEqual([queuedId]);
+  await expect(tasks.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(tasks.getByText("任务已取消，原始资料仍保留。", { exact: true })).toBeVisible();
+  await expect(tasks.getByText("1/3（33%）", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "添加来源", exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectR02NoHorizontalOverflow(page, "processing task queue 390px");
+  await expectR02NoAccessibilityViolations(page, "processing task queue 390px");
 });

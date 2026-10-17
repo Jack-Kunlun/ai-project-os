@@ -10,6 +10,7 @@ import {
 import {
   PersonalKnowledgeQaError,
   executePersonalKnowledgeQa,
+  personalKnowledgeQaPrepareSchema,
   preparePersonalKnowledgeQa,
 } from "../src/lib/personal-knowledge-qa-service";
 
@@ -32,6 +33,15 @@ const qaExecuteInput = {
 function qaCode(error: unknown): string {
   return error instanceof PersonalKnowledgeQaError ? error.code : "unexpected";
 }
+
+test("个人知识问答默认平台模型，不再要求提交个人模型 ID", () => {
+  const parsed = personalKnowledgeQaPrepareSchema.safeParse({
+    question: "人工审核需要什么？",
+    clientKey: "platform-default-qa-key",
+  });
+  assert.equal(parsed.success, true);
+  if (parsed.success) assert.equal(parsed.data.providerId, undefined);
+});
 
 class NoDispatchQaDb {
   transactions = 0;

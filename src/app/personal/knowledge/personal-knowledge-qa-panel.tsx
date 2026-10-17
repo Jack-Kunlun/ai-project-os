@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type QaCitation = Readonly<{
@@ -18,6 +17,8 @@ type QaConfirmationSummary = Readonly<{
   evidenceBytes: number;
   provider: string;
   model: string;
+  billingMode: "platform" | "byok";
+  quotaMultiplierBps: number | null;
   expiresAt?: string;
 }>;
 
@@ -36,9 +37,10 @@ type QaAnswer = Readonly<{
 type QaProvider = Readonly<{
   id: string;
   name: string;
-  status: string;
-  disabledAt: string | null;
-  defaultGenerationModelId: string | null;
+  modelId: string;
+  billingMode: "platform" | "byok";
+  quotaMultiplierBps: number | null;
+  isDefault: boolean;
 }>;
 
 type QaState = "idle" | "preparing" | "awaiting-confirmation" | "executing" | "success" | "error";
@@ -70,7 +72,7 @@ function randomClientKey(): string {
 /**
  * Ask one current personal page a grounded question. Prepare and execute are
  * deliberately separate so the user sees the exact outbound summary before
- * the BYOK provider request is dispatched.
+ * the selected platform or BYOK provider request is dispatched.
  */
 export function PersonalKnowledgeQaPanel({
   documentId,
@@ -95,16 +97,18 @@ export function PersonalKnowledgeQaPanel({
     const controller = new AbortController();
     async function loadProviders(): Promise<void> {
       try {
-        const response = await fetch("/api/me/ai-providers", { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error(await responseError(response, "个人模型列表暂时不可用"));
+        const response = await fetch("/api/personal/knowledge/qa-providers", { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error(await responseError(response, "问答模型暂时不可用"));
         const payload = await response.json() as { providers?: readonly QaProvider[] };
-        const available = (payload.providers ?? []).filter((provider) => provider.status === "verified" && provider.disabledAt === null && provider.defaultGenerationModelId !== null);
+        const available = payload.providers ?? [];
         setProviders(available);
-        setProviderId((current) => current !== null && available.some((provider) => provider.id === current) ? current : (available[0]?.id ?? null));
+        setProviderId((current) => current !== null && available.some((provider) => provider.id === current)
+          ? current
+          : (available.find((provider) => provider.isDefault)?.id ?? null));
         setProvidersError(null);
       } catch (cause) {
         if (controller.signal.aborted || isAbortError(cause)) return;
-        const message = cause instanceof Error ? cause.message : "个人模型列表暂时不可用";
+        const message = cause instanceof Error ? cause.message : "问答模型暂时不可用";
         setProvidersError(message);
       } finally {
         if (!controller.signal.aborted) setProvidersLoading(false);
@@ -123,7 +127,7 @@ export function PersonalKnowledgeQaPanel({
       return;
     }
     if (providerId === null) {
-      setError("请选择一个已验证的个人生成模型后再准备问答。");
+      setError("当前没有可用的平台默认模型。你可以暂时选择已验证的个人模型，或稍后重试。");
       setState("error");
       return;
     }
@@ -141,7 +145,12 @@ export function PersonalKnowledgeQaPanel({
         headers: { "content-type": "application/json" },
         cache: "no-store",
         signal: controller.signal,
-        body: JSON.stringify({ phase: "prepare", question: trimmed, providerId, clientKey: clientKeyRef.current }),
+        body: JSON.stringify({
+          phase: "prepare",
+          question: trimmed,
+          ...(selectedProvider?.billingMode === "byok" ? { providerId: selectedProvider.id } : {}),
+          clientKey: clientKeyRef.current,
+        }),
       });
       if (!response.ok) throw new Error(await responseError(response, "当前页面暂时不能发起问答"));
       const payload = await response.json() as { confirmation?: QaConfirmation };
@@ -182,7 +191,7 @@ export function PersonalKnowledgeQaPanel({
         body: JSON.stringify({
           phase: "execute",
           challengeId: confirmation.challengeId,
-          providerId: confirmation.providerId,
+          ...(confirmation.safeSummary.billingMode === "byok" ? { providerId: confirmation.providerId } : {}),
           clientKey: clientKeyRef.current,
           question: question.trim(),
         }),
@@ -218,15 +227,25 @@ export function PersonalKnowledgeQaPanel({
     clientKeyRef.current = randomClientKey();
   }
 
+  const selectedProvider = providers.find((provider) => provider.id === providerId) ?? null;
+  const platformProviders = providers.filter((provider) => provider.billingMode === "platform");
+  const byokProviders = providers.filter((provider) => provider.billingMode === "byok");
+
   return (
     <section id="personal-knowledge-qa" className="mt-6 scroll-mt-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-5" aria-labelledby="personal-page-qa-title">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Page Q&amp;A</p>
           <h3 id="personal-page-qa-title" className="mt-2 text-lg font-semibold text-slate-900">问问这页内容</h3>
-          <p className="mt-1 text-xs leading-5 text-slate-600">只使用当前版本 v{version} 的词法命中片段。发送前会列出页面字节数、证据片段和模型，并需要你单独确认。</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600">只使用当前版本 v{version} 中与问题相关的片段。发送前会说明模型、资料范围和额度，并由你确认。</p>
         </div>
-        <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700">BYOK · 不扣平台额度</span>
+        <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700">
+          {selectedProvider?.billingMode === "byok"
+            ? "个人模型 · 不扣平台额度"
+            : selectedProvider !== null
+              ? "平台默认模型 · 按实际用量扣额度"
+              : providersLoading ? "正在检查模型…" : "模型暂不可用"}
+        </span>
       </div>
 
       <form onSubmit={prepare} className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -237,20 +256,28 @@ export function PersonalKnowledgeQaPanel({
         <button type="submit" disabled={state === "preparing" || state === "executing" || providersLoading || providerId === null} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">{state === "preparing" ? "检查证据中…" : "准备问答"}</button>
       </form>
 
-      <div className="mt-3">
-        <label className="block text-xs font-semibold text-slate-600" htmlFor="personal-qa-provider">发送到个人模型</label>
-        <select id="personal-qa-provider" value={providerId ?? ""} onChange={(event) => { setProviderId(event.target.value || null); invalidateConfirmation(); }} disabled={providersLoading || state === "preparing" || state === "executing"} className="mt-1 w-full rounded-xl border border-indigo-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:opacity-60">
-          <option value="">{providersLoading ? "正在读取已验证的个人模型…" : "请选择个人模型"}</option>
-          {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.defaultGenerationModelId}</option>)}
-        </select>
-        {providersError !== null ? <p className="mt-1 text-xs text-rose-700" role="alert">{providersError}</p> : null}
-        {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-600">没有可用的已验证个人生成模型，请先到“<Link href="/personal/models" className="font-semibold text-indigo-700 underline underline-offset-4">配置 · 我的模型</Link>”完成连接测试。</p> : null}
+      <div className="mt-3 rounded-xl bg-white/80 px-3.5 py-3 text-xs text-slate-700">
+        {providersLoading ? "正在检查平台默认模型…" : providersError !== null ? <span role="alert">{providersError}</span> : selectedProvider === null ? "平台默认模型暂不可用。" : `本次使用 ${selectedProvider.name} · ${selectedProvider.modelId}`}
       </div>
+      {byokProviders.length > 0 ? (
+        <details open={platformProviders.length === 0} className="mt-2 rounded-xl border border-indigo-100 bg-white px-3.5 py-3">
+          <summary className="cursor-pointer text-xs font-semibold text-indigo-800">高级选项：改用个人模型（可选）</summary>
+          <label className="mt-3 block text-xs font-semibold text-slate-600" htmlFor="personal-qa-provider">问答模型</label>
+          <select id="personal-qa-provider" value={providerId ?? ""} onChange={(event) => { setProviderId(event.target.value || null); invalidateConfirmation(); }} disabled={providersLoading || state === "preparing" || state === "executing"} className="mt-1 w-full rounded-xl border border-indigo-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:opacity-60">
+            <option value="" disabled>请选择个人模型</option>
+            {platformProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.modelId}（平台额度）</option>)}
+            {byokProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.modelId}（不扣平台额度）</option>)}
+          </select>
+          <p className="mt-2 text-xs leading-5 text-slate-500">默认平台模型无需单独配置。个人模型仅在你主动切换时使用。</p>
+        </details>
+      ) : null}
+      {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-2 text-xs text-slate-600">平台默认模型当前不可用。你无需配置个人模型，稍后可以重试。</p> : null}
 
       {state === "awaiting-confirmation" && confirmation !== null ? (
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4" role="dialog" aria-labelledby="personal-qa-confirm-title">
           <h4 id="personal-qa-confirm-title" className="text-sm font-semibold text-amber-950">确认发送当前页面</h4>
-          <p className="mt-2 text-xs leading-5 text-amber-900">本次将发送页面 {formatBytes(confirmation.safeSummary.documentBytes)} 中的 {confirmation.safeSummary.evidenceChunks} 个证据片段（{formatBytes(confirmation.safeSummary.evidenceBytes)}），使用 {confirmation.safeSummary.provider} / {confirmation.safeSummary.model}。确认后才会请求你的个人模型。</p>
+          <p className="mt-2 text-xs leading-5 text-amber-900">本次仅发送当前页面 {formatBytes(confirmation.safeSummary.documentBytes)} 中的 {confirmation.safeSummary.evidenceChunks} 个相关片段（{formatBytes(confirmation.safeSummary.evidenceBytes)}），使用 {confirmation.safeSummary.provider} / {confirmation.safeSummary.model}。</p>
+          <p className="mt-2 text-xs leading-5 text-amber-900">{confirmation.safeSummary.billingMode === "platform" ? `确认后按实际用量扣除平台额度${confirmation.safeSummary.quotaMultiplierBps === null ? "" : `（倍率 ×${(confirmation.safeSummary.quotaMultiplierBps / 10_000).toFixed(2)}）`}；未发送不扣，调用结果不明时会暂留额度核对。` : "本次由你选择的个人模型处理，不扣平台额度。"}</p>
           <p className="mt-2 text-xs text-amber-800">确认有效期至 {formatExpiry(confirmation.expiresAt)}；页面内容或配置变化后需要重新准备。</p>
           <div className="mt-3 flex flex-wrap justify-end gap-2">
             <button type="button" onClick={cancelConfirmation} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900">取消</button>
@@ -259,7 +286,7 @@ export function PersonalKnowledgeQaPanel({
         </div>
       ) : null}
 
-      {state === "executing" ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-xs text-slate-600" role="status">正在请求个人模型并校验引用…</p> : null}
+      {state === "executing" ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-xs text-slate-600" role="status">正在请求模型并校验引用…</p> : null}
       {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</div> : null}
       {answer !== null ? (
         <div className="mt-4 rounded-xl border border-emerald-200 bg-white px-4 py-4">

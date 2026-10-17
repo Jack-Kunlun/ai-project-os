@@ -633,13 +633,15 @@ test("all Web AI provider transports carry a request actor and vision guards bef
   ] as const;
   for (const callerPath of callerPaths) {
     const source = readFileSync(join(process.cwd(), callerPath), "utf8");
-    const calls = [...source.matchAll(/auditedProviderCall\(\{([\s\S]*?)\n\s*\}, db\)/gu)];
+    const calls = [...source.matchAll(/auditedProviderCall(?:<[\s\S]*?>)?\(\{([\s\S]*?)\n\s*\}, db\)/gu)];
     assert.ok(calls.length > 0, `${callerPath} has no audited provider call`);
     for (const call of calls) assert.match(call[1]!, /actor:/u, `${callerPath} has an actorless transport`);
   }
 
   const visionSource = readFileSync(join(process.cwd(), "src/lib/project-assets/vision.ts"), "utf8");
   const blobIndex = visionSource.indexOf("readAssetBlob(");
-  const postClaimGuardIndex = visionSource.indexOf("withWebAiProjectAccessTransaction");
+  const postClaimGuardIndex = visionSource.indexOf("withProjectJobAccessTransaction(db, {");
   assert.ok(postClaimGuardIndex >= 0 && postClaimGuardIndex < blobIndex);
+  assert.match(visionSource.slice(postClaimGuardIndex, blobIndex), /attempt:\s*\{\s*jobId:\s*granted\.jobId,\s*\.\.\.claim\s*\}/u,
+    "the blob read remains behind an access check bound to the claimed job attempt");
 });

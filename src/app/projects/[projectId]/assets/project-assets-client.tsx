@@ -13,6 +13,7 @@ import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { initializeReviewDrafts } from "@/lib/project-asset-review-drafts";
 import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
+import { buildProjectHref } from "@/lib/project-navigation";
 
 type AssetStatus = "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed" | "deleted";
 type Segment = {
@@ -164,7 +165,8 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   const [files, setFiles] = useState<File[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [recognizing, setRecognizing] = useState<string | null>(null);
+  const [recognizing, setRecognizing] = useState<Record<string, boolean>>({});
+  const [processingJobIds, setProcessingJobIds] = useState<Record<string, string | undefined>>({});
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<Record<string, Confirmation | undefined>>({});
@@ -275,7 +277,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
     const sequence = prepareSequences.current[asset.id]!;
     const controller = new AbortController();
     prepareControllers.current[asset.id] = controller;
-    setRecognizing(asset.id);
+    setRecognizing((current) => ({ ...current, [asset.id]: true }));
     setMessage(null);
     setError(null);
     try {
@@ -299,7 +301,11 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
       setError(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
     } finally {
       if (sequence === prepareSequences.current[asset.id]) {
-        setRecognizing(null);
+        setRecognizing((current) => {
+          const next = { ...current };
+          delete next[asset.id];
+          return next;
+        });
         if (prepareControllers.current[asset.id] === controller) prepareControllers.current[asset.id] = undefined;
       }
       endAssetFlight(flightRef, asset.id, flightToken);
@@ -315,7 +321,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
     }
     const flightToken = beginAssetFlight(flightRef, asset.id);
     if (flightToken === null) return;
-    setRecognizing(asset.id);
+    setRecognizing((current) => ({ ...current, [asset.id]: true }));
     setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/assets/${asset.id}/recognize`, {
@@ -332,8 +338,11 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
         }
         throw new Error(nextStep ?? failure.message ?? "图片识别失败");
       }
-      const payload = await response.json() as { job: { status: string; failureCode?: string | null } };
-      setMessage(payload.job.status === "succeeded"
+      const payload = await response.json() as { job: { id: string; status: string; failureCode?: string | null } };
+      setProcessingJobIds((current) => ({ ...current, [asset.id]: payload.job.id }));
+      setMessage(payload.job.status === "queued"
+        ? "识别已加入后台任务，可继续操作其他文件；识别结果不会自动发布。"
+        : payload.job.status === "succeeded"
         ? "识别完成。结果仍未进入记忆，请逐项检查并确认。"
         : payload.job.status === "unknown"
           ? "供应商返回状态未知，系统没有发布识别结果；请前往治理页人工收口。"
@@ -345,7 +354,11 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
       setError(recognizeError instanceof Error ? recognizeError.message : "图片识别失败");
       await reload();
     } finally {
-      setRecognizing(null);
+      setRecognizing((current) => {
+        const next = { ...current };
+        delete next[asset.id];
+        return next;
+      });
       endAssetFlight(flightRef, asset.id, flightToken);
     }
   }
@@ -453,7 +466,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
             <article key={asset.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{kindLabels[asset.kind]}</span><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusTone(asset.status)}`}>{statusLabels[asset.status]}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : "版本信息不可用"} · {formatDate(asset.createdAt)}</p><p className="mt-3 text-xs leading-5 text-slate-500">已形成 {asset.segments.filter((segment) => segment.projectSourceId !== null).length} 个活动资料来源，共 {asset.segments.length} 个可定位片段。{asset.latestRun?.modelId ? ` 最近视觉模型：${asset.latestRun.modelId}。` : ""}</p>{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600">失败代码：{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2">{asset.status === "failed" ? <button type="button" onClick={() => void retryParsing(asset)} disabled={retrying !== null} className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white disabled:opacity-40">{retrying === asset.id ? "重新解析中…" : "重新解析"}</button> : null}<a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600">查看原文件</a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700">移除</button></div></div>
 
-              {asset.status === "waitingVision" ? <OperationPanel className="px-6 pb-5" title="识别文件中的图片" triggerLabel="开始图片识别">{error ? <p role="alert" className="mb-4 text-sm text-rose-700">{error}</p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700">{message}</p> : null}<div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950">需要视觉模型识别</h4><p className="mt-2 text-xs leading-5 text-amber-900">本次只发送此文件中标为待识别的原图、扫描 PDF 页或 Office 内嵌图片；不会发送项目中的其他资料。共 {asset.segments.filter((segment) => segment.requiresVision).length} 个片段。请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置“图片与扫描件识别”路由。</p><ul className="mt-3 list-inside list-disc space-y-1 text-xs text-amber-950">{asset.segments.filter((segment) => segment.requiresVision).map((segment) => <li key={segment.id}>{segment.locatorLabel}</li>)}</ul>{confirmations[asset.id] ? <ConfirmationCard confirmation={confirmations[asset.id]!} pending={recognizing === asset.id} executeLabel="开始图片识别" onExecute={() => void recognize(asset)} /> : <button type="button" onClick={() => void prepareRecognition(asset)} disabled={recognizing !== null} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing === asset.id ? "读取摘要中…" : "读取本次外发摘要"}</button>}</div></OperationPanel> : null}
+              {asset.status === "waitingVision" ? <OperationPanel className="px-6 pb-5" title="识别文件中的图片" triggerLabel="开始图片识别">{error ? <p role="alert" className="mb-4 text-sm text-rose-700">{error}</p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700">{message}</p> : null}{processingJobIds[asset.id] ? <Link href={buildProjectHref(projectId, "materials", { view: "tasks", from: "materials" })} className="mb-4 inline-block text-sm font-semibold text-indigo-700 underline">查看任务进度和取消 →</Link> : null}<div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950">需要视觉模型识别</h4><p className="mt-2 text-xs leading-5 text-amber-900">本次只发送此文件中标为待识别的原图、扫描 PDF 页或 Office 内嵌图片；不会发送项目中的其他资料。共 {asset.segments.filter((segment) => segment.requiresVision).length} 个片段。请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置“图片与扫描件识别”路由。</p><ul className="mt-3 list-inside list-disc space-y-1 text-xs text-amber-950">{asset.segments.filter((segment) => segment.requiresVision).map((segment) => <li key={segment.id}>{segment.locatorLabel}</li>)}</ul>{confirmations[asset.id] ? <ConfirmationCard confirmation={confirmations[asset.id]!} pending={recognizing[asset.id] === true} executeLabel="加入后台识别任务" onExecute={() => void recognize(asset)} /> : <button type="button" onClick={() => void prepareRecognition(asset)} disabled={recognizing[asset.id] === true} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing[asset.id] ? "读取摘要中…" : "读取本次外发摘要"}</button>}</div></OperationPanel> : null}
 
               {asset.status === "awaitingReview" ? <OperationPanel className="px-6 pb-5" title="核对识别文字" triggerLabel="核对识别结果">{error ? <p role="alert" className="mb-4 text-sm text-rose-700">{error}</p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700">{message}</p> : null}<div className="border-t border-indigo-100 bg-indigo-50/40 p-6 sm:px-7"><div className="mb-4"><h4 className="text-sm font-semibold text-indigo-950">确认识别结果</h4><p className="mt-2 text-xs leading-5 text-indigo-800">所有片段审核结束后，接受的内容才会一起发布到项目资料库；驳回的片段不会参与记忆与问答。</p></div><div className="space-y-4">{asset.segments.map((segment) => <div key={segment.id} className="rounded-2xl border border-indigo-100 bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">{segment.locatorLabel}</p><span className="text-[12px] text-slate-400">{segment.extractionMethod === "vision" ? `${segment.providerConnection?.name ?? "视觉模型"} · ${segment.modelId ?? "模型未记录"}` : "本地解析"}</span></div>{segment.reviewStatus === "pending" ? <><textarea value={edits[segment.id] ?? segment.contentText} onChange={(event) => setEdits((current) => ({ ...current, [segment.id]: event.target.value }))} rows={Math.min(12, Math.max(5, Math.ceil((edits[segment.id] ?? segment.contentText).length / 100)))} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-700 outline-none focus:border-indigo-400" /><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void review(asset.id, segment, "accept")} disabled={reviewing !== null || !(edits[segment.id] ?? segment.contentText).trim()} className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{reviewing === segment.id ? "保存中…" : "确认并保留"}</button><button type="button" onClick={() => void review(asset.id, segment, "dismiss")} disabled={reviewing !== null} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600 disabled:opacity-40">驳回片段</button></div></> : <p className="mt-3 text-xs text-slate-500">{segment.reviewStatus === "accepted" ? "已确认，等待文件其余片段完成。" : "已驳回，不会发布。"}</p>}</div>)}</div></div></OperationPanel> : null}
               {asset.status === "ready" ? <OperationPanel className="px-6 pb-5" title="整理文件中的事实" triggerLabel="AI 整理事实"><ProjectFactImport projectId={projectId} sourceIds={asset.segments.flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : [])} onChanged={reload} /></OperationPanel> : null}

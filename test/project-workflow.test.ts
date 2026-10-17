@@ -811,9 +811,11 @@ test("public job mapper uses a strict whitelist and sanitizes nested results", (
     webAiGrantId: randomUUID(),
   } as never);
   assert.deepEqual(Object.keys(publicJob).sort(), [
-    "attempts", "completedAt", "createdAt", "failureCode", "id", "kind",
+    "attempts", "canCancel", "completedAt", "createdAt", "failureCode", "id", "inputSummary", "kind",
     "progressCurrent", "progressTotal", "projectId", "reconciliationRequired", "result", "stage", "startedAt", "status",
   ]);
+  assert.equal(publicJob.inputSummary, null);
+  assert.equal(publicJob.canCancel, false, "the mapper never exposes an internal queue payload as a cancellation grant");
   assert.equal("payload" in publicJob, false);
   assert.equal("idempotencyKey" in publicJob, false);
   assert.equal("webAiGrantId" in publicJob, false);
@@ -821,6 +823,96 @@ test("public job mapper uses a strict whitelist and sanitizes nested results", (
   assert.equal("secret" in (publicJob.result as Record<string, unknown>), false);
   assert.equal("secret" in (publicJob.result as { results: Array<Record<string, unknown>> }).results[0]!, false);
   assert.equal("leaseTokenHash" in publicJob.attempts[0]!, false);
+});
+
+test("public task projection permits only confirmed queued work or undispatched persistent attempts to be cancelled", () => {
+  const now = new Date("2026-08-28T00:00:00.000Z");
+  const base = {
+    id: randomUUID(),
+    projectId: randomUUID(),
+    kind: "autoExtract" as const,
+    stage: "worker_queued",
+    result: null,
+    progressCurrent: 0,
+    progressTotal: 1,
+    failureCode: null,
+    reconciliationRequired: false,
+    createdAt: now,
+    payload: { queueMode: "persistentWorker" },
+    _count: { providerCalls: 0 },
+  };
+  const queued = toPublicProjectJob({ ...base, status: "queued", attempts: [] });
+  assert.equal(queued.canCancel, true);
+
+  const pending = toPublicProjectJob({
+    ...base,
+    status: "running",
+    attempts: [{
+      id: randomUUID(), attemptNumber: 1, status: "running", leasedAt: now, leaseExpiresAt: now,
+      heartbeatAt: now, dispatchState: "pending", safeFailureCode: null, completedAt: null,
+    }],
+  });
+  assert.equal(pending.canCancel, true);
+
+  const dispatched = toPublicProjectJob({
+    ...base,
+    status: "running",
+    attempts: [{
+      id: randomUUID(), attemptNumber: 1, status: "running", leasedAt: now, leaseExpiresAt: now,
+      heartbeatAt: now, dispatchState: "dispatched", safeFailureCode: null, completedAt: null,
+    }],
+  });
+  assert.equal(dispatched.canCancel, false);
+
+  const hasAudit = toPublicProjectJob({ ...base, status: "queued", attempts: [], _count: { providerCalls: 1 } });
+  assert.equal(hasAudit.canCancel, false);
+
+  const legacy = toPublicProjectJob({ ...base, status: "queued", attempts: [], payload: {} });
+  assert.equal(legacy.canCancel, false, "old synchronous job fixtures remain visible without receiving queue controls");
+  assert.equal(legacy.inputSummary, null, "old jobs fall back to their type and creation time");
+});
+
+test("processing job projection exposes safe file/source labels without forwarding job payloads", () => {
+  const common = {
+    id: randomUUID(),
+    projectId: randomUUID(),
+    status: "queued" as const,
+    stage: "worker_queued",
+    result: null,
+    progressCurrent: 0,
+    progressTotal: 1,
+    failureCode: null,
+    reconciliationRequired: false,
+    createdAt: new Date("2026-10-17T04:00:00.000Z"),
+    _count: { providerCalls: 0 },
+    attempts: [],
+  };
+  const file = toPublicProjectJob({
+    ...common,
+    kind: "assetExtract",
+    payload: {
+      queueMode: "persistentWorker",
+      inputSummary: { displayName: "项目方案", fileName: "方案.pdf", contentText: "private body", grantId: "secret-grant" },
+      sourceIds: [randomUUID()],
+    },
+  });
+  assert.deepEqual(file.inputSummary, { displayName: "项目方案", fileName: "方案.pdf" });
+  assert.equal(JSON.stringify(file).includes("private body"), false);
+  assert.equal(JSON.stringify(file).includes("secret-grant"), false);
+  assert.equal("payload" in file, false);
+
+  const sources = toPublicProjectJob({
+    ...common,
+    kind: "autoExtract",
+    payload: {
+      inputSummary: { sourceCount: 4, sourceLabels: ["docs.example.com/plan · 3f204b3a"], rawBody: "private body" },
+      sourceIds: [randomUUID()],
+      manifest: "private manifest",
+    },
+  });
+  assert.deepEqual(sources.inputSummary, { sourceCount: 4, sourceLabels: ["docs.example.com/plan · 3f204b3a"] });
+  assert.equal(JSON.stringify(sources).includes("private manifest"), false);
+  assert.equal(JSON.stringify(sources).includes("private body"), false);
 });
 
 test("job result serializers keep search and answer payloads explicit", () => {

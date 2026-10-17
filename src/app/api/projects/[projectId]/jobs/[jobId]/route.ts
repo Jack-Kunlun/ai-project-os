@@ -9,6 +9,7 @@ import {
   rejectProjectJobRetry,
   toPublicProjectJob,
 } from "@/lib/project-workflow";
+import { cancelQueuedWebAiProjectJob } from "@/lib/web-ai-governance";
 import { cancelGitHubProjectSync, reconcileGitHubProjectSync } from "@/lib/github/project-sync-service";
 import { cancelMemoryIndexJob, reconcileMemoryIndexJob } from "@/lib/web-memory-index";
 
@@ -55,7 +56,9 @@ export async function POST(request: Request, context: Context) {
           ? await cancelGitHubProjectSync({ projectId, jobId, actor: user })
           : existing?.kind === "memoryIndex"
             ? await cancelMemoryIndexJob(projectId, jobId, user)
-          : await cancelProjectJob(projectId, jobId, user)
+          : existing?.kind === "assetExtract" || existing?.kind === "autoExtract"
+            ? await cancelQueuedWebAiProjectJob(projectId, jobId, user)
+            : await cancelProjectJob(projectId, jobId, user)
         : rejectProjectJobRetry();
     return NextResponse.json({ job: toPublicProjectJob(job) });
   } catch (error) {

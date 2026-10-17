@@ -13,7 +13,9 @@ import {
   createPlatformDefaultAiRoute,
   validatePlatformDefaultAiRoute,
 } from "../src/lib/platform-default-ai-routes";
-import { listWebAiCandidates, prepareAutoExtractConfirmation, reviewWebAiCandidate, runAutoExtractJob } from "../src/lib/web-auto-extract";
+import { listWebAiCandidates, prepareAutoExtractConfirmation, reviewWebAiCandidate, runAutoExtractJob, runQueuedAutoExtractJob } from "../src/lib/web-auto-extract";
+import { cancelQueuedWebAiProjectJob, claimQueuedWebAiProjectJob } from "../src/lib/web-ai-governance";
+import { ProjectWorkflowError } from "../src/lib/project-workflow";
 import { prepareProjectMemoryIndexConfirmation, runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
 import { hashSourceContent } from "../src/lib/source";
 import {
@@ -24,6 +26,8 @@ import {
 } from "../src/lib/web-rag";
 import { createControlledMembership } from "./membership-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
+import { afterProcessingClaim } from "./project-processing-claim-fixture";
+import { assertPlatformConcurrency } from "../src/lib/ai-entitlements";
 
 const shouldRun = process.env.WEB_AI_POSTGRES_GATE === "1";
 
@@ -72,11 +76,17 @@ test(
     let truncatedDispatchCount = 0;
     let partialSourceId: string | null = null;
     const partialDispatchRanges: Array<{ start: number; end: number }> = [];
+    let providerHttpRequestCount = 0;
+    let blockedQueueSourceId: string | null = null;
+    let queuedDispatchStarted: (() => void) | null = null;
+    let queuedDispatchGate: Promise<void> | null = null;
+    let releaseQueuedDispatch: (() => void) | null = null;
 
     await unlink(masterKeyPath).catch(() => undefined);
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
 
     globalThis.fetch = async (input, init) => {
+      providerHttpRequestCount += 1;
       const url = String(input);
       assert.equal((init?.headers as Record<string, string>).authorization, "Bearer sk-v2-workflow-secret");
       const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -91,6 +101,10 @@ test(
         const messages = request.messages as Array<{ role: string; content: string }>;
         const system = messages[0]!.content;
         const user = JSON.parse(messages[1]!.content) as Record<string, unknown>;
+        if (user.sourceId === blockedQueueSourceId && blockedQueueSourceId !== null) {
+          queuedDispatchStarted?.();
+          await queuedDispatchGate;
+        }
         let content: string;
         let finishReason: string | undefined;
         if (system.includes("extract project-memory candidates")) {
@@ -625,6 +639,48 @@ test(
       await assert.rejects(prepareAutoExtractConfirmation({ projectId, requestedBy: user, clientKey: `retired-${suffix}`, sourceIds: [retiredSource.id], db }), (error: unknown) => error instanceof Error && "code" in error && error.code === "AUTO_EXTRACT_SOURCE_NOT_FOUND");
       assert.equal(await db.projectItem.count({ where: { projectId, reviewStatus: "confirmed" } }), confirmedBefore);
 
+      const retiredBeforeDispatchText = `即将过期的项目资料 ${suffix}：只允许确认仍有效的内容。`;
+      const retiredBeforeDispatchSource = await db.projectSource.create({ data: {
+        projectId,
+        kind: "manual",
+        originScope: "project",
+        contentText: retiredBeforeDispatchText,
+        contentHash: hashSourceContent(retiredBeforeDispatchText),
+        manualContentDedupeKey: null,
+      } });
+      const retiredBeforeDispatchKey = `extract-retired-before-dispatch-${suffix}`;
+      const retiredBeforeDispatchConfirmation = await prepareAutoExtractConfirmation({
+        projectId, requestedBy: user, clientKey: retiredBeforeDispatchKey,
+        sourceIds: [retiredBeforeDispatchSource.id], db,
+      });
+      const originalFindFirst = db.projectSource.findFirst.bind(db.projectSource);
+      const sourceDelegate = db.projectSource as unknown as { findFirst: (...args: unknown[]) => Promise<unknown> };
+      const initialRequestCount = providerHttpRequestCount;
+      sourceDelegate.findFirst = async (...args) => {
+        const found = await originalFindFirst(args[0] as never);
+        const query = args[0] as { where?: { id?: unknown } };
+        if (query.where?.id === retiredBeforeDispatchSource.id) {
+          await db.projectSource.update({
+            where: { id: retiredBeforeDispatchSource.id },
+            data: { retiredAt: new Date() },
+          });
+        }
+        return found;
+      };
+      try {
+        await assert.rejects(runAutoExtractJob({
+          projectId,
+          requestedBy: user,
+          clientKey: retiredBeforeDispatchKey,
+          challengeId: retiredBeforeDispatchConfirmation.challengeId,
+          request: { sourceIds: [retiredBeforeDispatchSource.id] },
+        }, db), (error: unknown) => error instanceof Error && "code" in error && error.code === "AUTO_EXTRACT_SOURCE_NOT_FOUND");
+      } finally {
+        sourceDelegate.findFirst = originalFindFirst as unknown as (...args: unknown[]) => Promise<unknown>;
+      }
+      assert.equal(providerHttpRequestCount, initialRequestCount, "retired source is rejected before any provider request");
+      assert.equal(await db.webAiCandidate.count({ where: { projectId, sourceId: retiredBeforeDispatchSource.id } }), 0);
+
       longFact = "项目当前使用 PostgreSQL 存储项目记忆。";
       const longSourceText = `${"a".repeat(10_000)}${longFact}${"b".repeat(70_000 - 10_000 - longFact.length)}${longFact}${"c".repeat(100_000 - 70_000 - longFact.length)}`;
       assert.equal(longSourceText.length, 100_000);
@@ -729,7 +785,99 @@ test(
         (error: unknown) => error instanceof Error && "code" in error && error.code === "AUTO_EXTRACT_SOURCE_TOO_LARGE",
       );
 
+      const queuedSource = source;
+      const enqueueAutoExtract = async (key: string) => {
+        const confirmation = await prepareAutoExtractConfirmation({
+          projectId, requestedBy: user, clientKey: key, sourceIds: [queuedSource.id], db,
+        });
+        return runAutoExtractJob({
+          projectId, requestedBy: user, clientKey: key, challengeId: confirmation.challengeId,
+          request: { sourceIds: [queuedSource.id] }, queueForWorker: true,
+        }, db);
+      };
+      const queuedJobOne = await enqueueAutoExtract(`queued-one-${suffix}`);
+      const queuedJobTwo = await enqueueAutoExtract(`queued-two-${suffix}`);
+      assert.equal(queuedJobOne.status, "queued", "confirmed first task is persisted without waiting for provider work");
+      assert.equal(queuedJobTwo.status, "queued", "a second task can be confirmed while the first remains queued");
+      const queuedJobRows = await db.backgroundJob.findMany({
+        where: { id: { in: [queuedJobOne.id, queuedJobTwo.id] } },
+        select: { id: true, stage: true, payload: true },
+      });
+      assert.equal(queuedJobRows.length, 2);
+      assert.equal(queuedJobRows.every((job) => job.stage === "worker_queued" &&
+        typeof job.payload === "object" && job.payload !== null && !Array.isArray(job.payload) &&
+        (job.payload as Record<string, unknown>).queueMode === "persistentWorker"), true);
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: { in: [queuedJobOne.id, queuedJobTwo.id] } } }), 0,
+        "enqueue itself never dispatches a model request");
+
+      const queuedCompletionOne = await runQueuedAutoExtractJob({ projectId, jobId: queuedJobOne.id, requestedBy: user }, db);
+      const queuedCompletionTwo = await runQueuedAutoExtractJob({ projectId, jobId: queuedJobTwo.id, requestedBy: user }, db);
+      assert.equal(queuedCompletionOne.status, "succeeded");
+      assert.equal(queuedCompletionTwo.status, "succeeded");
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: queuedJobOne.id, operation: "autoExtract" } }), 1);
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: queuedJobTwo.id, operation: "autoExtract" } }), 1);
+
+      const revokedAfterClaim = await enqueueAutoExtract(`queued-revoked-after-claim-${suffix}`);
+      const requestsBeforeRevocation = providerHttpRequestCount;
+      let revokedResult;
+      try {
+        revokedResult = await runQueuedAutoExtractJob({ projectId, jobId: revokedAfterClaim.id, requestedBy: user }, afterProcessingClaim(
+          db, revokedAfterClaim.id,
+          () => db.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } }),
+        ));
+      } finally {
+        await db.project.update({ where: { id: projectId }, data: { archivedAt: null } });
+      }
+      assert.equal(revokedResult.status, "failed", "access loss after claim terminalizes the task instead of leaving a running slot");
+      assert.equal(providerHttpRequestCount, requestsBeforeRevocation);
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: revokedAfterClaim.id } }), 0);
+      assert.equal(await db.backgroundJobAttempt.count({ where: { jobId: revokedAfterClaim.id, status: "failed", dispatchState: "pending" } }), 1);
+      await assertPlatformConcurrency(user, db);
+
+      const queuedCancellation = await enqueueAutoExtract(`queued-cancel-${suffix}`);
+      const cancelledJob = await cancelQueuedWebAiProjectJob(projectId, queuedCancellation.id, user, db);
+      assert.equal(cancelledJob.status, "cancelled");
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: queuedCancellation.id } }), 0,
+        "cancelling a queued task prevents provider dispatch");
+
+      const preDispatchCancellation = await enqueueAutoExtract(`queued-cancel-running-${suffix}`);
+      const preDispatchClaim = await claimQueuedWebAiProjectJob({
+        projectId, jobId: preDispatchCancellation.id, actor: user, kind: "autoExtract", verify: async () => true,
+      }, db);
+      assert.ok(preDispatchClaim);
+      const cancelledRunning = await cancelQueuedWebAiProjectJob(projectId, preDispatchCancellation.id, user, db);
+      assert.equal(cancelledRunning.status, "cancelled", "an undispatched running attempt is safely cancellable");
+      assert.equal(await db.backgroundJobAttempt.count({ where: { jobId: preDispatchCancellation.id, status: "cancelled" } }), 1);
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: preDispatchCancellation.id } }), 0);
+      assert.equal((await runQueuedAutoExtractJob({ projectId, jobId: preDispatchCancellation.id, requestedBy: user }, db)).status, "cancelled",
+        "a worker that resumes after cancellation cannot dispatch the stale attempt");
+
+      const dispatchedCancellation = await enqueueAutoExtract(`queued-cancel-dispatched-${suffix}`);
+      let signalDispatchStarted!: () => void;
+      let releaseProviderResponse!: () => void;
+      const dispatchStarted = new Promise<void>((resolve) => { signalDispatchStarted = resolve; });
+      const providerResponseGate = new Promise<void>((resolve) => { releaseProviderResponse = resolve; });
+      releaseQueuedDispatch = releaseProviderResponse;
+      blockedQueueSourceId = queuedSource.id;
+      queuedDispatchStarted = signalDispatchStarted;
+      queuedDispatchGate = providerResponseGate;
+      const dispatchedWorker = runQueuedAutoExtractJob({ projectId, jobId: dispatchedCancellation.id, requestedBy: user }, db);
+      await dispatchStarted;
+      await assert.rejects(
+        cancelQueuedWebAiProjectJob(projectId, dispatchedCancellation.id, user, db),
+        (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED",
+        "a task already sent to the provider cannot be represented as safely cancelled",
+      );
+      releaseProviderResponse();
+      const dispatchedResult = await dispatchedWorker;
+      blockedQueueSourceId = null;
+      queuedDispatchStarted = null;
+      queuedDispatchGate = null;
+      assert.equal(dispatchedResult.status, "succeeded");
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: dispatchedCancellation.id, operation: "autoExtract" } }), 1);
+
     } finally {
+      releaseQueuedDispatch?.();
       globalThis.fetch = previousFetch;
       // Platform default route/audit rows are immutable evidence. The
       // disposable gate runner drops this database after the test, so row

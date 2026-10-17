@@ -1,35 +1,49 @@
 import { createHash, randomUUID } from "node:crypto";
-import { type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { invokeVisionCompletion, ProviderTransportError } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { nonLegacyMcpProjectAssetSegmentWhere } from "@/lib/legacy-mcp-source-quarantine";
-import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
-import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
+import { assertWebAiProjectAccess, WebAiAccessError, type WebAiActor } from "@/lib/web-ai-access";
+import { ProjectLifecycleError } from "@/lib/project-lifecycle";
 import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
+import { AiEntitlementError } from "@/lib/ai-entitlements";
 import { loadProjectAiPublicVisibility } from "@/lib/project-ai-public-projection";
 import { readOfficeImageForVision, renderPdfPageForVision } from "@/lib/project-assets/parser";
 import { ProjectAssetError } from "@/lib/project-assets/service";
 import { readAssetBlob } from "@/lib/project-assets/storage";
-import { getProjectJobInternal, isUncertainProviderDispatch } from "@/lib/project-workflow";
+import { getProjectJobInternal, isUncertainProviderDispatch, ProjectWorkflowError, withProjectJobAccessTransaction, type JobAttemptClaim } from "@/lib/project-workflow";
 import {
   auditedProviderCall,
+  assertQueuedProjectWebAiGrant,
+  claimQueuedWebAiProjectJob,
   claimWebAiJob,
   createGrantedWebAiJob,
+  failQueuedWebAiProjectJob,
   failWebAiJob,
   finishWebAiJob,
   manifestFingerprint,
   stableAiCallKey,
   updateWebAiJobProgress,
+  WebAiGovernanceError,
 } from "@/lib/web-ai-governance";
 import {
   confirmationRouteDisplay,
   confirmationRouteSnapshot,
   parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
+  WebAiConfirmationError,
 } from "@/lib/web-ai-confirmation";
 
 const assetIdSchema = z.string().uuid();
+const queuedVisionPayloadSchema = z.object({
+  queueMode: z.literal("persistentWorker"),
+  assetId: z.string().uuid(),
+  versionId: z.string().uuid(),
+  segmentIds: z.array(z.string().uuid()).min(1).max(5_000),
+  manifest: z.string().regex(/^[a-f0-9]{64}$/u),
+  inputSummary: z.object({ displayName: z.string().trim().min(1).max(255), fileName: z.string().trim().min(1).max(255) }).strict().optional(),
+}).strict();
 const visionResponseSchema = z.object({
   transcript: z.string().max(100_000).default(""),
   description: z.string().max(20_000).default(""),
@@ -89,15 +103,16 @@ function promptFor(locatorLabel: string): string {
 type VisionMaterial = Readonly<{
   assetId: string;
   route: Awaited<ReturnType<typeof resolveEffectiveAiRoute>>;
-  asset: Readonly<{ status: string }>;
+  asset: Readonly<{ status: string; displayName: string }>;
   version: Readonly<{
     id: string;
     status: string;
     mimeType: string;
+    originalFileName: string;
     contentHash: string;
-    segments: ReadonlyArray<Readonly<{ id: string; requiresVision: boolean; locatorLabel: string; ordinal: number; pageNumber: number | null }>>;
+    segments: ReadonlyArray<Readonly<{ id: string; requiresVision: boolean; locatorLabel: string; contentHash: string; ordinal: number; pageNumber: number | null }>>;
   }>;
-  segments: ReadonlyArray<Readonly<{ id: string; requiresVision: boolean; locatorLabel: string; ordinal: number; pageNumber: number | null }>>;
+  segments: ReadonlyArray<Readonly<{ id: string; requiresVision: boolean; locatorLabel: string; contentHash: string; ordinal: number; pageNumber: number | null }>>;
   manifest: string;
 }>;
 
@@ -182,97 +197,136 @@ export async function prepareProjectAssetVisionConfirmation(input: Readonly<{
   });
 }
 
+type PreclaimedVision = Readonly<{
+  jobId: string;
+  grantId: string;
+  claim: JobAttemptClaim;
+  material: VisionMaterial;
+  runId: string;
+}>;
+
 export async function runProjectAssetVisionExtraction(input: Readonly<{
   projectId: string;
-  assetId: unknown;
+  assetId?: unknown;
   requestedBy: WebAiActor;
-  clientKey: unknown;
+  clientKey?: unknown;
   challengeId?: unknown;
   consent?: unknown;
+  queueForWorker?: boolean;
+  /** Internal worker continuation after the persisted job was atomically claimed. */
+  preclaimed?: PreclaimedVision;
 }>, db: PrismaClient = getDb()) {
   // Asset/version and route reads stay behind the current project access
   // fence. The grant admission repeats this check while consuming the
   // challenge, so this is only the early fail-closed boundary.
-  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
-  const material = await loadVisionMaterial(input.projectId, input.assetId, db);
-  const { assetId, route, version, segments, manifest } = material;
-  const runId = randomUUID();
-  const granted = await createGrantedWebAiJob({
-    projectId: input.projectId,
-    kind: "assetExtract",
-    route,
-    requestedBy: input.requestedBy,
-    clientKey: input.clientKey,
-    scopeKind: "projectAssets",
-    scopeIds: { assetId, versionId: version.id, segmentIds: segments.map((segment) => segment.id) },
-    manifestFingerprint: manifest,
-    payload: { assetId, versionId: version.id, segmentIds: segments.map((segment) => segment.id), manifest },
-    confirmation: {
-      challengeId: input.challengeId,
+  if (input.preclaimed === undefined) await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+  let material: VisionMaterial;
+  let runId: string;
+  let granted: Readonly<{ jobId: string; grantId: string; created: boolean }>;
+  let claim: JobAttemptClaim;
+  if (input.preclaimed !== undefined) {
+    material = input.preclaimed.material;
+    runId = input.preclaimed.runId;
+    granted = { jobId: input.preclaimed.jobId, grantId: input.preclaimed.grantId, created: false };
+    claim = input.preclaimed.claim;
+  } else {
+    material = await loadVisionMaterial(input.projectId, input.assetId, db);
+    runId = randomUUID();
+    const { assetId, route, version, segments, manifest } = material;
+    granted = await createGrantedWebAiJob({
+      projectId: input.projectId,
+      kind: "assetExtract",
+      route,
+      requestedBy: input.requestedBy,
       clientKey: input.clientKey,
-      targetAction: "assetRecognize",
-      contentVersion: `asset-recognize:v1:${manifest}`,
-      inputFingerprintPayload: {
+      scopeKind: "projectAssets",
+      scopeIds: { assetId, versionId: version.id, segmentIds: segments.map((segment) => segment.id) },
+      manifestFingerprint: manifest,
+      payload: {
         assetId,
         versionId: version.id,
-        contentHash: version.contentHash,
         segmentIds: segments.map((segment) => segment.id),
+        manifest,
+        inputSummary: {
+          displayName: material.asset.displayName.slice(0, 255),
+          fileName: version.originalFileName.slice(0, 255),
+        },
       },
-      routeSnapshot: confirmationRouteSnapshot(route),
-    },
-    refreshConfirmation: async (tx) => {
-      const fresh = await loadVisionMaterial(input.projectId, input.assetId, tx as unknown as PrismaClient);
-      return {
+      queueForWorker: input.queueForWorker === true,
+      confirmation: {
         challengeId: input.challengeId,
         clientKey: input.clientKey,
         targetAction: "assetRecognize",
-        contentVersion: `asset-recognize:v1:${fresh.manifest}`,
+        contentVersion: `asset-recognize:v1:${manifest}`,
         inputFingerprintPayload: {
-          assetId: fresh.assetId,
-          versionId: fresh.version.id,
-          contentHash: fresh.version.contentHash,
-          segmentIds: fresh.segments.map((segment) => segment.id),
+          assetId,
+          versionId: version.id,
+          contentHash: version.contentHash,
+          segmentIds: segments.map((segment) => segment.id),
         },
-        routeSnapshot: confirmationRouteSnapshot(fresh.route),
-      };
-    },
-    afterCreate: async (tx, jobId) => {
-      const currentVersion = await tx.projectAssetVersion.findUnique({
-        where: { projectId_id: { projectId: input.projectId, id: version.id } },
-        select: { status: true, asset: { select: { status: true } } },
-      });
-      if (currentVersion?.status !== "waitingVision" || currentVersion.asset.status !== "waitingVision") {
-        throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
-      }
-      await tx.projectAssetExtractionRun.create({
-        data: {
-          id: runId,
-          projectId: input.projectId,
-          projectAssetId: assetId,
-          projectAssetVersionId: version.id,
-          jobId,
-          status: "queued",
-          providerConnectionId: route.providerConnectionId,
-          modelId: route.modelId,
-          inputManifestFingerprint: manifest,
-          localSegmentCount: version.segments.length - segments.length,
-          visionSegmentCount: segments.length,
-        },
-      });
-    },
-  }, db);
-  if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
-  const claim = await claimWebAiJob(granted.jobId, db);
-  if (!claim) return getProjectJobInternal(input.projectId, granted.jobId, db);
+        routeSnapshot: confirmationRouteSnapshot(route),
+      },
+      refreshConfirmation: async (tx) => {
+        const fresh = await loadVisionMaterial(input.projectId, input.assetId, tx as unknown as PrismaClient);
+        return {
+          challengeId: input.challengeId,
+          clientKey: input.clientKey,
+          targetAction: "assetRecognize",
+          contentVersion: `asset-recognize:v1:${fresh.manifest}`,
+          inputFingerprintPayload: {
+            assetId: fresh.assetId,
+            versionId: fresh.version.id,
+            contentHash: fresh.version.contentHash,
+            segmentIds: fresh.segments.map((segment) => segment.id),
+          },
+          routeSnapshot: confirmationRouteSnapshot(fresh.route),
+        };
+      },
+      afterCreate: async (tx, jobId) => {
+        const currentVersion = await tx.projectAssetVersion.findUnique({
+          where: { projectId_id: { projectId: input.projectId, id: version.id } },
+          select: { status: true, asset: { select: { status: true } } },
+        });
+        if (currentVersion?.status !== "waitingVision" || currentVersion.asset.status !== "waitingVision") {
+          throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
+        }
+        await tx.projectAssetExtractionRun.create({
+          data: {
+            id: runId,
+            projectId: input.projectId,
+            projectAssetId: assetId,
+            projectAssetVersionId: version.id,
+            jobId,
+            status: "queued",
+            providerConnectionId: route.providerConnectionId,
+            modelId: route.modelId,
+            inputManifestFingerprint: manifest,
+            localSegmentCount: version.segments.length - segments.length,
+            visionSegmentCount: segments.length,
+          },
+        });
+      },
+    }, db);
+    if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
+    if (input.queueForWorker === true) return getProjectJobInternal(input.projectId, granted.jobId, db);
+    const claimed = await claimWebAiJob(granted.jobId, db);
+    if (!claimed) return getProjectJobInternal(input.projectId, granted.jobId, db);
+    claim = claimed;
+  }
+  const { assetId, route, version, segments, manifest } = material;
 
   try {
+    if (input.preclaimed !== undefined) await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
     // The run/resource transition is also ordered after the project access
     // fence. This keeps the asset lock from establishing a reverse
     // resource -> actor/workspace/project order with revocation/archive.
-    const blob = await withWebAiProjectAccessTransaction(db, {
+    const blob = await withProjectJobAccessTransaction(db, {
       actor: input.requestedBy,
       projectId: input.projectId,
+      jobId: granted.jobId,
       required: "edit",
+      expectedRequestedById: input.requestedBy.id,
+      attempt: { jobId: granted.jobId, ...claim },
     }, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${input.projectId}:${assetId}`}, 29082026))`;
       const current = await tx.projectAsset.findUnique({
@@ -328,55 +382,130 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
           throw new ProviderTransportError("AI_PROVIDER_VISION_UNSUPPORTED", 422, false);
         }
       }
-      const response = await auditedProviderCall({
-        jobId: granted.jobId,
-        attempt: claim,
+      let visionFenceRejected = false;
+      let response: Awaited<ReturnType<typeof auditedProviderCall<{ extracted: ReturnType<typeof parseVisionResponse> }>>>;
+      try {
+        response = await auditedProviderCall<{ extracted: ReturnType<typeof parseVisionResponse> }>({
+          jobId: granted.jobId,
+          attempt: claim,
+          actor: input.requestedBy,
+          route,
+          grantId: granted.grantId,
+          operation: "visionExtract",
+          callKey: stableAiCallKey(granted.jobId, "visionExtract", segment.id),
+          requestPayload: { segmentId: segment.id, prompt: promptFor(segment.locatorLabel), imageBytes: image.length },
+          maxOutputTokens: route.maxOutputTokens,
+          resourceFence: async (tx: Prisma.TransactionClient) => {
+            const activeRun = await tx.projectAssetExtractionRun.findFirst({
+              where: { id: runId, projectId: input.projectId, projectAssetId: assetId, projectAssetVersionId: version.id, jobId: granted.jobId, status: "running" },
+              select: { id: true },
+            });
+            const currentVersion = await tx.projectAssetVersion.findFirst({
+              where: { projectId: input.projectId, id: version.id, projectAssetId: assetId },
+              select: {
+                status: true,
+                contentHash: true,
+                storageKey: true,
+                sizeBytes: true,
+                asset: { select: { status: true, deletedAt: true } },
+              },
+            });
+            const currentSegment = await tx.projectAssetSegment.findFirst({
+              where: {
+                projectId: input.projectId,
+                id: segment.id,
+                projectAssetId: assetId,
+                projectAssetVersionId: version.id,
+                locatorLabel: segment.locatorLabel,
+                contentHash: segment.contentHash,
+                requiresVision: true,
+              },
+              select: { id: true },
+            });
+            if (
+              activeRun === null
+              || currentVersion?.status !== "waitingVision"
+              || currentVersion.contentHash !== version.contentHash
+              || currentVersion.storageKey !== blob.storageKey
+              || currentVersion.sizeBytes !== blob.sizeBytes
+              || currentVersion.asset.status !== "waitingVision"
+              || currentVersion.asset.deletedAt !== null
+              || currentSegment === null
+            ) {
+              visionFenceRejected = true;
+              throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
+            }
+          },
+          call: async (dispatch) => {
+            const providerResult = await invokeVisionCompletion({
+              connection: dispatch.connection,
+              modelId: dispatch.modelId,
+              image,
+              mimeType,
+              prompt: promptFor(segment.locatorLabel),
+              maxOutputTokens: dispatch.maxOutputTokens,
+            });
+            return Object.freeze({ ...providerResult, extracted: parseVisionResponse(providerResult.content) });
+          },
+        }, db);
+      } catch (error) {
+        if (visionFenceRejected) throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
+        throw error;
+      }
+      await withProjectJobAccessTransaction(db, {
         actor: input.requestedBy,
-        route,
-        grantId: granted.grantId,
-        operation: "visionExtract",
-        callKey: stableAiCallKey(granted.jobId, "visionExtract", segment.id),
-        requestPayload: { segmentId: segment.id, prompt: promptFor(segment.locatorLabel), imageBytes: image.length },
-        maxOutputTokens: route.maxOutputTokens,
-        call: async (dispatch) => {
-          const providerResult = await invokeVisionCompletion({
-            connection: dispatch.connection,
-            modelId: dispatch.modelId,
-            image,
-            mimeType,
-            prompt: promptFor(segment.locatorLabel),
-            maxOutputTokens: dispatch.maxOutputTokens,
-          });
-          return Object.freeze({ ...providerResult, extracted: parseVisionResponse(providerResult.content) });
-        },
-      }, db);
-      await db.projectAssetSegment.update({
-        where: { projectId_id: { projectId: input.projectId, id: segment.id } },
-        data: {
-          contentText: response.extracted.contentText,
-          contentHash: response.extracted.contentHash,
-          requiresVision: false,
-          extractionMethod: "vision",
-          providerConnectionId: route.providerConnectionId,
-          modelId: route.modelId,
-        },
+        projectId: input.projectId,
+        jobId: granted.jobId,
+        required: "edit",
+        expectedRequestedById: input.requestedBy.id,
+        attempt: { jobId: granted.jobId, ...claim },
+      }, async (tx) => {
+        const updated = await tx.projectAssetSegment.updateMany({
+          where: {
+            projectId: input.projectId,
+            id: segment.id,
+            projectAssetId: assetId,
+            projectAssetVersionId: version.id,
+            requiresVision: true,
+          },
+          data: {
+            contentText: response.extracted.contentText,
+            contentHash: response.extracted.contentHash,
+            requiresVision: false,
+            extractionMethod: "vision",
+            providerConnectionId: route.providerConnectionId,
+            modelId: route.modelId,
+          },
+        });
+        if (updated.count !== 1) throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
       });
+      await updateWebAiJobProgress(granted.jobId, claim, "recognizing", index + 1, segments.length, db);
     }
-    await db.$transaction([
-      db.projectAsset.update({
-        where: { projectId_id: { projectId: input.projectId, id: assetId } },
+    await withProjectJobAccessTransaction(db, {
+      actor: input.requestedBy,
+      projectId: input.projectId,
+      jobId: granted.jobId,
+      required: "edit",
+      expectedRequestedById: input.requestedBy.id,
+      attempt: { jobId: granted.jobId, ...claim },
+    }, async (tx) => {
+      const assetUpdate = await tx.projectAsset.updateMany({
+        where: { projectId: input.projectId, id: assetId, status: "waitingVision" },
         data: { status: "awaitingReview" },
-      }),
-      db.projectAssetVersion.update({
-        where: { projectId_id: { projectId: input.projectId, id: version.id } },
+      });
+      const versionUpdate = await tx.projectAssetVersion.updateMany({
+        where: { projectId: input.projectId, id: version.id, status: "waitingVision" },
         data: { status: "awaitingReview" },
-      }),
-      db.projectAssetExtractionRun.update({
-        where: { id: runId },
+      });
+      const runUpdate = await tx.projectAssetExtractionRun.updateMany({
+        where: { id: runId, projectId: input.projectId, jobId: granted.jobId, status: "running" },
         data: { status: "waitingReview" },
-      }),
-      db.project.update({ where: { id: input.projectId }, data: { updatedAt: new Date() } }),
-    ]);
+      });
+      if (assetUpdate.count !== 1 || versionUpdate.count !== 1 || runUpdate.count !== 1) {
+        throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
+      }
+      await tx.project.update({ where: { id: input.projectId }, data: { updatedAt: new Date() } });
+    });
     return finishWebAiJob(granted.jobId, claim, {
       assetId,
       versionId: version.id,
@@ -385,22 +514,115 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
     }, db);
   } catch (error) {
     const status = isUncertainProviderDispatch(error) ? "unknown" : "failed";
-    await db.$transaction([
-      db.projectAsset.updateMany({
-        where: { projectId: input.projectId, id: assetId, status: { not: "deleted" } },
-        data: { status: "waitingVision" },
-      }),
-      db.projectAssetVersion.updateMany({
-        where: { projectId: input.projectId, id: version.id },
-        data: { status: "waitingVision", failureCode: safeFailureCode(error) },
-      }),
-      db.projectAssetExtractionRun.updateMany({
-        where: { id: runId, status: { in: ["queued", "running"] } },
+    await withProjectJobAccessTransaction(db, {
+      actor: input.requestedBy,
+      projectId: input.projectId,
+      jobId: granted.jobId,
+      required: "edit",
+      expectedRequestedById: input.requestedBy.id,
+      attempt: { jobId: granted.jobId, ...claim },
+    }, async (tx) => {
+      const runUpdate = await tx.projectAssetExtractionRun.updateMany({
+        where: { id: runId, projectId: input.projectId, jobId: granted.jobId, status: { in: ["queued", "running"] } },
         data: { status, failureCode: safeFailureCode(error), completedAt: new Date() },
-      }),
-      db.project.updateMany({ where: { id: input.projectId }, data: { updatedAt: new Date() } }),
-    ]);
+      });
+      if (runUpdate.count > 0) {
+        await tx.projectAssetVersion.updateMany({
+          where: { projectId: input.projectId, id: version.id, status: "waitingVision" },
+          data: { failureCode: safeFailureCode(error) },
+        });
+        await tx.project.update({ where: { id: input.projectId }, data: { updatedAt: new Date() } });
+      }
+    }).catch(() => undefined);
     await failWebAiJob(granted.jobId, claim, error, db).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function runQueuedProjectAssetVisionExtraction(input: Readonly<{
+  projectId: string;
+  jobId: string;
+  requestedBy: WebAiActor;
+}>, db: PrismaClient = getDb()) {
+  try {
+    const claimed = await claimQueuedWebAiProjectJob({
+      projectId: input.projectId,
+      jobId: input.jobId,
+      actor: input.requestedBy,
+      kind: "assetExtract",
+      verify: async (tx, job, actor) => {
+        if (job.stage !== "worker_queued" || job.webAiGrantId === null) {
+          throw new WebAiGovernanceError("WEB_AI_JOB_INVALID_STATE");
+        }
+        const payload = queuedVisionPayloadSchema.safeParse(job.payload);
+        if (!payload.success) throw new WebAiGovernanceError("WEB_AI_JOB_INVALID_STATE");
+        const material = await loadVisionMaterial(input.projectId, payload.data.assetId, tx as unknown as PrismaClient);
+        if (
+          material.version.id !== payload.data.versionId
+          || material.manifest !== payload.data.manifest
+          || material.segments.length !== payload.data.segmentIds.length
+          || material.segments.some((segment, index) => segment.id !== payload.data.segmentIds[index])
+        ) throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_STALE");
+        const run = await tx.projectAssetExtractionRun.findFirst({
+          where: { projectId: input.projectId, jobId: input.jobId },
+          select: { id: true, status: true, projectAssetId: true, projectAssetVersionId: true, inputManifestFingerprint: true },
+        });
+        if (
+          run === null
+          || run.status !== "queued"
+          || run.projectAssetId !== material.assetId
+          || run.projectAssetVersionId !== material.version.id
+          || run.inputManifestFingerprint !== material.manifest
+        ) throw new WebAiGovernanceError("WEB_AI_JOB_INVALID_STATE");
+        await assertQueuedProjectWebAiGrant({
+          projectId: input.projectId,
+          jobId: input.jobId,
+          grantId: job.webAiGrantId,
+          requestedById: actor.id,
+          kind: "assetExtract",
+          route: material.route,
+          scopeKind: "projectAssets",
+          scopeIds: {
+            assetId: material.assetId,
+            versionId: material.version.id,
+            segmentIds: material.segments.map((segment) => segment.id),
+          },
+          manifestFingerprint: material.manifest,
+        }, tx);
+        return Object.freeze({ material, runId: run.id, grantId: job.webAiGrantId });
+      },
+    }, db);
+    if (claimed === null) return getProjectJobInternal(input.projectId, input.jobId, db);
+    return await runProjectAssetVisionExtraction({
+      projectId: input.projectId,
+      requestedBy: input.requestedBy,
+      preclaimed: {
+        jobId: input.jobId,
+        grantId: claimed.verified.grantId,
+        claim: claimed.claim,
+        material: claimed.verified.material,
+        runId: claimed.verified.runId,
+      },
+    }, db);
+  } catch (error) {
+    if (
+      error instanceof WebAiAccessError
+      || error instanceof ProjectLifecycleError
+      || error instanceof ProjectWorkflowError
+      || error instanceof WebAiGovernanceError
+      || error instanceof WebAiConfirmationError
+      || error instanceof AiEntitlementError
+      || error instanceof ProjectAssetError
+    ) {
+      await failQueuedWebAiProjectJob({
+        projectId: input.projectId,
+        jobId: input.jobId,
+        actor: input.requestedBy,
+        kind: "assetExtract",
+        error,
+      }, db).catch(() => false);
+      return getProjectJobInternal(input.projectId, input.jobId, db);
+    }
     throw error;
   }
 }

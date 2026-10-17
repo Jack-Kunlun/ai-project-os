@@ -39,17 +39,18 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId: string; onChanged?: () => Promise<void> }) {
+export function ProjectMaterialReviewQueue({ projectId, onChanged, embedded = false }: { projectId: string; onChanged?: () => Promise<void>; embedded?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("materialsReview", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const cursor = navigation.cursor;
-  const search = navigation.search ?? "";
+  const [localQuery, setLocalQuery] = useState<{ cursor: string | null; search: string; type: ReviewType }>({ cursor: null, search: "", type: "all" });
+  const cursor = embedded ? localQuery.cursor : navigation.cursor;
+  const search = embedded ? localQuery.search : navigation.search ?? "";
   const deferredSearch = useDeferredValue(search);
-  const itemType: ReviewType = parseReviewType(navigation.filter);
+  const itemType: ReviewType = embedded ? localQuery.type : parseReviewType(navigation.filter);
   const [history, setHistory] = useState<Array<string | null>>([]);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<string | null>(null);
@@ -57,6 +58,10 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
   const [message, setMessage] = useState<string | null>(null);
 
   function replaceReviewQuery(input: { search?: string; type?: ReviewType; cursor?: string | null }): void {
+    if (embedded) {
+      setLocalQuery((current) => ({ search: input.search ?? current.search, type: input.type ?? current.type, cursor: input.cursor === undefined ? current.cursor : input.cursor }));
+      return;
+    }
     const nextSearch = input.search ?? navigation.search ?? "";
     const nextType = input.type ?? parseReviewType(navigation.filter);
     const nextCursor = input.cursor === undefined ? navigation.cursor : input.cursor;
@@ -95,14 +100,14 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
   }, [load]);
 
   useEffect(() => {
-    if (navigation.focus !== "review-queue" || loading) return;
+    if (embedded || navigation.focus !== "review-queue" || loading) return;
     const timer = window.setTimeout(() => {
       const target = document.getElementById("review-queue");
       target?.scrollIntoView({ block: "start" });
       if (target instanceof HTMLElement) target.focus({ preventScroll: true });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loading, navigation.focus]);
+  }, [embedded, loading, navigation.focus]);
 
   async function reviewCandidate(review: Review, action: "accept" | "dismiss") {
     const key = `${review.source}:${review.id}:${action}`;
@@ -147,13 +152,13 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
 
   return (
     <section id="review-queue" tabIndex={-1} aria-labelledby="review-queue-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
-      {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-5 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
-      <ProjectFlowGuide projectId={projectId} stage="review" />
+      {!embedded && navigation.returnTo ? <Link href={navigation.returnTo} className="mb-5 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
+      {!embedded ? <ProjectFlowGuide projectId={projectId} stage="review" /> : null}
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI candidate review</p><h2 id="review-queue-heading" className="mt-2 text-2xl font-semibold tracking-tight">审核 AI 候选</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">这里只处理自动整理后仍需核对的冲突、改写或不确定内容。核对原始资料证据后可确认或驳回；有充分原文证据的普通结果已自动入库。</p></div>
+        <div><h2 id="review-queue-heading" className="mt-2 text-2xl font-semibold tracking-tight">待核对内容</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">对照下方原文，决定保留或驳回。有充分依据的普通内容已整理在下方。</p></div>
         <span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">当前页 {reviews.length} 条</span>
       </div>
-      <div className="mt-5"><KnowledgeLifecycle compact /></div>
+      {!embedded ? <div className="mt-5"><KnowledgeLifecycle compact /></div> : null}
       <div className="mt-6 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_190px]">
         <label><span className="sr-only">搜索 AI 候选</span><input value={search} onChange={(event) => { const value = event.target.value; setHistory([]); replaceReviewQuery({ search: value, cursor: null }); }} placeholder="搜索候选标题、内容或证据" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
         <label><span className="sr-only">按候选类型筛选</span><select value={itemType} onChange={(event) => { const value = isReviewType(event.target.value) ? event.target.value : "all"; setHistory([]); replaceReviewQuery({ type: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部类型</option><option value="decision">决策</option><option value="progress">进展</option><option value="issue">问题</option><option value="risk">风险</option></select></label>
@@ -169,7 +174,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
           <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void reviewCandidate(review, "accept")} disabled={pending !== null} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{pending === `${review.source}:${review.id}:accept` ? "确认中…" : "确认进入已确认事实"}</button><button type="button" onClick={() => void reviewCandidate(review, "dismiss")} disabled={pending !== null} className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{pending === `${review.source}:${review.id}:dismiss` ? "驳回中…" : "驳回"}</button></div>
         </article>
       ))}</div>}
-      <div className="mt-5 flex flex-wrap gap-3 text-sm font-semibold text-indigo-700"><Link href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "materials" })}>查看已确认事实 →</Link><Link href={buildProjectHref(projectId, "memory", { focus: "memory-index", from: "materials" })}>下一步：更新索引并问答 →</Link><Link href={buildProjectHref(projectId, "plan", { from: "materials" })}>安排任务 →</Link></div>
+      <div className="mt-5 flex flex-wrap gap-3 text-sm font-semibold text-indigo-700"><Link href={buildProjectHref(projectId, "materials", { view: "review", status: "confirmed", focus: "confirmed-facts", from: "materials" })}>查看已确认事实 →</Link><Link href={buildProjectHref(projectId, "materials", { view: "ask", from: "materials" })}>向项目提问 →</Link><Link href={buildProjectHref(projectId, "plan", { from: "materials" })}>安排任务 →</Link></div>
       <CursorPagination page={history.length + 1} hasPrevious={history.length > 0} hasNext={nextCursor !== null} disabled={loading || pending !== null} onPrevious={() => { const previous = history.at(-1) ?? null; setHistory((current) => current.slice(0, -1)); replaceReviewQuery({ cursor: previous }); }} onNext={() => { if (!nextCursor) return; setHistory((current) => [...current, cursor]); replaceReviewQuery({ cursor: nextCursor }); }} />
     </section>
   );

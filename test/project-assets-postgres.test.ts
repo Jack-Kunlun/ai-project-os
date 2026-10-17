@@ -26,7 +26,10 @@ import {
 import {
   prepareProjectAssetVisionConfirmation,
   runProjectAssetVisionExtraction,
+  runQueuedProjectAssetVisionExtraction,
 } from "../src/lib/project-assets/vision";
+import { afterProcessingClaim } from "./project-processing-claim-fixture";
+import { assertPlatformConcurrency } from "../src/lib/ai-entitlements";
 import { collectProjectMemoryInputs } from "../src/lib/web-memory-index";
 import { createControlledMembership } from "./membership-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
@@ -108,12 +111,14 @@ test(
     const previousAssetRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
+    let providerRequestCount = 0;
     process.env.AI_PROJECT_OS_ASSET_DIR = assetRoot;
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
     await rm(assetRoot, { recursive: true, force: true });
     await unlink(masterKeyPath).catch(() => undefined);
 
     globalThis.fetch = async (input, init) => {
+      providerRequestCount += 1;
       const url = String(input);
       const authorization = (init?.headers as Record<string, string>).authorization;
       assert.match(authorization, /^Bearer sk-project-assets-(?:test|qwen|glm|deepseek)$/);
@@ -220,6 +225,30 @@ test(
       const defaultRoute = await activateDefaultVisionRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, provider.id);
       assert.equal(defaultRoute.status, "active");
 
+      const revokedKey = `vision-revoked-after-claim-${suffix}`;
+      const revokedConfirmation = await prepareProjectAssetVisionConfirmation({ projectId, assetId: image!.id, requestedBy: user, clientKey: revokedKey, db });
+      const revokedJob = await runProjectAssetVisionExtraction({
+        projectId, assetId: image!.id, requestedBy: user, clientKey: revokedKey,
+        challengeId: revokedConfirmation.challengeId, queueForWorker: true,
+      }, db);
+      const requestsBeforeRevocation = providerRequestCount;
+      let revokedResult;
+      try {
+        revokedResult = await runQueuedProjectAssetVisionExtraction({ projectId, jobId: revokedJob.id, requestedBy: user }, afterProcessingClaim(
+          db, revokedJob.id,
+          () => db.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } }),
+        ));
+      } finally {
+        await db.project.update({ where: { id: projectId }, data: { archivedAt: null } });
+      }
+      assert.equal(revokedResult.status, "failed");
+      assert.equal(providerRequestCount, requestsBeforeRevocation);
+      assert.equal(await db.providerCallAudit.count({ where: { jobId: revokedJob.id } }), 0);
+      assert.equal(await db.backgroundJobAttempt.count({ where: { jobId: revokedJob.id, status: "failed", dispatchState: "pending" } }), 1);
+      assert.equal(await db.projectAssetExtractionRun.count({ where: { jobId: revokedJob.id, status: "failed" } }), 1,
+        "failed preflight must release the asset extraction marker after access loss");
+      await assertPlatformConcurrency(user, db);
+
       const visionClientKey = `vision-${suffix}`;
       const visionConfirmation = await prepareProjectAssetVisionConfirmation({
         projectId,
@@ -256,7 +285,7 @@ test(
       assert.equal(inputs.length, 2);
       assert.ok(inputs.some((entry) => entry.path === "原始图片"));
       assert.equal(await db.providerCallAudit.count({ where: { job: { projectId }, operation: "visionExtract", status: "succeeded" } }), 1);
-      assert.equal(await db.webAiGrant.count({ where: { projectId, scopeKind: "projectAssets" } }), 1);
+      assert.equal(await db.webAiGrant.count({ where: { projectId, scopeKind: "projectAssets" } }), 2);
 
       await deleteProjectAsset(projectId, image!.id, db);
       assert.equal((await listProjectAssets(projectId, db)).length, 1);

@@ -66,7 +66,10 @@ test("project overview owns governance panels while materials and configuration 
   assert.match(reviewPage, /ProjectMaterialReviewQueue/u);
   assert.match(materials, /id="add-source-trigger"/u);
   assert.match(materials, /审核 AI 候选/u);
-  assert.doesNotMatch(materials, /ProjectMaterialReviewQueue/u);
+  assert.match(materials, /<ProjectMaterialReviewQueue[^>]*embedded/u);
+  assert.match(materials, /<ProjectQuestionWorkspace/u);
+  assert.match(materials, /<ProjectProcessingTasks/u);
+  assert.match(materials, /aria-label="项目资料栏目"/u);
   assert.match(materialsPage, /Suspense/u);
   assert.match(materials, /materials\/sources/u);
   assert.doesNotMatch(materials, /<details|查看原文/u);

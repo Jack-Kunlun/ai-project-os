@@ -1,0 +1,205 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+
+type ProcessingJob = Readonly<{
+  id: string;
+  kind: "assetExtract" | "autoExtract";
+  status: "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
+  stage: string;
+  result: unknown;
+  progressCurrent: number;
+  progressTotal: number;
+  failureCode: string | null;
+  reconciliationRequired: boolean;
+  canCancel: boolean;
+  inputSummary:
+    | { displayName: string | null; fileName: string | null }
+    | { sourceCount: number; sourceLabels: string[] }
+    | null;
+  createdAt: string;
+  completedAt: string | null;
+}>;
+
+const activeStatuses = new Set<ProcessingJob["status"]>(["queued", "waitingConsent", "running"]);
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function count(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function statusLabel(status: ProcessingJob["status"]): string {
+  return {
+    queued: "排队中",
+    waitingConsent: "等待确认",
+    running: "处理中",
+    succeeded: "已完成",
+    failed: "失败",
+    unknown: "结果待核实",
+    cancelled: "已取消",
+  }[status];
+}
+
+function stageLabel(stage: string): string {
+  return {
+    worker_queued: "等待后台开始",
+    worker_processing: "正在读取资料",
+    extracting: "正在整理资料",
+    recognizing: "正在识别文件内容",
+    cancelled: "已取消",
+    succeeded: "处理完成",
+    failed: "处理失败",
+    unknown: "结果待核实",
+  }[stage] ?? "后台处理中";
+}
+
+function resultSummary(job: ProcessingJob): string | null {
+  const result = record(job.result);
+  if (job.kind === "autoExtract") {
+    const confirmed = count(result.confirmedCount);
+    const review = count(result.reviewRequiredCount);
+    const duplicates = count(result.duplicateCount);
+    if (confirmed === null || review === null || duplicates === null) return null;
+    return `已形成 ${confirmed} 条事实 · ${review} 条待核对 · ${duplicates} 条重复`;
+  }
+  const segments = count(result.visionSegmentCount);
+  return segments === null ? null : `识别完成，共 ${segments} 个片段等待人工核对`;
+}
+
+function inputSummaryLabel(job: ProcessingJob): string | null {
+  if (job.inputSummary === null) return null;
+  if (job.kind === "assetExtract" && "displayName" in job.inputSummary) {
+    return [job.inputSummary.displayName, job.inputSummary.fileName].filter((label): label is string => label !== null).join(" · ") || null;
+  }
+  if (job.kind === "autoExtract" && "sourceCount" in job.inputSummary) {
+    const labels = job.inputSummary.sourceLabels.join("、");
+    return labels.length > 0
+      ? `${labels}${job.inputSummary.sourceCount > job.inputSummary.sourceLabels.length ? ` 等 ${job.inputSummary.sourceCount} 份资料` : ""}`
+      : `共 ${job.inputSummary.sourceCount} 份资料`;
+  }
+  return null;
+}
+
+function formatCreatedAt(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "时间未知" : new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).format(date);
+}
+
+export function ProjectProcessingTasks({ projectId, onChanged }: {
+  projectId: string;
+  onChanged?: () => Promise<void>;
+}) {
+  const [jobs, setJobs] = useState<ProcessingJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [canceling, setCanceling] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [polling, setPolling] = useState(false);
+
+  const reload = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch(`/api/projects/${projectId}/jobs`, { cache: "no-store", signal });
+    const payload = await response.json() as { jobs?: ProcessingJob[]; error?: { message?: string } };
+    if (!response.ok) throw new Error(payload.error?.message ?? "任务列表读取失败");
+    const processingJobs = (payload.jobs ?? []).filter((job) => job.kind === "assetExtract" || job.kind === "autoExtract");
+    setJobs(processingJobs);
+    return processingJobs;
+  }, [projectId]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    let attempts = 0;
+    let active = true;
+    const poll = async () => {
+      try {
+        const current = await reload(controller.signal);
+        if (!active) return;
+        setError(null);
+        setLoading(false);
+        attempts += 1;
+        if (current.some((job) => activeStatuses.has(job.status)) && attempts < 120) {
+          setPolling(true);
+          timer = window.setTimeout(() => void poll(), 5_000);
+        } else {
+          setPolling(false);
+        }
+      } catch (cause) {
+        if (!active || controller.signal.aborted) return;
+        setError(cause instanceof Error ? cause.message : "任务列表读取失败");
+        setLoading(false);
+        setPolling(false);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [projectId, refreshToken, reload]);
+
+  async function cancel(job: ProcessingJob) {
+    setCanceling(job.id);
+    setNotice(null);
+    setError(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/jobs/${job.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const payload = await response.json() as { error?: { message?: string; code?: string } };
+      if (!response.ok) {
+        throw new Error(response.status === 409
+          ? "任务已进入不可安全取消的阶段；系统会继续保留真实结果，不会假装已取消。"
+          : payload.error?.message ?? "取消任务失败");
+      }
+      setNotice("任务已取消，尚未发送的请求不会继续执行。");
+      await reload();
+      await onChanged?.();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "取消任务失败");
+    } finally {
+      setCanceling(null);
+    }
+  }
+
+  const pendingCount = jobs.filter((job) => activeStatuses.has(job.status)).length;
+  return <section aria-labelledby="project-processing-tasks-title" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h2 id="project-processing-tasks-title" className="text-lg font-semibold text-slate-950">识别与整理任务</h2>
+        <p className="mt-1 text-sm text-slate-600">这里查看后台进度、已保存结果，并取消尚未发出的任务。未知结果需要人工核实。</p>
+      </div>
+      <button type="button" onClick={() => setRefreshToken((value) => value + 1)} className="min-h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700">刷新</button>
+    </div>
+    {pendingCount > 0 ? <p role="status" className="mt-3 text-xs text-indigo-700">{pendingCount} 项处理中{polling ? "，每 5 秒更新一次" : "，自动刷新已暂停，可手动刷新"}</p> : null}
+    {notice ? <p role="status" className="mt-3 text-sm text-emerald-700">{notice}</p> : null}
+    {error ? <p role="alert" className="mt-3 text-sm text-rose-700">{error}</p> : null}
+    {loading ? <p className="mt-5 text-sm text-slate-500">正在读取任务…</p> : jobs.length === 0 ? <p className="mt-5 rounded-2xl bg-slate-50 px-4 py-6 text-sm text-slate-500">目前没有识别或整理任务。你可以回到资料栏目上传文件或确认 AI 整理。</p> : <div className="mt-5 space-y-3">{jobs.map((job) => {
+      const progress = job.progressTotal > 0 ? Math.min(100, Math.round(job.progressCurrent / job.progressTotal * 100)) : null;
+      const canCancel = job.canCancel && canceling !== job.id;
+      const inputLabel = inputSummaryLabel(job);
+      return <article key={job.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><h3 className="font-semibold text-slate-900">{job.kind === "assetExtract" ? "文件图片识别" : "资料自动整理"}</h3>{inputLabel ? <p className="mt-1 max-w-2xl break-all text-xs text-slate-600">{inputLabel}</p> : null}<p className="mt-1 text-xs text-slate-500">{statusLabel(job.status)} · {stageLabel(job.stage)} · 创建于 {formatCreatedAt(job.createdAt)}</p></div>
+          {canCancel ? <button type="button" onClick={() => void cancel(job)} className="min-h-9 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700">取消任务</button> : canceling === job.id ? <span className="text-xs text-slate-500">正在取消…</span> : null}
+        </div>
+        {progress !== null ? <div className="mt-3"><div className="flex justify-between text-xs text-slate-500"><span>处理进度</span><span>{job.progressCurrent}/{job.progressTotal}（{progress}%）</span></div><div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-indigo-600 transition-[width]" style={{ width: `${progress}%` }} /></div></div> : null}
+        {job.status === "succeeded" ? <p className="mt-3 text-sm text-emerald-800">{resultSummary(job) ?? "任务已完成，结果已保存。"}</p> : null}
+        {job.status === "failed" ? <p className="mt-3 text-sm text-rose-700">任务失败{job.failureCode ? `（${job.failureCode}）` : ""}。原始资料仍保留。</p> : null}
+        {job.status === "unknown" || job.reconciliationRequired ? <p className="mt-3 text-sm text-amber-800">模型返回状态未知，系统未自动重试；请到模型治理记录核实。</p> : null}
+        {job.status === "cancelled" ? <p className="mt-3 text-sm text-slate-600">任务已取消，原始资料仍保留。</p> : null}
+        <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-indigo-700"><Link href={`/projects/${projectId}/jobs/${job.id}`} className="underline">查看任务详情</Link>{job.kind === "assetExtract" && job.status === "succeeded" ? <Link href={`/projects/${projectId}/assets`} className="underline">核对识别结果</Link> : null}{job.kind === "autoExtract" && job.status === "succeeded" ? <Link href={`/projects/${projectId}/materials?view=review&from=materials`} className="underline">查看整理结果</Link> : null}</div>
+      </article>;
+    })}</div>}
+  </section>;
+}

@@ -50,11 +50,13 @@ test("materials workspace has separate source, intake dialog, and AI review rout
   assert.match(materials, /原始资料来源库/u);
   assert.match(materials, /id="add-source-trigger"/u);
   assert.match(materials, /buildMaterialsReturnTo/u);
-  assert.match(materials, /parseProjectItemReviewStatus\(navigation\.status\)/u);
+  assert.match(materials, /parseProjectItemReviewStatus\(navigation\.status/u);
   assert.match(materials, /reviewStatus: itemStatus/u);
   assert.match(materials, /id="confirmed-facts" tabIndex=\{-1\}/u);
   assert.match(materials, /focusesItems \? isItemsLoading : isSourcesLoading/u);
-  assert.doesNotMatch(materials, /<ProjectMaterialReviewQueue/u);
+  assert.match(materials, /<ProjectMaterialReviewQueue[^>]*embedded/u);
+  assert.match(materials, /<ProjectQuestionWorkspace/u);
+  assert.match(materials, /<ProjectProcessingTasks/u);
   assert.match(intake, /role="dialog"/u);
   assert.match(intake, /aria-modal="true"/u);
   assert.match(intake, /event.key === "Escape"/u);

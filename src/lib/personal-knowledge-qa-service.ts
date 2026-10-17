@@ -1,7 +1,6 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   Prisma,
-  type AiProviderConnectionStatus,
   type PersonalKnowledgeQaAuditStatus,
   type PersonalKnowledgeQaChallengeStatus,
   type PrismaClient,
@@ -9,14 +8,31 @@ import {
 import { z } from "zod";
 import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { lockActorAccess } from "@/lib/access-linearization";
+import {
+  AiEntitlementError,
+  acquirePlatformTokenDispatchFence,
+  assertPlatformConcurrency,
+  estimatePlatformTokens,
+  holdPlatformTokenReservation,
+  releasePlatformTokenReservation,
+  reservePlatformTokens,
+  settlePlatformTokenReservation,
+} from "@/lib/ai-entitlements";
 import { getDb } from "@/lib/db";
 import { loadOrCreateMasterKey } from "@/lib/credential-vault";
 import {
   invokeChatCompletion,
   ProviderTransportError,
 } from "@/lib/ai-providers";
-import { getProviderDefinition } from "@/lib/ai-providers/registry";
 import { lockProviderConfiguration } from "@/lib/ai-providers/service";
+import {
+  lockPersonalKnowledgeQaRoute,
+  personalKnowledgeQaBillingMatches,
+  personalKnowledgeQaProviderSelect,
+  personalKnowledgeQaProviderVerified,
+  readPersonalKnowledgeQaPlatformProvider,
+  type PersonalKnowledgeQaProvider,
+} from "@/lib/personal-knowledge-qa-provider";
 import {
   buildPersonalKnowledgeQaEvidence,
   buildPersonalKnowledgeQaMessages,
@@ -25,7 +41,6 @@ import {
   personalKnowledgeQaEvidenceManifest,
   personalKnowledgeQaQuestionSchema,
   type PersonalKnowledgeQaEvidence,
-  type PersonalKnowledgeQaModelResult,
   type PersonalKnowledgeQaPage,
 } from "@/lib/personal-knowledge-qa-contract";
 
@@ -41,7 +56,7 @@ export const personalKnowledgeQaPrepareSchema = z.object({
   phase: z.literal("prepare").optional(),
   question: personalKnowledgeQaQuestionSchema,
   clientKey: CLIENT_KEY_SCHEMA,
-  providerId: UUID_SCHEMA,
+  providerId: UUID_SCHEMA.optional(),
 }).strict();
 
 export const personalKnowledgeQaExecuteSchema = z.object({
@@ -67,7 +82,9 @@ export type PersonalKnowledgeQaErrorCode =
   | "PERSONAL_KNOWLEDGE_QA_CONFIRMATION_CONSUMED"
   | "PERSONAL_KNOWLEDGE_QA_PROVIDER_UNAVAILABLE"
   | "PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN"
+  | "PERSONAL_KNOWLEDGE_QA_PLATFORM_ROUTE_UNAVAILABLE"
   | "PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT"
+  | "PERSONAL_KNOWLEDGE_QA_OUTPUT_TRUNCATED"
   | "PERSONAL_KNOWLEDGE_QA_INVALID_CITATION"
   | "PERSONAL_KNOWLEDGE_QA_CONFLICT";
 
@@ -85,20 +102,7 @@ function fail(code: PersonalKnowledgeQaErrorCode): never {
 type QaDb = PrismaClient | Prisma.TransactionClient;
 type QaActor = Readonly<{ id: string; role: "admin" | "user"; accountAccessVersion?: number }>;
 
-type QaProvider = Readonly<{
-  id: string;
-  name: string;
-  kind: "openai" | "deepseek" | "qwen" | "glm";
-  protocol: "chatCompletions";
-  baseUrl: string;
-  credentialId: string;
-  configurationVersion: number;
-  ownerAccountAccessVersion: number | null;
-  status: AiProviderConnectionStatus;
-  disabledAt: Date | null;
-  defaultGenerationModelId: string | null;
-  credential: { kind: "aiProvider"; secretFingerprint: string };
-}>;
+type QaProvider = PersonalKnowledgeQaProvider;
 
 type QaPageRow = Readonly<{
   id: string;
@@ -173,7 +177,10 @@ function parseProviderId(value: unknown): string {
 function parsePrepareInput(value: unknown): z.infer<typeof personalKnowledgeQaPrepareSchema> {
   const parsed = personalKnowledgeQaPrepareSchema.safeParse(value);
   if (!parsed.success) return fail("PERSONAL_KNOWLEDGE_QA_INVALID_INPUT");
-  return Object.freeze({ ...parsed.data, providerId: parsed.data.providerId.toLowerCase() });
+  return Object.freeze({
+    ...parsed.data,
+    ...(parsed.data.providerId === undefined ? {} : { providerId: parsed.data.providerId.toLowerCase() }),
+  });
 }
 
 function parseExecuteInput(value: unknown): z.infer<typeof personalKnowledgeQaExecuteSchema> {
@@ -221,23 +228,6 @@ async function persistedQuestionHash(question: string): Promise<string> {
 
 function evidenceManifestEquals(left: unknown, right: readonly Readonly<Record<string, unknown>>[]): boolean {
   return canonicalPersonalKnowledgeQaJson(left) === canonicalPersonalKnowledgeQaJson(right);
-}
-
-function providerSelect() {
-  return {
-    id: true,
-    name: true,
-    kind: true,
-    protocol: true,
-    baseUrl: true,
-    credentialId: true,
-    configurationVersion: true,
-    ownerAccountAccessVersion: true,
-    status: true,
-    disabledAt: true,
-    defaultGenerationModelId: true,
-    credential: { select: { kind: true, secretFingerprint: true } },
-  } as const;
 }
 
 async function currentActor(db: QaDb, actor: QaActor): Promise<Readonly<{ accountAccessVersion: number }>> {
@@ -293,29 +283,44 @@ function toQaPage(row: QaPageRow): PersonalKnowledgeQaPage {
   });
 }
 
-async function readVerifiedProvider(db: QaDb, ownerUserId: string, providerId: string): Promise<QaProvider> {
+async function readPersonalProvider(db: QaDb, ownerUserId: string, providerId: string): Promise<QaProvider> {
   const provider = await db.aiProviderConnection.findFirst({
     where: { id: providerId, scope: "user", ownerUserId },
-    select: providerSelect(),
+    select: personalKnowledgeQaProviderSelect,
   });
-  if (provider === null) return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_FOUND");
-  let definition: ReturnType<typeof getProviderDefinition>;
-  try {
-    definition = getProviderDefinition(provider.kind);
-  } catch {
+  if (provider === null) {
+    const priorPlatformProvider = await db.aiProviderConnection.findFirst({
+      where: { id: providerId, scope: "platform", ownerUserId: null },
+      select: { id: true },
+    });
+    if (priorPlatformProvider !== null) return fail("PERSONAL_KNOWLEDGE_QA_CONFIRMATION_STALE");
+    return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_FOUND");
+  }
+  if (!personalKnowledgeQaProviderVerified(provider as QaProvider) || provider.ownerAccountAccessVersion === null) {
     return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_VERIFIED");
   }
-  if (
-    provider.protocol !== "chatCompletions"
-    || provider.baseUrl !== definition.baseUrl
-    || provider.status !== "verified"
-    || provider.disabledAt !== null
-    || provider.defaultGenerationModelId === null
-    || provider.ownerAccountAccessVersion === null
-    || provider.credential.kind !== "aiProvider"
-    || !HASH_PATTERN.test(provider.credential.secretFingerprint)
-  ) return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_VERIFIED");
   return provider as QaProvider;
+}
+
+async function readProvider(
+  db: QaDb,
+  ownerUserId: string,
+  providerId: string | undefined,
+): Promise<QaProvider> {
+  const platform = await readPersonalKnowledgeQaPlatformProvider(db);
+  if (providerId === undefined) {
+    if (platform === null) return fail("PERSONAL_KNOWLEDGE_QA_PLATFORM_ROUTE_UNAVAILABLE");
+    return platform;
+  }
+  if (platform?.id === providerId) return platform;
+  return readPersonalProvider(db, ownerUserId, providerId);
+}
+
+function providerOwnerMatches(provider: QaProvider, accountAccessVersion: number): boolean {
+  return provider.scope === "platform"
+    ? provider.ownerUserId === null && provider.billingRoute !== undefined
+    : provider.ownerUserId !== null
+      && provider.ownerAccountAccessVersion === accountAccessVersion;
 }
 
 function confirmationSummary(page: PersonalKnowledgeQaPage, evidence: readonly PersonalKnowledgeQaEvidence[], provider: QaProvider, expiresAt: Date) {
@@ -326,6 +331,8 @@ function confirmationSummary(page: PersonalKnowledgeQaPage, evidence: readonly P
     evidenceBytes: evidence.reduce((total, item) => total + Buffer.byteLength(item.excerpt, "utf8"), 0),
     provider: provider.name,
     model: provider.defaultGenerationModelId!,
+    billingMode: provider.billingRoute === undefined ? "byok" as const : "platform" as const,
+    quotaMultiplierBps: provider.billingRoute?.quotaMultiplierBps ?? null,
     expiresAt: expiresAt.toISOString(),
   });
 }
@@ -353,6 +360,7 @@ function fingerprintMaterial(input: Readonly<{
     providerConfigurationVersion: input.provider.configurationVersion,
     modelId: input.provider.defaultGenerationModelId,
     credentialSecretFingerprint: input.provider.credential.secretFingerprint,
+    ...(input.provider.billingRoute === undefined ? {} : { platformRoute: input.provider.billingRoute }),
   });
 }
 
@@ -363,10 +371,17 @@ function safeProviderRequestId(value: string | null): string | null {
 function safeErrorCode(error: unknown): string {
   if (error instanceof PersonalKnowledgeQaError) return error.code;
   if (error instanceof ProviderTransportError) return error.code;
+  if (error instanceof AiEntitlementError) return error.code;
   return "PERSONAL_KNOWLEDGE_QA_PROVIDER_UNAVAILABLE";
 }
 
 function transportWasUncertain(error: unknown): boolean {
+  if (error instanceof Error && [
+    "PERSONAL_KNOWLEDGE_QA_INVALID_CITATION",
+    "PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT",
+    "PERSONAL_KNOWLEDGE_QA_OUTPUT_TRUNCATED",
+  ].includes(error.message)) return false;
+  if (error instanceof PersonalKnowledgeQaError || error instanceof AiEntitlementError) return false;
   if (!(error instanceof ProviderTransportError)) return true;
   if (error.requestDispatched === false) return false;
   return error.code === "AI_PROVIDER_TIMEOUT" || error.code === "AI_PROVIDER_UNAVAILABLE";
@@ -375,6 +390,7 @@ function transportWasUncertain(error: unknown): boolean {
 function mapModelError(error: unknown): never {
   if (error instanceof Error && error.message === "PERSONAL_KNOWLEDGE_QA_INVALID_CITATION") return fail("PERSONAL_KNOWLEDGE_QA_INVALID_CITATION");
   if (error instanceof Error && error.message === "PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT") return fail("PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT");
+  if (error instanceof Error && error.message === "PERSONAL_KNOWLEDGE_QA_OUTPUT_TRUNCATED") return fail("PERSONAL_KNOWLEDGE_QA_OUTPUT_TRUNCATED");
   throw error;
 }
 
@@ -418,18 +434,17 @@ async function findChallenge(db: QaDb, id: string, ownerUserId: string): Promise
 async function assertDispatchStillValid(snapshot: QaDispatchSnapshot, db: PrismaClient): Promise<boolean> {
   try {
     return await db.$transaction(async (tx) => {
-      // Keep the lock order identical to account/provider mutations.  The
-      // actor must be locked before the provider and re-read only after both
-      // locks are held; otherwise a revoke can commit between the actor read
-      // and the provider fence while this callback still sees a stale snapshot.
+      // Lock actor, operation route, and provider in the same order used by
+      // admission and control-plane route writes before re-reading the fence.
       await lockActorAccess(tx, snapshot.actor.id);
+      await lockPersonalKnowledgeQaRoute(tx);
       await lockProviderConfiguration(tx, snapshot.provider.id);
       const current = await assertCurrentOrdinaryUser(tx, snapshot.actor);
       const [challenge, audit, page, provider] = await Promise.all([
         findChallenge(tx, snapshot.challengeId, snapshot.actor.id),
         tx.personalKnowledgeQaAudit.findFirst({ where: { id: snapshot.auditId, ownerUserId: snapshot.actor.id }, select: { status: true } }),
         readPage(tx, snapshot.actor.id, snapshot.documentId),
-        readVerifiedProvider(tx, snapshot.actor.id, snapshot.provider.id),
+        readProvider(tx, snapshot.actor.id, snapshot.provider.id),
       ]);
       if (
         challenge === null
@@ -452,8 +467,22 @@ async function assertDispatchStillValid(snapshot: QaDispatchSnapshot, db: Prisma
         || provider.configurationVersion !== snapshot.provider.configurationVersion
         || provider.credential.secretFingerprint !== snapshot.provider.credential.secretFingerprint
         || provider.defaultGenerationModelId !== snapshot.provider.defaultGenerationModelId
-        || provider.ownerAccountAccessVersion !== current.accountAccessVersion
+        || !providerOwnerMatches(provider, current.accountAccessVersion)
+        || !personalKnowledgeQaBillingMatches(provider, snapshot.provider)
       ) return false;
+      if (provider.billingRoute !== undefined) {
+        const fence = await acquirePlatformTokenDispatchFence({
+          userId: snapshot.actor.id,
+          callKey: `personal-qa:${snapshot.challengeId}`,
+          jobId: null,
+          operation: QA_OPERATION,
+          modelId: provider.defaultGenerationModelId!,
+          webAiGrantId: null,
+          routeFenceFingerprint: provider.billingRoute.routeFenceFingerprint,
+          quotaMultiplierBps: provider.billingRoute.quotaMultiplierBps,
+        }, tx);
+        if (fence === null || !fence.allowed) return false;
+      }
       return true;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 15_000 });
   } catch {
@@ -508,9 +537,67 @@ export type PersonalKnowledgeQaConfirmation = Readonly<{
     evidenceBytes: number;
     provider: string;
     model: string;
+    billingMode: "platform" | "byok";
+    quotaMultiplierBps: number | null;
     expiresAt: string;
   }>;
 }>;
+
+export type PersonalKnowledgeQaProviderOption = Readonly<{
+  id: string;
+  name: string;
+  modelId: string;
+  billingMode: "platform" | "byok";
+  quotaMultiplierBps: number | null;
+  isDefault: boolean;
+}>;
+
+/** Return only safe display data for the active platform route and owner BYOK models. */
+export async function listPersonalKnowledgeQaProviders(
+  actor: QaActor,
+  db: PrismaClient = getDb(),
+): Promise<Readonly<{ providers: readonly PersonalKnowledgeQaProviderOption[]; platformRouteAvailable: boolean }>> {
+  assertActorShape(actor);
+  const current = await assertCurrentOrdinaryUser(db, actor);
+  const [platform, personal] = await Promise.all([
+    readPersonalKnowledgeQaPlatformProvider(db),
+    db.aiProviderConnection.findMany({
+      where: { scope: "user", ownerUserId: actor.id, ownerAccountAccessVersion: current.accountAccessVersion },
+      select: personalKnowledgeQaProviderSelect,
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    }),
+  ]);
+  const platformOption = platform !== null && personalKnowledgeQaProviderEligible(platform, current.accountAccessVersion)
+    ? [{
+        id: platform.id,
+        name: platform.name,
+        modelId: platform.defaultGenerationModelId!,
+        billingMode: "platform" as const,
+        quotaMultiplierBps: platform.billingRoute!.quotaMultiplierBps,
+        isDefault: true,
+      }]
+    : [];
+  const personalOptions = personal
+    .filter((provider) => provider.scope === "user" && provider.ownerUserId === actor.id
+      && provider.ownerAccountAccessVersion === current.accountAccessVersion
+      && personalKnowledgeQaProviderVerified(provider as QaProvider))
+    .map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      modelId: provider.defaultGenerationModelId!,
+      billingMode: "byok" as const,
+      quotaMultiplierBps: null,
+      isDefault: false,
+    }));
+  return Object.freeze({
+    providers: Object.freeze([...platformOption, ...personalOptions]),
+    platformRouteAvailable: platformOption.length > 0,
+  });
+}
+
+function personalKnowledgeQaProviderEligible(provider: QaProvider, accountAccessVersion: number): boolean {
+  return personalKnowledgeQaProviderVerified(provider) && providerOwnerMatches(provider, accountAccessVersion);
+}
 
 export async function preparePersonalKnowledgeQa(
   documentIdInput: unknown,
@@ -524,6 +611,8 @@ export async function preparePersonalKnowledgeQa(
   const clientHash = await clientKeyHash(parsed.clientKey);
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await lockPersonalKnowledgeQaRoute(tx);
       const current = await assertCurrentOrdinaryUser(tx, actor);
       const pageRow = await readPage(tx, actor.id, documentId);
       const page = toQaPage(pageRow);
@@ -531,11 +620,11 @@ export async function preparePersonalKnowledgeQa(
       const evidence = buildPersonalKnowledgeQaEvidence(page, parsed.question);
       if (evidence.length === 0) return fail("PERSONAL_KNOWLEDGE_QA_NO_EVIDENCE");
       const manifest = personalKnowledgeQaEvidenceManifest(evidence);
-      const selectedProviderId = parseProviderId(parsed.providerId);
-      const initialProvider = await readVerifiedProvider(tx, actor.id, selectedProviderId);
+      const selectedProviderId = parsed.providerId === undefined ? undefined : parseProviderId(parsed.providerId);
+      const initialProvider = await readProvider(tx, actor.id, selectedProviderId);
       await lockProviderConfiguration(tx, initialProvider.id);
-      const provider = await readVerifiedProvider(tx, actor.id, selectedProviderId);
-      if (provider.ownerAccountAccessVersion !== current.accountAccessVersion) return fail("PERSONAL_KNOWLEDGE_QA_ACCOUNT_ACCESS_STALE");
+      const provider = await readProvider(tx, actor.id, selectedProviderId);
+      if (!providerOwnerMatches(provider, current.accountAccessVersion)) return fail("PERSONAL_KNOWLEDGE_QA_ACCOUNT_ACCESS_STALE");
       const now = await databaseNow(tx);
       const expiresAt = new Date(now.getTime() + QA_CHALLENGE_TTL_MS);
       await mutationContext(tx);
@@ -569,7 +658,7 @@ export async function preparePersonalKnowledgeQa(
         expiresAt: challenge.expiresAt.toISOString(),
         safeSummary: confirmationSummary(page, evidence, provider, challenge.expiresAt),
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15_000 });
   } catch (error) {
     if (isKnown(error, "P2002")) return fail("PERSONAL_KNOWLEDGE_QA_CONFLICT");
     throw error;
@@ -584,6 +673,7 @@ async function admitExecution(
 ): Promise<QaDispatchSnapshot> {
   return db.$transaction(async (tx) => {
     await lockActorAccess(tx, actor.id);
+    await lockPersonalKnowledgeQaRoute(tx);
     const current = await assertCurrentOrdinaryUser(tx, actor);
     const challenge = await findChallenge(tx, parsed.challengeId.toLowerCase(), actor.id);
     if (challenge === null) return fail("PERSONAL_KNOWLEDGE_QA_CONFIRMATION_REQUIRED");
@@ -601,10 +691,14 @@ async function admitExecution(
     const expectedClientHash = await clientKeyHash(parsed.clientKey);
     if (!equalHash(challenge.clientKeyHash, expectedClientHash)) return fail("PERSONAL_KNOWLEDGE_QA_CONFIRMATION_REQUIRED");
     await lockProviderConfiguration(tx, challenge.providerConnectionId);
-    const provider = await readVerifiedProvider(tx, actor.id, challenge.providerConnectionId);
-    if (provider.configurationVersion !== challenge.providerConfigurationVersion || provider.defaultGenerationModelId !== challenge.modelId || !equalHash(provider.credential.secretFingerprint, challenge.credentialSecretFingerprint) || provider.ownerAccountAccessVersion !== current.accountAccessVersion) return fail("PERSONAL_KNOWLEDGE_QA_CONFIRMATION_STALE");
+    const provider = await readProvider(tx, actor.id, challenge.providerConnectionId);
+    if (provider.configurationVersion !== challenge.providerConfigurationVersion || provider.defaultGenerationModelId !== challenge.modelId || !equalHash(provider.credential.secretFingerprint, challenge.credentialSecretFingerprint) || !providerOwnerMatches(provider, current.accountAccessVersion)) return fail("PERSONAL_KNOWLEDGE_QA_CONFIRMATION_STALE");
     const expectedInputFingerprint = await hmacDigest(fingerprintMaterial({ actor, page, questionHash, evidenceManifest: manifest, provider }));
     if (!equalHash(challenge.inputFingerprint, expectedInputFingerprint)) return fail("PERSONAL_KNOWLEDGE_QA_CONFIRMATION_STALE");
+
+    if (provider.billingRoute !== undefined) {
+      await assertPlatformConcurrency({ id: actor.id, role: "user" }, tx);
+    }
 
     await mutationContext(tx);
     const consumed = await tx.personalKnowledgeQaChallenge.updateMany({
@@ -670,9 +764,28 @@ export async function executePersonalKnowledgeQa(
   assertActorShape(actor);
   const snapshot = await admitExecution(documentId, parsed, actor, db);
   const messages = buildPersonalKnowledgeQaMessages(parsed.question, snapshot.evidence);
-  let generated: Awaited<ReturnType<typeof invokeChatCompletion>>;
+  const callKey = `personal-qa:${snapshot.challengeId}`;
+  const billing = { dispatched: false, inputTokens: 0, outputTokens: 0, usageKnown: false };
+  let reserved = false;
   try {
-    generated = await invokeChatCompletion({
+    if (snapshot.provider.billingRoute !== undefined) {
+      const reservation = await reservePlatformTokens({
+        userId: actor.id,
+        providerConnectionId: snapshot.provider.id,
+        callKey,
+        operation: QA_OPERATION,
+        modelId: snapshot.provider.defaultGenerationModelId!,
+        rawEstimatedTokens: estimatePlatformTokens(messages, snapshot.provider.billingRoute.maxOutputTokens),
+        routeSnapshot: snapshot.provider.billingRoute,
+      }, db);
+      if (reservation.status !== "reserved" || !reservation.created) {
+        throw new AiEntitlementError("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
+      }
+      reserved = true;
+    }
+
+    const maxOutputTokens = snapshot.provider.billingRoute?.maxOutputTokens ?? 2_048;
+    const generated = await invokeChatCompletion({
       connection: {
         id: snapshot.provider.id,
         kind: snapshot.provider.kind,
@@ -681,53 +794,88 @@ export async function executePersonalKnowledgeQa(
         status: snapshot.provider.status,
         credentialSecretFingerprint: snapshot.provider.credential.secretFingerprint,
         onBeforeCredentialRead: () => assertDispatchStillValid(snapshot, db),
-        onBeforeRequest: () => assertDispatchStillValid(snapshot, db),
+        onBeforeRequest: async () => {
+          const allowed = await assertDispatchStillValid(snapshot, db);
+          if (allowed) billing.dispatched = true;
+          return allowed;
+        },
       },
       operation: QA_OPERATION,
       modelId: snapshot.provider.defaultGenerationModelId!,
       messages,
-      maxOutputTokens: 2_048,
+      maxOutputTokens,
       temperature: 0,
+      jsonOutput: true,
+      disableThinking: true,
     });
-  } catch (error) {
-    const uncertain = transportWasUncertain(error);
-    await finalizeAudit(snapshot, {
-      status: uncertain ? "unknown" : "failed",
-      safeErrorCode: uncertain ? "PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN" : safeErrorCode(error),
-      providerRequestId: error instanceof ProviderTransportError ? null : undefined,
-    }, db);
-    if (uncertain) return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN");
-    if (error instanceof ProviderTransportError) return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_UNAVAILABLE");
-    throw error;
-  }
+    billing.dispatched = true;
+    billing.inputTokens = generated.inputTokens;
+    billing.outputTokens = generated.outputTokens;
+    billing.usageKnown = generated.usageKnown;
+    if (generated.outputTruncated === true) throw new PersonalKnowledgeQaError("PERSONAL_KNOWLEDGE_QA_OUTPUT_TRUNCATED");
 
-  let modelResult: PersonalKnowledgeQaModelResult;
-  try {
-    modelResult = parsePersonalKnowledgeQaModelOutput(generated.content, new Set(snapshot.evidence.map((item) => item.citationKey)));
-  } catch (error) {
+    const modelResult = parsePersonalKnowledgeQaModelOutput(generated.content, new Set(snapshot.evidence.map((item) => item.citationKey)));
+    if (reserved) {
+      await settlePlatformTokenReservation({
+        userId: actor.id,
+        callKey,
+        actualTokens: billing.inputTokens + billing.outputTokens,
+        usageKnown: billing.usageKnown,
+      }, db);
+      reserved = false;
+    }
     await finalizeAudit(snapshot, {
-      status: "failed",
-      safeErrorCode: error instanceof Error ? error.message : "PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT",
+      status: "succeeded",
+      safeErrorCode: null,
       providerRequestId: safeProviderRequestId(generated.providerRequestId),
       inputTokens: generated.inputTokens,
       outputTokens: generated.outputTokens,
       usageKnown: generated.usageKnown,
     }, db);
+    const citations = modelResult.citations.map((citationKey) => {
+      const evidence = snapshot.evidence.find((item) => item.citationKey === citationKey);
+      if (evidence === undefined) return fail("PERSONAL_KNOWLEDGE_QA_INVALID_CITATION");
+      return Object.freeze({ citationKey: evidence.citationKey, title: evidence.title, rangeStart: evidence.rangeStart, rangeEnd: evidence.rangeEnd, excerpt: evidence.excerpt });
+    });
+    return Object.freeze({ answer: modelResult.answer, citations: Object.freeze(citations) });
+  } catch (error) {
+    if (reserved) {
+      try {
+        if (!billing.dispatched) {
+          await releasePlatformTokenReservation({ userId: actor.id, callKey }, db);
+        } else if (!billing.usageKnown) {
+          await holdPlatformTokenReservation({ userId: actor.id, callKey, errorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" }, db);
+        } else {
+          await settlePlatformTokenReservation({
+            userId: actor.id,
+            callKey,
+            actualTokens: billing.inputTokens + billing.outputTokens,
+            usageKnown: true,
+          }, db);
+        }
+      } catch {
+        // Expiry recovery sees the immutable QA challenge binding and holds
+        // the reservation if terminal accounting cannot be persisted here.
+      }
+    }
+    const uncertain = transportWasUncertain(error);
+    const modelErrorCode = error instanceof Error && [
+      "PERSONAL_KNOWLEDGE_QA_INVALID_CITATION",
+      "PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT",
+      "PERSONAL_KNOWLEDGE_QA_OUTPUT_TRUNCATED",
+    ].includes(error.message) ? error.message : null;
+    await finalizeAudit(snapshot, {
+      status: uncertain ? "unknown" : "failed",
+      safeErrorCode: uncertain ? "PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN" : modelErrorCode ?? safeErrorCode(error),
+      providerRequestId: error instanceof ProviderTransportError ? null : undefined,
+      inputTokens: billing.inputTokens,
+      outputTokens: billing.outputTokens,
+      usageKnown: billing.usageKnown,
+    }, db);
+    if (error instanceof ProviderTransportError) {
+      if (uncertain) return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN");
+      return fail("PERSONAL_KNOWLEDGE_QA_PROVIDER_UNAVAILABLE");
+    }
     return mapModelError(error);
   }
-
-  await finalizeAudit(snapshot, {
-    status: "succeeded",
-    safeErrorCode: null,
-    providerRequestId: safeProviderRequestId(generated.providerRequestId),
-    inputTokens: generated.inputTokens,
-    outputTokens: generated.outputTokens,
-    usageKnown: generated.usageKnown,
-  }, db);
-  const citations = modelResult.citations.map((citationKey) => {
-    const evidence = snapshot.evidence.find((item) => item.citationKey === citationKey);
-    if (evidence === undefined) return fail("PERSONAL_KNOWLEDGE_QA_INVALID_CITATION");
-    return Object.freeze({ citationKey: evidence.citationKey, title: evidence.title, rangeStart: evidence.rangeStart, rangeEnd: evidence.rangeEnd, excerpt: evidence.excerpt });
-  });
-  return Object.freeze({ answer: modelResult.answer, citations: Object.freeze(citations) });
 }

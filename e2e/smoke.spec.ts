@@ -556,16 +556,15 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=all$`, "u"));
   await page.getByLabel("按原始资料类型筛选").selectOption("manual");
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=manual$`, "u"));
-  await page.getByRole("link", { name: "审核 AI 候选", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials/review\\?focus=review-queue&from=materials&returnTo=`, "u"));
-  await expect(page.locator("#review-queue")).toBeFocused();
-  await expect(page.getByRole("heading", { name: "审核 AI 候选", exact: true }).first()).toBeVisible();
+  const materialColumns = page.getByRole("navigation", { name: "项目资料栏目", exact: true });
+  await materialColumns.getByRole("link", { name: "整理结果", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("review");
+  await expect(page.getByRole("heading", { name: "待核对内容", exact: true })).toBeVisible();
   await expect(page.locator("#review-queue").getByText(/^当前没有待审核 AI 候选。/u)).toBeVisible();
-  await page.getByRole("link", { name: /返回来源页面/u }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=manual&focus=sources-heading$`, "u"));
+  await materialColumns.getByRole("link", { name: "资料", exact: true }).click();
   await expect(page.getByPlaceholder("搜索正文、来源链接或内容哈希")).toHaveValue("Browser smoke");
   await expect(page.getByLabel("按原始资料类型筛选")).toHaveValue("manual");
-  await expect(page.locator("#sources-heading")).toBeFocused();
+  await expect(page.locator("#sources-heading")).toBeVisible();
 
   const returnedSourceRow = page.getByRole("list", { name: "项目原始资料列表", exact: true }).getByRole("listitem").filter({ hasText: sourceText });
   await expect(returnedSourceRow).toBeVisible();

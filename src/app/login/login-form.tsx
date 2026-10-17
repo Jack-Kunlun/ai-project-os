@@ -137,13 +137,13 @@ export function LoginForm({
             <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
               <Feature icon={<DocumentIcon />} iconTone="bg-indigo-600/35 text-indigo-300" title="资料有出处">来源、文件与代码快照<br />留存内容指纹和定位信息。</Feature>
               <Feature icon={<ShieldIcon />} iconTone="bg-emerald-500/20 text-emerald-300" title="权限有边界">工作区与项目角色由服务<br />端统一校验。</Feature>
-              <Feature icon={<PeopleIcon />} iconTone="bg-blue-500/20 text-blue-300" title="确认在人手">AI 只生成候选；事实、状态<br />和资料发布由人审核。</Feature>
+              <Feature icon={<PeopleIcon />} iconTone="bg-blue-500/20 text-blue-300" title="事实有依据">文件与手工资料有明确证据时<br />可自动成事实；其余内容待核对。</Feature>
               <Feature icon={<BoltIcon />} iconTone="bg-amber-500/20 text-amber-300" title="动作受控制">外部只读能力逐项授权、<br />逐次审批并留下审计。</Feature>
             </div>
 
             <div className="mt-auto flex items-start gap-3 pt-5 text-[12px] leading-5 text-slate-400">
               <span className="mt-0.5 text-slate-400"><SmallShieldIcon /></span>
-              <p>当前产品聚焦可追溯资料、人工确认、项目记忆和受控只读能力。<br className="hidden xl:block" />不会替你修改代码、写入 Git、执行 Shell 或部署。</p>
+              <p>当前产品支持可追溯资料、事实整理、项目记忆和受控只读能力。<br className="hidden xl:block" />不会替你修改代码、写入 Git、执行 Shell 或部署。</p>
             </div>
           </div>
         </section>

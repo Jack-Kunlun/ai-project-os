@@ -102,6 +102,19 @@ export function parseMaintenanceReport(log, operation, context, expectedPlanDige
 
 const IMAGE_PREFIX = "IMAGE_MAINTENANCE_REPORT ";
 const IMAGE_SERVICES = ["app", "worker", "git-worker", "migrate", "reconcile", "principal-bootstrap", "production-upgrade-preflight"];
+// Exact legacy references, bound to the inspected immutable ID, version, and service.
+const HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS = new Map([
+  ["sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266", ["0.8.0-dev.4", "reconcile", "ai-project-os-v1-reconcile:df0f227669d0ea62c6119bd9b057c38f3b14d4d7", "ai-project-os-v1-reconcile@sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266"]],
+  ["sha256:4aaa76f6d6a9ec3d81929a91b493e74f197bd66a45bb340be2c48124a16f3e41", ["0.8.0-dev.4", "app", "ai-project-os-v1-app:df0f227669d0ea62c6119bd9b057c38f3b14d4d7", "ai-project-os-v1-app@sha256:4aaa76f6d6a9ec3d81929a91b493e74f197bd66a45bb340be2c48124a16f3e41"]],
+  ["sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9", ["0.8.0-dev.4", "migrate", "ai-project-os-v1-migrate:df0f227669d0ea62c6119bd9b057c38f3b14d4d7", "ai-project-os-v1-migrate@sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9"]],
+  ["sha256:507fb49a9b0fb572df87bb79e73f2f8df62de4c0d85ff01524219cd969f8edd2", ["0.5.0-dev.1", "worker", "ai-project-os-preserve-v0-5-0-dev-1-worker:latest", "ai-project-os-preserve-v0-5-0-dev-1-worker@sha256:507fb49a9b0fb572df87bb79e73f2f8df62de4c0d85ff01524219cd969f8edd2"]],
+  ["sha256:6060a7c9dd640c1702fdd3383bf5b5609ea18c8cceb71e1831cb94f47fc37ac6", ["1.0.0", "app", "ai-project-os-v1-app:f57d050fffa445a6ef9eb3d7e692e6df06fac98d", "ai-project-os-v1-app@sha256:6060a7c9dd640c1702fdd3383bf5b5609ea18c8cceb71e1831cb94f47fc37ac6"]],
+  ["sha256:717905ac3b6cd0ae2be747d976e3adb7b74647f68664f4ed285fdaf4051533b9", ["1.0.0", "worker", "ai-project-os-v1-worker:f57d050fffa445a6ef9eb3d7e692e6df06fac98d", "ai-project-os-v1-worker@sha256:717905ac3b6cd0ae2be747d976e3adb7b74647f68664f4ed285fdaf4051533b9"]],
+  ["sha256:71b9491d66dfc809163e3e0111161f5dc167a9868f9d8e552612f959791e05a7", ["0.5.0-dev.1", "app", "ai-project-os-preserve-v0-5-0-dev-1-app:latest", "ai-project-os-preserve-v0-5-0-dev-1-app@sha256:71b9491d66dfc809163e3e0111161f5dc167a9868f9d8e552612f959791e05a7"]],
+  ["sha256:8620b13bfc6046074e8e13d4c5b09f528e09730d3c2f6d689c2351c464864a9c", ["0.8.0-dev.4", "worker", "ai-project-os-v1-worker:df0f227669d0ea62c6119bd9b057c38f3b14d4d7", "ai-project-os-v1-worker@sha256:8620b13bfc6046074e8e13d4c5b09f528e09730d3c2f6d689c2351c464864a9c"]],
+  ["sha256:c4ff0bc5c0bdf7d74949cb3ede45293d38f81cae7c87ce873cb79c5404ee0681", ["1.0.0", "git-worker", "ai-project-os-v1-git-worker:f57d050fffa445a6ef9eb3d7e692e6df06fac98d", "ai-project-os-v1-git-worker@sha256:c4ff0bc5c0bdf7d74949cb3ede45293d38f81cae7c87ce873cb79c5404ee0681"]],
+  ["sha256:e0952e811202fb5952561ae5bca82f4668b32144dbea4559e73602716894ba1c", ["0.8.0-dev.4", "git-worker", "ai-project-os-v1-git-worker:df0f227669d0ea62c6119bd9b057c38f3b14d4d7", "ai-project-os-v1-git-worker@sha256:e0952e811202fb5952561ae5bca82f4668b32144dbea4559e73602716894ba1c"]],
+]);
 const CONTAINER_STATUSES = ["created", "restarting", "running", "removing", "paused", "exited", "dead"];
 const IMAGE_REASONS = new Set(["image-missing", "title-invalid", "source-invalid", "version-invalid",
   "revision-invalid", "project-invalid", "service-invalid", "title-unrecognized", "source-unrecognized",
@@ -114,12 +127,15 @@ const imageIdsOrEmpty = (values) => Array.isArray(values) && values.length <= 10
   && new Set(values).size === values.length && values.every((id) => typeof id === "string" && IMAGE.test(id));
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
-function knownImageReference(reference, kind) {
+function knownImageReference(reference, kind, item) {
   if (typeof reference !== "string" || reference.length > 512) return false;
   const match = kind === "digest" ? reference.match(/^(.*)@sha256:[a-f0-9]{64}$/u)
     : reference.match(/^(.*):[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/u);
   if (!match) return false;
-  return IMAGE_SERVICES.some((service) => ["", "docker.io/library/"]
+  const historical = HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS.get(item.id);
+  const exactHistorical = historical && item.version === historical[0] && item.service === historical[1]
+    && reference === historical[kind === "tag" ? 2 : 3];
+  return exactHistorical || IMAGE_SERVICES.some((service) => ["", "docker.io/library/"]
     .some((prefix) => match[1] === `${prefix}ai-project-os-${service}`))
     || ["ghcr.io/jack-kunlun/ai-project-os", ...["app", "worker", "migrate"]
       .map((service) => `ghcr.io/jack-kunlun/ai-project-os-${service}`)].includes(match[1]);
@@ -139,7 +155,7 @@ function validateImageRecords(images, scopeIds, protection) {
       && [item.ownershipReasons, item.retainReasons].every((reasons) => Array.isArray(reasons)
         && reasons.length <= IMAGE_REASONS.size && reasons.every((reason) => IMAGE_REASONS.has(reason)))
       && ["recognizedRepoTags", "recognizedRepoDigests"].every((key) => Array.isArray(item[key])
-        && item[key].length <= 8 && item[key].every((ref) => knownImageReference(ref, key === "recognizedRepoTags" ? "tag" : "digest")))
+        && item[key].length <= 8 && item[key].every((ref) => knownImageReference(ref, key === "recognizedRepoTags" ? "tag" : "digest", item)))
       && Array.isArray(item.containerReferences) && item.containerReferences.length <= 1024
       && new Set(item.containerReferences.map((ref) => ref?.id)).size === item.containerReferences.length
       && item.containerReferences.every((ref) => DIGEST.test(ref?.id ?? "") && CONTAINER_STATUSES.includes(ref.status)),

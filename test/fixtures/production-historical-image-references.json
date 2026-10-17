@@ -1,0 +1,72 @@
+[
+  {
+    "id": "sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266",
+    "version": "0.8.0-dev.4",
+    "service": "reconcile",
+    "tag": "ai-project-os-v1-reconcile:df0f227669d0ea62c6119bd9b057c38f3b14d4d7",
+    "digest": "ai-project-os-v1-reconcile@sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266"
+  },
+  {
+    "id": "sha256:4aaa76f6d6a9ec3d81929a91b493e74f197bd66a45bb340be2c48124a16f3e41",
+    "version": "0.8.0-dev.4",
+    "service": "app",
+    "tag": "ai-project-os-v1-app:df0f227669d0ea62c6119bd9b057c38f3b14d4d7",
+    "digest": "ai-project-os-v1-app@sha256:4aaa76f6d6a9ec3d81929a91b493e74f197bd66a45bb340be2c48124a16f3e41"
+  },
+  {
+    "id": "sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9",
+    "version": "0.8.0-dev.4",
+    "service": "migrate",
+    "tag": "ai-project-os-v1-migrate:df0f227669d0ea62c6119bd9b057c38f3b14d4d7",
+    "digest": "ai-project-os-v1-migrate@sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9"
+  },
+  {
+    "id": "sha256:507fb49a9b0fb572df87bb79e73f2f8df62de4c0d85ff01524219cd969f8edd2",
+    "version": "0.5.0-dev.1",
+    "service": "worker",
+    "tag": "ai-project-os-preserve-v0-5-0-dev-1-worker:latest",
+    "digest": "ai-project-os-preserve-v0-5-0-dev-1-worker@sha256:507fb49a9b0fb572df87bb79e73f2f8df62de4c0d85ff01524219cd969f8edd2"
+  },
+  {
+    "id": "sha256:6060a7c9dd640c1702fdd3383bf5b5609ea18c8cceb71e1831cb94f47fc37ac6",
+    "version": "1.0.0",
+    "service": "app",
+    "tag": "ai-project-os-v1-app:f57d050fffa445a6ef9eb3d7e692e6df06fac98d",
+    "digest": "ai-project-os-v1-app@sha256:6060a7c9dd640c1702fdd3383bf5b5609ea18c8cceb71e1831cb94f47fc37ac6"
+  },
+  {
+    "id": "sha256:717905ac3b6cd0ae2be747d976e3adb7b74647f68664f4ed285fdaf4051533b9",
+    "version": "1.0.0",
+    "service": "worker",
+    "tag": "ai-project-os-v1-worker:f57d050fffa445a6ef9eb3d7e692e6df06fac98d",
+    "digest": "ai-project-os-v1-worker@sha256:717905ac3b6cd0ae2be747d976e3adb7b74647f68664f4ed285fdaf4051533b9"
+  },
+  {
+    "id": "sha256:71b9491d66dfc809163e3e0111161f5dc167a9868f9d8e552612f959791e05a7",
+    "version": "0.5.0-dev.1",
+    "service": "app",
+    "tag": "ai-project-os-preserve-v0-5-0-dev-1-app:latest",
+    "digest": "ai-project-os-preserve-v0-5-0-dev-1-app@sha256:71b9491d66dfc809163e3e0111161f5dc167a9868f9d8e552612f959791e05a7"
+  },
+  {
+    "id": "sha256:8620b13bfc6046074e8e13d4c5b09f528e09730d3c2f6d689c2351c464864a9c",
+    "version": "0.8.0-dev.4",
+    "service": "worker",
+    "tag": "ai-project-os-v1-worker:df0f227669d0ea62c6119bd9b057c38f3b14d4d7",
+    "digest": "ai-project-os-v1-worker@sha256:8620b13bfc6046074e8e13d4c5b09f528e09730d3c2f6d689c2351c464864a9c"
+  },
+  {
+    "id": "sha256:c4ff0bc5c0bdf7d74949cb3ede45293d38f81cae7c87ce873cb79c5404ee0681",
+    "version": "1.0.0",
+    "service": "git-worker",
+    "tag": "ai-project-os-v1-git-worker:f57d050fffa445a6ef9eb3d7e692e6df06fac98d",
+    "digest": "ai-project-os-v1-git-worker@sha256:c4ff0bc5c0bdf7d74949cb3ede45293d38f81cae7c87ce873cb79c5404ee0681"
+  },
+  {
+    "id": "sha256:e0952e811202fb5952561ae5bca82f4668b32144dbea4559e73602716894ba1c",
+    "version": "0.8.0-dev.4",
+    "service": "git-worker",
+    "tag": "ai-project-os-v1-git-worker:df0f227669d0ea62c6119bd9b057c38f3b14d4d7",
+    "digest": "ai-project-os-v1-git-worker@sha256:e0952e811202fb5952561ae5bca82f4668b32144dbea4559e73602716894ba1c"
+  }
+]

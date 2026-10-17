@@ -113,6 +113,59 @@ LEGACY_IMAGE_SERVICES = frozenset(('app', 'worker', 'git-worker', 'migrate',
 HISTORICAL_IMAGE_SERVICES = LEGACY_IMAGE_SERVICES | frozenset(
     ('production-upgrade-preflight',)
 )
+# Exact references matched to legacy deployment sources and the inspected reference hashes.
+HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS = {
+    'sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266': (
+        '0.8.0-dev.4', 'reconcile',
+        'ai-project-os-v1-reconcile:df0f227669d0ea62c6119bd9b057c38f3b14d4d7',
+        'ai-project-os-v1-reconcile@sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266',
+    ),
+    'sha256:4aaa76f6d6a9ec3d81929a91b493e74f197bd66a45bb340be2c48124a16f3e41': (
+        '0.8.0-dev.4', 'app',
+        'ai-project-os-v1-app:df0f227669d0ea62c6119bd9b057c38f3b14d4d7',
+        'ai-project-os-v1-app@sha256:4aaa76f6d6a9ec3d81929a91b493e74f197bd66a45bb340be2c48124a16f3e41',
+    ),
+    'sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9': (
+        '0.8.0-dev.4', 'migrate',
+        'ai-project-os-v1-migrate:df0f227669d0ea62c6119bd9b057c38f3b14d4d7',
+        'ai-project-os-v1-migrate@sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9',
+    ),
+    'sha256:507fb49a9b0fb572df87bb79e73f2f8df62de4c0d85ff01524219cd969f8edd2': (
+        '0.5.0-dev.1', 'worker',
+        'ai-project-os-preserve-v0-5-0-dev-1-worker:latest',
+        'ai-project-os-preserve-v0-5-0-dev-1-worker@sha256:507fb49a9b0fb572df87bb79e73f2f8df62de4c0d85ff01524219cd969f8edd2',
+    ),
+    'sha256:6060a7c9dd640c1702fdd3383bf5b5609ea18c8cceb71e1831cb94f47fc37ac6': (
+        '1.0.0', 'app',
+        'ai-project-os-v1-app:f57d050fffa445a6ef9eb3d7e692e6df06fac98d',
+        'ai-project-os-v1-app@sha256:6060a7c9dd640c1702fdd3383bf5b5609ea18c8cceb71e1831cb94f47fc37ac6',
+    ),
+    'sha256:717905ac3b6cd0ae2be747d976e3adb7b74647f68664f4ed285fdaf4051533b9': (
+        '1.0.0', 'worker',
+        'ai-project-os-v1-worker:f57d050fffa445a6ef9eb3d7e692e6df06fac98d',
+        'ai-project-os-v1-worker@sha256:717905ac3b6cd0ae2be747d976e3adb7b74647f68664f4ed285fdaf4051533b9',
+    ),
+    'sha256:71b9491d66dfc809163e3e0111161f5dc167a9868f9d8e552612f959791e05a7': (
+        '0.5.0-dev.1', 'app',
+        'ai-project-os-preserve-v0-5-0-dev-1-app:latest',
+        'ai-project-os-preserve-v0-5-0-dev-1-app@sha256:71b9491d66dfc809163e3e0111161f5dc167a9868f9d8e552612f959791e05a7',
+    ),
+    'sha256:8620b13bfc6046074e8e13d4c5b09f528e09730d3c2f6d689c2351c464864a9c': (
+        '0.8.0-dev.4', 'worker',
+        'ai-project-os-v1-worker:df0f227669d0ea62c6119bd9b057c38f3b14d4d7',
+        'ai-project-os-v1-worker@sha256:8620b13bfc6046074e8e13d4c5b09f528e09730d3c2f6d689c2351c464864a9c',
+    ),
+    'sha256:c4ff0bc5c0bdf7d74949cb3ede45293d38f81cae7c87ce873cb79c5404ee0681': (
+        '1.0.0', 'git-worker',
+        'ai-project-os-v1-git-worker:f57d050fffa445a6ef9eb3d7e692e6df06fac98d',
+        'ai-project-os-v1-git-worker@sha256:c4ff0bc5c0bdf7d74949cb3ede45293d38f81cae7c87ce873cb79c5404ee0681',
+    ),
+    'sha256:e0952e811202fb5952561ae5bca82f4668b32144dbea4559e73602716894ba1c': (
+        '0.8.0-dev.4', 'git-worker',
+        'ai-project-os-v1-git-worker:df0f227669d0ea62c6119bd9b057c38f3b14d4d7',
+        'ai-project-os-v1-git-worker@sha256:e0952e811202fb5952561ae5bca82f4668b32144dbea4559e73602716894ba1c',
+    ),
+}
 CACHE_PLAN_TTL_SECONDS = 15 * 60
 CACHE_MAX_IMAGE_REFS = 256
 IMAGE_REF_DISPLAY_LIMIT = 8
@@ -1655,6 +1708,11 @@ def _image_record(identifier, raw, container_references):
     ):
         for reference in refs:
             valid, referenced_service = _image_ref_repo(reference, kind)
+            historical = HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS.get(identifier)
+            if (not valid and historical is not None
+                    and (version, service) == historical[:2]
+                    and reference == historical[2 if kind == 'tag' else 3]):
+                valid, referenced_service = True, historical[1]
             if not valid:
                 unknown_references.append(reference)
                 continue

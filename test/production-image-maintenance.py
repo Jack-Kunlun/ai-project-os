@@ -139,6 +139,47 @@ def snapshot_after_remove(plan, identifier):
 
 
 class ImageReferenceTests(unittest.TestCase):
+    def test_exact_legacy_reference_exceptions_are_bound_to_id_version_and_service(self):
+        fixtures = json.loads((ROOT / 'test/fixtures/production-historical-image-references.json').read_text())
+        self.assertEqual(len(fixtures), 10)
+        self.assertEqual(set(DEPLOYER.HISTORICAL_IMAGE_REFERENCE_EXCEPTIONS),
+                         {item['id'] for item in fixtures})
+        for item in fixtures:
+            with self.subTest(identifier=item['id']):
+                self.assertIn(item['id'], DEPLOYER.HISTORICAL_IMAGE_SCOPE)
+                raw = raw_image(item['id'], version=item['version'], service=item['service'],
+                                tags=[item['tag']], digests=[item['digest']])
+                record = DEPLOYER._image_record(item['id'], raw, [])
+                self.assertEqual(record['ownership'], 'confirmed')
+                self.assertTrue(record['eligible'])
+                for field, value in (
+                    ('version', '0.0.1'), ('service', 'principal-bootstrap'),
+                    ('repoTags', [item['tag'] + '-unverified']),
+                    ('repoDigests', [item['digest'][:-1] + ('0' if item['digest'][-1] != '0' else '1')]),
+                    ('source', 'https://foreign.invalid/project'),
+                    ('project', 'foreign-project'),
+                ):
+                    changed = dict(raw)
+                    changed[field] = value
+                    retained = DEPLOYER._image_record(item['id'], changed, [])
+                    self.assertFalse(retained['eligible'], (field, item['id']))
+                    self.assertEqual(retained['ownership'], 'unconfirmed')
+                changed = DEPLOYER._image_record(OTHER_IMAGE_ID, raw, [])
+                self.assertFalse(changed['eligible'])
+                self.assertIn('repository-reference-unrecognized', changed['ownershipReasons'])
+
+    def test_exact_legacy_references_never_override_container_protection(self):
+        fixtures = json.loads((ROOT / 'test/fixtures/production-historical-image-references.json').read_text())
+        for item in fixtures:
+            for status in ('running', 'exited'):
+                with self.subTest(identifier=item['id'], status=status):
+                    raw = raw_image(item['id'], version=item['version'], service=item['service'],
+                                    tags=[item['tag']], digests=[item['digest']])
+                    record = DEPLOYER._image_record(item['id'], raw, [{'id': CONTAINER_ID, 'status': status}])
+                    self.assertEqual(record['ownership'], 'confirmed')
+                    self.assertFalse(record['eligible'])
+                    self.assertEqual(record['retainReasons'], ['container-referenced'])
+
     def test_scope_is_exactly_the_seventeen_authorized_image_ids(self):
         self.assertEqual(len(DEPLOYER.HISTORICAL_IMAGE_SCOPE), 17)
         self.assertEqual(DEPLOYER.HISTORICAL_IMAGE_SCOPE,

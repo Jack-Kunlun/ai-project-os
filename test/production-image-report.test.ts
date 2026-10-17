@@ -153,3 +153,39 @@ test("image actions reuse the production lock and credentials without invoking a
   assert.match(workflow, /group: ai-project-os-production\n  cancel-in-progress: false/u);
   assert.match(maintenance, /Remove the temporary maintenance SSH identity\n        if: \$\{\{ always\(\) \}\}/u);
 });
+
+test("legacy reference reports require the exact inspected ID, version, service and references", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("./fixtures/production-historical-image-references.json", import.meta.url), "utf8")) as {
+    id: string; version: string; service: string; tag: string; digest: string;
+  }[];
+  assert.equal(fixtures.length, 10);
+  for (const fixture of fixtures) {
+    const value = inspect();
+    value.scopeIds[0] = fixture.id;
+    Object.assign(value.images[0], { id: fixture.id, version: fixture.version, service: fixture.service,
+      recognizedRepoTags: [fixture.tag], recognizedRepoDigests: [fixture.digest] });
+    value.protection.scopeIds = [...value.scopeIds];
+    value.protection.unverifiedImages[0].id = fixture.id;
+    value.protection.allImageIds = [current, previous, fixture.id].sort();
+    assert.equal(parseImageMaintenanceReport(line(value), "image-inspect", context).images[0].ownership, "confirmed");
+    const mutations = [
+      (candidate: ReturnType<typeof inspect>) => {
+        const id = `sha256:${"8".repeat(64)}`;
+        candidate.scopeIds[0] = id; candidate.images[0].id = id;
+        candidate.protection.scopeIds = [...candidate.scopeIds];
+        candidate.protection.unverifiedImages[0].id = id;
+        candidate.protection.allImageIds = [current, previous, id].sort();
+      },
+      (candidate: ReturnType<typeof inspect>) => { candidate.images[0].version = "0.0.1"; },
+      (candidate: ReturnType<typeof inspect>) => { candidate.images[0].service = "principal-bootstrap"; },
+      (candidate: ReturnType<typeof inspect>) => { candidate.images[0].recognizedRepoTags[0] += "-unverified"; },
+      (candidate: ReturnType<typeof inspect>) => {
+        candidate.images[0].recognizedRepoDigests[0] = fixture.digest.slice(0, -1) + (fixture.digest.endsWith("0") ? "1" : "0");
+      },
+    ];
+    for (const mutate of mutations) {
+      const changed = structuredClone(value); mutate(changed);
+      assert.throws(() => parseImageMaintenanceReport(line(changed), "image-inspect", context), fixture.id);
+    }
+  }
+});

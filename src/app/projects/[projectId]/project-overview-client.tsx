@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { AppHeader } from "@/components/app-header";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import { projectIndexReadinessDetail, projectIndexReadinessLabel, summarizeProjectOverview } from "@/lib/project-overview-metrics";
@@ -161,8 +162,8 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
     if (data === null || summary === null) return null;
     const returnTo = buildProjectHref(projectId, "overview", { focus: "current-state" });
     if (data.project._count.sources === 0 && data.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo }), action: "添加资料" };
-    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "核对原始资料后，只有人工确认的内容才会进入已确认事实。", href: pendingDetailHref, action: "开始审核" };
-    if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "把已确认内容建立为可检索、可引用的语义索引。", href: buildProjectHref(projectId, "memory", { from: "overview", returnTo }), action: "管理记忆" };
+    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "有原文依据且符合条件的内容已自动形成事实；这里只核对仍待处理的内容。", href: pendingDetailHref, action: "开始审核" };
+    if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "确认本次资料范围后，建立可检索、可引用的语义索引。", href: buildProjectHref(projectId, "memory", { focus: "memory-index", from: "overview", returnTo }), action: "管理记忆" };
     return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: buildProjectHref(projectId, "intelligence", { focus: "agent-investigation", from: "overview", returnTo }), action: "打开 AI 工作台" };
   })();
 
@@ -176,6 +177,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
           <div role="alert" className="flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error ?? "项目概览加载失败"}</span><button type="button" onClick={() => void load({ showLoading: true })} className="font-semibold underline underline-offset-4">重试</button></div>
         ) : (
           <>
+            <ProjectFlowGuide projectId={projectId} stage="overview" sourceCount={data.project._count.sources + data.project._count.assets} pendingCount={summary.pendingContent} indexReady={data.governance.index.compatible} archived={Boolean(data.project.archivedAt)} />
             <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10 lg:px-12">
               <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-indigo-500/30 blur-3xl" />
               <div className="relative grid gap-8 lg:grid-cols-[1.25fr_0.75fr] lg:items-end">

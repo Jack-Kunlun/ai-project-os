@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { AppHeader } from "@/components/app-header";
 import { OperationPanel } from "@/components/operation-panel";
 import { buildProjectHref, parseProjectPageState, PROJECT_PLAN_STATUS_VALUES } from "@/lib/project-navigation";
@@ -136,6 +137,7 @@ export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { user
         <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4"><Metric label="有效目标" value={counts.objectives} /><Metric label="待采纳建议" value={counts.proposed} /><Metric label="推进中/受阻" value={counts.active} /><Metric label="已完成" value={counts.completed} /></div>
       </section>
 
+      <ProjectFlowGuide projectId={projectId} stage="plan" archived={Boolean(plan?.project.archivedAt)} />
       {loading ? <div className="mt-8 h-44 animate-pulse rounded-3xl bg-slate-200" aria-label="正在加载项目计划" /> : null}
       {plan?.project.archivedAt ? <p className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">项目已归档，计划保持只读，目标、工作项和依赖不会被修改。</p> : null}
       {message ? <p role="status" className="mt-6 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-700">{message}</p> : null}

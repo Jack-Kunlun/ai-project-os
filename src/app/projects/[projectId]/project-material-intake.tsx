@@ -50,6 +50,7 @@ export function ProjectMaterialIntake({
   const [savingText, setSavingText] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [savedAssetCount, setSavedAssetCount] = useState(0);
   const [maxFiles, setMaxFiles] = useState(10);
   const [factSourceIds, setFactSourceIds] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -178,6 +179,7 @@ export function ProjectMaterialIntake({
     if (files.length === 0) return;
     setFactSourceIds([]);
     setUploading(true);
+    setSavedAssetCount(0);
     setError(null);
     setMessage(null);
     let uploaded = 0;
@@ -201,6 +203,7 @@ export function ProjectMaterialIntake({
       }
     }
     setFiles([]);
+    setSavedAssetCount(uploaded);
     setFactSourceIds([...new Set(readySourceIds)]);
     try {
       await onChanged();
@@ -240,6 +243,11 @@ export function ProjectMaterialIntake({
       {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700">{error}</p> : null}
       {message ? <p role="status" aria-live="polite" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800">{message}</p> : null}
 
+      <ol aria-label="资料导入步骤" className="mt-5 grid gap-2 text-sm sm:grid-cols-3">
+        <li className="rounded-lg bg-slate-100 px-3 py-2">1. 保存原文并完成解析</li>
+        <li className="rounded-lg bg-slate-100 px-3 py-2">2. 在下方确认 AI 整理</li>
+        <li className="rounded-lg bg-slate-100 px-3 py-2">3. 查看事实与待处理项</li>
+      </ol>
       <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-2">
         <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">输入文本</p>
@@ -276,6 +284,7 @@ export function ProjectMaterialIntake({
         </div>
       </div>
 
+      {savedAssetCount > 0 && factSourceIds.length === 0 ? <div role="status" className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"><p>文件已保存，暂未有可整理的文字。下一步查看解析进度；图片和扫描件需先确认识别并核对文字。</p><Link href={`/projects/${projectId}/assets`} className="mt-2 inline-flex min-h-11 items-center font-semibold underline">继续解析或核对识别文字 →</Link></div> : null}
       <ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={onChanged} />
 
       <div className="mt-4 flex flex-wrap gap-2">

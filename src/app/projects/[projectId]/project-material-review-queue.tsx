@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CursorPagination } from "@/components/list-pagination";
+import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { KnowledgeLifecycle } from "@/components/knowledge-lifecycle";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
@@ -147,6 +148,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
   return (
     <section id="review-queue" tabIndex={-1} aria-labelledby="review-queue-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
       {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-5 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
+      <ProjectFlowGuide projectId={projectId} stage="review" />
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI candidate review</p><h2 id="review-queue-heading" className="mt-2 text-2xl font-semibold tracking-tight">审核 AI 候选</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">这里只处理自动整理后仍需核对的冲突、改写或不确定内容。核对原始资料证据后可确认或驳回；有充分原文证据的普通结果已自动入库。</p></div>
         <span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">当前页 {reviews.length} 条</span>
@@ -158,7 +160,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
       </div>
       {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
       {message ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">{message}</p> : null}
-      {loading ? <div className="mt-6 h-40 animate-pulse rounded-2xl bg-slate-100" /> : reviews.length === 0 ? <p className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">{search.trim() || itemType !== "all" ? "没有匹配的 AI 候选。" : "当前没有待审核 AI 候选。"}</p> : <div className="mt-6 space-y-4">{reviews.map((review) => (
+      {loading ? <div className="mt-6 h-40 animate-pulse rounded-2xl bg-slate-100" /> : reviews.length === 0 ? <p className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">{search.trim() || itemType !== "all" ? "没有匹配的 AI 候选。" : "当前没有待审核 AI 候选。可以查看事实，或更新索引后开始问答。"}</p> : <div className="mt-6 space-y-4">{reviews.map((review) => (
         <article key={`${review.source}:${review.id}`} className="rounded-2xl border border-slate-200 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">{itemLabels[review.item.type]}</span><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{review.source === "web" ? "网页 AI" : "受控 AI"}</span></div><h3 className="mt-3 text-base font-semibold">{review.item.title}</h3></div><span className="text-xs text-slate-400">{formatDate(review.createdAt)}</span></div>
           <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{review.item.content}</p>
@@ -167,6 +169,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
           <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void reviewCandidate(review, "accept")} disabled={pending !== null} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{pending === `${review.source}:${review.id}:accept` ? "确认中…" : "确认进入已确认事实"}</button><button type="button" onClick={() => void reviewCandidate(review, "dismiss")} disabled={pending !== null} className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{pending === `${review.source}:${review.id}:dismiss` ? "驳回中…" : "驳回"}</button></div>
         </article>
       ))}</div>}
+      <div className="mt-5 flex flex-wrap gap-3 text-sm font-semibold text-indigo-700"><Link href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "materials" })}>查看已确认事实 →</Link><Link href={buildProjectHref(projectId, "memory", { focus: "memory-index", from: "materials" })}>下一步：更新索引并问答 →</Link><Link href={buildProjectHref(projectId, "plan", { from: "materials" })}>安排任务 →</Link></div>
       <CursorPagination page={history.length + 1} hasPrevious={history.length > 0} hasNext={nextCursor !== null} disabled={loading || pending !== null} onPrevious={() => { const previous = history.at(-1) ?? null; setHistory((current) => current.slice(0, -1)); replaceReviewQuery({ cursor: previous }); }} onNext={() => { if (!nextCursor) return; setHistory((current) => [...current, cursor]); replaceReviewQuery({ cursor: nextCursor }); }} />
     </section>
   );

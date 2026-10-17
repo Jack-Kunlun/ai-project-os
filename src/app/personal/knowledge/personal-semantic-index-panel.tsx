@@ -81,7 +81,8 @@ function randomClientKey(): string {
  */
 export function PersonalSemanticIndexPanel({
   onError,
-}: Readonly<{ onError?: (message: string) => void }>): React.JSX.Element {
+  onOpenSemanticSearch,
+}: Readonly<{ onError?: (message: string) => void; onOpenSemanticSearch?: () => void }>): React.JSX.Element {
   const [state, setState] = useState<SemanticIndexState>("idle");
   const [confirmation, setConfirmation] = useState<SemanticConfirmation | null>(null);
   const [overview, setOverview] = useState<SemanticIndexOverview | null>(null);
@@ -271,6 +272,7 @@ export function PersonalSemanticIndexPanel({
 
       {state === "executing" ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600" role="status">正在请求向量模型并写入索引…</p> : null}
       {state === "success" ? <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-xs text-emerald-800" role="status">语义索引已建立，共写入 {indexedEntryCount ?? 0} 个片段，现在可以使用个人语义搜索。</p> : null}
+      {overview?.status === "ready" && onOpenSemanticSearch ? <button type="button" onClick={onOpenSemanticSearch} className="mt-3 min-h-10 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100">打开个人语义搜索</button> : null}
       {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</div> : null}
     </section>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type QaCitation = Readonly<{
@@ -218,7 +219,7 @@ export function PersonalKnowledgeQaPanel({
   }
 
   return (
-    <section className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-5" aria-labelledby="personal-page-qa-title">
+    <section id="personal-knowledge-qa" className="mt-6 scroll-mt-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-5" aria-labelledby="personal-page-qa-title">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Page Q&amp;A</p>
@@ -243,7 +244,7 @@ export function PersonalKnowledgeQaPanel({
           {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · {provider.defaultGenerationModelId}</option>)}
         </select>
         {providersError !== null ? <p className="mt-1 text-xs text-rose-700" role="alert">{providersError}</p> : null}
-        {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-500">没有可用的已验证个人生成模型，请先到“配置 · 我的模型”完成连接测试。</p> : null}
+        {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-600">没有可用的已验证个人生成模型，请先到“<Link href="/personal/models" className="font-semibold text-indigo-700 underline underline-offset-4">配置 · 我的模型</Link>”完成连接测试。</p> : null}
       </div>
 
       {state === "awaiting-confirmation" && confirmation !== null ? (

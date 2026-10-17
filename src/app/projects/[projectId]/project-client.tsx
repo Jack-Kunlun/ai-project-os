@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { OperationPanel } from "@/components/operation-panel";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
@@ -58,6 +59,7 @@ type Project = {
   name: string;
   slug: string;
   description: string | null;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   _count: {
@@ -722,7 +724,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project materials</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 原始资料</h1>
-            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">先收集可追溯的原始资料，再审核 AI 候选，最后形成已确认事实与 AI 可引用记忆。</p>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">添加资料后，在导入窗口继续 AI 整理；符合条件的内容形成事实，冲突与不确定项再核对。需要问答时单独更新索引。</p>
           </div>
           <div className="flex flex-wrap gap-3" aria-label="资料主要操作">
             <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">添加来源</button>
@@ -730,6 +732,8 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
           </div>
         </div>
       </div>
+
+      <ProjectFlowGuide projectId={projectId} stage="materials" sourceCount={project._count.sources + project._count.assets} pendingCount={isItemsLoading ? undefined : itemCounts.candidate} confirmedCount={isItemsLoading ? undefined : itemCounts.confirmed} archived={Boolean(project.archivedAt)} />
 
       <section id="source-library" aria-labelledby="sources-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">

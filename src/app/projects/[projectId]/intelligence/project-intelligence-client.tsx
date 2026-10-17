@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { AppHeader } from "@/components/app-header";
 import { KnowledgeLifecycle } from "@/components/knowledge-lifecycle";
 import { OperationPanel } from "@/components/operation-panel";
@@ -250,6 +251,7 @@ export function ProjectIntelligenceClient({ username, isSystemAdmin }: { usernam
         {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
 
         <div className="space-y-7">
+          <ProjectFlowGuide projectId={projectId} stage="memory" indexReady={status?.readiness.indexCompatible} />
           <CapabilityOverview projectId={projectId} readiness={status?.readiness ?? null} />
           {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
           {loading || status === null ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" aria-label="正在加载项目智能体" /> : (

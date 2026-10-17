@@ -8,6 +8,7 @@ import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { modalNativeBackdropClassName } from "@/components/modal-styles";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { PersonalKnowledgeQaPanel } from "./personal-knowledge-qa-panel";
+import { PersonalKnowledgeNextSteps } from "./personal-knowledge-next-steps";
 import { PersonalProjectSearchPanel } from "./personal-project-search-panel";
 import { PersonalSemanticIndexPanel } from "./personal-semantic-index-panel";
 import { PersonalSemanticSearchPanel } from "./personal-semantic-search-panel";
@@ -340,6 +341,11 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       setLibraryScreen("list");
       void loadDocuments();
     }
+  }
+
+  function openSearchTool(tool: SearchTool): void {
+    setSearchTool(tool);
+    void openWorkspaceSection("search");
   }
 
   async function returnToList(): Promise<void> {
@@ -768,7 +774,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       setSelectedDocumentId(next.id);
       setMode("view");
       setWorkspaceSection("library");
-      setLibraryScreen(modalReturnScreenRef.current);
+      setLibraryScreen(isCreate ? "view" : modalReturnScreenRef.current);
       setKnowledgeModal(null);
       clearHistoryState();
       setMessage({ tone: "success", text: isCreate ? "个人知识已创建。" : "个人知识已保存为新版本。" });
@@ -960,7 +966,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">个人知识</h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里是你的个人知识库。无需创建项目即可保存、搜索和维护知识；只有你明确标记的个人通用记忆会自动补充你发起的项目 AI 请求。</p>
+              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">保存后会直接打开内容供你阅读或针对本篇提问。按意思搜索时先建立个人语义索引；要让项目使用，请手动复制到项目资料。只有明确标记的个人通用记忆会自动补充你发起的项目 AI 请求。</p>
             </div>
             <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-3 lg:w-[34rem]">
               <div className="rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-3">无需项目</div>
@@ -1008,7 +1014,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
 
         {workspaceSection === "library" && libraryScreen === "view" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
           <button type="button" onClick={() => void returnToList()} className="mb-5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">← 返回我的内容</button>
-          {detailLoading ? <div className="space-y-4" aria-label="正在加载内容"><div className="h-7 w-2/3 animate-pulse rounded bg-slate-100" /><div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" /><div className="h-72 animate-pulse rounded-2xl bg-slate-100" /></div> : document ? <DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} /> : <EmptyDetail onCreate={startCreate} />}
+          {detailLoading ? <div className="space-y-4" aria-label="正在加载内容"><div className="h-7 w-2/3 animate-pulse rounded bg-slate-100" /><div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" /><div className="h-72 animate-pulse rounded-2xl bg-slate-100" /></div> : document ? <><PersonalKnowledgeNextSteps key={`${document.id}:${document.version}`} content={document.content} onOpenSemanticIndex={() => openSearchTool("index")} /><DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} /></> : <EmptyDetail onCreate={startCreate} />}
         </section> : null}
 
         {workspaceSection === "search" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
@@ -1020,7 +1026,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             <button type="button" aria-current={searchTool === "index" ? "page" : undefined} onClick={() => setSearchTool("index")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "index" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>索引管理</button>
             <button type="button" aria-current={searchTool === "project" ? "page" : undefined} onClick={() => setSearchTool("project")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "project" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>项目来源搜索</button>
           </nav>
-          <div className="mt-5">{searchTool === "semantic" ? <PersonalSemanticSearchPanel /> : searchTool === "index" ? <PersonalSemanticIndexPanel /> : <PersonalProjectSearchPanel />}</div>
+          <div className="mt-5">{searchTool === "semantic" ? <PersonalSemanticSearchPanel onManageIndex={() => setSearchTool("index")} /> : searchTool === "index" ? <PersonalSemanticIndexPanel onOpenSemanticSearch={() => setSearchTool("semantic")} /> : <PersonalProjectSearchPanel />}</div>
         </section> : null}
 
         <dialog
@@ -1177,7 +1183,7 @@ function DocumentDetail({
         <button type="button" onClick={onHistory} disabled={historyLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{historyLoading ? "读取历史中…" : historyOpen ? "收起版本历史" : "查看版本历史"}</button>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-5">
+      <div id="personal-knowledge-content" className="mt-5 scroll-mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-5">
         <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-slate-700">{document.content}</pre>
       </div>
 

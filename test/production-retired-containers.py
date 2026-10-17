@@ -199,6 +199,38 @@ class RetiredContainerTests(unittest.TestCase):
             with patch.object(D, 'docker', return_value=json.dumps(raw)), self.assertRaises(RuntimeError):
                 D._retired_details([{'id': IDS[0]}])
 
+    def test_mount_order_and_live_exec_sessions_do_not_mask_mount_content_changes(self):
+        raw = detail(IDS[0]); raw[0] = OTHER
+        raw[18] = [{'Type': 'bind', 'Source': '/fixture/a', 'Destination': '/data/a'},
+                   {'Type': 'volume', 'Name': 'fixture-b', 'Destination': '/data/b'}]
+        raw[24] = ['e' * 64]
+        with patch.object(D, 'docker', return_value=json.dumps(raw)):
+            before = D._retired_details([{'id': OTHER}])
+        raw[18].reverse(); raw[24] = ['d' * 64]
+        with patch.object(D, 'docker', return_value=json.dumps(raw)):
+            self.assertEqual(D._retired_details([{'id': OTHER}]), before)
+        raw[18][0]['Name'] = 'changed-business-volume'
+        with patch.object(D, 'docker', return_value=json.dumps(raw)):
+            self.assertNotEqual(D._retired_details([{'id': OTHER}]), before)
+        raw[18] = before[OTHER][18] + [before[OTHER][18][0]]
+        with patch.object(D, 'docker', return_value=json.dumps(raw)):
+            self.assertNotEqual(D._retired_details([{'id': OTHER}]), before)
+
+    def test_target_exec_sessions_still_retain_and_invalid_session_shapes_fail(self):
+        for identifier in IDS:
+            raw = detail(identifier); raw[24] = ['e' * 64]
+            with patch.object(D, 'docker', return_value=json.dumps(raw)):
+                details = D._retired_details([{'id': identifier}])
+            self.assertEqual(details[identifier][24], ['e' * 64])
+            with patch.object(D, '_retired_diff', return_value=changes()):
+                record = D._retired_record(identifier, details, image_records(), set(), NOW)
+            self.assertFalse(record['eligible'])
+            self.assertIn('not-completed-successfully', record['retainReasons'])
+        for invalid in ('unknown', ['not-an-id'], ['e' * 64] * 129):
+            raw = detail(IDS[0]); raw[0] = OTHER; raw[24] = invalid
+            with patch.object(D, 'docker', return_value=json.dumps(raw)), self.assertRaises(RuntimeError):
+                D._retired_details([{'id': OTHER}])
+
     def test_plan_binds_digest_source_tooling_scope_and_lifetime(self):
         value, data, digest = plan()
         with patch.object(D.time, 'time', return_value=NOW):

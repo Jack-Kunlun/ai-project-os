@@ -2391,6 +2391,15 @@ def _retired_details(containers):
                 and isinstance(value[18], list) and len(value[18]) <= 128,
                 'RETIRED_INSPECT_INVALID')
         require(all(isinstance(mount, dict) for mount in value[18]), 'RETIRED_MOUNTS_INVALID')
+        # Mount order is not identity; retain every field and duplicate entry.
+        value[18] = sorted(value[18], key=_cache_json_bytes)
+        require(value[24] is None or (isinstance(value[24], list) and len(value[24]) <= 128
+                and all(isinstance(item, str) and HEX64.fullmatch(item) is not None
+                        for item in value[24])), 'RETIRED_EXEC_IDS_INVALID')
+        # Live health probes create transient exec sessions. Only the two
+        # deletion targets must have no sessions; their nonempty IDs stay bound.
+        if value[0] not in RETIRED_CONTAINER_SCOPE or not value[24]:
+            value[24] = None
         result[value[0]] = value
     require(set(result) == set(identifiers), 'RETIRED_INSPECT_INVALID')
     return result

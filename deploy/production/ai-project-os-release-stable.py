@@ -2361,6 +2361,8 @@ def _retired_details(containers):
     result = {}
     for line in rows:
         value = _image_parse_json(line, 'RETIRED_INSPECT_INVALID')
+        if isinstance(value, list) and len(value) == len(_RETIRED_FIELDS) and value[18] is None:
+            value[18] = []
         require(isinstance(value, list) and len(value) == len(_RETIRED_FIELDS)
                 and isinstance(value[0], str) and value[0] in identifiers
                 and value[0] not in result and isinstance(value[1], str)

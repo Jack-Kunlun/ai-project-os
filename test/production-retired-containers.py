@@ -158,6 +158,15 @@ class RetiredContainerTests(unittest.TestCase):
         with patch.object(D, 'docker', return_value=json.dumps(detail(IDS[0]))), self.assertRaises(RuntimeError):
             D._retired_details(containers)
 
+    def test_nil_mount_slice_is_empty_and_other_shapes_are_rejected(self):
+        raw = detail(IDS[0]); raw[18] = None
+        with patch.object(D, 'docker', return_value=json.dumps(raw)):
+            self.assertEqual(D._retired_details([{'id': IDS[0]}])[IDS[0]][18], [])
+        for invalid in ({}, 'unknown', 0):
+            raw[18] = invalid
+            with patch.object(D, 'docker', return_value=json.dumps(raw)), self.assertRaises(RuntimeError):
+                D._retired_details([{'id': IDS[0]}])
+
     def test_plan_binds_digest_source_tooling_scope_and_lifetime(self):
         value, data, digest = plan()
         with patch.object(D.time, 'time', return_value=NOW):

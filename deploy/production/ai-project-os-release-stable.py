@@ -562,8 +562,8 @@ def deployment_flow(ops, preflight_source=None) -> None:
         # stop a healthy release or delete its receipt.
         try:
             ops.cleanup_old_images(source)
-        except Exception:
-            print('STABLE_IMAGE_CLEANUP_DEFERRED', flush=True)
+        except Exception as error:
+            print('STABLE_IMAGE_CLEANUP_DEFERRED code=' + safe_failure_code(error), flush=True)
     except BaseException:
         if migration_started:
             ops.quiesce_for_manual_recovery(source)
@@ -1457,15 +1457,20 @@ def cache_clean(target_tag, target_revision, plan_digest):
         _cache_emit_report(report)
         require(protection_verified, 'CACHE_PROTECTED_RESOURCE_DRIFT')
     except BaseException as error:
-        _cache_write_audit({
+        failure_report = {
             'schema': 1, 'operation': 'clean', 'status': 'FAILED',
             'tag': target_tag, 'revision': target_revision,
             'toolingRevision': installed['toolingRevision'],
             'planDigest': plan_digest, 'completedAt': int(time.time()),
             'attemptedIds': sorted(set(attempted)),
             'failureCode': safe_failure_code(error),
-            'protectionVerified': protection_verified,
-        })
+            'protectionVerified': False,
+        }
+        try:
+            _cache_write_audit(failure_report)
+        finally:
+            # Preserve the failure independently of the next inspect audit.
+            print('CACHE_MAINTENANCE_FAILURE ' + _cache_json_bytes(failure_report).decode('ascii'), flush=True)
         raise
 
 
@@ -1641,7 +1646,11 @@ def _image_raw_inspect(identifier):
     }
 
 
-def _image_scope_snapshot():
+def _image_scope_snapshot(scope_ids=HISTORICAL_IMAGE_SCOPE):
+    require(isinstance(scope_ids, (tuple, list)) and len(scope_ids) <= CACHE_MAX_IMAGES
+            and len(set(scope_ids)) == len(scope_ids)
+            and all(isinstance(item, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', item)
+                    for item in scope_ids), 'IMAGE_SCOPE_INVALID')
     all_ids = _image_inventory_ids()
     container_inventory = _image_container_inventory()
     references_by_image = {}
@@ -1651,7 +1660,7 @@ def _image_scope_snapshot():
         )
     present_ids = set(all_ids)
     images = []
-    for identifier in HISTORICAL_IMAGE_SCOPE:
+    for identifier in scope_ids:
         raw = _image_raw_inspect(identifier) if identifier in present_ids else None
         if raw is None:
             images.append(_image_record(identifier, None, []))
@@ -1932,8 +1941,10 @@ def _image_protection_matches(plan_protection, planned_images, base_protection,
     expected_ids = sorted(set(plan_protection['allImageIds']) - set(removed_ids))
     expected_by_id = {item['id']: item for item in planned_images}
     actual_by_id = {item['id']: item for item in snapshot['images']}
-    scope_matches = True
-    for identifier in HISTORICAL_IMAGE_SCOPE:
+    scope_matches = (expected_by_id.keys() == actual_by_id.keys()
+                     and len(expected_by_id) == len(planned_images)
+                     and len(actual_by_id) == len(snapshot['images']))
+    for identifier in expected_by_id.keys() & actual_by_id.keys():
         expected = expected_by_id[identifier]
         actual = actual_by_id[identifier]
         if identifier in removed_ids:
@@ -1954,9 +1965,14 @@ def _image_public_protection(base_protection, snapshot, plan_digest):
     return report
 
 
-def _image_runtime_snapshot(target_tag, target_revision):
+def _image_runtime_snapshot(target_tag, target_revision, *, scope_ids=HISTORICAL_IMAGE_SCOPE):
     source, installed, base_protection = _cache_runtime_state(target_tag, target_revision)
-    scope_snapshot = _image_scope_snapshot()
+    if scope_ids is None:
+        # Internal release cleanup freezes the current owned/unverified inventory;
+        # the public historical maintenance command retains its fixed 17-ID scope.
+        scope_ids = tuple(sorted(set(base_protection['ownedImageIds'])
+                                 | {item['id'] for item in base_protection['unverifiedImages']}))
+    scope_snapshot = _image_scope_snapshot(scope_ids)
     classified = []
     previous_tag = base_protection.get('previousTag')
     require(STABLE_TAG.fullmatch(previous_tag or '') is not None,
@@ -2022,7 +2038,13 @@ def _image_available_bytes(docker_root):
 
 
 def _image_remove_id(identifier, *, timeout_seconds):
-    require(isinstance(identifier, str) and identifier in HISTORICAL_IMAGE_SCOPE
+    require(isinstance(identifier, str) and identifier in HISTORICAL_IMAGE_SCOPE,
+            'IMAGE_REMOVE_ARGUMENT_INVALID')
+    return _image_remove_command(identifier, timeout_seconds=timeout_seconds)
+
+
+def _image_remove_command(identifier, *, timeout_seconds):
+    require(isinstance(identifier, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', identifier)
             and type(timeout_seconds) in (int, float) and 0 < timeout_seconds <= 600,
             'IMAGE_REMOVE_ARGUMENT_INVALID')
     executable = BINARIES['docker']
@@ -2050,6 +2072,112 @@ def _image_emit_report(value):
     data = _cache_json_bytes(value)
     require(len(data) <= 512 * 1024, 'IMAGE_REPORT_TOO_LARGE')
     print('IMAGE_MAINTENANCE_REPORT ' + data.decode('ascii'), flush=True)
+
+
+def release_cleanup_old_images(target_tag, target_revision):
+    """After a healthy receipt, remove only frozen, older, unreferenced owned IDs."""
+    _source, installed, base, snapshot = _image_runtime_snapshot(
+        target_tag, target_revision, scope_ids=None,
+    )
+    scope_ids = tuple(item['id'] for item in snapshot['images'])
+    frozen = snapshot['images']
+    protection = _image_plan_protection(base, snapshot)
+    plan_digest = sha256(_cache_json_bytes(protection))
+    require(len(_cache_json_bytes({
+        'images': frozen, 'protection': _cache_protection_report(base, plan_digest),
+    })) <= 192 * 1024, 'IMAGE_RELEASE_REPORT_TOO_LARGE')
+    deadline = time.monotonic() + CACHE_PLAN_TTL_SECONDS
+    available_before = _image_available_bytes(base['dockerRoot'])
+    available_after = None
+    attempted = []
+    outcomes = []
+    verified_attempts = set()
+    removed = set()
+    refused = []
+    last_base, last_snapshot = base, snapshot
+
+    def audit_record(status, *, pending_id=None, failure_code=None,
+                     failure_inventory_verified=False):
+        return {
+            'schema': 1, 'operation': 'release-image-clean', 'status': status,
+            'tag': target_tag, 'revision': target_revision, 'planDigest': plan_digest,
+            'scopeIds': list(scope_ids), 'pendingId': pending_id,
+            'attemptedIds': list(attempted), 'commandOutcomes': list(outcomes),
+            'removedIds': sorted(removed), 'engineRetained': list(refused),
+            'unconfirmedAttemptIds': sorted(set(attempted) - verified_attempts),
+            'failureCode': failure_code,
+            'failureInventoryVerified': failure_inventory_verified,
+            'retainedImages': ([item for item in last_snapshot['images'] if item['present']]
+                               if status == 'OK' else []),
+            'protectionVerified': status == 'OK',
+            'protection': _cache_protection_report(last_base, plan_digest),
+            'availableBytesBefore': available_before,
+            'availableBytesAfter': available_after,
+            'netAvailableBytesDelta': (available_after - available_before
+                                      if available_after is not None else None),
+        }
+
+    try:
+        for record in frozen:
+            if not record['eligible']:
+                continue
+            require(deadline - time.monotonic() > 0, 'IMAGE_RELEASE_CLEANUP_EXPIRED')
+            _source, now_installed, now_base, now_snapshot = _image_runtime_snapshot(
+                target_tag, target_revision, scope_ids=scope_ids,
+            )
+            require(now_installed == installed and _image_protection_matches(
+                protection, frozen, now_base, now_snapshot, removed,
+            ), 'IMAGE_RELEASE_PROTECTED_RESOURCE_DRIFT')
+            # A durable intent must succeed before any mutation. No tags, force,
+            # parent pruning, containers or volumes are deletion targets.
+            _image_write_audit(audit_record('IN_PROGRESS', pending_id=record['id']))
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, 'IMAGE_RELEASE_CLEANUP_EXPIRED')
+            attempted.append(record['id'])
+            outcome = _image_remove_command(record['id'], timeout_seconds=min(600, remaining))
+            outcomes.append({'id': record['id'], 'outcome': outcome})
+            _source, after_installed, last_base, last_snapshot = _image_runtime_snapshot(
+                target_tag, target_revision, scope_ids=scope_ids,
+            )
+            verified_attempts.add(record['id'])
+            if record['id'] not in last_snapshot['allImageIds']:
+                removed.add(record['id'])
+            else:
+                refused.append({'id': record['id'], 'reason': outcome})
+            require(after_installed == installed and _image_protection_matches(
+                protection, frozen, last_base, last_snapshot, removed,
+            ), 'IMAGE_RELEASE_PROTECTED_RESOURCE_DRIFT')
+        _source, final_installed, last_base, last_snapshot = _image_runtime_snapshot(
+            target_tag, target_revision, scope_ids=scope_ids,
+        )
+        require(final_installed == installed and _image_protection_matches(
+            protection, frozen, last_base, last_snapshot, removed,
+        ), 'IMAGE_RELEASE_PROTECTED_RESOURCE_DRIFT')
+        available_after = _image_available_bytes(base['dockerRoot'])
+        report = audit_record('OK')
+        _image_write_audit(report)
+    except BaseException as error:
+        inventory_verified = False
+        if attempted:
+            try:
+                # Read only IDs when full health/protection validation is unavailable.
+                # A successful rm command alone is not proof of actual deletion.
+                present_ids = set(_image_inventory_ids())
+                removed.update(set(attempted) - present_ids)
+                verified_attempts.update(attempted)
+                inventory_verified = True
+            except BaseException:
+                pass
+        report = audit_record('FAILED', failure_code=safe_failure_code(error),
+                              failure_inventory_verified=inventory_verified)
+        try:
+            _image_write_audit(report)
+        finally:
+            # Also preserve safe evidence in the deployment log if disk/audit fails.
+            print('STABLE_RELEASE_IMAGE_CLEANUP ' + _cache_json_bytes(report).decode('ascii'), flush=True)
+        raise
+    print('STABLE_RELEASE_IMAGE_CLEANUP ' + _cache_json_bytes(report).decode('ascii'), flush=True)
+    return report
 
 
 def image_clean(target_tag, target_revision, plan_digest):
@@ -3860,57 +3988,8 @@ class HostDeployment:
         return images
 
     def cleanup_old_images(self, source):
-        # Called only after target health, ledger and receipt all succeeded.
-        keep = set(self.images.values()) | set(source['writer_images'].values())
-        previous = json.loads(source['receipt'].get('target_image_ids', '{}'))
-        require(isinstance(previous, dict), 'IMAGE_HISTORY_INVALID')
-        keep.update(previous.values())
-        require(all(isinstance(value, str) and re.fullmatch(r'sha256:[a-f0-9]{64}', value)
-                    for value in keep), 'IMAGE_HISTORY_INVALID')
-        before_containers = docker('ps', '-aq', '--no-trunc').splitlines()
-        before_volumes = docker('volume', 'ls', '-q').splitlines()
-        if before_containers:
-            infos = json.loads(docker('inspect', *before_containers))
-            keep.update(info['Image'] for info in infos)
-        candidates = set(docker('image', 'ls', '--quiet', '--no-trunc',
-                                '--filter', 'label=org.opencontainers.image.title=AI Project OS').splitlines())
-        removed = 0
-        for identifier in sorted(candidates - keep):
-            require(re.fullmatch(r'sha256:[a-f0-9]{64}', identifier) is not None,
-                    'CLEANUP_IMAGE_ID_INVALID')
-            info = json.loads(docker('image', 'inspect', identifier))[0]
-            labels = info.get('Config', {}).get('Labels', {})
-            tags = info.get('RepoTags') or []
-            digests = info.get('RepoDigests') or []
-            legacy = (labels.get('org.opencontainers.image.source') is None
-                      and labels.get('org.opencontainers.image.title') == 'AI Project OS'
-                      and labels.get('com.docker.compose.project') == PROJECT
-                      and labels.get('com.docker.compose.service') in
-                      ('app', 'worker', 'git-worker', 'migrate', 'reconcile', 'principal-bootstrap')
-                      and re.fullmatch(r'(?:0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-dev\.[0-9]+)?',
-                                       labels.get('org.opencontainers.image.version', '')) is not None
-                      and all(re.fullmatch(r'ai-project-os-[a-z-]+(?::[^/]+)?', tag) for tag in tags))
-            owned = (labels.get('org.opencontainers.image.source')
-                     == 'https://github.com/Jack-Kunlun/ai-project-os' or legacy)
-            require(info.get('Id') == identifier, 'CLEANUP_IMAGE_CHANGED')
-            if not owned or any(not ref.startswith('ghcr.io/jack-kunlun/ai-project-os-') for ref in digests):
-                continue
-            # Removing explicit references without force leaves any newly referenced
-            # image protected by Docker, including concurrent unrelated containers.
-            try:
-                docker('image', 'rm', *(tags + digests or [identifier]), capture=False)
-                removed += 1
-            except RuntimeError:
-                print('STABLE_IMAGE_CLEANUP_IN_USE_SKIPPED', flush=True)
-        cache_budget_met = prune_build_cache()
-        require(docker('ps', '-aq', '--no-trunc').splitlines() == before_containers
-                and docker('volume', 'ls', '-q').splitlines() == before_volumes,
-                'CLEANUP_RESOURCE_IDENTITIES_CHANGED')
-        filesystem = os.statvfs('/')
-        print('STABLE_IMAGE_CLEANUP_OK removed=' + str(removed)
-              + ' available_bytes=' + str(filesystem.f_bavail * filesystem.f_frsize)
-              + ' retained=current-and-previous cache_target=2GB cache_budget_met='
-              + str(cache_budget_met).lower(), flush=True)
+        # Cache cleanup follows in Actions through the guarded inspect/clean protocol.
+        return release_cleanup_old_images(self.target_tag, self.target_revision)
 
     def revalidate_source(self, source):
         require(git(['rev-parse', 'HEAD']) == self.target_revision, 'TARGET_CHECKOUT_CHANGED')

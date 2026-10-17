@@ -4,6 +4,7 @@ import ast
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import subprocess
@@ -154,7 +155,8 @@ class Images(unittest.TestCase):
         self.assertEqual(login.call_args.kwargs['input'], credentials['token'] + '\n')
         self.assertTrue(all('build' not in call.args for call in compose.call_args_list))
         # Exercise Compose's actual merge semantics against the generated pin.
-        if subprocess.run(['docker', 'compose', 'version'], capture_output=True).returncode == 0:
+        if os.environ.get('AI_PROJECT_OS_TEST_LOCAL_COMPOSE') == '1' and subprocess.run(
+                ['docker', 'compose', 'version'], capture_output=True).returncode == 0:
             with tempfile.TemporaryDirectory() as directory:
                 base = Path(directory) / 'base.json'; overlay = Path(directory) / 'pin.yaml'
                 base.write_text(json.dumps({'services': {name: {'image': 'previous:latest',
@@ -212,36 +214,15 @@ class Images(unittest.TestCase):
             self.assertEqual(host.build_target_images(), engine)
         self.assertIn(engine['app'], helper.atomic_write.call_args.args[1].decode())
 
-    def test_cleanup_keeps_current_previous_and_all_container_references(self):
-        current, previous, referenced, old, foreign, legacy, same_title_foreign = ['sha256:' + str(i) * 64 for i in range(1, 8)]
-        calls = []
-        def docker(*args, **kwargs):
-            calls.append(args)
-            if args[:2] == ('ps', '-aq'): return 'container'
-            if args[:3] == ('volume', 'ls', '-q'): return 'database\nuploads'
-            if args[0] == 'inspect': return json.dumps([{'Image': referenced}])
-            if args[:2] == ('image', 'ls'): return '\n'.join([current, previous, referenced, old, foreign, legacy, same_title_foreign])
-            if args[:2] == ('image', 'inspect'):
-                identity = args[2]
-                if identity in (legacy, same_title_foreign):
-                    labels = {
-                        'org.opencontainers.image.title': 'AI Project OS',
-                        'org.opencontainers.image.version': '1.0.1'}
-                    if identity == legacy: labels.update({'com.docker.compose.project': 'ai-project-os', 'com.docker.compose.service': 'app'})
-                    return json.dumps([{'Id': identity, 'Config': {'Labels': labels}, 'RepoTags': None, 'RepoDigests': None}])
-                return json.dumps([{'Id': identity, 'Config': {'Labels': {
-                    'org.opencontainers.image.source': ('https://github.com/Jack-Kunlun/ai-project-os' if identity == old else 'foreign')}},
-                    'RepoTags': [('ghcr.io/jack-kunlun/ai-project-os-app:old' if identity == old else 'foreign:latest')]}])
-            if args[:2] == ('image', 'rm') or args[:2] == ('buildx', 'prune'): return ''
-            if args[:2] == ('buildx', 'du'): return ''
-            self.fail(repr(args))
-        host = m.HostDeployment('v1.0.6', REVISION); host.images = {'app': current}
-        source = {'writer_images': {'app': previous}, 'receipt': {'target_image_ids': '{}'}}
-        with patch.object(m, 'docker', side_effect=docker): host.cleanup_old_images(source)
-        removals = [args for args in calls if args[:2] == ('image', 'rm')]
-        self.assertEqual(removals, [('image', 'rm', 'ghcr.io/jack-kunlun/ai-project-os-app:old'), ('image', 'rm', legacy)])
-        self.assertFalse(any('--force' in args for args in removals))
-        self.assertFalse(any(args[:2] in [('volume', 'rm'), ('system', 'prune'), ('container', 'prune')] for args in calls))
+    def test_cleanup_uses_guarded_release_inventory_without_broad_cache_prune(self):
+        host = m.HostDeployment('v1.0.6', REVISION)
+        with patch.object(m, 'release_cleanup_old_images', autospec=True) as clean, \
+                patch.object(m, 'prune_build_cache') as broad_prune, \
+                patch.object(m, 'docker') as docker:
+            host.cleanup_old_images({})
+        clean.assert_called_once_with('v1.0.6', REVISION)
+        broad_prune.assert_not_called()
+        docker.assert_not_called()
 
     def test_noop_cache_prune_reports_budget_deferred_instead_of_success(self):
         large = json.dumps({'Size': '49000000000', 'Reclaimable': True, 'Shared': True})

@@ -405,7 +405,8 @@ class CacheCommandTests(unittest.TestCase):
                         patch.object(DEPLOYER.time, 'monotonic', side_effect=lambda: clock['monotonic']), \
                         patch.object(DEPLOYER, '_cache_prune_ids', side_effect=prune), \
                         patch.object(DEPLOYER, '_cache_write_audit', side_effect=audits.append), \
-                        patch.object(DEPLOYER, '_cache_emit_report') as emit:
+                        patch.object(DEPLOYER, '_cache_emit_report') as emit, \
+                        patch('builtins.print') as failure_log:
                     with self.assertRaisesRegex(RuntimeError, 'CACHE_PLAN_EXPIRED_OR_INVALID'):
                         DEPLOYER.cache_clean(TAG, REVISION, DEPLOYER.sha256(encoded))
                 self.assertEqual(len(prune_calls), 0 if expire_at == 'snapshot' else 1)
@@ -414,6 +415,12 @@ class CacheCommandTests(unittest.TestCase):
                     self.assertEqual(prune_calls[0][1], 0.5)
                 self.assertEqual(audits[-1]['status'], 'FAILED')
                 self.assertEqual(audits[-1]['failureCode'], 'STABLE_CACHE_PLAN_EXPIRED_OR_INVALID')
+                self.assertFalse(audits[-1]['protectionVerified'])
+                failure_line = failure_log.call_args.args[0]
+                self.assertTrue(failure_line.startswith('CACHE_MAINTENANCE_FAILURE '))
+                failure = json.loads(failure_line.split(' ', 1)[1])
+                self.assertEqual(failure['attemptedIds'], audits[-1]['attemptedIds'])
+                self.assertEqual(failure['status'], 'FAILED')
                 emit.assert_not_called()
 
     def test_clean_reports_net_filesystem_change_separately_from_cache_bytes(self):

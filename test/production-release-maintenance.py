@@ -73,6 +73,43 @@ class Inventory:
 
 
 class ReleaseMaintenanceTests(unittest.TestCase):
+    def test_production_digest_only_tags_match_original_fingerprints_and_preserve_release_boundaries(self):
+        data = json.loads((Path(__file__).parent / 'fixtures/production-containerd-image-references.json').read_text())
+        eligible = []
+        for fixture in data['records']:
+            identity = fixture['identity']
+            self.assertEqual(m.sha256(m._cache_json_bytes(identity)), fixture['fingerprint'])
+            self.assertEqual(m.sha256(m._cache_json_bytes(identity['repoTags'])), fixture['unknownRefsSha256'])
+            title, source, version, revision, project, service = identity['labels']
+            raw = fixtures.raw_image(identity['id'], title=title, source=source, version=version,
+                                     revision=revision, project=project, service=service,
+                                     tags=identity['repoTags'], digests=identity['repoDigests'], size=identity['sizeBytes'])
+            raw.update(previousTag=data['previousTag'], currentImageIds=data['currentImageIds'],
+                       previousImageIds=data['previousImageIds'])
+            record = m._image_record(identity['id'], raw, identity['containerReferences'])
+            self.assertEqual(record['fingerprint'], fixture['fingerprint'])
+            self.assertEqual(record['ownership'], 'confirmed', identity['id'])
+            if record['eligible']:
+                eligible.append(record)
+        self.assertEqual(len(eligible), 3)
+        self.assertTrue(all(record['version'] == '1.0.8' for record in eligible))
+        self.assertFalse(set(record['id'] for record in eligible) & set(data['currentImageIds'] + data['previousImageIds']))
+
+    def test_digest_tag_exception_requires_canonical_known_repository_matching_digest_and_immutable_id(self):
+        identifier = image_id('9')
+        reference = 'ghcr.io/jack-kunlun/ai-project-os-app@' + identifier
+        raw = fixtures.raw_image(identifier, source=m.IMAGE_SOURCE, tags=[reference], digests=[reference])
+        self.assertTrue(m._image_record(identifier, raw, [])['eligible'])
+        for change in ({'source': None}, {'repoDigests': []},
+                       {'repoTags': [reference.replace(identifier, image_id('8'))]},
+                       {'repoTags': [reference.replace('ai-project-os-app', 'foreign')],
+                        'repoDigests': [reference.replace('ai-project-os-app', 'foreign')]},
+                       {'repoTags': [reference, 'foreign:keep']}, {'service': 'worker'}):
+            with self.subTest(change=change):
+                record = m._image_record(identifier, {**raw, **change}, [])
+                self.assertFalse(record['eligible'])
+                self.assertEqual(record['ownership'], 'unconfirmed')
+
     def test_real_inventory_classification_keeps_current_previous_future_unknown_and_all_references(self):
         inventory = Inventory()
         with ExitStack() as stack:

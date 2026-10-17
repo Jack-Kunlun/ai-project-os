@@ -1,0 +1,212 @@
+{
+  "source": "production release 39036335965; safe metadata reconstructed and bound to reported fingerprints",
+  "currentImageIds": [
+    "sha256:4e5ecec1adf220e3558e37dffc62b952fdeadfe0e889a6eef29915392591ca64",
+    "sha256:d13fac718c18cf10f281acac35d1734f427128272195fb9807e20b62ee7de114",
+    "sha256:d23017b15ca7aa8e185ca9d6a23b6081919e812251a67cbffd98ff536d74d010"
+  ],
+  "previousImageIds": [
+    "sha256:221418259120aa401a17f0433f74d392da065ba11eca6556f4d966d5d2bcc825",
+    "sha256:c6b61006ba852c6b4bd82c7e934a1cb00824af3313e71cce5727bdc7605d7140",
+    "sha256:cc8a960c8b3141458d7e63b53b843994ea9c549c97c9cbbbe644db282befb3d8"
+  ],
+  "previousTag": "v1.0.9",
+  "records": [
+    {
+      "identity": {
+        "id": "sha256:0f74f75622b4577f8b5402fc1c9f6112d8cd2cd4f32eb0cff49f5294ab76f60a",
+        "present": true,
+        "labels": [
+          "AI Project OS",
+          "https://github.com/Jack-Kunlun/ai-project-os",
+          "1.0.8",
+          "8521386741733e743fe9c94ccdb289e76e966f33",
+          null,
+          null
+        ],
+        "repoTags": [
+          "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:0f74f75622b4577f8b5402fc1c9f6112d8cd2cd4f32eb0cff49f5294ab76f60a"
+        ],
+        "repoDigests": [
+          "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:0f74f75622b4577f8b5402fc1c9f6112d8cd2cd4f32eb0cff49f5294ab76f60a"
+        ],
+        "sizeBytes": 405899598,
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "containerReferences": []
+      },
+      "fingerprint": "de2c6d04b3cbc49708811c3498cb92fa6a1e1d33f1e153e677a668f7fd47f471",
+      "unknownRefsSha256": "c98b3e5933078984479e64ac59c31bd1b33ad6491d5310151ca1ebb49b90a294"
+    },
+    {
+      "identity": {
+        "id": "sha256:221418259120aa401a17f0433f74d392da065ba11eca6556f4d966d5d2bcc825",
+        "present": true,
+        "labels": [
+          "AI Project OS",
+          "https://github.com/Jack-Kunlun/ai-project-os",
+          "1.0.9",
+          "a972d806d552a582bd30875ddcf6f83726343a0e",
+          null,
+          null
+        ],
+        "repoTags": [
+          "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:221418259120aa401a17f0433f74d392da065ba11eca6556f4d966d5d2bcc825"
+        ],
+        "repoDigests": [
+          "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:221418259120aa401a17f0433f74d392da065ba11eca6556f4d966d5d2bcc825"
+        ],
+        "sizeBytes": 405894993,
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "containerReferences": []
+      },
+      "fingerprint": "5c6856714cbebc6ac54e8054690baddeff67dcc7e9244f7825a4d75296d4dc82",
+      "unknownRefsSha256": "9ad80d4ac49462deb16764ba3919e42815142c658b4c586013619da8707807ad"
+    },
+    {
+      "identity": {
+        "id": "sha256:43238f9caa8d7edbdfe0e638550edd65f2619582b46e0920601fccde854e6aad",
+        "present": true,
+        "labels": [
+          "AI Project OS",
+          "https://github.com/Jack-Kunlun/ai-project-os",
+          "1.0.8",
+          "8521386741733e743fe9c94ccdb289e76e966f33",
+          null,
+          null
+        ],
+        "repoTags": [
+          "ghcr.io/jack-kunlun/ai-project-os-app@sha256:43238f9caa8d7edbdfe0e638550edd65f2619582b46e0920601fccde854e6aad"
+        ],
+        "repoDigests": [
+          "ghcr.io/jack-kunlun/ai-project-os-app@sha256:43238f9caa8d7edbdfe0e638550edd65f2619582b46e0920601fccde854e6aad"
+        ],
+        "sizeBytes": 181419624,
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "containerReferences": []
+      },
+      "fingerprint": "1b739f7673eea0ca4208e3198942c14498aa346c6d66446c5e301c2dcd350f80",
+      "unknownRefsSha256": "17edc2971f3de3c0e205c8c0137aceeedb525c994a71cc0587b84cf3c3bd0668"
+    },
+    {
+      "identity": {
+        "id": "sha256:a4f4787da6990c665cd1da78fe197b994a2415045ed8fbe77c77e6c292249e5c",
+        "present": true,
+        "labels": [
+          "AI Project OS",
+          "https://github.com/Jack-Kunlun/ai-project-os",
+          "1.0.8",
+          "8521386741733e743fe9c94ccdb289e76e966f33",
+          null,
+          null
+        ],
+        "repoTags": [
+          "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:a4f4787da6990c665cd1da78fe197b994a2415045ed8fbe77c77e6c292249e5c"
+        ],
+        "repoDigests": [
+          "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:a4f4787da6990c665cd1da78fe197b994a2415045ed8fbe77c77e6c292249e5c"
+        ],
+        "sizeBytes": 456315359,
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "containerReferences": []
+      },
+      "fingerprint": "e51a0c8b68d26efb2e15b8a9601937c525d51a5a385add4c7902bb513ac90a7f",
+      "unknownRefsSha256": "326e9cac77b1bec61f1d8ee77349bde9e67a246f4a53206d6b10b7ba1cb92b52"
+    },
+    {
+      "identity": {
+        "id": "sha256:c6b61006ba852c6b4bd82c7e934a1cb00824af3313e71cce5727bdc7605d7140",
+        "present": true,
+        "labels": [
+          "AI Project OS",
+          "https://github.com/Jack-Kunlun/ai-project-os",
+          "1.0.9",
+          "a972d806d552a582bd30875ddcf6f83726343a0e",
+          null,
+          null
+        ],
+        "repoTags": [
+          "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:c6b61006ba852c6b4bd82c7e934a1cb00824af3313e71cce5727bdc7605d7140"
+        ],
+        "repoDigests": [
+          "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:c6b61006ba852c6b4bd82c7e934a1cb00824af3313e71cce5727bdc7605d7140"
+        ],
+        "sizeBytes": 456353380,
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "containerReferences": []
+      },
+      "fingerprint": "8e01844f5a9bc3b0979d977ddd1dc8b4645d97702175a96f52ca81e560d24582",
+      "unknownRefsSha256": "860ac091594662a55b3b708e7a6880740070c810c62b07d23aee1685b29d5f0e"
+    },
+    {
+      "identity": {
+        "id": "sha256:cc8a960c8b3141458d7e63b53b843994ea9c549c97c9cbbbe644db282befb3d8",
+        "present": true,
+        "labels": [
+          "AI Project OS",
+          "https://github.com/Jack-Kunlun/ai-project-os",
+          "1.0.9",
+          "a972d806d552a582bd30875ddcf6f83726343a0e",
+          null,
+          null
+        ],
+        "repoTags": [
+          "ghcr.io/jack-kunlun/ai-project-os-app@sha256:cc8a960c8b3141458d7e63b53b843994ea9c549c97c9cbbbe644db282befb3d8"
+        ],
+        "repoDigests": [
+          "ghcr.io/jack-kunlun/ai-project-os-app@sha256:cc8a960c8b3141458d7e63b53b843994ea9c549c97c9cbbbe644db282befb3d8"
+        ],
+        "sizeBytes": 181885557,
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "containerReferences": []
+      },
+      "fingerprint": "bdfecb5b4cb492287ab7b5012acf89133cc00cd28c2782393c24061a8605d585",
+      "unknownRefsSha256": "bef41e9ba313fd99b3736c74d51d0ee2c0da5c2adf26d7d7770bde1808d92dce"
+    },
+    {
+      "identity": {
+        "id": "sha256:d13fac718c18cf10f281acac35d1734f427128272195fb9807e20b62ee7de114",
+        "present": true,
+        "labels": [
+          "AI Project OS",
+          "https://github.com/Jack-Kunlun/ai-project-os",
+          "1.0.11",
+          "30291442d089130b8b1198f9f89ae9debca4ad68",
+          null,
+          null
+        ],
+        "repoTags": [
+          "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:d13fac718c18cf10f281acac35d1734f427128272195fb9807e20b62ee7de114"
+        ],
+        "repoDigests": [
+          "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:d13fac718c18cf10f281acac35d1734f427128272195fb9807e20b62ee7de114"
+        ],
+        "sizeBytes": 405894574,
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        "containerReferences": []
+      },
+      "fingerprint": "d1777c48fe27edc7642c2ba0194858ab254dd1b78ae5807abf65656d4ba85e8c",
+      "unknownRefsSha256": "04de331f4bc3f126f53927a81433ce0fce2d9c5e05542b1f7d7f151fc117345a"
+    }
+  ]
+}

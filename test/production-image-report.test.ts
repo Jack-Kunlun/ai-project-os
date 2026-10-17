@@ -64,6 +64,24 @@ function clean() {
 }
 const line = (value: unknown) => `IMAGE_MAINTENANCE_REPORT ${JSON.stringify(value)}\n`;
 
+test("containerd digest-only tag requires canonical ownership and an identical recognized digest bound to the image ID", () => {
+  const value = inspect();
+  const item = value.images[0];
+  item.sourceKind = "canonical";
+  const reference = `ghcr.io/jack-kunlun/ai-project-os-app@${item.id}`;
+  item.recognizedRepoTags = [reference]; item.recognizedRepoDigests = [reference];
+  assert.equal(parseImageMaintenanceReport(line(value), "image-inspect", context).summary.eligibleCount, 1);
+  for (const changes of [
+    { sourceKind: "legacy" }, { recognizedRepoDigests: [] },
+    { recognizedRepoTags: [`ghcr.io/jack-kunlun/ai-project-os-app@${current}`] },
+    { recognizedRepoTags: [reference.replace("ai-project-os-app", "foreign")],
+      recognizedRepoDigests: [reference.replace("ai-project-os-app", "foreign")] },
+  ]) {
+    const invalid = inspect(); invalid.images[0] = { ...item, ...changes };
+    assert.throws(() => parseImageMaintenanceReport(line(invalid), "image-inspect", context));
+  }
+});
+
 test("image inspection validates fixed scope, ownership evidence and all-image inventory", () => {
   assert.equal(parseImageMaintenanceReport(line(inspect()), "image-inspect", context).summary.eligibleCount, 1);
   const mutations = [

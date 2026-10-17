@@ -130,6 +130,10 @@ const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 function knownImageReference(reference, kind, item) {
   if (typeof reference !== "string" || reference.length > 512) return false;
+  if (kind === "tag" && item.sourceKind === "canonical" && reference.startsWith("ghcr.io/")
+    && reference.endsWith(`@${item.id}`) && item.recognizedRepoDigests?.includes(reference)) {
+    return knownImageReference(reference, "digest", item);
+  }
   const match = kind === "digest" ? reference.match(/^(.*)@sha256:[a-f0-9]{64}$/u)
     : reference.match(/^(.*):[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/u);
   if (!match) return false;

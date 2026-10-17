@@ -1728,6 +1728,14 @@ def _image_record(identifier, raw, container_references):
     ):
         for reference in refs:
             valid, referenced_service = _image_ref_repo(reference, kind)
+            # The containerd image store can list a digest pull in RepoTags too.
+            # Accept only a canonical GHCR reference also present in RepoDigests,
+            # bound to this exact engine image ID; unknown aliases still protect it.
+            if (not valid and kind == 'tag' and source == IMAGE_SOURCE
+                    and reference.startswith('ghcr.io/')
+                    and reference in raw['repoDigests']
+                    and reference.endswith('@' + identifier)):
+                valid, referenced_service = _image_ref_repo(reference, 'digest')
             if (not valid and historical_matches
                     and reference == historical[2 if kind == 'tag' else 3]):
                 valid, referenced_service = True, historical[1]

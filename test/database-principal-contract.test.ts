@@ -380,7 +380,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   }
   assert.match(gitAutomationMaterialMigration, /"ProjectGitRepositoryMaterialPublicationHead"[\s\S]*?project_git_material_head_guard/u);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "legacy_mcp_source_reference_guard"));
-  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 146/u);
+  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 147/u);
   for (const roleName of ["ai_project_os_runtime", "ai_project_os_entitlement_writer", "ai_project_os_git_automation_worker"]) {
     assert.ok(emailAuthMigration.includes(`'${roleName}'`));
   }

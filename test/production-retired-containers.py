@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Offline guards for the two explicitly authorized retired containers."""
 import copy
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -229,6 +231,40 @@ class RetiredContainerTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], [sys.executable, 'container', 'rm', IDS[0]])
         with self.assertRaises(RuntimeError):
             D._retired_remove_id(OTHER, 60)
+
+    def test_drift_receipt_identifies_only_components_fields_and_hashes(self):
+        value = plan()[0]
+        before = value['protection']['containers'][-1]
+        before['fieldFingerprints'] = [HASH] * len(D._RETIRED_FIELDS)
+        after = state()
+        after[2]['ownedImages'] = [{'private': 'secret-fixture'}]
+        after[4][-1]['fieldFingerprints'] = [HASH] * len(D._RETIRED_FIELDS)
+        after[4][-1]['fieldFingerprints'][24] = '8' * 64
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertFalse(D._retired_matches(value, *after[2:], set()))
+        text = output.getvalue()
+        receipt = json.loads(text.removeprefix('RETIRED_CONTAINER_DRIFT '))
+        self.assertEqual(receipt['baseDifferences'][0]['field'], 'ownedImages')
+        self.assertEqual(receipt['containerDifferences'][0]['fields'][0]['field'], '.ExecIDs')
+        self.assertNotIn('secret-fixture', text)
+        self.assertTrue(all(len(item['expectedSha256']) == len(item['actualSha256']) == 64
+                            for item in receipt['baseDifferences']))
+
+    def test_read_only_inspection_refuses_unstable_snapshot_before_installing_plan(self):
+        first, second = state(), state()
+        second[2]['ownedImages'] = [{'private': 'secret-fixture'}]
+        output = io.StringIO()
+        with patch.object(D, '_retired_runtime', side_effect=[first, second]), \
+             patch.object(D, 'atomic_install') as install, \
+             patch.object(D, '_retired_remove_id') as remove, \
+             contextlib.redirect_stdout(output), \
+             self.assertRaisesRegex(RuntimeError, 'RETIRED_INSPECTION_UNSTABLE'):
+            D.retired_container_inspect(H.TAG, H.REVISION)
+        install.assert_not_called()
+        remove.assert_not_called()
+        self.assertIn('RETIRED_CONTAINER_DRIFT ', output.getvalue())
+        self.assertNotIn('secret-fixture', output.getvalue())
 
     def run_clean(self, refuse=False, drift=False, expire=False):
         _value, data, digest = plan()

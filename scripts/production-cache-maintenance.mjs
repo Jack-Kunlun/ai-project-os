@@ -269,7 +269,9 @@ export function parseRetiredContainerReport(log, operation, context, expectedDig
   requireValue(Array.isArray(inventory) && inventory.length <= 1024
     && new Set(inventory.map((item) => item?.id)).size === inventory.length
     && inventory.every((item) => DIGEST.test(item?.id ?? "") && IMAGE.test(item?.image ?? "")
-      && CONTAINER_STATUSES.includes(item.status) && DIGEST.test(item.fingerprint ?? ""))
+      && CONTAINER_STATUSES.includes(item.status) && DIGEST.test(item.fingerprint ?? "")
+      && (item.fieldFingerprints === undefined || (Array.isArray(item.fieldFingerprints)
+        && item.fieldFingerprints.length === 29 && item.fieldFingerprints.every((hash) => DIGEST.test(hash)))))
     && same(inventory.map((item) => item.id), inventory.map((item) => item.id).sort())
     && inventory.length === protection.containerCount
     && protection.containerSnapshotSha256 === jsonDigest(inventory.map(({ id, image }) => ({ id, image })))

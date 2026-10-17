@@ -79,6 +79,13 @@ test("retired inspection rejects unsafe scope, purpose, mounts, writable changes
     assert.throws(() => parseRetiredContainerReport(line(v), "retired-container-inspect", context));
   }
   assert.throws(() => parseRetiredContainerReport(line(inspect()) + line(inspect()), "retired-container-inspect", context));
+  const diagnostic = inspect();
+  Object.assign(diagnostic.protection.containerInventory[0], { fieldFingerprints: Array(29).fill(hash) });
+  assert.equal(parseRetiredContainerReport(line(diagnostic), "retired-container-inspect", context).records.length, 2);
+  for (const fieldFingerprints of [[hash], Array(29).fill("private-fixture")]) {
+    Object.assign(diagnostic.protection.containerInventory[0], { fieldFingerprints });
+    assert.throws(() => parseRetiredContainerReport(line(diagnostic), "retired-container-inspect", context));
+  }
 });
 
 test("retired cleanup allows only exact selected container removal and preserves all image and volume identities", () => {

@@ -2475,7 +2475,8 @@ def _retired_runtime(target_tag, target_revision):
     source, installed, base, snapshot = _image_runtime_snapshot(target_tag, target_revision)
     details = _retired_details(snapshot['containers'])
     inventory = [{'id': identifier, 'image': value[1], 'status': value[3],
-                  'fingerprint': sha256(_cache_json_bytes(value))}
+                  'fingerprint': sha256(_cache_json_bytes(value)),
+                  'fieldFingerprints': [sha256(_cache_json_bytes(field)) for field in value]}
                  for identifier, value in sorted(details.items())]
     require([{key: item[key] for key in ('id', 'image', 'status')} for item in inventory]
             == snapshot['containers']
@@ -2498,9 +2499,52 @@ def _retired_matches(plan, base, snapshot, inventory, records, removed):
                                       if item['id'] not in removed]
     expected['containers'] = [item for item in expected['containers'] if item['id'] not in removed]
     expected_records = {item['id']: item for item in plan['records']}
-    return (expected == _retired_protection(base, snapshot, inventory)
-            and all((not item['present']) if item['id'] in removed
-                    else item == expected_records[item['id']] for item in records))
+    actual = _retired_protection(base, snapshot, inventory)
+    matches = (expected == actual
+               and all((not item['present']) if item['id'] in removed
+                       else item == expected_records[item['id']] for item in records))
+    if not matches:
+        def fingerprint(value):
+            return sha256(_cache_json_bytes(value))
+        base_differences = [
+            {'field': key, 'expectedSha256': fingerprint(expected['base'].get(key)),
+             'actualSha256': fingerprint(base.get(key))}
+            for key in sorted(set(expected['base']) | set(base))
+            if expected['base'].get(key) != base.get(key)]
+        before = {item['id']: item for item in expected['containers']}
+        after = {item['id']: item for item in inventory}
+        container_differences = []
+        for identifier in sorted(set(before) | set(after)):
+            left, right = before.get(identifier), after.get(identifier)
+            if left == right:
+                continue
+            left_fields = (left or {}).get('fieldFingerprints', [])
+            right_fields = (right or {}).get('fieldFingerprints', [])
+            fields = [
+                {'field': name, 'expectedSha256': left_fields[index],
+                 'actualSha256': right_fields[index]}
+                for index, name in enumerate(_RETIRED_FIELDS)
+                if len(left_fields) == len(right_fields) == len(_RETIRED_FIELDS)
+                and left_fields[index] != right_fields[index]]
+            container_differences.append({'id': identifier, 'fields': fields,
+                                         'expectedSha256': fingerprint(left),
+                                         'actualSha256': fingerprint(right)})
+        record_differences = [
+            {'id': item['id'], 'field': key,
+             'expectedSha256': fingerprint(expected_records[item['id']].get(key)),
+             'actualSha256': fingerprint(item.get(key))}
+            for item in records if item['id'] not in removed
+            for key in sorted(set(expected_records[item['id']]) | set(item))
+            if expected_records[item['id']].get(key) != item.get(key)]
+        diagnostic = {'schema': 1, 'operation': 'retired-container-drift',
+                      'baseDifferences': base_differences,
+                      'allImageIdsChanged': expected['allImageIds'] != snapshot['allImageIds'],
+                      'containerDifferences': container_differences,
+                      'recordDifferences': record_differences}
+        data = _cache_json_bytes(diagnostic)
+        require(len(data) <= 256 * 1024, 'RETIRED_DRIFT_REPORT_TOO_LARGE')
+        print('RETIRED_CONTAINER_DRIFT ' + data.decode('ascii'), flush=True)
+    return matches
 
 
 def _retired_public_protection(base, snapshot, inventory, digest):
@@ -2526,6 +2570,11 @@ def retired_container_inspect(target_tag, target_revision):
             'protection': _retired_protection(base, snapshot, inventory)}
     data = _cache_plan_bytes(plan)
     digest = sha256(data)
+    # Compare a second read-only snapshot before issuing any deletion plan.
+    _source, _installed, fresh_base, fresh_snapshot, fresh_inventory, fresh_records = _retired_runtime(
+        target_tag, target_revision)
+    require(_retired_matches(plan, fresh_base, fresh_snapshot, fresh_inventory, fresh_records, set()),
+            'RETIRED_INSPECTION_UNSTABLE')
     atomic_install(RETIRED_CONTAINER_PLAN, data, 0o600)
     _retired_emit({'schema': 1, 'operation': 'retired-container-inspect', 'tag': target_tag,
                    'revision': target_revision, 'scopeIds': list(RETIRED_CONTAINER_SCOPE),

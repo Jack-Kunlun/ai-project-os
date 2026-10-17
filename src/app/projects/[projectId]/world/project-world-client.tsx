@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { OperationPanel } from "@/components/operation-panel";
 import { ProjectOverviewParentLink } from "@/components/project-parent-link";
 
 type WorldStatus = "on_track" | "needs_attention" | "at_risk" | "insufficient_data";
@@ -160,10 +161,11 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
   const [targetItemId, setTargetItemId] = useState("");
   const [relationKind, setRelationKind] = useState<RelationKind>("supports");
   const [relationRationale, setRelationRationale] = useState("");
-  const [retirementReason, setRetirementReason] = useState("");
+  const [relationOperationOpen, setRelationOperationOpen] = useState(false);
   const [predecessorItemId, setPredecessorItemId] = useState("");
   const [successorItemId, setSuccessorItemId] = useState("");
   const [supersessionReason, setSupersessionReason] = useState("");
+  const [supersessionOperationOpen, setSupersessionOperationOpen] = useState(false);
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
@@ -206,25 +208,27 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
     }
   }
 
-  async function createRelation() {
-    if (await mutate({ operation: "createRelation", sourceItemId, targetItemId, kind: relationKind, rationale: relationRationale }, "create-relation", "事实关系已建立，并固定到双方当前证据版本。")) {
+  async function createRelation(): Promise<boolean> {
+    const created = await mutate({ operation: "createRelation", sourceItemId, targetItemId, kind: relationKind, rationale: relationRationale }, "create-relation", "事实关系已建立，并固定到双方当前证据版本。");
+    if (created) {
       setRelationRationale("");
     }
+    return created;
   }
 
-  async function retireRelation(relation: WorldRelation) {
-    if (await mutate({ operation: "retireRelation", relationId: relation.id, expectedFingerprint: relation.fingerprint, reason: retirementReason }, `retire-${relation.id}`, "事实关系已退役，历史记录仍然保留。")) {
-      setRetirementReason("");
-    }
+  async function retireRelation(relation: WorldRelation, reason: string): Promise<boolean> {
+    return await mutate({ operation: "retireRelation", relationId: relation.id, expectedFingerprint: relation.fingerprint, reason }, `retire-${relation.id}`, "事实关系已退役，历史记录仍然保留。");
   }
 
-  async function supersede() {
+  async function supersede(): Promise<boolean> {
     const oldFact = activeFacts.find((fact) => fact.id === predecessorItemId);
     const newFact = activeFacts.find((fact) => fact.id === successorItemId);
-    if (!oldFact || !newFact) return;
-    if (await mutate({ operation: "supersedeFact", predecessorItemId: oldFact.id, successorItemId: newFact.id, predecessorUpdatedAt: oldFact.updatedAt, successorUpdatedAt: newFact.updatedAt, reason: supersessionReason }, "supersede", "替代链已建立，旧事实已转为历史状态。")) {
+    if (!oldFact || !newFact) return false;
+    const created = await mutate({ operation: "supersedeFact", predecessorItemId: oldFact.id, successorItemId: newFact.id, predecessorUpdatedAt: oldFact.updatedAt, successorUpdatedAt: newFact.updatedAt, reason: supersessionReason }, "supersede", "替代链已建立，旧事实已转为历史状态。");
+    if (created) {
       setPredecessorItemId(""); setSuccessorItemId(""); setSupersessionReason("");
     }
+    return created;
   }
 
   const meta = statusMeta[world?.state.status ?? "insufficient_data"];
@@ -283,27 +287,32 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
           </aside>
         </section>
 
-        <section className="mt-10 grid gap-6 xl:grid-cols-2">
+        {canEdit ? <section className="mt-10 flex flex-wrap gap-3">
+          <OperationPanel title="建立事实关系" triggerLabel="建立事实关系" open={relationOperationOpen} onOpenChange={(open) => { setRelationOperationOpen(open); if (open) setError(null); }} disabled={pending !== null} description="关系只连接已确认的当前事实，并固定双方当前证据版本；事实变化后旧关系会自动标记为陈旧。">
+          {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
           <Workbench title="建立事实关系" eyebrow="Relation workbench" description="关系只连接已确认的当前事实，并固定双方当前证据版本；事实变化后旧关系会自动标记为陈旧。">
             <SelectField label="起点事实" value={sourceItemId} onChange={setSourceItemId} disabled={!canEdit}><option value="">选择事实</option>{activeFacts.map((fact) => <option key={fact.id} value={fact.id}>{factMeta[fact.type].label} · {fact.title}</option>)}</SelectField>
             <SelectField label="关系" value={relationKind} onChange={(value) => setRelationKind(value as RelationKind)} disabled={!canEdit}>{(Object.keys(relationLabels) as RelationKind[]).map((kind) => <option key={kind} value={kind}>{relationLabels[kind]}</option>)}</SelectField>
             <SelectField label="终点事实" value={targetItemId} onChange={setTargetItemId} disabled={!canEdit}><option value="">选择事实</option>{activeFacts.filter((fact) => fact.id !== sourceItemId).map((fact) => <option key={fact.id} value={fact.id}>{factMeta[fact.type].label} · {fact.title}</option>)}</SelectField>
             <TextField label="关系依据" value={relationRationale} onChange={setRelationRationale} placeholder="说明为何建立这条关系，便于后续人工复核。" disabled={!canEdit} />
-            <button type="button" onClick={() => void createRelation()} disabled={!canEdit || pending !== null || !sourceItemId || !targetItemId || !relationRationale.trim()} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">{pending === "create-relation" ? "建立中…" : "建立关系"}</button>
+            <button type="button" onClick={async () => { if (await createRelation()) setRelationOperationOpen(false); }} disabled={pending !== null || !sourceItemId || !targetItemId || !relationRationale.trim()} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">{pending === "create-relation" ? "建立中…" : "建立关系"}</button>
           </Workbench>
+          </OperationPanel>
+          <OperationPanel title="建立事实替代链" triggerLabel="建立事实替代链" open={supersessionOperationOpen} onOpenChange={(open) => { setSupersessionOperationOpen(open); if (open) setError(null); }} disabled={pending !== null} description="选择同类型的新事实替代旧事实。旧事实会成为只读历史；该操作不能撤销或形成循环。">
+          {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
           <Workbench title="建立事实替代链" eyebrow="Supersession workbench" description="选择同类型的新事实替代旧事实。旧事实会成为只读历史；该操作不能撤销或形成循环。">
             <SelectField label="被替代的旧事实" value={predecessorItemId} onChange={(value) => { setPredecessorItemId(value); setSuccessorItemId(""); }} disabled={!canEdit}><option value="">选择旧事实</option>{activeFacts.map((fact) => <option key={fact.id} value={fact.id}>{factMeta[fact.type].label} · {fact.title}</option>)}</SelectField>
             <SelectField label="作为当前版本的新事实" value={successorItemId} onChange={setSuccessorItemId} disabled={!canEdit || !predecessor}><option value="">选择同类型新事实</option>{successorOptions.map((fact) => <option key={fact.id} value={fact.id}>{factMeta[fact.type].label} · {fact.title}</option>)}</SelectField>
             <TextField label="替代理由" value={supersessionReason} onChange={setSupersessionReason} placeholder="说明变化原因和新事实适用范围。" disabled={!canEdit} />
-            <button type="button" onClick={() => void supersede()} disabled={!canEdit || pending !== null || !predecessorItemId || !successorItemId || !supersessionReason.trim()} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{pending === "supersede" ? "建立中…" : "确认建立替代链"}</button>
+            <button type="button" onClick={async () => { if (await supersede()) setSupersessionOperationOpen(false); }} disabled={pending !== null || !predecessorItemId || !successorItemId || !supersessionReason.trim()} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{pending === "supersede" ? "建立中…" : "确认建立替代链"}</button>
           </Workbench>
-        </section>
+          </OperationPanel>
+        </section> : null}
 
         <section className="mt-10">
           <SectionHeading eyebrow="Typed relations" title="事实关系" detail="陈旧关系不会进入当前状态，但仍保留原始端点版本和审计记录。" />
-          <label className="mt-4 block max-w-xl text-xs font-semibold text-slate-600">退役理由<input value={retirementReason} onChange={(event) => setRetirementReason(event.target.value)} disabled={!canEdit} placeholder="退役关系前填写原因" className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-normal outline-none focus:border-indigo-400 disabled:bg-slate-100" /></label>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            {!loading && (world?.relations.length ?? 0) === 0 ? <Empty title="尚未建立事实关系" detail="从上方工作台选择两条当前事实，建立可追溯关系。" /> : world?.relations.map((relation) => <article key={relation.id} className={`rounded-3xl border bg-white p-5 shadow-sm ${relation.stale ? "border-amber-200" : "border-slate-200"}`}><div className="flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{relationLabels[relation.kind]}</span>{relation.stale ? <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">版本已变化</span> : <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">当前有效</span>}</div><div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm"><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{factById.get(relation.sourceItemId)?.title ?? relation.sourceItemId}</span><span className="text-slate-300">→</span><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{factById.get(relation.targetItemId)?.title ?? relation.targetItemId}</span></div><p className="mt-4 text-sm leading-6 text-slate-600">{relation.rationale}</p><div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>{relation.createdBy.displayName ?? relation.createdBy.username} · {formatDate(relation.createdAt)}</span><button type="button" onClick={() => void retireRelation(relation)} disabled={!canEdit || pending !== null || !retirementReason.trim()} className="inline-flex min-h-9 items-center justify-center rounded-lg px-3 py-2 font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-40">{pending === `retire-${relation.id}` ? "退役中…" : "退役关系"}</button></div></article>)}
+            {!loading && (world?.relations.length ?? 0) === 0 ? <Empty title="尚未建立事实关系" detail="在上方“建立事实关系”操作中选择两条当前事实，建立可追溯关系。" /> : world?.relations.map((relation) => <RelationCard key={relation.id} relation={relation} sourceTitle={factById.get(relation.sourceItemId)?.title ?? relation.sourceItemId} targetTitle={factById.get(relation.targetItemId)?.title ?? relation.targetItemId} canEdit={canEdit} pending={pending} error={error} onErrorDismiss={() => setError(null)} onRetire={retireRelation} />)}
           </div>
         </section>
 
@@ -342,6 +351,26 @@ function SectionHeading({ eyebrow, title, detail, compact = false }: { eyebrow: 
 function FactCard({ fact }: { fact: WorldFact }) {
   const meta = factMeta[fact.type];
   return <article className="min-w-0 max-w-full overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{meta.label}</span><span className="text-[12px] text-slate-400">证据版本 #{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-slate-900">{fact.title}</h3><p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-slate-600">{fact.content}</p><div className="mt-4 min-w-0 max-w-full overflow-hidden rounded-2xl bg-slate-50 p-4 text-xs text-slate-500"><p className="max-w-full [overflow-wrap:anywhere]">来源：{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}>证据清单 {shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]">工作项：{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
+}
+
+function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, error, onErrorDismiss, onRetire }: {
+  relation: WorldRelation;
+  sourceTitle: string;
+  targetTitle: string;
+  canEdit: boolean;
+  pending: string | null;
+  error: string | null;
+  onErrorDismiss: () => void;
+  onRetire: (relation: WorldRelation, reason: string) => Promise<boolean>;
+}) {
+  const [reason, setReason] = useState("");
+  const [open, setOpen] = useState(false);
+  return <article className={`rounded-3xl border bg-white p-5 shadow-sm ${relation.stale ? "border-amber-200" : "border-slate-200"}`}>
+    <div className="flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{relationLabels[relation.kind]}</span>{relation.stale ? <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">版本已变化</span> : <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">当前有效</span>}</div>
+    <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm"><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{sourceTitle}</span><span className="text-slate-300">→</span><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{targetTitle}</span></div>
+    <p className="mt-4 text-sm leading-6 text-slate-600">{relation.rationale}</p>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>{relation.createdBy.displayName ?? relation.createdBy.username} · {formatDate(relation.createdAt)}</span>{canEdit ? <OperationPanel title="退役事实关系" triggerLabel="退役关系" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending !== null} description="退役会将该关系从当前状态判断中移除，并保留历史记录。请填写原因。">{error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}<div className="max-w-xl"><label className="block text-sm font-medium text-slate-700">退役理由<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明为何不再使用这条关系" className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm" /></label><button type="button" onClick={async () => { if (await onRetire(relation, reason)) { setReason(""); setOpen(false); } }} disabled={pending !== null || !reason.trim()} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-500 disabled:opacity-40">{pending === `retire-${relation.id}` ? "退役中…" : "确认退役关系"}</button></div></OperationPanel> : null}</div>
+  </article>;
 }
 
 function Workbench({ title, eyebrow, description, children }: { title: string; eyebrow: string; description: string; children: React.ReactNode }) {

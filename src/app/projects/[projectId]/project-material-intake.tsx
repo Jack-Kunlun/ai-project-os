@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { awaitImportedAsset } from "./imported-asset-readiness";
+import { ProjectFactImport } from "./project-fact-import";
 import type { MaterialKind } from "./materials/materials-navigation";
 
 type UploadPolicy = { maxFiles: number };
@@ -40,6 +42,8 @@ export function ProjectMaterialIntake({
   kind: MaterialKind;
   onClose: () => void;
 }) {
+  const [hasOpened, setHasOpened] = useState(open);
+  if (open && !hasOpened) setHasOpened(true);
   const [contentText, setContentText] = useState("");
   const [externalRef, setExternalRef] = useState("");
   const [capturedAt, setCapturedAt] = useState("");
@@ -47,6 +51,7 @@ export function ProjectMaterialIntake({
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [maxFiles, setMaxFiles] = useState(10);
+  const [factSourceIds, setFactSourceIds] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -121,6 +126,7 @@ export function ProjectMaterialIntake({
   async function saveText(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!contentText.trim()) return;
+    setFactSourceIds([]);
     setSavingText(true);
     setError(null);
     setMessage(null);
@@ -137,11 +143,13 @@ export function ProjectMaterialIntake({
         body: JSON.stringify({ contentText, externalRef, capturedAt: capturedAtIso }),
       });
       if (!response.ok) throw new Error(await responseError(response, "文本资料保存失败"));
+      const payload = await response.json() as { source: { id: string } };
+      setFactSourceIds([payload.source.id]);
       setContentText("");
       setExternalRef("");
       setCapturedAt("");
       await onChanged();
-      setMessage("文本已加入原始资料来源库。它仍需审核，不会直接成为已确认事实。");
+      setMessage("文本已保存。下方已接好 AI 整理流程，确认本次模型外发后即可自动形成有证据的事实。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "文本资料保存失败");
     } finally {
@@ -168,10 +176,13 @@ export function ProjectMaterialIntake({
 
   async function uploadFiles() {
     if (files.length === 0) return;
+    setFactSourceIds([]);
     setUploading(true);
     setError(null);
     setMessage(null);
     let uploaded = 0;
+    const readySourceIds: string[] = [];
+    const pendingParsing: string[] = [];
     const failures: string[] = [];
     for (const file of files) {
       try {
@@ -179,6 +190,10 @@ export function ProjectMaterialIntake({
         form.set("file", file);
         const response = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body: form });
         if (!response.ok) throw new Error(await responseError(response, "上传失败"));
+        const payload = await response.json() as { asset?: { id: string; status: string; segments?: Array<{ projectSourceId: string | null }> } };
+        const readiness = payload.asset ? await awaitImportedAsset(projectId, payload.asset, () => setMessage(`正在等待 ${selectedFileName(file)} 的本地解析…`)) : null;
+        if (readiness?.pending) pendingParsing.push(selectedFileName(file));
+        readySourceIds.push(...(readiness?.asset.segments ?? []).flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : []));
         uploaded += 1;
         setMessage(`正在上传并解析 ${uploaded + failures.length} / ${files.length}…`);
       } catch (cause) {
@@ -186,13 +201,14 @@ export function ProjectMaterialIntake({
       }
     }
     setFiles([]);
+    setFactSourceIds([...new Set(readySourceIds)]);
     try {
       await onChanged();
       if (failures.length > 0) {
         setError(`已保存 ${uploaded} 个，失败 ${failures.length} 个：${failures.slice(0, 3).join("；")}${failures.length > 3 ? "；其余失败项请分批重试" : ""}`);
         setMessage(uploaded > 0 ? "已保存文件的本地解析状态可在“管理全部文件”查看；需要模型识别的任务结束后会进入通知中心。" : null);
       } else {
-        setMessage(`已保存 ${uploaded} 个文件。本地解析状态可在“管理全部文件”查看；需要模型识别的任务结束后会进入通知中心。需要人工确认的内容不会自动进入 AI 可引用记忆。`);
+        setMessage(`已保存 ${uploaded} 个文件。${pendingParsing.length > 0 ? `其中 ${pendingParsing.length} 个仍在后台解析或状态暂时不可读，请稍后在文件库查看。` : ""}本地解析状态可在“管理全部文件”查看；需要模型识别的任务结束后会进入通知中心。已解析的文本可在下方直接交给 AI 整理成事实；图片和扫描件仍需先完成识别核对。`);
       }
     } catch {
       setError("文件上传已经结束，但资料列表刷新失败；请打开“管理全部文件”确认结果。");
@@ -201,16 +217,16 @@ export function ProjectMaterialIntake({
     }
   }
 
-  if (!open) return null;
+  if (!hasOpened) return null;
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto ${modalBackdropClassName} p-4 sm:p-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
+    <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto ${modalBackdropClassName} p-4 sm:p-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`my-4 w-full max-w-5xl overflow-hidden rounded-2xl sm:my-6 ${modalSurfaceClassName}`}>
         <div className={`flex flex-wrap items-start justify-between gap-4 px-6 py-5 sm:px-8 ${modalHeaderClassName}`}>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Add source</p>
           <h2 id="add-source-dialog-title" className="mt-1 text-lg font-semibold tracking-tight text-slate-950">添加来源</h2>
-          <p id="add-source-dialog-description" className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">新增的内容会先进入“原始资料”，经过核对后才会形成已确认事实；不会自动成为 AI 可引用记忆。</p>
+          <p id="add-source-dialog-description" className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">导入后直接衔接 AI 整理：有原文证据的内容自动形成事实，冲突与不确定内容单独待处理。涉及模型外发时会显示本次资料范围。</p>
         </div>
         <button ref={closeButtonRef} type="button" onClick={closeDrawer} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
       </div>
@@ -228,7 +244,7 @@ export function ProjectMaterialIntake({
         <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">输入文本</p>
           <h3 className="mt-2 text-xl font-semibold text-slate-950">粘贴一段原始资料</h3>
-          <p className="mt-2 text-xs leading-5 text-slate-600">适合会议记录、项目进展、需求说明和临时笔记。系统保留原文，不会把未审核内容当成事实。</p>
+          <p className="mt-2 text-xs leading-5 text-slate-600">适合会议记录、项目进展、需求说明和临时笔记。系统保留原文，AI 整理后的事实可逐条追溯。</p>
           <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" />
           <details className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <summary className="cursor-pointer text-xs font-semibold text-slate-700">补充来源链接和资料时间（可选）</summary>
@@ -259,6 +275,8 @@ export function ProjectMaterialIntake({
           <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? "上传并解析中…" : files.length > 0 ? `上传并解析 ${files.length} 个文件` : "请先选择文件或文件夹"}</button>
         </div>
       </div>
+
+      <ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={onChanged} />
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Link href={`/projects/${projectId}/external-sources`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50">添加网页资料</Link>

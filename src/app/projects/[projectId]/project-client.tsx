@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
+import { OperationPanel } from "@/components/operation-panel";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
@@ -253,6 +254,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [isSavingItem, setIsSavingItem] = useState(false);
   const [itemActionId, setItemActionId] = useState<string | null>(null);
+  const [itemEditorOpen, setItemEditorOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [itemDraftDirty, setItemDraftDirty] = useState(false);
   const focusRestoredRef = useRef<string | null>(null);
@@ -486,7 +488,8 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   }
 
   async function handleEditItem(item: ProjectItem) {
-    if (item.reviewStatus === "superseded" || itemActionId || isSavingItem || editingItemId === item.id) return;
+    if (item.reviewStatus === "superseded" || itemActionId || isSavingItem) return;
+    if (editingItemId === item.id) { setItemEditorOpen(true); return; }
 
     if (itemDraftDirty) {
       const confirmation = await confirm({
@@ -507,6 +510,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
       setItemError("资料原文加载失败");
       return;
     }
+    setItemEditorOpen(true);
     setEditingItemId(item.id);
     setItemDraftDirty(false);
     setItemForm({
@@ -525,6 +529,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   }
 
   function handleCancelEdit() {
+    setItemEditorOpen(false);
     setEditingItemId(null);
     setItemDraftDirty(false);
     setItemForm({
@@ -641,6 +646,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
         setItemSuccess("候选条目已保存。");
       }
 
+      setItemEditorOpen(false);
       await reloadProjectAndSources();
     } catch (saveError) {
       setItemError(saveError instanceof Error ? saveError.message : "条目保存失败");
@@ -810,7 +816,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Confirmed facts</p>
             <h2 id="items-heading" tabIndex={-1} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">已确认事实</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">人工记录或审核项目事实，并通过精确原文摘录回溯到原始资料。只有已确认事实才可能进入后续 AI 可引用记忆流程。</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">查看 AI 自动整理和人工补充的事实，每条记录都能回溯原始资料；有冲突或不确定的内容单独进入待处理。</p>
           </div>
           <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isItemsLoading ? "读取中…" : `${itemCounts.confirmed} 已确认 · ${itemCounts.candidate} 待确认`}</span>
         </div>
@@ -822,6 +828,8 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
           <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{itemSuccess}</div>
         ) : null}
 
+        <OperationPanel title={isEditingItem ? "编辑事实" : "手动补充事实"} triggerLabel={isEditingItem ? "继续编辑事实" : "手动补充"} open={itemEditorOpen} onOpenChange={setItemEditorOpen} className="mt-6" description="自动整理后的事实可在下方查看；只有需要手动补充或纠正时才使用此操作区。">
+          {itemError ? <p role="alert" className="mb-4 text-sm text-rose-700">{itemError}</p> : null}
         <div className="mt-8 grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
           <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Fact candidate</p>
@@ -950,6 +958,8 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
           </div>
         </div>
 
+        </OperationPanel>
+
         <div className="mt-10 border-t border-slate-100 pt-8">
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -1040,7 +1050,7 @@ function ItemCard({
             ) : null}
             {item.webAiCandidate ? (
               <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">
-                AI 候选 · {item.webAiCandidate.reviewStatus === "candidate" ? "待审阅" : item.webAiCandidate.reviewStatus === "accepted" ? "已接受" : "已驳回"}
+                AI 整理 · {item.webAiCandidate.reviewStatus === "candidate" ? "待审阅" : item.webAiCandidate.reviewStatus === "accepted" ? "已接受" : "已驳回"}
               </span>
             ) : null}
           </div>

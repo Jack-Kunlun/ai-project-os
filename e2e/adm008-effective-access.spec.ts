@@ -63,7 +63,9 @@ test("ADM-008 user operations stay within the safe admin boundary and preserve a
       expect(pageText).not.toContain(leakedValue);
     }
 
-    const accountReason = page.getByLabel("操作原因", { exact: true });
+    await expect(page.getByLabel("操作原因", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "管理账号状态", exact: true }).click();
+    const accountReason = page.getByRole("dialog").getByLabel("操作原因", { exact: true });
     await accountReason.fill("ADM008 browser disable regression");
     await page.getByRole("button", { name: "预览停用", exact: true }).click();
     const disablePreview = page.getByRole("region", { name: "账号状态变更预览", exact: true });
@@ -72,6 +74,7 @@ test("ADM-008 user operations stay within the safe admin boundary and preserve a
     await disablePreview.getByRole("button", { name: "确认并执行", exact: true }).click();
     await expect(page.getByText("账号已停用", { exact: true })).toBeVisible();
 
+    await page.getByRole("button", { name: "管理账号状态", exact: true }).click();
     await accountReason.fill("ADM008 browser restore regression");
     await page.getByRole("button", { name: "预览恢复", exact: true }).click();
     const restorePreview = page.getByRole("region", { name: "账号状态变更预览", exact: true });

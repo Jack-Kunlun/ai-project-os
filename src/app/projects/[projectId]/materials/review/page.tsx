@@ -21,7 +21,7 @@ export default async function ProjectMaterialReviewPage({ params }: { params: Pr
         <section className="mt-8 border-b border-slate-200/80 pb-8">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI candidate review</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">审核 AI 候选</h1>
-          <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600">在独立工作区核对原始资料证据。确认后只进入已确认事实，后续是否进入 AI 可引用记忆由记忆流程和索引状态决定。</p>
+          <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600">在独立工作区处理冲突、改写或不确定内容。有充分原文证据的普通结果已自动形成事实；这里保留人工核对与纠错入口。</p>
         </section>
         <Suspense fallback={<ReviewLoading />}>
           <ProjectMaterialReviewQueue projectId={projectId} />

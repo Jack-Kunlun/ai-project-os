@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { OperationPanel } from "@/components/operation-panel";
 import { AppHeader } from "@/components/app-header";
 import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
 
@@ -30,6 +31,7 @@ type Candidate = {
     content: string;
     sourceExcerpt: string;
     updatedAt: string;
+    admission?: { mode: "automatic" | "review_required"; reason: string } | null;
   };
 };
 type Citation = {
@@ -193,7 +195,7 @@ export function ProjectMemoryClient({ username, isSystemAdmin }: { username: str
 
   useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">从可追溯原文自动抽取候选，建立跨人工资料与多仓库代码的向量记忆，并通过语义检索和引用式问答找到项目答案。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">查看项目记忆状态，通过语义检索和引用式问答找到答案。整理资料、维护索引和处理不确定内容均在独立操作区完成。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
 }
 
 function IndexPanel({ projectId, index, onReload }: { projectId: string; index: IndexStatus; onReload: () => Promise<IndexStatus | null> }) {
@@ -357,7 +359,7 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
   const ready = index.readiness === "ready";
 
   const changeMode = (nextMode: "full" | "incremental") => { invalidatePrepareRequest(); setMode(nextMode); setConfirmation(null); setClientKey(null); setPlan(null); };
-  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Unified vector memory</p><h2 className="mt-2 text-2xl font-semibold">项目语义索引</h2><p className="mt-2 text-sm leading-6 text-slate-500">使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败或未知不会替换上一个可用索引。</p></div><div className="grid grid-cols-3 gap-2"><Metric label="资料" value={index.inputs.projectSourceCount} /><Metric label="代码" value={index.inputs.hasCodeSnapshot ? "已冻结" : "无"} /><Metric label="仓库资料" value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${ready ? "text-emerald-900" : "text-amber-900"}`}>{readinessLabels[index.readiness]} · {index.activeIndex.generation.recordCount} 条记忆</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>索引：{index.activeIndex.generation.providerConnection?.name ?? index.activeIndex.generation.providerConnection?.kind ?? "个人连接"} · {index.activeIndex.generation.modelId ?? "模型信息受限"} · {index.activeIndex.generation.dimensions === null ? "维度受限" : `${index.activeIndex.generation.dimensions} 维`} · {dateLabel(index.activeIndex.publishedAt)}</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>当前路由：{index.route ? `${index.route.providerConnection?.name ?? index.route.providerConnection?.kind ?? "个人连接"} · ${index.route.modelId ?? "模型信息受限"} · ${index.route.embeddingDimensions ?? "未知"} 维` : "未配置"}</p></div>{index.activeIndex.generation.inputManifestFingerprint ? <code className={`text-[10px] ${ready ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code> : null}</div>{!ready ? <p className="mt-3 text-xs leading-5 text-amber-800">{index.readiness === "providerUnavailable" ? "当前向量供应商未通过连接测试或已停用，语义查询和项目智能体已暂停。" : index.readiness === "legacyIndex" ? "这是旧版索引格式，升级后需首次全量重建；重建前语义查询和项目智能体保持暂停。" : index.readiness === "inputsChanged" ? "资料或仓库快照已变化，旧索引不会混用新输入；请重建后恢复语义能力。" : "当前向量供应商、模型或维度与该索引不一致，重建前已停用语义查询和项目智能体。"}</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">{readinessLabels[index.readiness]}</div>}{index.latestJob?.status === "unknown" && index.latestJob.reconciliationRequired ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p>上一次索引请求结果未知，不能自动重试模型。</p><button type="button" onClick={() => void reconcile()} disabled={pending} className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold">人工收口未知结果</button></div> : null}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">当前没有可用的向量路由。普通用户使用平台默认模型；会员用户请先在 <Link href="/personal/models" className="font-semibold underline">个人模型设置</Link> 配置向量能力，项目 Owner 确认后才能使用个人模型。</p> : <><div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-700">选择构建方式</p><div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600"><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "full"} onChange={() => changeMode("full")} />全量构建（不复用旧向量）</label><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "incremental"} onChange={() => changeMode("incremental")} />增量构建（仅复用兼容向量）</label></div>{planLoading ? <p className="mt-3 text-xs text-slate-500">正在计算当前计划…</p> : plan ? <p className="mt-3 text-xs leading-5 text-slate-500">当前路由：{plan.providerName ?? plan.providerKind ?? "当前路由"} · {plan.modelId ?? "模型信息受限"} · {plan.dimensions ?? "未知"} 维；输入 {plan.expectedInputCount} 条，需生成 {plan.generateCount} 条，复用 {plan.reuseCount} 条，删除 {plan.deleteCount} 条。{plan.ineligibleCode === "MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED" ? "当前没有可复用的兼容全量基线，请先执行全量构建。" : !plan.deadlineEligible ? "规模无法在一次请求期限内安全完成。" : "计划可执行，读取摘要后才会发送选中内容。所有待生成片段会发送给该供应商；复用片段不会再次外发。"}</p> : null}</div>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={index.activeIndex ? `${mode === "full" ? "全量重建" : "增量重建"}并切换索引` : "建立语义索引"} onExecute={() => void build()} /> : <button type="button" onClick={() => void prepare()} disabled={pending || planLoading || plan === null || !plan.deadlineEligible || plan.ineligibleCode !== null} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button>}</>}{message ? <p role="status" className="mt-3 text-sm text-slate-600">{message}</p> : null}</section>;
+  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Unified vector memory</p><h2 className="mt-2 text-2xl font-semibold">项目语义索引</h2><p className="mt-2 text-sm leading-6 text-slate-500">使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败或未知不会替换上一个可用索引。</p></div><div className="grid grid-cols-3 gap-2"><Metric label="资料" value={index.inputs.projectSourceCount} /><Metric label="代码" value={index.inputs.hasCodeSnapshot ? "已冻结" : "无"} /><Metric label="仓库资料" value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${ready ? "text-emerald-900" : "text-amber-900"}`}>{readinessLabels[index.readiness]} · {index.activeIndex.generation.recordCount} 条记忆</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>索引：{index.activeIndex.generation.providerConnection?.name ?? index.activeIndex.generation.providerConnection?.kind ?? "个人连接"} · {index.activeIndex.generation.modelId ?? "模型信息受限"} · {index.activeIndex.generation.dimensions === null ? "维度受限" : `${index.activeIndex.generation.dimensions} 维`} · {dateLabel(index.activeIndex.publishedAt)}</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>当前路由：{index.route ? `${index.route.providerConnection?.name ?? index.route.providerConnection?.kind ?? "个人连接"} · ${index.route.modelId ?? "模型信息受限"} · ${index.route.embeddingDimensions ?? "未知"} 维` : "未配置"}</p></div>{index.activeIndex.generation.inputManifestFingerprint ? <code className={`text-[10px] ${ready ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code> : null}</div>{!ready ? <p className="mt-3 text-xs leading-5 text-amber-800">{index.readiness === "providerUnavailable" ? "当前向量供应商未通过连接测试或已停用，语义查询和项目智能体已暂停。" : index.readiness === "legacyIndex" ? "这是旧版索引格式，升级后需首次全量重建；重建前语义查询和项目智能体保持暂停。" : index.readiness === "inputsChanged" ? "资料或仓库快照已变化，旧索引不会混用新输入；请重建后恢复语义能力。" : "当前向量供应商、模型或维度与该索引不一致，重建前已停用语义查询和项目智能体。"}</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">{readinessLabels[index.readiness]}</div>}{index.latestJob?.status === "unknown" && index.latestJob.reconciliationRequired ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p>上一次索引请求结果未知，不能自动重试模型。</p><button type="button" onClick={() => void reconcile()} disabled={pending} className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold">人工收口未知结果</button></div> : null}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">当前没有可用的向量路由。普通用户使用平台默认模型；会员用户请先在 <Link href="/personal/models" className="font-semibold underline">个人模型设置</Link> 配置向量能力，项目 Owner 确认后才能使用个人模型。</p> : <OperationPanel title="维护项目语义索引" triggerLabel={index.activeIndex ? "更新语义索引" : "建立语义索引"} className="mt-5">{message ? <p role="status" className="mb-3 text-sm text-slate-600">{message}</p> : null}<div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-700">选择构建方式</p><div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600"><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "full"} onChange={() => changeMode("full")} />全量构建（不复用旧向量）</label><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "incremental"} onChange={() => changeMode("incremental")} />增量构建（仅复用兼容向量）</label></div>{planLoading ? <p className="mt-3 text-xs text-slate-500">正在计算当前计划…</p> : plan ? <p className="mt-3 text-xs leading-5 text-slate-500">当前路由：{plan.providerName ?? plan.providerKind ?? "当前路由"} · {plan.modelId ?? "模型信息受限"} · {plan.dimensions ?? "未知"} 维；输入 {plan.expectedInputCount} 条，需生成 {plan.generateCount} 条，复用 {plan.reuseCount} 条，删除 {plan.deleteCount} 条。{plan.ineligibleCode === "MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED" ? "当前没有可复用的兼容全量基线，请先执行全量构建。" : !plan.deadlineEligible ? "规模无法在一次请求期限内安全完成。" : "计划可执行，读取摘要后才会发送选中内容。所有待生成片段会发送给该供应商；复用片段不会再次外发。"}</p> : null}</div>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={index.activeIndex ? `${mode === "full" ? "全量重建" : "增量重建"}并切换索引` : "建立语义索引"} onExecute={() => void build()} /> : <button type="button" onClick={() => void prepare()} disabled={pending || planLoading || plan === null || !plan.deadlineEligible || plan.ineligibleCode !== null} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button>}</OperationPanel>}{message ? <p role="status" className="mt-3 text-sm text-slate-600">{message}</p> : null}</section>;
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) { return <div className="min-w-20 rounded-xl bg-slate-50 px-3 py-3 text-center"><p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>; }
@@ -498,6 +500,8 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       }
       const payload = await response.json() as { job?: { result?: {
         candidateCount?: number;
+        confirmedCount?: number;
+        reviewRequiredCount?: number;
         duplicateCount?: number;
         returnedCandidateCount?: number;
         rejectedCandidateCount?: number;
@@ -506,6 +510,8 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       } | null } };
       const result = payload.job?.result;
       const created = result?.candidateCount ?? 0;
+      const confirmed = result?.confirmedCount ?? 0;
+      const reviewRequired = result?.reviewRequiredCount ?? created;
       const duplicates = result?.duplicateCount ?? 0;
       const returned = result?.returnedCandidateCount ?? created + duplicates;
       const rejected = result?.rejectedCandidateCount ?? 0;
@@ -519,12 +525,12 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       } else if (returned === 0) {
         setMessage("供应商调用成功，但模型未发现有充分原文证据的决策、进展、问题或风险；本次未生成候选。可换一条资料或缩小范围后重试。");
       } else {
-        const details = [`新增 ${created} 条待审核候选`];
+        const details = [`自动形成 ${confirmed} 条事实`, `${reviewRequired} 条待处理`];
         if (rejected > 0) details.push(`跳过 ${rejected} 条无有效证据定位的输出`);
         if (anchored > 0) details.push(`通过证据块定位 ${anchored} 条原文`);
         if (recovered > 0) details.push(`校正 ${recovered} 条仅有空白差异的摘录`);
-        if (duplicates > 0) details.push(`忽略 ${duplicates} 条重复候选`);
-        setMessage(`${details.join("；")}。候选仍须逐条人工确认才会进入已确认记忆。`);
+        if (duplicates > 0) details.push(`忽略 ${duplicates} 条重复记录`);
+        setMessage(`${details.join("；")}。有证据的事实已入库，仅待处理内容需要人工介入。`);
       }
       await onReload();
     } catch (extractError) {
@@ -598,11 +604,12 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
     <section id="auto-extract-review" className="mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
       <div className="border-b border-slate-100 pb-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Grounded extraction</p>
-        <h2 className="mt-2 text-2xl font-semibold">自动抽取与人工审核</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-500">每个候选都必须带有原文中的精确连续摘录。系统会逐条校验：有效候选继续进入人工审核，无法回溯的条目单独跳过，不再拖垮整批结果。</p>
+        <h2 className="mt-2 text-2xl font-semibold">资料整理与待处理内容</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">AI 整理会自动发布有逐字原文证据的内容，仅冲突、改写或不确定的内容进入待处理。新导入的资料也可直接在导入操作中完成整理。</p>
       </div>
 
-      <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-7 lg:h-[620px] lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
+      <div className="mt-6 flex flex-wrap gap-4">
+        <OperationPanel title="整理已有项目资料" triggerLabel="整理已有资料">{message ? <p role="status" className="mb-4 text-sm text-slate-600">{message}</p> : null}
         <div className="flex min-h-0 min-w-0 flex-col">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold">选择资料（最多 10 条）</h3>
@@ -623,9 +630,11 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
           {confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={`抽取 ${selected.length} 条资料`} onExecute={() => void extract()} /> : <button type="button" onClick={() => void prepareExtract()} disabled={pending || selected.length === 0} className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button>}
         </div>
 
+        </OperationPanel>
+        <OperationPanel title="处理不确定内容" triggerLabel={`处理待确认内容（${pendingCandidates.length}）`}>{message ? <p role="status" className="mb-4 text-sm text-slate-600">{message}</p> : null}
         <div className="flex min-h-0 min-w-0 flex-col">
           <div className="flex min-w-0 items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">待审核候选</h3>
+            <h3 className="text-sm font-semibold">待处理内容</h3>
             <span className="shrink-0 text-xs text-slate-400">{pendingCandidates.length} 条 · 已选 {activeSelectedCandidates.length} 条</span>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -634,9 +643,9 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
             <button type="button" onClick={() => void batchReview("accept")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{batchReviewAction === "accept" ? "批量确认中…" : "批量确认"}</button>
             <button type="button" onClick={() => void batchReview("dismiss")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-40">{batchReviewAction === "dismiss" ? "批量驳回中…" : "批量驳回"}</button>
           </div>
-          <div className="mt-3 min-h-72 min-w-0 max-w-full flex-1 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-3 pr-2 lg:min-h-0" aria-label="待审核候选列表">
+          <div className="mt-3 min-h-72 max-h-[34rem] min-w-0 max-w-full flex-1 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-3 pr-2 lg:min-h-0" aria-label="待处理内容列表">
             {pendingCandidates.length === 0 ? (
-              <p className="flex h-full min-h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">暂无待审核候选。</p>
+              <p className="flex h-full min-h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">暂无待处理内容。</p>
             ) : (
               <div className="space-y-3">{pendingCandidates.map((candidate) => (
                 <article key={candidate.id} className={`min-w-0 max-w-full rounded-2xl border bg-white p-5 transition ${activeSelectedCandidates.includes(candidate.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200"}`}>
@@ -648,6 +657,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
                     </span>
                   </label>
                   <p className="mt-2 text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">{candidate.projectItem.content}</p>
+                  {candidate.projectItem.admission ? <p className="mt-3 text-xs font-medium text-amber-800">待处理原因：{({ content_too_short: "原文信息不足", content_not_exact_source_text: "正文包含模型改写，需要核对", source_contains_uncertainty: "来源含计划、示例或未决内容", conflicting_confirmed_fact: "与同类已有事实存在冲突", source_requires_manual_review: "外部来源或工具结果需要人工核对" } as Record<string, string>)[candidate.projectItem.admission.reason] ?? "需要核对原文证据"}</p> : null}
                   <blockquote className="mt-4 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{candidate.projectItem.sourceExcerpt}</blockquote>
                   <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void review(candidate, "accept")} disabled={reviewBusy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{reviewingId === candidate.id ? "确认中…" : "确认记忆"}</button><button type="button" onClick={() => void review(candidate, "dismiss")} disabled={reviewBusy} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{reviewingId === candidate.id ? "处理中…" : "驳回"}</button></div>
                 </article>
@@ -655,6 +665,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
             )}
           </div>
         </div>
+        </OperationPanel>
       </div>
       {message ? <p role="status" className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}
     </section>

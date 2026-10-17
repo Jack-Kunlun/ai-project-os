@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { OperationPanel } from "@/components/operation-panel";
 import { buildProjectHref, parseProjectPageState, PROJECT_PLAN_STATUS_VALUES } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import {
@@ -65,7 +66,8 @@ export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { user
   const [error, setError] = useState<string | null>(null);
   const [objectiveForm, setObjectiveForm] = useState({ title: "", description: "", targetDate: "" });
   const [workItemForm, setWorkItemForm] = useState({ title: "", description: "", acceptanceCriteria: "", objectiveId: "", assigneeId: "", priority: "medium" as Priority, targetDate: "" });
-  const [dependencyChoices, setDependencyChoices] = useState<Record<string, string>>({});
+  const [objectiveOpen, setObjectiveOpen] = useState(false);
+  const [workItemOpen, setWorkItemOpen] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -88,26 +90,28 @@ export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { user
     return () => window.clearTimeout(timer);
   }, [navigation.focus, plan]);
 
-  async function request(body: unknown, method: "POST" | "PATCH", key: string, success: string) {
+  async function request(body: unknown, method: "POST" | "PATCH", key: string, success: string): Promise<boolean> {
     setPending(key); setError(null); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/plan`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) throw new Error(await responseError(response, "项目计划更新失败"));
-      setMessage(success); await reload();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "项目计划更新失败"); }
+      setMessage(success); await reload(); return true;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "项目计划更新失败"); return false; }
     finally { setPending(null); }
   }
 
   async function createObjective(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await request({ operation: "createObjective", title: objectiveForm.title, description: objectiveForm.description || null, targetDate: objectiveForm.targetDate || null }, "POST", "create-objective", "目标已创建为草稿，由成员决定何时启动。");
+    if (!await request({ operation: "createObjective", title: objectiveForm.title, description: objectiveForm.description || null, targetDate: objectiveForm.targetDate || null }, "POST", "create-objective", "目标已创建为草稿，由成员决定何时启动。")) return;
     setObjectiveForm({ title: "", description: "", targetDate: "" });
+    setObjectiveOpen(false);
   }
 
   async function createWorkItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await request({ operation: "createWorkItem", title: workItemForm.title, description: workItemForm.description || null, acceptanceCriteria: workItemForm.acceptanceCriteria || null, objectiveId: workItemForm.objectiveId || null, assigneeId: workItemForm.assigneeId || null, priority: workItemForm.priority, targetDate: workItemForm.targetDate || null }, "POST", "create-work-item", "工作项已加入计划。");
+    if (!await request({ operation: "createWorkItem", title: workItemForm.title, description: workItemForm.description || null, acceptanceCriteria: workItemForm.acceptanceCriteria || null, objectiveId: workItemForm.objectiveId || null, assigneeId: workItemForm.assigneeId || null, priority: workItemForm.priority, targetDate: workItemForm.targetDate || null }, "POST", "create-work-item", "工作项已加入计划。")) return;
     setWorkItemForm({ title: "", description: "", acceptanceCriteria: "", objectiveId: "", assigneeId: "", priority: "medium", targetDate: "" });
+    setWorkItemOpen(false);
   }
 
   const workItemById = useMemo(() => new Map(plan?.workItems.map((item) => [item.id, item]) ?? []), [plan]);
@@ -139,22 +143,28 @@ export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { user
       {navigation.returnTo ? <Link href={navigation.returnTo} className="mt-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
 
       {plan ? <>
-        <ProjectOperationsSummary health={plan.health} impacts={plan.impactSuggestions} workItems={plan.workItems} canEdit={plan.canEdit} pending={pending} request={request} />
-        <section className="mt-8 grid gap-5 xl:grid-cols-2">
-          <form onSubmit={createObjective} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <ProjectOperationsSummary health={plan.health} impacts={plan.impactSuggestions} workItems={plan.workItems} canEdit={plan.canEdit} pending={pending} error={error} request={request} />
+        <div className="mt-8 flex flex-wrap gap-3">
+          <OperationPanel title="创建项目目标" triggerLabel="创建项目目标" open={objectiveOpen} onOpenChange={setObjectiveOpen} disabled={!plan.canEdit} description="目标先保存为草稿，后续由项目成员明确决定何时启动或完成。">
+          <form onSubmit={createObjective} className="max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Human objective</p><h2 className="mt-2 text-xl font-semibold">创建项目目标</h2><p className="mt-2 text-sm leading-6 text-slate-500">目标先以草稿保存，启动和完成需要明确的状态操作。</p>
             <input required maxLength={160} value={objectiveForm.title} onChange={(event) => setObjectiveForm((value) => ({ ...value, title: event.target.value }))} placeholder="目标名称" className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
             <textarea maxLength={20_000} rows={3} value={objectiveForm.description} onChange={(event) => setObjectiveForm((value) => ({ ...value, description: event.target.value }))} placeholder="完成标准或背景（可选）" className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
             <div className="mt-3 flex flex-wrap items-center gap-3"><input type="date" value={objectiveForm.targetDate} onChange={(event) => setObjectiveForm((value) => ({ ...value, targetDate: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm" /><button disabled={!plan.canEdit || pending !== null || objectiveForm.title.trim().length === 0} className="flex min-h-11 flex-1 items-center justify-center rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{pending === "create-objective" ? "创建中…" : "创建目标草稿"}</button></div>
           </form>
-          <form onSubmit={createWorkItem} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          </OperationPanel>
+          <OperationPanel title="添加人工工作项" triggerLabel="添加工作项" open={workItemOpen} onOpenChange={setWorkItemOpen} disabled={!plan.canEdit} description="设置负责人、优先级和可验证的验收标准后，成员可以手动推进工作项。">
+          <form onSubmit={createWorkItem} className="max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-500">Human work item</p><h2 className="mt-2 text-xl font-semibold">添加人工工作项</h2><p className="mt-2 text-sm leading-6 text-slate-500">工作项先进入“已计划”；设置负责人和可验证验收标准后，才能由成员手动开始。</p>
             <input required maxLength={160} value={workItemForm.title} onChange={(event) => setWorkItemForm((value) => ({ ...value, title: event.target.value }))} placeholder="工作项名称" className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
             <div className="mt-3 grid gap-3 sm:grid-cols-2"><textarea maxLength={20_000} rows={3} value={workItemForm.description} onChange={(event) => setWorkItemForm((value) => ({ ...value, description: event.target.value }))} placeholder="范围与背景（可选）" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" /><textarea maxLength={20_000} rows={3} value={workItemForm.acceptanceCriteria} onChange={(event) => setWorkItemForm((value) => ({ ...value, acceptanceCriteria: event.target.value }))} placeholder="可验证的验收标准" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" /></div>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><select value={workItemForm.objectiveId} onChange={(event) => setWorkItemForm((value) => ({ ...value, objectiveId: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm"><option value="">不关联目标</option>{plan.objectives.filter((item) => item.status !== "cancelled" && item.status !== "completed").map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><select value={workItemForm.assigneeId} onChange={(event) => setWorkItemForm((value) => ({ ...value, assigneeId: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm"><option value="">未分配负责人</option>{plan.members.map((member) => <option key={member.id} value={member.id}>{userLabel(member)}</option>)}</select><select value={workItemForm.priority} onChange={(event) => setWorkItemForm((value) => ({ ...value, priority: event.target.value as Priority }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm">{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}优先级</option>)}</select><input type="date" value={workItemForm.targetDate} onChange={(event) => setWorkItemForm((value) => ({ ...value, targetDate: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm" /></div>
             <button disabled={!plan.canEdit || pending !== null || workItemForm.title.trim().length === 0} className="mt-3 flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{pending === "create-work-item" ? "添加中…" : "加入项目计划"}</button>
           </form>
-        </section>
+          </OperationPanel>
+        </div>
 
         <section className="mt-8 rounded-3xl border border-amber-200 bg-amber-50 p-6">
           <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Agent recommendations</p><h2 className="mt-2 text-xl font-semibold text-amber-950">带证据的智能体建议</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-amber-900">这里仅显示尚未加入计划的建议。点击后会固定原建议、引用证据和运行指纹，并创建“待采纳”工作项；不会自动开始。</p></div><Link href={`/projects/${projectId}/intelligence`} className="flex min-h-10 items-center justify-center rounded-xl border border-amber-300 px-4 py-2 text-xs font-semibold text-amber-900">进入项目智能体</Link></div>
@@ -168,8 +178,9 @@ export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { user
           const candidates = activeWorkItems.filter((candidate) => candidate.id !== item.id && !dependencies.some((entry) => entry.dependsOnId === candidate.id));
           return <article id={`work-item-${item.id}`} tabIndex={navigation.focus === item.id ? -1 : undefined} key={item.id} className="scroll-mt-28 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100"><div className="flex flex-wrap items-start justify-between gap-4"><div className="max-w-3xl"><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold">{item.title}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{workItemStatusLabels[item.status]}</span><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{priorityLabels[item.priority]}优先级</span></div><p className="mt-2 text-sm leading-6 text-slate-500">{item.description ?? "未填写范围与背景"}</p><p className="mt-2 text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-500">验收标准：</span>{item.acceptanceCriteria ?? "尚未设置"}</p></div><div className="text-right text-xs text-slate-400"><p>{item.objectiveId ? `目标：${objectiveById.get(item.objectiveId)?.title ?? "已移除"}` : "未关联目标"}</p><p className="mt-1">负责人：{item.assignee ? userLabel(item.assignee) : "未分配"}</p><p className="mt-1">目标日期：{dateLabel(item.targetDate)}</p></div></div>
             {item.origin === "agentRecommendation" ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><p className="font-semibold">智能体建议 · 等待人工采纳</p><p className="mt-1 font-mono text-[10px] text-amber-700">证据指纹 {item.evidenceFingerprint?.slice(0, 16)}…</p></div> : null}
-            <WorkItemOperations key={`${item.id}:${item.updatedAt}`} item={item} objectives={plan.objectives} members={plan.members} evidenceLinks={plan.evidenceLinks.filter((link) => link.workItemId === item.id)} evidenceCandidates={[...plan.evidenceCandidates.projectItems, ...plan.evidenceCandidates.projectSources]} canEdit={plan.canEdit} pending={pending} request={request} />
-            <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto]"><div><p className="text-xs font-semibold text-slate-500">前置依赖</p><div className="mt-2 flex flex-wrap gap-2">{dependencies.map((dependency) => <span key={dependency.id} className="inline-flex min-h-9 items-center gap-2 rounded-xl bg-slate-100 px-3 py-1.5 text-xs text-slate-700">{workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项"}<button type="button" aria-label="移除依赖" onClick={() => void request({ operation: "removeDependency", dependencyId: dependency.id, expectedUpdatedAt: item.updatedAt }, "POST", `remove-dependency:${dependency.id}`, "工作项依赖已移除，审计记录保留。") } disabled={!plan.canEdit || pending !== null} className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-rose-600 disabled:opacity-40">×</button></span>)}{dependencies.length === 0 ? <span className="text-xs text-slate-400">无前置依赖</span> : null}</div>{candidates.length > 0 && item.status !== "completed" && item.status !== "cancelled" ? <div className="mt-3 flex flex-wrap gap-2"><select aria-label="选择前置依赖" value={dependencyChoices[item.id] ?? ""} onChange={(event) => setDependencyChoices((value) => ({ ...value, [item.id]: event.target.value }))} className="min-h-10 flex-1 rounded-xl border border-slate-200 px-3 text-xs"><option value="">选择前置工作项</option>{candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}</select><button type="button" onClick={() => { const dependsOnId = dependencyChoices[item.id]; if (dependsOnId) void request({ operation: "addDependency", workItemId: item.id, dependsOnId, expectedUpdatedAt: item.updatedAt }, "POST", `add-dependency:${item.id}`, "前置依赖已添加并通过循环检查。"); }} disabled={!plan.canEdit || pending !== null || !(dependencyChoices[item.id])} className="flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">添加依赖</button></div> : null}</div><div className="flex flex-wrap items-end justify-end gap-2">{workItemTransitions[item.status].map((status) => <button key={status} type="button" onClick={() => void request({ entity: "workItem", id: item.id, expectedUpdatedAt: item.updatedAt, status }, "PATCH", `work-item:${item.id}:${status}`, `工作项已更新为“${workItemStatusLabels[status]}”。`)} disabled={!plan.canEdit || pending !== null} className="flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-600 disabled:opacity-40">{workItemStatusLabels[status]}</button>)}</div></div>
+            <WorkItemOperations key={`${item.id}:${item.updatedAt}`} item={item} objectives={plan.objectives} members={plan.members} evidenceLinks={plan.evidenceLinks.filter((link) => link.workItemId === item.id)} evidenceCandidates={[...plan.evidenceCandidates.projectItems, ...plan.evidenceCandidates.projectSources]} dependencies={dependencies.map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} dependencyCandidates={candidates} canEdit={plan.canEdit} pending={pending} error={error} request={request} />
+            <div className="mt-5"><p className="text-xs font-semibold text-slate-500">前置依赖</p><div className="mt-2 flex flex-wrap gap-2">{dependencies.map((dependency) => <span key={dependency.id} className="inline-flex min-h-9 items-center rounded-xl bg-slate-100 px-3 py-1.5 text-xs text-slate-700">{workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项"}</span>)}{dependencies.length === 0 ? <span className="text-xs text-slate-400">无前置依赖</span> : null}</div></div>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">{workItemTransitions[item.status].map((status) => <button key={status} type="button" onClick={() => void request({ entity: "workItem", id: item.id, expectedUpdatedAt: item.updatedAt, status }, "PATCH", `work-item:${item.id}:${status}`, `工作项已更新为“${workItemStatusLabels[status]}”。`)} disabled={!plan.canEdit || pending !== null} className="flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-600 disabled:opacity-40">{workItemStatusLabels[status]}</button>)}</div>
           </article>;
         })}{visibleWorkItems.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 px-6 py-16 text-center text-sm text-slate-500">{plan.workItems.length === 0 ? "还没有工作项。可以人工创建，或把有证据的智能体建议保存为待采纳项。" : "当前筛选条件下没有工作项。"}</div> : null}</div></section>
 

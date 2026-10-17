@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { OperationPanel } from "@/components/operation-panel";
+import { awaitImportedAsset } from "../imported-asset-readiness";
+import { ProjectFactImport } from "../project-fact-import";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
@@ -157,6 +160,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [factSourceIds, setFactSourceIds] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -228,9 +232,12 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
 
   async function upload() {
     if (files.length === 0) return;
+    setFactSourceIds([]);
     setUploading(true);
     setError(null);
     let uploaded = 0;
+    const readySourceIds: string[] = [];
+    const pendingParsing: string[] = [];
     const failures: string[] = [];
     const parseFailures: string[] = [];
     for (const file of files) {
@@ -240,16 +247,20 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
         const response = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body: form });
         if (!response.ok) throw new Error(await readError(response, "上传失败"));
         const payload = await response.json() as { asset?: Asset };
+        const readiness = payload.asset ? await awaitImportedAsset(projectId, payload.asset, () => setMessage(`正在等待 ${file.name} 的本地解析…`)) : null;
+        if (readiness?.pending) pendingParsing.push(file.name);
+        readySourceIds.push(...(readiness?.asset.segments ?? []).flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : []));
         uploaded += 1;
-        if (payload.asset?.status === "failed") parseFailures.push(file.name);
+        if (readiness?.asset.status === "failed") parseFailures.push(file.name);
       } catch (uploadError) {
         failures.push(`${file.name}：${uploadError instanceof Error ? uploadError.message : "上传失败"}`);
       }
     }
     setFiles([]);
+    setFactSourceIds([...new Set(readySourceIds)]);
     setMessage(failures.length === 0
       ? parseFailures.length === 0
-        ? `已上传并解析 ${uploaded} 个文件。`
+        ? pendingParsing.length > 0 ? `已保存 ${uploaded} 个文件，其中 ${pendingParsing.length} 个仍在后台解析或状态暂时不可读，请稍后在文件库查看。` : `已上传并解析 ${uploaded} 个文件。`
         : `已保存 ${uploaded} 个文件，其中 ${parseFailures.length} 个本地解析失败，可在文件卡片中重试：${parseFailures.join("、")}`
       : `成功保存 ${uploaded} 个，上传失败 ${failures.length} 个：${failures.join("；")}`);
     await reload();
@@ -407,7 +418,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
         <section className="pb-8 pt-10">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project files</p>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-5">
-            <div><h1 className="text-4xl font-semibold tracking-[-0.04em]">{projectName} · 文件资料</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">上传文本、PDF、Word、PowerPoint、Excel 和图片。本地先完成结构化解析；原图、扫描 PDF 页和 Office 内嵌图片经确认后调用视觉模型，人工审核后才进入项目记忆。</p></div>
+            <div><h1 className="text-4xl font-semibold tracking-[-0.04em]">{projectName} · 文件资料</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">上传文本、PDF、Word、PowerPoint、Excel 和图片。本地先完成结构化解析；原图、扫描 PDF 页和 Office 内嵌图片经确认后调用视觉模型，识别文字核对后可交给 AI 整理；有原文证据的内容自动形成事实，仅冲突与不确定项待处理。</p></div>
             <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-right shadow-sm"><p className="text-xs text-slate-400">当前页待人工确认</p><p className="mt-1 text-2xl font-semibold">{pendingCount}</p></div>
           </div>
         </section>
@@ -415,6 +426,9 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
         {error ? <div role="alert" className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
 
+        <OperationPanel title="导入文件并整理事实" triggerLabel="导入文件或文件夹">
+          {error ? <p role="alert" className="mb-4 text-sm text-rose-700">{error}</p> : null}
+          {message ? <p role="status" className="mb-4 text-sm text-indigo-700">{message}</p> : null}
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
           <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
             <div><h2 className="text-xl font-semibold">上传文件或文件夹</h2><p className="mt-2 text-xs leading-6 text-slate-500">单文件最大 {formatBytes(policy.maxFileBytes)}，图片最大 {formatBytes(policy.maxImageBytes)} / 2000 万像素；单次最多选择 {policy.maxFiles} 个，multipart 请求最大 {formatBytes(policy.maxRequestBytes)}。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP。</p><div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 px-6 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><input type="file" multiple accept=".txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx,.png,.jpg,.jpeg,.webp" onChange={chooseFiles} className="sr-only" /><span>{files.length > 0 ? `已选择 ${files.length} 个文件` : "选择一个或多个文件"}</span></label><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 px-6 text-center text-sm font-semibold text-violet-700 hover:bg-violet-50"><input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} className="sr-only" /><span>选择整个本地文件夹</span></label></div>{files.length > 0 ? <p className="mt-3 line-clamp-2 text-xs text-slate-500">{files.map((file) => file.webkitRelativePath || file.name).join("、")}</p> : null}<p className="mt-4 text-xs leading-5 text-slate-500">服务端每次请求只接收一个文件，页面会按选择逐个提交；服务端还会按项目 {formatBytes(policy.maxProjectBytes)}、工作区 {formatBytes(policy.maxWorkspaceBytes)}、部署 {formatBytes(policy.maxDeploymentBytes)}、活动文件 {policy.maxProjectAssets} 以及保留对象 {policy.maxProjectRetainedObjects} / {policy.maxWorkspaceRetainedObjects} / {policy.maxDeploymentRetainedObjects} 限制；每用户每分钟最多 {policy.maxUploadsPerMinute} 次请求，同时最多 {policy.maxConcurrentUploads} 个，整套部署同时最多 {policy.maxGlobalConcurrentUploads} 个上传。</p></div>
@@ -429,6 +443,9 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
           </div>
         </section>
 
+          <ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={reload} />
+        </OperationPanel>
+
         <section className="mt-8">
           <div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Asset library</p><h2 className="mt-2 text-2xl font-semibold">已上传文件</h2></div><button type="button" onClick={() => void reload()} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-600">刷新</button></div>
           <div className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索文件</span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="搜索文件名" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:bg-white" /></label><label><span className="sr-only">按文件类型筛选</span><select value={kindFilter} onChange={(event) => { setKindFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all">全部文件类型</option>{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按处理状态筛选</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all">全部处理状态</option>{Object.entries(statusLabels).filter(([value]) => value !== "deleted").map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
@@ -436,9 +453,10 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
             <article key={asset.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{kindLabels[asset.kind]}</span><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusTone(asset.status)}`}>{statusLabels[asset.status]}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : "版本信息不可用"} · {formatDate(asset.createdAt)}</p><p className="mt-3 text-xs leading-5 text-slate-500">已形成 {asset.segments.filter((segment) => segment.projectSourceId !== null).length} 个活动资料来源，共 {asset.segments.length} 个可定位片段。{asset.latestRun?.modelId ? ` 最近视觉模型：${asset.latestRun.modelId}。` : ""}</p>{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600">失败代码：{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2">{asset.status === "failed" ? <button type="button" onClick={() => void retryParsing(asset)} disabled={retrying !== null} className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white disabled:opacity-40">{retrying === asset.id ? "重新解析中…" : "重新解析"}</button> : null}<a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600">查看原文件</a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700">移除</button></div></div>
 
-              {asset.status === "waitingVision" ? <div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950">需要视觉模型识别</h4><p className="mt-2 text-xs leading-5 text-amber-900">本次只发送此文件中标为待识别的原图、扫描 PDF 页或 Office 内嵌图片；不会发送项目中的其他资料。共 {asset.segments.filter((segment) => segment.requiresVision).length} 个片段。请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置“图片与扫描件识别”路由。</p><ul className="mt-3 list-inside list-disc space-y-1 text-xs text-amber-950">{asset.segments.filter((segment) => segment.requiresVision).map((segment) => <li key={segment.id}>{segment.locatorLabel}</li>)}</ul>{confirmations[asset.id] ? <ConfirmationCard confirmation={confirmations[asset.id]!} pending={recognizing === asset.id} executeLabel="开始图片识别" onExecute={() => void recognize(asset)} /> : <button type="button" onClick={() => void prepareRecognition(asset)} disabled={recognizing !== null} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing === asset.id ? "读取摘要中…" : "读取本次外发摘要"}</button>}</div> : null}
+              {asset.status === "waitingVision" ? <OperationPanel className="px-6 pb-5" title="识别文件中的图片" triggerLabel="开始图片识别">{error ? <p role="alert" className="mb-4 text-sm text-rose-700">{error}</p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700">{message}</p> : null}<div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950">需要视觉模型识别</h4><p className="mt-2 text-xs leading-5 text-amber-900">本次只发送此文件中标为待识别的原图、扫描 PDF 页或 Office 内嵌图片；不会发送项目中的其他资料。共 {asset.segments.filter((segment) => segment.requiresVision).length} 个片段。请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置“图片与扫描件识别”路由。</p><ul className="mt-3 list-inside list-disc space-y-1 text-xs text-amber-950">{asset.segments.filter((segment) => segment.requiresVision).map((segment) => <li key={segment.id}>{segment.locatorLabel}</li>)}</ul>{confirmations[asset.id] ? <ConfirmationCard confirmation={confirmations[asset.id]!} pending={recognizing === asset.id} executeLabel="开始图片识别" onExecute={() => void recognize(asset)} /> : <button type="button" onClick={() => void prepareRecognition(asset)} disabled={recognizing !== null} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing === asset.id ? "读取摘要中…" : "读取本次外发摘要"}</button>}</div></OperationPanel> : null}
 
-              {asset.status === "awaitingReview" ? <div className="border-t border-indigo-100 bg-indigo-50/40 p-6 sm:px-7"><div className="mb-4"><h4 className="text-sm font-semibold text-indigo-950">确认识别结果</h4><p className="mt-2 text-xs leading-5 text-indigo-800">所有片段审核结束后，接受的内容才会一起发布到项目资料库；驳回的片段不会参与记忆与问答。</p></div><div className="space-y-4">{asset.segments.map((segment) => <div key={segment.id} className="rounded-2xl border border-indigo-100 bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">{segment.locatorLabel}</p><span className="text-[12px] text-slate-400">{segment.extractionMethod === "vision" ? `${segment.providerConnection?.name ?? "视觉模型"} · ${segment.modelId ?? "模型未记录"}` : "本地解析"}</span></div>{segment.reviewStatus === "pending" ? <><textarea value={edits[segment.id] ?? segment.contentText} onChange={(event) => setEdits((current) => ({ ...current, [segment.id]: event.target.value }))} rows={Math.min(12, Math.max(5, Math.ceil((edits[segment.id] ?? segment.contentText).length / 100)))} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-700 outline-none focus:border-indigo-400" /><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void review(asset.id, segment, "accept")} disabled={reviewing !== null || !(edits[segment.id] ?? segment.contentText).trim()} className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{reviewing === segment.id ? "保存中…" : "确认并保留"}</button><button type="button" onClick={() => void review(asset.id, segment, "dismiss")} disabled={reviewing !== null} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600 disabled:opacity-40">驳回片段</button></div></> : <p className="mt-3 text-xs text-slate-500">{segment.reviewStatus === "accepted" ? "已确认，等待文件其余片段完成。" : "已驳回，不会发布。"}</p>}</div>)}</div></div> : null}
+              {asset.status === "awaitingReview" ? <OperationPanel className="px-6 pb-5" title="核对识别文字" triggerLabel="核对识别结果">{error ? <p role="alert" className="mb-4 text-sm text-rose-700">{error}</p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700">{message}</p> : null}<div className="border-t border-indigo-100 bg-indigo-50/40 p-6 sm:px-7"><div className="mb-4"><h4 className="text-sm font-semibold text-indigo-950">确认识别结果</h4><p className="mt-2 text-xs leading-5 text-indigo-800">所有片段审核结束后，接受的内容才会一起发布到项目资料库；驳回的片段不会参与记忆与问答。</p></div><div className="space-y-4">{asset.segments.map((segment) => <div key={segment.id} className="rounded-2xl border border-indigo-100 bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">{segment.locatorLabel}</p><span className="text-[12px] text-slate-400">{segment.extractionMethod === "vision" ? `${segment.providerConnection?.name ?? "视觉模型"} · ${segment.modelId ?? "模型未记录"}` : "本地解析"}</span></div>{segment.reviewStatus === "pending" ? <><textarea value={edits[segment.id] ?? segment.contentText} onChange={(event) => setEdits((current) => ({ ...current, [segment.id]: event.target.value }))} rows={Math.min(12, Math.max(5, Math.ceil((edits[segment.id] ?? segment.contentText).length / 100)))} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-700 outline-none focus:border-indigo-400" /><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void review(asset.id, segment, "accept")} disabled={reviewing !== null || !(edits[segment.id] ?? segment.contentText).trim()} className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{reviewing === segment.id ? "保存中…" : "确认并保留"}</button><button type="button" onClick={() => void review(asset.id, segment, "dismiss")} disabled={reviewing !== null} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600 disabled:opacity-40">驳回片段</button></div></> : <p className="mt-3 text-xs text-slate-500">{segment.reviewStatus === "accepted" ? "已确认，等待文件其余片段完成。" : "已驳回，不会发布。"}</p>}</div>)}</div></div></OperationPanel> : null}
+              {asset.status === "ready" ? <OperationPanel className="px-6 pb-5" title="整理文件中的事实" triggerLabel="AI 整理事实"><ProjectFactImport projectId={projectId} sourceIds={asset.segments.flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : [])} onChanged={reload} /></OperationPanel> : null}
             </article>
           ))}</div>}
           <ListPagination {...pagination} onPageChange={setPage} disabled={loading} />

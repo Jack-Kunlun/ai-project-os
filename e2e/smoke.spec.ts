@@ -316,8 +316,14 @@ async function seedBrowserPersonalOwner(username: string, password: string): Pro
 test("first-run administrator and personal workspace Owner stay separate across protected pages", async ({ page, request }) => {
   test.setTimeout(60_000);
   const browserErrors: string[] = [];
+  const expectedHttpErrors = new Map<string, number>();
   page.on("console", (message) => {
-    if (message.type() === "error") browserErrors.push(`console:${message.text()}`);
+    if (message.type() !== "error") return;
+    const status = /server responded with a status of (\d{3})/u.exec(message.text())?.[1];
+    const key = `${message.location().url}|${status}`;
+    const remaining = expectedHttpErrors.get(key) ?? 0;
+    if (remaining > 0) { expectedHttpErrors.set(key, remaining - 1); return; }
+    browserErrors.push(`console:${message.text()}`);
   });
   page.on("pageerror", (error) => browserErrors.push(`page:${new URL(page.url()).pathname}:${error.message}`));
   const adminUsername = "browser_admin";
@@ -496,7 +502,10 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByRole("heading", { name: "代码仓库", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "自动读取授权", exact: true })).toBeVisible();
   await expect(page.getByText("还没有 Git 自动读取授权记录。", { exact: true })).toBeVisible();
-  await expect(page.getByText("还没有已验证的个人 Git 连接。先添加连接并测试指定仓库和 ref，再回来提交范围提案。", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "提交仓库范围提案", exact: true }).click();
+  const repositoryProposal = page.getByRole("dialog", { name: "提交仓库范围提案", exact: true });
+  await expect(repositoryProposal.getByText("还没有已验证的个人 Git 连接。先添加连接并测试指定仓库和 ref，再回来提交范围提案。", { exact: true })).toBeVisible();
+  await repositoryProposal.getByRole("button", { name: "返回查看", exact: true }).click();
   const projectRepositoryViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   const repositoryDimensions = await readOverflowMeasurement(page);
@@ -525,8 +534,14 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await addSourceTrigger.click();
   await expect(addSourceDialog).toBeVisible();
   await addSourceDialog.locator("#manual-text textarea").fill(sourceText);
+  const prepareUrl = new URL(`/api/projects/${projectId}/memory/extract`, page.url()).href;
+  expectedHttpErrors.set(`${prepareUrl}|409`, 1);
+  const unavailablePreparation = page.waitForResponse((response) => response.url() === prepareUrl && response.request().postDataJSON()?.phase === "prepare");
   await addSourceDialog.getByRole("button", { name: "加入原始资料", exact: true }).click();
-  await expect(addSourceDialog.getByRole("status")).toContainText("加入原始资料来源库");
+  await expect(addSourceDialog.getByRole("status").filter({ hasText: "文本已保存" })).toBeVisible();
+  const unavailableResponse = await unavailablePreparation;
+  expect(unavailableResponse.status()).toBe(409);
+  expect((await unavailableResponse.json()).error.code).toBe("PLATFORM_ROUTE_UNAVAILABLE");
   await closeSourceDialog.click();
   await expect(addSourceDialog).toHaveCount(0);
   await expect(addSourceTrigger).toBeFocused();
@@ -634,6 +649,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByText(/当前项目/u).first()).toBeVisible();
 
   await page.goto(`/projects/${projectId}/automations`);
+  await expect(page.getByRole("button", { name: "预览并确认", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "添加自动化", exact: true }).click();
   await page.getByRole("button", { name: "预览并确认", exact: true }).click();
   const automationPreview = page.getByRole("region", { name: "创建前影响预览" });
   await expect(automationPreview).toBeVisible();
@@ -754,6 +771,9 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.goto("/profile");
   await expect(page.getByText("账户详情", { exact: true })).toBeVisible();
   await expect(page.locator("details[open]").filter({ hasText: "账户详情" })).toHaveCount(1);
+  const editProfile = page.getByRole("button", { name: "编辑资料", exact: true });
+  await expect(editProfile).toBeEnabled();
+  await expect(editProfile).toHaveCSS("opacity", "1");
   await expectNoAccessibilityViolations(page, "profile");
 
   await page.goto("/personal/configuration");
@@ -847,6 +867,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
   await expect(page.getByText("会员有效", { exact: true })).toBeVisible();
   await expect(page.getByText(/固定官方端点不可修改/u)).toBeVisible();
+  await expect(page.getByLabel("连接名称", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "添加连接", exact: true }).click();
   await expect(page.getByText("生成模型或向量模型至少配置一项。", { exact: true })).toBeVisible();
 
   const smokeConnectionName = "Browser smoke personal model";
@@ -859,10 +881,22 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(createKeyInput).toHaveValue("");
   await expect(page.getByRole("heading", { name: smokeConnectionName, exact: true })).toBeVisible();
 
+  await page.getByRole("button", { name: "管理配置", exact: true }).click();
   await page.getByRole("button", { name: "编辑配置", exact: true }).click();
   await expect(page.getByLabel("新的 API Key", { exact: true })).toHaveCount(0);
   await page.getByLabel("连接名称", { exact: true }).last().fill(smokeConnectionNameUpdated);
   await page.getByLabel("生成模型（可选）", { exact: true }).last().fill("gpt-4.1");
+  await page.route("**/api/me/ai-providers/*", async (route) => {
+    if (route.request().method() !== "PATCH") { await route.fallback(); return; }
+    expectedHttpErrors.set(`${route.request().url()}|400`, 1);
+    await route.fulfill({ status: 400, json: { error: { message: "Isolated model edit retry error" } } });
+  });
+  await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  const modelEditor = page.getByRole("dialog", { name: "编辑个人模型配置", exact: true });
+  await expect(modelEditor.getByRole("alert")).toContainText("连接更新失败");
+  await expect(modelEditor.getByRole("alert")).not.toContainText("Isolated model edit retry error");
+  await expect(modelEditor.getByLabel("连接名称", { exact: true })).toHaveValue(smokeConnectionNameUpdated);
+  await page.unroute("**/api/me/ai-providers/*");
   await page.getByRole("button", { name: "保存配置", exact: true }).click();
   await expect(page.getByRole("heading", { name: smokeConnectionNameUpdated, exact: true })).toBeVisible();
 
@@ -911,6 +945,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(adminPage.getByText(/不开放远端工具操作/u)).toBeVisible();
   await expect(adminPage.getByLabel("Bearer Token", { exact: true })).toHaveCount(0);
   await expectNoAccessibilityViolations(adminPage, "MCP connections");
+  expect([...expectedHttpErrors.values()].every((remaining) => remaining === 0)).toBe(true);
   expect(browserErrors).toEqual([]);
   await adminContext.close();
 });

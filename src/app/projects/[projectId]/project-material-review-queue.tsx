@@ -148,7 +148,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
     <section id="review-queue" tabIndex={-1} aria-labelledby="review-queue-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
       {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-5 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI candidate review</p><h2 id="review-queue-heading" className="mt-2 text-2xl font-semibold tracking-tight">审核 AI 候选</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">AI 抽取结果仍是候选。核对原始资料证据后，确认操作只会将其推进为已确认事实，不会在这里直接承诺进入 AI 可引用记忆。</p></div>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI candidate review</p><h2 id="review-queue-heading" className="mt-2 text-2xl font-semibold tracking-tight">审核 AI 候选</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">这里只处理自动整理后仍需核对的冲突、改写或不确定内容。核对原始资料证据后可确认或驳回；有充分原文证据的普通结果已自动入库。</p></div>
         <span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">当前页 {reviews.length} 条</span>
       </div>
       <div className="mt-5"><KnowledgeLifecycle compact /></div>

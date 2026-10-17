@@ -922,6 +922,8 @@ test("job result serializers keep search and answer payloads explicit", () => {
     sourceCount: 2,
     returnedCandidateCount: 7,
     candidateCount: 4,
+    confirmedCount: 2,
+    reviewRequiredCount: 2,
     rejectedCandidateCount: 2,
     recoveredExcerptCount: 1,
     anchoredExcerptCount: 2,
@@ -932,6 +934,8 @@ test("job result serializers keep search and answer payloads explicit", () => {
   assert.deepEqual(extraction, {
     sourceCount: 2,
     candidateCount: 4,
+    confirmedCount: 2,
+    reviewRequiredCount: 2,
     duplicateCount: 1,
     returnedCandidateCount: 7,
     rejectedCandidateCount: 2,

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { OperationPanel } from "@/components/operation-panel";
 import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
 
 type QualityKind = "duplicate" | "conflict" | "stale" | "missingEvidence" | "lowConfidence";
@@ -151,15 +152,21 @@ function ItemMetadataEditor({ projectId, item, onChanged }: { projectId: string;
   const [pinned, setPinned] = useState(item.pinned);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  async function save(verifyNow = false) {
+  async function save(verifyNow = false): Promise<boolean> {
     setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/items/${item.id}/memory-metadata`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedUpdatedAt: item.updatedAt, importance: Number(importance), confidence: confidence.trim() === "" ? null : Number(confidence), validUntil: validUntil === "" ? null : new Date(`${validUntil}T23:59:59.000Z`).toISOString(), pinned, verifyNow }) });
       if (!response.ok) throw new Error(await responseError(response, "生命周期设置保存失败"));
       setMessage(verifyNow ? "已记录本次人工复核。" : "生命周期设置已保存。");
       await onChanged();
-    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "生命周期设置保存失败"); }
+      return true;
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "生命周期设置保存失败"); return false; }
     finally { setPending(false); }
   }
-  return <div className="mt-5 border-t border-slate-100 pt-4"><button onClick={() => setOpen((value) => !value)} className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">{open ? "收起生命周期设置" : "编辑置信度、重要性与有效期"}</button>{open ? <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-4"><label className="text-xs font-medium text-slate-600">置信度 0–1<input type="number" min="0" max="1" step="0.05" value={confidence} onChange={(event) => setConfidence(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-slate-600">重要性 0–100<input type="number" min="0" max="100" value={importance} onChange={(event) => setImportance(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-slate-600">有效截止<input type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label><label className="flex items-center gap-2 pt-5 text-xs font-medium text-slate-600"><input type="checkbox" checked={pinned} onChange={(event) => setPinned(event.target.checked)} />长期置顶，不按时间过期</label><div className="flex flex-wrap gap-2 md:col-span-4"><button onClick={() => void save(false)} disabled={pending} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">保存设置</button><button onClick={() => void save(true)} disabled={pending} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">保存并记录已复核</button>{message ? <span role="status" className="self-center text-xs text-slate-500">{message}</span> : null}</div></div> : null}</div>;
+  return <div className="mt-5 border-t border-slate-100 pt-4"><OperationPanel title={`编辑“${item.title}”的生命周期`} triggerLabel="编辑生命周期" open={open} onOpenChange={setOpen} disabled={pending} description="调整记忆质量元数据；保存并记录已复核会额外写入本次人工复核状态。">
+    <div className="max-w-4xl rounded-2xl border border-slate-200 bg-white p-5">
+      <div className="grid gap-3 md:grid-cols-4"><label className="text-xs font-medium text-slate-600">置信度 0–1<input type="number" min="0" max="1" step="0.05" value={confidence} onChange={(event) => setConfidence(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-slate-600">重要性 0–100<input type="number" min="0" max="100" value={importance} onChange={(event) => setImportance(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-slate-600">有效截止<input type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label><label className="flex items-center gap-2 pt-5 text-xs font-medium text-slate-600"><input type="checkbox" checked={pinned} onChange={(event) => setPinned(event.target.checked)} />长期置顶，不按时间过期</label></div>
+      <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={async () => { if (await save(false)) setOpen(false); }} disabled={pending} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">保存设置</button><button type="button" onClick={async () => { if (await save(true)) setOpen(false); }} disabled={pending} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">保存并记录已复核</button>{message ? <span role="status" className="self-center text-xs text-slate-500">{message}</span> : null}</div>
+    </div>
+  </OperationPanel></div>;
 }

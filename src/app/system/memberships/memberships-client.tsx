@@ -1,10 +1,11 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { AdminPageHeader } from "@/components/admin-page-header";
+import { OperationPanel } from "@/components/operation-panel";
 
 type Subscription = {
   id: string;
@@ -102,7 +103,6 @@ function applicationLabel(application: Item["membershipApplication"]): string {
 export function MembershipsClient({ username, adminMode = false }: { username: string; adminMode?: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [search, setSearch] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -137,7 +137,7 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
       <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="membership-list-title">
         <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
           <h2 id="membership-list-title" className="text-lg font-semibold text-slate-900">会员资格列表</h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500">会员页面专门处理资格与申请；展开单行后进行授予、延期、撤销或拒绝，并保留原有预览确认流程。</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">列表用于查看状态；授予、延期、撤销或拒绝操作在对应用户的操作面板中完成，并保留原有预览确认流程。</p>
         </div>
         {loading ? <div className="px-6 py-12 text-center text-sm text-slate-500">读取中…</div> : items.length === 0 ? <div className="px-6 py-12 text-center text-sm text-slate-500">没有匹配的用户。</div> : <div className="overflow-x-auto">
           <table className="min-w-[860px] w-full text-left text-sm">
@@ -152,18 +152,14 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
             </thead>
             <tbody className="divide-y divide-slate-100">
               {items.map((item) => {
-                const expanded = expandedId === item.id;
                 const subscription = item.membershipSubscription;
-                return <Fragment key={item.id}>
-                  <tr key={item.id} className={`transition hover:bg-indigo-50/50 ${expanded ? "bg-indigo-50/30" : ""}`}>
+                return <tr key={item.id} className="transition hover:bg-indigo-50/50">
                     <td className="px-5 py-4 sm:px-6"><p className="font-semibold text-slate-900">{item.displayName || item.username}</p><p className="mt-1 text-xs text-slate-400">@{item.username}</p></td>
                     <td className="px-5 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-semibold ${item.membershipApplication?.status === "pending" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{applicationLabel(item.membershipApplication)}</span>{item.membershipApplication ? <p className="mt-1 text-xs text-slate-400">提交于 {date(item.membershipApplication.submittedAt)}</p> : null}</td>
                     <td className="px-5 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-semibold ${subscription?.status === "active" && new Date(subscription.expiresAt) > new Date() ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{statusLabel(subscription)}</span></td>
                     <td className="px-5 py-4 text-xs text-slate-600"><span>{subscription ? `至 ${date(subscription.expiresAt)}` : "尚未授予"}</span><span className="mt-1 block text-slate-400">{subscription ? `最近变更 ${date(subscription.updatedAt)}` : "—"}</span></td>
-                    <td className="px-5 py-4 text-right"><button type="button" aria-expanded={expanded} aria-controls={`membership-management-${item.id}`} onClick={() => setExpandedId((current) => current === item.id ? null : item.id)} className="inline-flex rounded-lg px-2 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500">{expanded ? "收起管理" : "管理资格"}</button></td>
-                  </tr>
-                  {expanded ? <tr key={`${item.id}-management`} id={`membership-management-${item.id}`}><td colSpan={5} className="bg-slate-50/70 p-4 sm:p-6"><MembershipCard item={item} onChanged={() => { setExpandedId(null); void load(); }} /></td></tr> : null}
-                </Fragment>;
+                    <td className="px-5 py-4 text-right"><MembershipCard item={item} onChanged={() => void load()} /></td>
+                  </tr>;
               })}
             </tbody>
           </table>
@@ -177,6 +173,7 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
 
 function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void }) {
   const subscription = item.membershipSubscription;
+  const [operationOpen, setOperationOpen] = useState(false);
   const [days, setDays] = useState("30");
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
@@ -289,6 +286,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
       // consecutive extensions), so it must receive a fresh key.
       requestKeyRef.current = newRequestKey();
       lastActionRef.current = null;
+      setOperationOpen(false);
       onChanged();
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "会员状态更新失败");
@@ -330,64 +328,62 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
         }),
       });
       if (!response.ok) throw new Error(await responseError(response, "拒绝申请失败"));
-      setRejectPreview(null); onChanged();
+      setRejectPreview(null); setOperationOpen(false); onChanged();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "拒绝申请失败"); }
     finally { setPending(false); }
   }
 
   const canGrant = subscription === null || subscription.status !== "active" || new Date(subscription.expiresAt) <= new Date();
   const action = canGrant ? "grant" : "extend";
-  return <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-semibold">{item.displayName || item.username}</h2>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{item.role === "admin" ? "系统管理员" : "普通用户"}</span>
-          <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${subscription?.status === "active" && new Date(subscription.expiresAt) > new Date() ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{statusLabel(subscription)}</span>
-        </div>
-        <p className="mt-2 text-xs text-slate-500">@{item.username}</p>
-        <p className="mt-2 text-xs text-slate-400">{subscription ? `到期：${date(subscription.expiresAt)} · 版本 ${subscription.version}` : "尚未授予会员资格"}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label>
-          <span className="sr-only">会员天数</span>
-          <input type="number" min={1} max={3650} value={days} onChange={(event) => changedDays(event.target.value)} className="w-20 rounded-xl border border-slate-200 px-3 py-2 text-xs" />
-        </label>
-        <button type="button" disabled={pending} onClick={() => void requestPreview(action)} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">预览{action === "extend" ? "延期" : "授予"}</button>
-        {subscription && subscription.status === "active" && new Date(subscription.expiresAt) > new Date() ? <button type="button" disabled={pending} onClick={() => void requestPreview("revoke")} className="rounded-xl border border-rose-200 px-4 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">预览撤销</button> : null}
-      </div>
-    </div>
-    {item.membershipApplication ? <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-indigo-900"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">会员申请：{item.membershipApplication.status === "pending" ? "待处理" : item.membershipApplication.status === "fulfilled" ? "已完成" : item.membershipApplication.status === "rejected" ? "已拒绝" : "已撤回"}</span><span>提交于 {date(item.membershipApplication.submittedAt)}</span></div>{item.membershipApplication.status === "pending" ? <button type="button" disabled={pending} onClick={() => void requestRejectPreview()} className="mt-3 rounded-xl border border-indigo-200 bg-white px-3 py-2 font-semibold text-indigo-700 disabled:opacity-50">预览拒绝申请</button> : null}</div> : null}
-    <label className="mt-4 block">
-      <span className="mb-2 block text-xs font-semibold text-slate-500">授予 / 延期备注</span>
-      <input value={note} onChange={(event) => changedNote(event.target.value)} placeholder="可选，仅用于审计" maxLength={500} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-    </label>
-    <label className="mt-4 block">
-      <span className="mb-2 block text-xs font-semibold text-slate-500">撤销原因</span>
-      <textarea value={reason} onChange={(event) => changedReason(event.target.value)} placeholder="仅在撤销时必填" maxLength={500} rows={3} className="w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-xs outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-    </label>
-    {preview ? <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 p-5" role="dialog" aria-label="会员变更确认">
+  return <OperationPanel title={`管理 @${item.username} 的会员资格`} triggerLabel="管理资格" open={operationOpen} onOpenChange={setOperationOpen} description="授予、延期、撤销和拒绝申请都要先检查预览，再按提示完成确认。">
+    <div className="mx-auto max-w-3xl">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-semibold text-indigo-950">确认{preview.action === "revoke" ? "撤销" : preview.action === "extend" ? "延期" : "授予"}会员</h3>
-          <p className="mt-2 text-xs leading-6 text-indigo-900">当前状态：{preview.current.state}（版本 {preview.current.version}） → {preview.target.state}（版本 {preview.target.version}）</p>
-          <p className="text-xs leading-6 text-indigo-900">有效期：{date(preview.target.startsAt)} 至 {date(preview.target.expiresAt)}</p>
+          <h3 className="text-lg font-semibold">{item.displayName || item.username}</h3>
+          <p className="mt-1 text-xs text-slate-500">@{item.username} · {statusLabel(subscription)}</p>
+          <p className="mt-1 text-xs text-slate-400">{subscription ? `到期：${date(subscription.expiresAt)} · 版本 ${subscription.version}` : "尚未授予会员资格"}</p>
         </div>
-        <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-indigo-700">预览有效至 {dateTime(preview.previewExpiresAt)}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <label>
+            <span className="sr-only">会员天数</span>
+            <input type="number" min={1} max={3650} value={days} onChange={(event) => changedDays(event.target.value)} className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <button type="button" disabled={pending} onClick={() => void requestPreview(action)} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">预览{action === "extend" ? "延期" : "授予"}</button>
+          {subscription && subscription.status === "active" && new Date(subscription.expiresAt) > new Date() ? <button type="button" disabled={pending} onClick={() => void requestPreview("revoke")} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50">预览撤销</button> : null}
+        </div>
       </div>
-      <div className="mt-3 rounded-xl border border-indigo-100 bg-white/70 p-3 text-xs leading-6 text-indigo-900">
-        <p className="font-semibold">个人模型依赖摘要</p>
-        <p>未终态个人委托 {preview.dependencyStats.nonTerminalPersonalDelegations} 项 · 有效个人路由 {preview.dependencyStats.effectivePersonalRouteSelections} 项 · 已发布个人索引 {preview.dependencyStats.publishedPersonalIndexes} 项</p>
-      </div>
-      <p className="mt-3 text-xs leading-6 text-indigo-900">个人模型自动化影响 {preview.dependencyStats.personalModelAutomationsAffected} 项；平台自动化、Git 与 MCP 配置不受影响。</p>
-      {preview.blockingCategories.length > 0 ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">检测到未解除的个人模型依赖，当前只能关闭确认；解除依赖后请重新预览。</p> : null}
-      {preview.action === "revoke" && preview.canExecute ? <label className="mt-4 block"><span className="mb-2 block text-xs font-semibold text-indigo-950">输入当前用户名确认撤销</span><input value={confirmationUsername} onChange={(event) => setConfirmationUsername(event.target.value)} placeholder={item.username} className="w-full rounded-xl border border-indigo-200 bg-white px-3 py-2.5 text-xs outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100" /></label> : null}
-      <div className="mt-4 flex flex-wrap justify-end gap-3">
-        <button type="button" disabled={pending} onClick={() => setPreview(null)} className="rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-xs font-semibold text-indigo-800 disabled:opacity-50">返回修改</button>
-        <button type="button" disabled={pending || !preview.canExecute} onClick={() => void executePreview()} className="rounded-xl bg-indigo-700 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">确认并执行</button>
-      </div>
-    </div> : null}
-    {rejectPreview ? <div className="mt-5 rounded-2xl border border-rose-100 bg-rose-50 p-5" role="dialog" aria-label="拒绝会员申请确认"><p className="text-sm font-semibold text-rose-950">确认拒绝会员申请</p><p className="mt-2 text-xs leading-6 text-rose-800">该预览有效至 {dateTime(rejectPreview.preview.expiresAt)}，确认后申请将进入终态。</p><div className="mt-4 flex flex-wrap justify-end gap-3"><button type="button" disabled={pending} onClick={() => setRejectPreview(null)} className="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-xs font-semibold text-rose-800">取消</button><button type="button" disabled={pending} onClick={() => void executeRejectPreview()} className="rounded-xl bg-rose-700 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">确认并执行</button></div></div> : null}
-    {message ? <p role="alert" className="mt-4 text-xs leading-6 text-rose-600">{message}</p> : null}
-  </article>;
+      {item.membershipApplication ? <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-sm leading-6 text-indigo-900"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">会员申请：{item.membershipApplication.status === "pending" ? "待处理" : item.membershipApplication.status === "fulfilled" ? "已完成" : item.membershipApplication.status === "rejected" ? "已拒绝" : "已撤回"}</span><span>提交于 {date(item.membershipApplication.submittedAt)}</span></div>{item.membershipApplication.status === "pending" ? <button type="button" disabled={pending} onClick={() => void requestRejectPreview()} className="mt-3 rounded-xl border border-indigo-200 bg-white px-3 py-2 font-semibold text-indigo-700 disabled:opacity-50">预览拒绝申请</button> : null}</div> : null}
+      <label className="mt-5 block">
+        <span className="mb-2 block text-sm font-semibold text-slate-600">授予 / 延期备注</span>
+        <input value={note} onChange={(event) => changedNote(event.target.value)} placeholder="可选，仅用于审计" maxLength={500} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
+      </label>
+      <label className="mt-5 block">
+        <span className="mb-2 block text-sm font-semibold text-slate-600">撤销 / 拒绝原因</span>
+        <textarea value={reason} onChange={(event) => changedReason(event.target.value)} placeholder="仅在撤销或拒绝时必填" maxLength={500} rows={3} className="w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
+      </label>
+      {preview ? <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 p-5" role="dialog" aria-label="会员变更确认">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h4 className="text-sm font-semibold text-indigo-950">确认{preview.action === "revoke" ? "撤销" : preview.action === "extend" ? "延期" : "授予"}会员</h4>
+            <p className="mt-2 text-xs leading-6 text-indigo-900">当前状态：{preview.current.state}（版本 {preview.current.version}） → {preview.target.state}（版本 {preview.target.version}）</p>
+            <p className="text-xs leading-6 text-indigo-900">有效期：{date(preview.target.startsAt)} 至 {date(preview.target.expiresAt)}</p>
+          </div>
+          <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-indigo-700">预览有效至 {dateTime(preview.previewExpiresAt)}</span>
+        </div>
+        <div className="mt-3 rounded-xl border border-indigo-100 bg-white/70 p-3 text-xs leading-6 text-indigo-900">
+          <p className="font-semibold">个人模型依赖摘要</p>
+          <p>未终态个人委托 {preview.dependencyStats.nonTerminalPersonalDelegations} 项 · 有效个人路由 {preview.dependencyStats.effectivePersonalRouteSelections} 项 · 已发布个人索引 {preview.dependencyStats.publishedPersonalIndexes} 项</p>
+        </div>
+        <p className="mt-3 text-xs leading-6 text-indigo-900">个人模型自动化影响 {preview.dependencyStats.personalModelAutomationsAffected} 项；平台自动化、Git 与 MCP 配置不受影响。</p>
+        {preview.blockingCategories.length > 0 ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">检测到未解除的个人模型依赖，当前只能关闭确认；解除依赖后请重新预览。</p> : null}
+        {preview.action === "revoke" && preview.canExecute ? <label className="mt-4 block"><span className="mb-2 block text-xs font-semibold text-indigo-950">输入当前用户名确认撤销</span><input value={confirmationUsername} onChange={(event) => setConfirmationUsername(event.target.value)} placeholder={item.username} className="w-full rounded-xl border border-indigo-200 bg-white px-3 py-2.5 text-xs outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100" /></label> : null}
+        <div className="mt-4 flex flex-wrap justify-end gap-3">
+          <button type="button" disabled={pending} onClick={() => setPreview(null)} className="rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-xs font-semibold text-indigo-800 disabled:opacity-50">返回修改</button>
+          <button type="button" disabled={pending || !preview.canExecute} onClick={() => void executePreview()} className="rounded-xl bg-indigo-700 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">确认并执行</button>
+        </div>
+      </div> : null}
+      {rejectPreview ? <div className="mt-5 rounded-2xl border border-rose-100 bg-rose-50 p-5" role="dialog" aria-label="拒绝会员申请确认"><p className="text-sm font-semibold text-rose-950">确认拒绝会员申请</p><p className="mt-2 text-xs leading-6 text-rose-800">该预览有效至 {dateTime(rejectPreview.preview.expiresAt)}，确认后申请将进入终态。</p><div className="mt-4 flex flex-wrap justify-end gap-3"><button type="button" disabled={pending} onClick={() => setRejectPreview(null)} className="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-xs font-semibold text-rose-800">取消</button><button type="button" disabled={pending} onClick={() => void executeRejectPreview()} className="rounded-xl bg-rose-700 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">确认并执行</button></div></div> : null}
+      {message ? <p role="alert" className="mt-4 text-sm leading-6 text-rose-600">{message}</p> : null}
+    </div>
+  </OperationPanel>;
 }

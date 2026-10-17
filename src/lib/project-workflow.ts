@@ -411,6 +411,8 @@ export function serializeProjectJobResult(kind: BackgroundJobKind, value: unknow
     return Object.freeze(serializeSimpleResult(value, {
       sourceCount: "integer",
       candidateCount: "integer",
+      confirmedCount: "integer",
+      reviewRequiredCount: "integer",
       duplicateCount: "integer",
       returnedCandidateCount: "integer",
       rejectedCandidateCount: "integer",

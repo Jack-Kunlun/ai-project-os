@@ -104,9 +104,10 @@ test("grounded extraction uses bounded scrolling and explicit batch operations",
   assert.match(memory, /反选/u);
   assert.match(memory, /批量确认/u);
   assert.match(memory, /批量驳回/u);
-  assert.match(memory, /lg:h-\[620px\]/u);
+  assert.match(memory, /<OperationPanel title="整理已有项目资料"/u);
+  assert.match(memory, /<OperationPanel title="处理不确定内容"/u);
   assert.match(memory, /aria-label="可选项目资料"/u);
-  assert.match(memory, /aria-label="待审核候选列表"/u);
+  assert.match(memory, /aria-label="待处理内容列表"/u);
   assert.match(memory, /overflow-y-auto/u);
   assert.match(memory, /expectedItemUpdatedAt: candidate\.projectItem\.updatedAt/u);
   assert.match(memory, /for \(const candidate of batch\)/u);

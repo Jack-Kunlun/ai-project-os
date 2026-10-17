@@ -498,6 +498,8 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     await signInR02Actor(activePage, actors.active);
     await activePage.goto("/personal/models");
     await expect(activePage.getByText("会员有效", { exact: true })).toBeVisible();
+    await expect(activePage.getByRole("button", { name: "保存个人连接", exact: true })).toHaveCount(0);
+    await activePage.getByRole("button", { name: "添加连接", exact: true }).click();
     await expect(activePage.getByRole("button", { name: "保存个人连接", exact: true })).toBeVisible();
     const activeProviderList = await activePage.evaluate(async () => {
       const response = await fetch("/api/me/ai-providers");

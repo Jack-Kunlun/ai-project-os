@@ -153,7 +153,9 @@ test("memory confirmation prepare and execute are single-flight and stale input 
   try {
     await addSource(page, projectId, `Browser confirmation source ${randomUUID()}`);
     await page.goto(`/projects/${projectId}/memory`);
-    const indexPanel = page.locator("section").filter({ has: page.getByRole("heading", { name: "项目语义索引", exact: true }) });
+    await expect(page.getByRole("heading", { name: "项目语义索引", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "建立语义索引", exact: true }).click();
+    const indexPanel = page.getByRole("dialog", { name: "维护项目语义索引", exact: true });
     await expect(indexPanel).toBeVisible();
     const prepareRequests: string[] = [];
     const executeRequests: string[] = [];

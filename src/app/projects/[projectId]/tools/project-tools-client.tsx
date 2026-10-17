@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { OperationPanel } from "@/components/operation-panel";
 import { ProjectOverviewParentLink } from "@/components/project-parent-link";
 import { connectionErrorText, connectionFieldClass, readConnectionError } from "@/app/profile/connections/connection-ui";
 
@@ -182,24 +183,26 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  async function mutate(key: string, url: string, body: Record<string, unknown>, success: string, failure: string): Promise<void> {
-    if (pendingKeyRef.current !== null) return;
+  async function mutate(key: string, url: string, body: Record<string, unknown>, success: string, failure: string): Promise<boolean> {
+    if (pendingKeyRef.current !== null) return false;
     pendingKeyRef.current = key;
     setPendingKey(key);
     try {
       await requestJson<unknown>(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       setMessage({ tone: "success", text: success });
       await load({ showLoading: false });
+      return true;
     } catch (error) {
       setMessage({ tone: "error", text: connectionErrorText(error, failure) });
+      return false;
     } finally {
       pendingKeyRef.current = null;
       setPendingKey(null);
     }
   }
 
-  async function propose(mcpConnectionId: string, expiresAt: string): Promise<void> {
-    if (pendingKeyRef.current !== null) return;
+  async function propose(mcpConnectionId: string, expiresAt: string): Promise<boolean> {
+    if (pendingKeyRef.current !== null) return false;
     const confirmation = await confirm({
       eyebrow: "创建项目委托",
       title: "提交只读 MCP 委托提案？",
@@ -210,8 +213,8 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
       requiredValue: "确认",
       inputPlaceholder: "确认",
     });
-    if (!confirmation.confirmed) return;
-    await mutate("proposal", `/api/projects/${projectId}/mcp-connection-delegations`, { mcpConnectionId, expiresAt: new Date(expiresAt).toISOString() }, "委托提案已创建，请等待连接所有者确认。", "创建委托提案失败");
+    if (!confirmation.confirmed) return false;
+    return await mutate("proposal", `/api/projects/${projectId}/mcp-connection-delegations`, { mcpConnectionId, expiresAt: new Date(expiresAt).toISOString() }, "委托提案已创建，请等待连接所有者确认。", "创建委托提案失败");
   }
 
   async function terminal(delegation: Delegation, action: "rejection" | "revocation"): Promise<void> {
@@ -320,8 +323,8 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
 
         {loading ? <LoadingState /> : (
           <>
-            <div className="mt-7 grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,.78fr)_minmax(0,1.22fr)]">
-              <ProposalPanel enabled={delegationState?.capabilities.canPropose === true && grantState?.archived !== true} connections={delegationState?.connections ?? []} pending={pendingKey === "proposal"} onSubmit={(connectionId, expiresAt) => void propose(connectionId, expiresAt)} />
+            <div className="mt-7 space-y-6">
+              <ProposalPanel enabled={delegationState?.capabilities.canPropose === true && grantState?.archived !== true} connections={delegationState?.connections ?? []} pending={pendingKey === "proposal"} operationError={message?.tone === "error" ? message.text : null} onErrorDismiss={() => setMessage(null)} onSubmit={propose} />
               <DelegationList delegations={delegationState?.delegations ?? []} pendingKey={pendingKey} onConfirm={confirmDelegation} onTerminal={terminal} />
             </div>
             <GrantPanel state={grantState} pendingKey={pendingKey} onCreate={createGrant} onRevoke={revokeGrant} />
@@ -332,17 +335,22 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
   );
 }
 
-function ProposalPanel({ enabled, connections, pending, onSubmit }: { enabled: boolean; connections: readonly ConnectionOption[]; pending: boolean; onSubmit: (connectionId: string, expiresAt: string) => void }) {
+function ProposalPanel({ enabled, connections, pending, operationError, onErrorDismiss, onSubmit }: { enabled: boolean; connections: readonly ConnectionOption[]; pending: boolean; operationError: string | null; onErrorDismiss: () => void; onSubmit: (connectionId: string, expiresAt: string) => Promise<boolean> }) {
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
   const [expiresAt, setExpiresAt] = useState(defaultExpiry);
+  const [open, setOpen] = useState(false);
   const selectedConnectionId = connectionId || connections[0]?.id || "";
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (selectedConnectionId !== "" && expiresAt !== "") onSubmit(selectedConnectionId, expiresAt);
+    if (selectedConnectionId !== "" && expiresAt !== "") void onSubmit(selectedConnectionId, expiresAt).then((created) => { if (created) setOpen(false); });
   }
 
-  return <section className="h-fit min-w-0 rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5 shadow-sm sm:p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">New delegation</p><h2 className="mt-2 text-xl font-semibold">提案只读 MCP 委托</h2><p className="mt-2 text-xs leading-5 text-slate-600">只能选择当前账户已验证的个人连接。提交后仍需连接所有者和项目 Owner 独立确认。</p>{!enabled ? <p className="mt-4 rounded-xl bg-slate-100 px-3 py-3 text-xs leading-5 text-slate-600">当前账户没有创建权限，或项目已归档。连接所有者确认和项目 Owner 确认仍由各自权限控制。</p> : connections.length === 0 ? <p className="mt-4 rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900">当前没有可进入项目委托的合格个人 MCP 连接。请先在“我的 MCP 连接”完成受限地址解析、initialize 和 tools/list 只读测试，再返回创建委托。</p> : <form onSubmit={submit} className="mt-5 space-y-3"><label className="block text-xs font-semibold text-slate-700">个人 MCP 连接<select className={connectionFieldClass} value={selectedConnectionId} onChange={(event) => setConnectionId(event.target.value)}>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label><label className="block text-xs font-semibold text-slate-700">有效期截止<input required type="datetime-local" className={connectionFieldClass} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label><div className="rounded-2xl bg-white/70 px-3 py-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-slate-800">本期固定规则</p><p className="mt-1">委托只授予只读范围；外部调用需单独审批和派发，自动化仍关闭。</p></div><button type="submit" disabled={pending || selectedConnectionId === ""} className={`${primaryButtonClass} min-h-11 w-full`}>{pending ? "提交中…" : "提交委托提案"}</button></form>}</section>;
+  if (!enabled) return <p className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">当前账户没有创建权限，或项目已归档。连接所有者确认和项目 Owner 确认仍由各自权限控制。</p>;
+  return <OperationPanel title="提案只读 MCP 委托" triggerLabel="提案只读 MCP 委托" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending} description="只能选择当前账户已验证的个人连接。提交后仍需连接所有者和项目 Owner 独立确认。">
+    {operationError ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{operationError}</p> : null}
+    {connections.length === 0 ? <p className="max-w-2xl rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900">当前没有可进入项目委托的合格个人 MCP 连接。请先在“我的 MCP 连接”完成受限地址解析、initialize 和 tools/list 只读测试，再返回创建委托。</p> : <form onSubmit={submit} className="max-w-2xl space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5"><label className="block text-xs font-semibold text-slate-700">个人 MCP 连接<select className={connectionFieldClass} value={selectedConnectionId} onChange={(event) => setConnectionId(event.target.value)}>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label><label className="block text-xs font-semibold text-slate-700">有效期截止<input required type="datetime-local" className={connectionFieldClass} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label><div className="rounded-2xl bg-white/70 px-3 py-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-slate-800">本期固定规则</p><p className="mt-1">委托只授予只读范围；外部调用需单独审批和派发，自动化仍关闭。</p></div><button type="submit" disabled={pending || selectedConnectionId === ""} className={`${primaryButtonClass} min-h-11 w-full`}>{pending ? "提交中…" : "提交委托提案"}</button></form>}
+  </OperationPanel>;
 }
 
 function DelegationList({ delegations, pendingKey, onConfirm, onTerminal }: { delegations: readonly Delegation[]; pendingKey: string | null; onConfirm: (delegation: Delegation, kind: "owner" | "project") => Promise<void>; onTerminal: (delegation: Delegation, action: "rejection" | "revocation") => Promise<void> }) {

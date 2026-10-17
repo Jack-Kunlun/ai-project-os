@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { OperationPanel } from "@/components/operation-panel";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
@@ -66,6 +67,7 @@ export function PlatformProbeBudgetClient() {
   const [startsAt, setStartsAt] = useState(() => formatDateTimeLocal(new Date()));
   const [expiresAt, setExpiresAt] = useState(() => formatDateTimeLocal(new Date(Date.now() + 24 * 60 * 60 * 1_000)));
   const [message, setMessage] = useState<string | null>(null);
+  const [operationOpen, setOperationOpen] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -109,6 +111,7 @@ export function PlatformProbeBudgetClient() {
       });
       if (!response.ok) throw new Error(await readError(response, "探测预算启用失败"));
       await load();
+      setOperationOpen(false);
       setMessage("新的平台连接探测预算已启用；未知外发不会自动重试。 ");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "探测预算启用失败");
@@ -129,13 +132,15 @@ export function PlatformProbeBudgetClient() {
       </div>
       <div className="mt-6"><ScopeEvidenceCard title="平台探测预算边界" evidence={{ scope: "平台 · 供应商连通性探测", owner: "平台管理员", payer: "平台探测预算", affectedProjects: "项目不适用 · 仅平台供应商连通性探测", latestSuccess: budgetEvidence(budget, loading) }} /></div>
       {budget ? <dl className="mt-6 grid gap-4 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-4"><div><dt className="text-slate-400">版本</dt><dd className="mt-1 font-medium text-slate-700">{budget.version}</dd></div><div><dt className="text-slate-400">可用单位</dt><dd className="mt-1 font-medium text-slate-700">{budget.availableUnits} / {budget.unitLimit}</dd></div><div><dt className="text-slate-400">已结算 / 待核对</dt><dd className="mt-1 font-medium text-slate-700">{budget.settledUnits} / {budget.heldUnits}</dd></div><div><dt className="text-slate-400">有效期</dt><dd className="mt-1 font-medium text-slate-700">{dateLabel(budget.startsAt)} — {dateLabel(budget.expiresAt)}</dd></div></dl> : null}
-      <form onSubmit={activate} className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-4">
-        <label className="text-xs font-medium text-slate-600">单位上限<input type="number" min={1} max={10_000} value={unitLimit} onChange={(event) => setUnitLimit(event.target.value)} required className={adminInputClass} /></label>
-        <label className="text-xs font-medium text-slate-600">告警阈值<input type="number" min={0} max={10_000} value={threshold} onChange={(event) => setThreshold(event.target.value)} required className={adminInputClass} /></label>
-        <label className="text-xs font-medium text-slate-600">开始时间<input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required className={adminInputClass} /></label>
-        <label className="text-xs font-medium text-slate-600">结束时间<input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} required className={adminInputClass} /></label>
-        <div className="sm:col-span-4"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "保存中…" : budget === null ? "创建测试预算周期" : "更新测试额度"}</button></div>
-      </form>
+      <div className="mt-6 border-t border-slate-100 pt-6"><OperationPanel title={budget === null ? "创建平台连接探测预算" : "更新平台连接探测预算"} triggerLabel={budget === null ? "创建预算周期" : "更新预算额度"} description="预算周期变更会立即停用旧周期，未使用单位不会转移。" open={operationOpen} onOpenChange={setOperationOpen} disabled={loading || pending}>
+        <form onSubmit={activate} className="grid gap-4 sm:grid-cols-2">
+          <label className="text-xs font-medium text-slate-600">单位上限<input type="number" min={1} max={10_000} value={unitLimit} onChange={(event) => setUnitLimit(event.target.value)} required className={adminInputClass} /></label>
+          <label className="text-xs font-medium text-slate-600">告警阈值<input type="number" min={0} max={10_000} value={threshold} onChange={(event) => setThreshold(event.target.value)} required className={adminInputClass} /></label>
+          <label className="text-xs font-medium text-slate-600">开始时间<input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required className={adminInputClass} /></label>
+          <label className="text-xs font-medium text-slate-600">结束时间<input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} required className={adminInputClass} /></label>
+          <div className="sm:col-span-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "保存中…" : budget === null ? "创建测试预算周期" : "更新测试额度"}</button></div>
+        </form>
+      </OperationPanel></div>
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
     </section>
   );

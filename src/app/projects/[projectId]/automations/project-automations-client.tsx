@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
+import { OperationPanel } from "@/components/operation-panel";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { automationFailurePresentation } from "@/lib/automation-failure-presentation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
@@ -149,6 +150,7 @@ export function ProjectAutomationsClient({ username, projectId, isSystemAdmin }:
   const [focusedRun, setFocusedRun] = useState<AutomationRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
@@ -190,8 +192,8 @@ export function ProjectAutomationsClient({ username, projectId, isSystemAdmin }:
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Persistent worker</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目自动化</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">规则和运行记录保存在数据库，由独立 Worker 领取并带租约执行。网页来源刷新与本地治理任务可自动完成；Git 计划只读在项目 Git 页面单独双确认授权。向模型发送内容的任务只会准备边界并通知你确认，不会静默外传。</p>
         </section>
         {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
-        <div className="mt-8 grid gap-7 xl:grid-cols-[.75fr_1.25fr]">
-          {effectiveCapabilities.canCreate ? <AutomationForm projectId={projectId} onCreated={(rule) => setRules((current) => [...current, rule])} /> : <section className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">只读访问</p><h2 className="mt-2 text-2xl font-semibold">自动化由项目 Owner 管理</h2><p className="mt-4 text-sm leading-6 text-slate-600">你当前是{effectiveCapabilities.permission === "edit" ? " Editor" : " Viewer"}。可以查看规则、运行时间和失败建议，但创建、启用、暂停与立即运行仅对项目 Owner 开放。</p></section>}
+        <div className="mt-8 space-y-7">
+          {effectiveCapabilities.canCreate ? <OperationPanel title="添加自动化" triggerLabel="添加自动化" open={createOpen} onOpenChange={setCreateOpen} description="先预览规则影响范围，再确认保存。保存后由独立 Worker 在首次运行时间领取任务。"><AutomationForm projectId={projectId} onCreated={(rule) => { setRules((current) => [...current, rule]); setCreateOpen(false); }} /></OperationPanel> : <p className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm leading-6 text-slate-600">自动化由项目 Owner 管理。你当前是{effectiveCapabilities.permission === "edit" ? " Editor" : " Viewer"}，可以查看规则、运行时间和失败建议。</p>}
           <section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Rules</p><h2 className="mt-2 text-2xl font-semibold">运行规则</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${rules.length} 条`}</span></div>{focusedRun ? <AutomationRunDetail projectId={projectId} run={focusedRun} returnHref={notificationReturnHref} /> : null}<div className="space-y-4">{!loading && rules.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">还没有可运行的自动化规则。Git 计划只读请到项目 Git 页面单独授权；这里可预览网页来源、记忆质量或项目计划提醒。</div> : rules.map((rule) => <AutomationCard key={rule.id} projectId={projectId} rule={rule} capabilities={effectiveCapabilities} focusedRunId={focusedRun?.id ?? runQuery} onReload={reload} />)}</div></section>
         </div>
       </div>

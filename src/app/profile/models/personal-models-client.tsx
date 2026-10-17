@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { HelpTooltip } from "@/components/help-tooltip";
+import { OperationPanel } from "@/components/operation-panel";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import {
@@ -63,6 +64,15 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
   return (await safeResponseError(response, fallback)).message;
 }
 
+async function isPersonalProviderConflict(response: Response): Promise<boolean> {
+  if (response.status !== 409) return false;
+  const payload = await response.clone().json().catch(() => null) as unknown;
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return false;
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) return false;
+  return (error as { code?: unknown }).code === "AI_PROVIDER_CONFLICT";
+}
+
 function getCatalogEntry(catalog: readonly CatalogEntry[], kind: ProviderKind): CatalogEntry | undefined {
   return catalog.find((entry) => entry.kind === kind);
 }
@@ -73,6 +83,7 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,26 +133,29 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : message.tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}`}>{message.text}</p> : null}
       {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重试</button></div> : null}
 
-      <div className={`mt-6 grid gap-6 ${canConfigure ? "lg:grid-cols-[minmax(280px,0.78fr)_minmax(0,1.22fr)]" : "lg:grid-cols-1"}`}>
-        {canConfigure ? catalog.length > 0 ? <CreateProviderForm catalog={catalog} onCreated={(provider) => { setProviders((current) => [...current, provider]); setMessage({ tone: "success", text: "个人模型连接已保存。首次使用前请先测试连接。" }); }} /> : <CreateProviderPlaceholder loading={loading} loadError={loadError} onRetry={load} /> : null}
-        <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
+      <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-xl font-semibold">已有连接</h2>
               <p className="mt-1 text-xs leading-5 text-slate-500">密钥只显示末尾掩码；固定官方端点不可修改。</p>
             </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{providers.length} 个连接</span>
+            <div className="flex items-center gap-3">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{providers.length} 个连接</span>
+              {canConfigure && catalog.length > 0 ? <OperationPanel title="添加个人模型连接" triggerLabel="添加连接" description="连接仅保存到当前账户。API Key 会加密保存，保存后请在连接卡片中测试。" open={createOpen} onOpenChange={setCreateOpen} disabled={loading}>
+                <CreateProviderForm catalog={catalog} onCreated={(provider) => { setProviders((current) => [...current, provider]); setCreateOpen(false); setMessage({ tone: "success", text: "个人模型连接已保存。首次使用前请先测试连接。" }); }} />
+              </OperationPanel> : null}
+            </div>
           </div>
-          {loading ? <div className="mt-5 space-y-3" aria-label="正在加载连接"><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /></div> : providers.length === 0 ? <EmptyState canConfigure={canConfigure} /> : <div className="mt-5 space-y-4">{providers.map((provider) => <ProviderCard key={provider.id} provider={provider} catalog={catalog} membership={membership} canConfigure={canConfigure} canMaintain={canMaintain} onChanged={(next) => setProviders((current) => current.map((item) => item.id === next.id ? next : item))} onRemoved={(id) => { setProviders((current) => current.filter((item) => item.id !== id)); setMessage({ tone: "success", text: "连接已删除。" }); }} onMessage={setMessage} onReload={load} />)}</div>}
-        </section>
-      </div>
+          {canConfigure && catalog.length === 0 ? <div className="mt-5"><CreateProviderPlaceholder loading={loading} loadError={loadError} onRetry={load} /></div> : null}
+          {loading && providers.length === 0 ? <div className="mt-5 space-y-3" aria-label="正在加载连接"><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /></div> : providers.length === 0 ? <EmptyState canConfigure={canConfigure} /> : <div className="mt-5 space-y-4">{providers.map((provider) => <ProviderCard key={provider.id} provider={provider} catalog={catalog} membership={membership} canConfigure={canConfigure} canMaintain={canMaintain} onChanged={(next) => setProviders((current) => current.map((item) => item.id === next.id ? next : item))} onRemoved={(id) => { setProviders((current) => current.filter((item) => item.id !== id)); setMessage({ tone: "success", text: "连接已删除。" }); }} onMessage={setMessage} onReload={load} />)}</div>}
+      </section>
       <style jsx global>{`.field{margin-top:.5rem;width:100%;border-radius:.75rem;border:1px solid #cbd5e1;background:white;padding:.72rem .9rem;font-size:.875rem;color:#0f172a;outline:none}.field:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.14)}.field:disabled{background:#f1f5f9;color:#64748b}`}</style>
     </div>
   );
 }
 
 function EmptyState({ canConfigure }: { canConfigure: boolean }) {
-  return <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center"><p className="text-sm font-semibold text-slate-700">还没有个人模型连接</p><p className="mt-2 text-xs leading-5 text-slate-500">{canConfigure ? "从左侧添加一个连接，保存后先测试再用于项目。" : "会员资格失效期间不能新增连接；历史连接仍可在这里安全清理。"}</p></div>;
+  return <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center"><p className="text-sm font-semibold text-slate-700">还没有个人模型连接</p><p className="mt-2 text-xs leading-5 text-slate-500">{canConfigure ? "使用上方“添加连接”入口创建连接，保存后先测试再用于项目。" : "会员资格失效期间不能新增连接；历史连接仍可在这里安全清理。"}</p></div>;
 }
 
 function CreateProviderPlaceholder({ loading, loadError, onRetry }: { loading: boolean; loadError: string | null; onRetry: () => Promise<void> }) {
@@ -196,15 +210,24 @@ function CreateProviderForm({ catalog, onCreated }: { catalog: readonly CatalogE
 function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain, onChanged, onRemoved, onMessage, onReload }: { provider: Provider; catalog: readonly CatalogEntry[]; membership: Membership; canConfigure: boolean; canMaintain: boolean; onChanged: (provider: Provider) => void; onRemoved: (providerId: string) => void; onMessage: (message: Message) => void; onReload: () => Promise<void> }) {
   const definition = getCatalogEntry(catalog, provider.kind);
   const [editing, setEditing] = useState<"configuration" | "key" | null>(null);
+  const [operationOpen, setOperationOpen] = useState(false);
+  const [operationMessage, setOperationMessage] = useState<Message | null>(null);
   const [draft, setDraft] = useState<PersonalModelDraft | null>(null);
   const [pending, setPending] = useState(false);
   const { confirm, dialog } = useAppConfirmDialog();
   const activeMembership = membership.status === "active";
   const enabled = provider.status !== "disabled" && provider.disabledAt === null;
 
+  function reportMessage(next: Message) {
+    setOperationMessage(next);
+    onMessage(next);
+  }
+
   function beginEditing(mode: "configuration" | "key") {
-    setDraft(createPersonalModelEditDraft(provider));
+    if (draft === null) setOperationMessage(null);
+    setDraft((current) => current ?? createPersonalModelEditDraft(provider));
     setEditing(mode);
+    setOperationOpen(true);
   }
 
   function updateDraft(next: Partial<PersonalModelDraft>) {
@@ -217,30 +240,31 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
 
   async function patch(input: Record<string, unknown>, expectedUpdatedAt: string, successText: string) {
     setPending(true);
+    setOperationMessage(null);
     try {
       const response = await fetch(`/api/me/ai-providers/${provider.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...input, expectedUpdatedAt }) });
       if (!response.ok) {
+        const staleSnapshot = await isPersonalProviderConflict(response);
         const error = await errorMessage(response, "连接更新失败");
         await onReload();
-        const editingMessage = editing === null ? error : `${error} 状态已刷新，请重新打开编辑。`;
-        if (editing !== null) {
+        if (staleSnapshot && editing !== null) {
+          setOperationOpen(false);
           setEditing(null);
           setDraft(null);
+          reportMessage({ tone: "error", text: "状态已刷新，请重新打开编辑" });
+          return null;
         }
-        onMessage({ tone: "error", text: editingMessage });
+        const editingMessage = editing === null ? error : `${error}；状态已刷新，非敏感字段草稿已保留；如填写过 API Key，需重新输入。若版本已变化，请放弃草稿后重新打开编辑。`;
+        reportMessage({ tone: "error", text: editingMessage });
         return null;
       }
       const payload = await response.json() as { provider: Provider };
-      onChanged(payload.provider); onMessage({ tone: "success", text: successText }); return payload.provider;
+      onChanged(payload.provider); reportMessage({ tone: "success", text: successText }); return payload.provider;
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : "连接更新失败";
       await onReload();
-      const editingMessage = editing === null ? error : `${error} 状态已刷新，请重新打开编辑。`;
-      if (editing !== null) {
-        setEditing(null);
-        setDraft(null);
-      }
-      onMessage({ tone: "error", text: editingMessage });
+      const editingMessage = editing === null ? error : `${error}；状态已刷新，非敏感字段草稿已保留；如填写过 API Key，需重新输入。若版本已变化，请放弃草稿后重新打开编辑。`;
+      reportMessage({ tone: "error", text: editingMessage });
       return null;
     } finally { clearDraftKey(); setPending(false); }
   }
@@ -249,22 +273,26 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
     event.preventDefault();
     if (editing === null || draft === null || (editing === "configuration" && !canConfigure) || (editing === "key" && !canMaintain)) return;
     if (editing === "configuration" && !hasPersonalModelCapability(draft)) {
-      onMessage({ tone: "error", text: "请至少配置生成模型或向量模型。" });
+      reportMessage({ tone: "error", text: "请至少配置生成模型或向量模型。" });
       return;
     }
     if (editing === "key" && !draft.apiKey) {
-      onMessage({ tone: "error", text: "请输入新的 API Key。" });
+      reportMessage({ tone: "error", text: "请输入新的 API Key。" });
       return;
     }
     const input = editing === "key"
       ? createPersonalModelKeyPatch(draft)
       : createPersonalModelConfigurationPatch(draft);
     if (draft.expectedUpdatedAt === undefined) {
-      onMessage({ tone: "error", text: "编辑快照已失效，请重新打开编辑。" });
+      reportMessage({ tone: "error", text: "编辑快照已失效，请重新打开编辑。" });
       return;
     }
     const next = await patch(input, draft.expectedUpdatedAt, editing === "key" ? "API Key 已轮换，请重新测试连接。" : "配置已更新，请重新测试连接。");
-    if (next) setEditing(null);
+    if (next) {
+      setOperationOpen(false);
+      setEditing(null);
+      setDraft(null);
+    }
   }
 
   async function toggleEnabled() {
@@ -277,20 +305,20 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
   }
 
   async function testConnection() {
-    setPending(true); onMessage({ tone: "info", text: "正在向固定官方端点发送不含用户或项目内容的探针…" });
+    setPending(true); reportMessage({ tone: "info", text: "正在向固定官方端点发送不含用户或项目内容的探针…" });
     try {
       const response = await fetch(`/api/me/ai-providers/${provider.id}/test`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
       if (!response.ok) {
         const error = await errorMessage(response, "连接测试失败");
         await onReload();
-        onMessage({ tone: "error", text: error });
+        reportMessage({ tone: "error", text: error });
         return;
       }
       const payload = await response.json() as { provider: Provider };
-      onChanged(payload.provider); onMessage({ tone: "success", text: "连接测试通过。探针不包含用户或项目内容。" });
+      onChanged(payload.provider); reportMessage({ tone: "success", text: "连接测试通过。探针不包含用户或项目内容。" });
     } catch (cause) {
       await onReload();
-      onMessage({ tone: "error", text: cause instanceof Error ? cause.message : "连接测试失败" });
+      reportMessage({ tone: "error", text: cause instanceof Error ? cause.message : "连接测试失败" });
     } finally { setPending(false); }
   }
 
@@ -309,14 +337,14 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
       if (!response.ok) {
         const error = await errorMessage(response, "连接删除失败");
         await onReload();
-        onMessage({ tone: "error", text: error });
+        reportMessage({ tone: "error", text: error });
         return;
       }
       onRemoved(current.id);
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : "连接删除失败";
       await onReload();
-      onMessage({ tone: "error", text: error });
+      reportMessage({ tone: "error", text: error });
     }
     finally { setPending(false); }
   }
@@ -325,8 +353,26 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
     {provider.lastErrorCode ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近错误：{provider.lastErrorCode}{provider.lastErrorCode === "AI_PROVIDER_IN_USE" ? "。该连接仍可能被项目或历史记录引用；清理活动路由或撤销委托后若仍失败，请保持连接停用并稍后重试。" : "。修改配置后请重新测试。"}</p> : null}
     <dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400">生成模型</dt><dd className="mt-1 break-all font-medium">{provider.defaultGenerationModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">图片模型</dt><dd className="mt-1 break-all font-medium">{provider.defaultVisionModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">向量模型</dt><dd className="mt-1 break-all font-medium">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId}${provider.embeddingDimensions ? ` · ${provider.embeddingDimensions} 维` : ""}` : "未配置"}</dd></div></dl>
     <div className="mt-4"><ScopeEvidenceCard title="个人模型连接边界" evidence={{ scope: "个人连接", owner: "当前账户", payer: "个人连接所有者承担费用", affectedProjects: "尚未取得项目委托证据；仅在项目权限与明确委托生效后影响，不展示项目标识或数量", latestSuccess: provider.lastTestedAt ? `最近连接测试：${formatDate(provider.lastTestedAt)}` : "尚未完成连接测试" }} /></div>
-    {editing !== null && draft !== null && (editing === "configuration" ? canConfigure : canMaintain) ? <form onSubmit={saveConfiguration} className="mt-4 grid gap-3 rounded-xl border border-indigo-100 bg-white p-4 sm:grid-cols-2">{editing === "configuration" ? <><Field label="连接名称"><input value={draft.name} onChange={(event) => updateDraft({ name: event.target.value })} required maxLength={80} className="field" /></Field><Field label="固定 Base URL"><input value={provider.baseUrl} readOnly aria-readonly="true" className="field bg-slate-100 text-slate-500" /></Field><p className="rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600 sm:col-span-2">生成模型或向量模型至少配置一项。</p><ModelField label="生成模型（可选）" value={draft.generationModelId} onChange={(value) => updateDraft({ generationModelId: value })} suggestions={definition?.generationModelSuggestions ?? []} /><ModelField label="图片识别模型（可选）" value={draft.visionModelId} onChange={(value) => updateDraft({ visionModelId: value })} suggestions={definition?.visionModelSuggestions ?? []} disabled={!definition?.supportsVision} /><ModelField label="向量模型（可选）" value={draft.embeddingModelId} onChange={(value) => updateDraft({ embeddingModelId: value, embeddingDimensions: definition?.embeddingModelSuggestions.find((item) => item.id === value)?.dimensions.toString() ?? draft.embeddingDimensions })} suggestions={definition?.embeddingModelSuggestions.map((item) => item.id) ?? []} disabled={!definition?.supportsEmbeddings} /><Field label="向量维度（可选）"><input type="number" min={8} max={8192} step={1} value={draft.embeddingDimensions} onChange={(event) => updateDraft({ embeddingDimensions: event.target.value })} required={Boolean(draft.embeddingModelId)} disabled={!definition?.supportsEmbeddings || !draft.embeddingModelId} className="field disabled:bg-slate-100" /></Field></> : <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">当前资格只允许安全维护。轮换 API Key 不会恢复测试、启用或调用能力。</div>}{editing === "key" ? <Field label="新的 API Key"><input type="password" value={draft.apiKey} onChange={(event) => updateDraft({ apiKey: event.target.value })} autoComplete="new-password" placeholder="输入新的 API Key" required minLength={8} maxLength={512} className="field" /></Field> : null}<div className="flex items-center gap-2 sm:col-span-2"><button type="submit" disabled={pending} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{pending ? "保存中…" : editing === "key" ? "轮换 Key" : "保存配置"}</button><button type="button" onClick={() => { setEditing(null); setDraft(null); }} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">取消</button></div></form> : null}
-    {editing === null ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap gap-2">{activeMembership ? <><button type="button" onClick={() => beginEditing("configuration")} disabled={pending} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">编辑配置</button><button type="button" onClick={() => void testConnection()} disabled={pending || !enabled} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "测试连接"}</button></> : null}<button type="button" onClick={() => beginEditing("key")} disabled={pending || !canMaintain} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">轮换 Key</button></div><div className="flex flex-wrap gap-2">{provider.status === "disabled" ? activeMembership ? <button type="button" onClick={() => void toggleEnabled()} disabled={pending} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">重新启用</button> : null : <button type="button" onClick={() => void toggleEnabled()} disabled={pending} className="rounded-lg px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">停用</button>}<button type="button" onClick={() => void remove()} disabled={pending} className="rounded-lg px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">删除</button></div></div> : null}
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap gap-2">
+        <OperationPanel title={editing === "key" ? "安全轮换个人模型 API Key" : "编辑个人模型配置"} triggerLabel="管理配置" description="编辑模型配置或安全轮换 API Key。关闭面板会保留当前草稿。" open={operationOpen} onOpenChange={(open) => { if (open && draft === null) beginEditing(canConfigure ? "configuration" : "key"); else setOperationOpen(open); }} disabled={pending || (!canConfigure && !canMaintain)}>
+          {editing !== null && draft !== null && (editing === "configuration" ? canConfigure : canMaintain) ? <div className="space-y-4">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="连接维护操作">
+              {canConfigure ? <button type="button" onClick={() => setEditing("configuration")} className={`rounded-lg px-3 py-2 text-xs font-semibold ${editing === "configuration" ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-700"}`}>编辑配置</button> : null}
+              {canMaintain ? <button type="button" onClick={() => setEditing("key")} className={`rounded-lg px-3 py-2 text-xs font-semibold ${editing === "key" ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-700"}`}>轮换 Key</button> : null}
+            </div>
+            <form onSubmit={saveConfiguration} className="grid gap-3 rounded-xl border border-indigo-100 bg-white p-4 sm:grid-cols-2">
+              {editing === "configuration" ? <><Field label="连接名称"><input value={draft.name} onChange={(event) => updateDraft({ name: event.target.value })} required maxLength={80} className="field" /></Field><Field label="固定 Base URL"><input value={provider.baseUrl} readOnly aria-readonly="true" className="field bg-slate-100 text-slate-500" /></Field><p className="rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600 sm:col-span-2">生成模型或向量模型至少配置一项。</p><ModelField label="生成模型（可选）" value={draft.generationModelId} onChange={(value) => updateDraft({ generationModelId: value })} suggestions={definition?.generationModelSuggestions ?? []} /><ModelField label="图片识别模型（可选）" value={draft.visionModelId} onChange={(value) => updateDraft({ visionModelId: value })} suggestions={definition?.visionModelSuggestions ?? []} disabled={!definition?.supportsVision} /><ModelField label="向量模型（可选）" value={draft.embeddingModelId} onChange={(value) => updateDraft({ embeddingModelId: value, embeddingDimensions: definition?.embeddingModelSuggestions.find((item) => item.id === value)?.dimensions.toString() ?? draft.embeddingDimensions })} suggestions={definition?.embeddingModelSuggestions.map((item) => item.id) ?? []} disabled={!definition?.supportsEmbeddings} /><Field label="向量维度（可选）"><input type="number" min={8} max={8192} step={1} value={draft.embeddingDimensions} onChange={(event) => updateDraft({ embeddingDimensions: event.target.value })} required={Boolean(draft.embeddingModelId)} disabled={!definition?.supportsEmbeddings || !draft.embeddingModelId} className="field disabled:bg-slate-100" /></Field></> : <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">当前资格只允许安全维护。轮换 API Key 不会恢复测试、启用或调用能力。</div>}
+              {editing === "key" ? <Field label="新的 API Key"><input type="password" value={draft.apiKey} onChange={(event) => updateDraft({ apiKey: event.target.value })} autoComplete="new-password" placeholder="输入新的 API Key" required minLength={8} maxLength={512} className="field" /></Field> : null}
+              <div className="flex items-center gap-2 sm:col-span-2"><button type="submit" disabled={pending} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{pending ? "保存中…" : editing === "key" ? "轮换 Key" : "保存配置"}</button><button type="button" onClick={() => { setOperationOpen(false); setEditing(null); setDraft(null); }} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">放弃草稿</button></div>
+              {operationMessage ? <p role={operationMessage.tone === "error" ? "alert" : "status"} className={`text-sm sm:col-span-2 ${operationMessage.tone === "error" ? "text-rose-700" : "text-slate-700"}`}>{operationMessage.text}</p> : null}
+            </form>
+          </div> : null}
+        </OperationPanel>
+        {activeMembership ? <button type="button" onClick={() => void testConnection()} disabled={pending || !enabled} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "测试连接"}</button> : null}
+      </div>
+      <div className="flex flex-wrap gap-2">{provider.status === "disabled" ? activeMembership ? <button type="button" onClick={() => void toggleEnabled()} disabled={pending} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">重新启用</button> : null : <button type="button" onClick={() => void toggleEnabled()} disabled={pending} className="rounded-lg px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">停用</button>}<button type="button" onClick={() => void remove()} disabled={pending} className="rounded-lg px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">删除</button></div>
+    </div>
     {provider.status === "disabled" ? <p className="mt-3 text-xs leading-5 text-slate-500">连接已停用。{activeMembership ? "会员有效时可重新启用，启用后请重新测试。" : "当前资格不能重新启用，只能轮换 Key、停用或删除。"}</p> : null}
   </article>;
 }

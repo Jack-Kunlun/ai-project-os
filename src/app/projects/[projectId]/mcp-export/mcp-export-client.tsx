@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { OperationPanel } from "@/components/operation-panel";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import type { McpExportOperation } from "@/lib/mcp-export-grants";
 
@@ -43,6 +44,8 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
   const [model, setModel] = useState("");
   const [operation, setOperation] = useState<McpExportOperation>("project_summary");
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [operationGrantId, setOperationGrantId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
@@ -84,6 +87,7 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
       setIssuedToken(payload.token);
       setLabel("");
       await load();
+      setIssueOpen(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "创建 MCP 输出凭证失败");
     } finally {
@@ -113,10 +117,10 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
     }
   }
 
-  async function approveNextRead(grant: Grant) {
+  async function approveNextRead(grant: Grant): Promise<boolean> {
     if (!provider.trim() || !model.trim()) {
       setMessage("请先填写外部服务和模型名称。");
-      return;
+      return false;
     }
     setBusy(true);
     setMessage(null);
@@ -140,15 +144,18 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
         confirmLabel: "确认本次外发", cancelLabel: "返回",
         inputLabel: "输入“确认外发”继续", requiredValue: "确认外发", inputPlaceholder: "确认外发",
       });
-      if (!decision.confirmed) return;
+      if (!decision.confirmed) return false;
       const response = await fetch(`/api/me/mcp-export-grants/${grant.id}/approval-confirmations`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ approvalId: preview.approvalId, contentFingerprint: preview.contentFingerprint, acknowledge: true }),
       });
       if (!response.ok) throw await requestError(response, "确认 MCP 外发失败");
       setMessage(`已批准“${recipient}”在 ${new Date(preview.expiresAt).toISOString()} 前读取一次 ${preview.operation}。`);
+      setOperationGrantId(null);
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "确认 MCP 外发失败");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -161,28 +168,37 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
       <h1 className="mt-2 text-2xl font-semibold">向外部客户端提供 MCP</h1>
       <p className="mt-3 text-sm leading-6 text-slate-600">当前提供项目摘要、最多 10 条最近已确认事实与来源，以及最多 10 项最近目标和工作项。OAuth 授权绑定客户端标识、项目和只读范围；访问令牌仍是可转移的 Bearer 密钥。每次工具读取还需要项目 Owner 单独确认，批准 5 分钟内只能用一次。</p>
       <p className="mt-2 text-xs text-slate-500">服务地址：当前站点的 <code>/api/mcp</code></p>
-      {legacyBearerEnabled ? <><p className="mt-3 text-xs leading-5 text-amber-800">本地兼容模式：可创建旧式可转移 Bearer 凭证；此方式在生产环境始终关闭。</p><form onSubmit={(event) => void issue(event)} className="mt-6 grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-        <label className="grid gap-2 text-sm font-medium">客户端名称<input required maxLength={80} value={label} onChange={(event) => setLabel(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder="例如：桌面助手" /></label>
-        <label className="grid gap-2 text-sm font-medium">有效天数<input type="number" min={1} max={30} value={lifetimeDays} onChange={(event) => setLifetimeDays(Number(event.target.value))} className="min-h-11 w-28 rounded-xl border border-slate-300 px-3" /></label>
-        <button type="submit" disabled={busy} className="min-h-11 rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white disabled:opacity-50">创建凭证</button>
-      </form></> : <p className="mt-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-950">由外部客户端发起 OAuth 授权后，在此查看并撤销连接。授权完成后仍需为每次工具读取单独确认。</p>}
+      {message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700">{message}</p> : null}
+      {legacyBearerEnabled ? <div className="mt-5"><p className="mb-3 text-xs leading-5 text-amber-800">本地兼容模式：可创建旧式可转移 Bearer 凭证；此方式在生产环境始终关闭。</p><OperationPanel title="创建 MCP 输出凭证" triggerLabel="创建兼容凭证" open={issueOpen} onOpenChange={(open) => { setIssueOpen(open); if (open) setMessage(null); }} disabled={busy} description="凭证只显示一次。创建后请立即复制并妥善保存。">
+        {message ? <p role="status" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{message}</p> : null}
+        <form onSubmit={(event) => void issue(event)} className="max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <label className="grid gap-2 text-sm font-medium">客户端名称<input required maxLength={80} value={label} onChange={(event) => setLabel(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder="例如：桌面助手" /></label>
+          <label className="mt-4 grid gap-2 text-sm font-medium">有效天数<input type="number" min={1} max={30} value={lifetimeDays} onChange={(event) => setLifetimeDays(Number(event.target.value))} className="min-h-11 w-28 rounded-xl border border-slate-300 px-3" /></label>
+          <button type="submit" disabled={busy} className="mt-5 min-h-11 rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white disabled:opacity-50">创建凭证</button>
+        </form>
+      </OperationPanel></div> : <p className="mt-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-950">由外部客户端发起 OAuth 授权后，在此查看并撤销连接。授权完成后仍需为每次工具读取单独确认。</p>}
       {issuedToken && <div role="status" className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
         <p className="text-sm font-semibold text-amber-950">请现在复制凭证；关闭页面后无法再次查看。</p>
         <code className="mt-2 block break-all rounded-lg bg-white p-3 text-xs select-all">{issuedToken}</code>
       </div>}
-      {message && <p role="status" className="mt-4 rounded-xl bg-slate-100 px-4 py-3 text-sm">{message}</p>}
     </section>
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-lg font-semibold">本项目凭证</h2>
       <p className="mt-2 text-xs leading-5 text-slate-500">批准前填写接收方声明的外部服务和模型。平台记录这些信息用于审计，无法核验第三方实际使用情况。</p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <label className="grid gap-2 text-sm font-medium">外部服务<input maxLength={80} value={provider} onChange={(event) => setProvider(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder="例如：桌面助手服务" /></label>
-        <label className="grid gap-2 text-sm font-medium">外部模型<input maxLength={80} value={model} onChange={(event) => setModel(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder="例如：客户端声明的模型" /></label>
-      </div>
-      <label className="mt-4 grid gap-2 text-sm font-medium">本次批准的工具<select value={operation} onChange={(event) => setOperation(event.target.value as McpExportOperation)} className="min-h-11 rounded-xl border border-slate-300 px-3"><option value="project_summary">项目摘要</option><option value="project_evidence">已确认事实与来源</option><option value="project_plan">项目计划</option></select></label>
       <div className="mt-4 space-y-3">{grants.length === 0 ? <p className="text-sm text-slate-500">暂无凭证。</p> : grants.map((grant) => <div key={grant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
         <div><p className="break-words font-medium">{grant.oauthClientName ?? grant.label}</p><p className="mt-1 break-all text-xs text-slate-500">{grant.grantType === "oauth" ? `OAuth 客户端 ID：${grant.oauthClientId ?? "客户端标识不可用"}` : "旧式 Bearer 凭证"}</p><p className="mt-1 text-xs text-slate-500">到期：{new Date(grant.expiresAt).toISOString()} · {grant.revokedAt ? "已撤销" : "未撤销"}</p></div>
-        {!grant.revokedAt && <div className="flex gap-2"><button type="button" disabled={busy} onClick={() => void approveNextRead(grant)} className="min-h-10 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-50">批准下一次读取</button><button type="button" disabled={busy} onClick={() => void revoke(grant)} className="min-h-10 rounded-lg border border-rose-200 px-3 text-sm font-medium text-rose-700 disabled:opacity-50">撤销</button></div>}
+        {!grant.revokedAt && <div className="flex flex-wrap gap-2"><OperationPanel title="准备单次读取授权" triggerLabel="批准下一次读取" open={operationGrantId === grant.id} onOpenChange={(open) => { setOperationGrantId(open ? grant.id : null); if (open) setMessage(null); }} disabled={busy} description="填写接收方声明的外部服务、模型和读取内容。确认前会展示本次外发内容，并要求再次输入确认语。">
+          {message ? <p role="status" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{message}</p> : null}
+          <div className="max-w-2xl space-y-4 rounded-2xl border border-slate-200 bg-white p-5">
+            <p className="text-sm text-slate-600">授权对象：<strong className="text-slate-900">{grant.oauthClientName ?? grant.label}</strong>{grant.oauthClientId ? ` · OAuth 客户端 ID：${grant.oauthClientId}` : ""}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-2 text-sm font-medium">外部服务<input maxLength={80} value={provider} onChange={(event) => setProvider(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder="例如：桌面助手服务" /></label>
+              <label className="grid gap-2 text-sm font-medium">外部模型<input maxLength={80} value={model} onChange={(event) => setModel(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder="例如：客户端声明的模型" /></label>
+            </div>
+            <label className="grid gap-2 text-sm font-medium">本次批准的工具<select value={operation} onChange={(event) => setOperation(event.target.value as McpExportOperation)} className="min-h-11 rounded-xl border border-slate-300 px-3"><option value="project_summary">项目摘要</option><option value="project_evidence">已确认事实与来源</option><option value="project_plan">项目计划</option></select></label>
+            <button type="button" disabled={busy} onClick={() => void approveNextRead(grant)} className="min-h-10 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-50">{busy ? "准备中…" : "查看内容并确认"}</button>
+          </div>
+        </OperationPanel><button type="button" disabled={busy} onClick={() => void revoke(grant)} className="min-h-10 rounded-lg border border-rose-200 px-3 text-sm font-medium text-rose-700 disabled:opacity-50">撤销</button></div>}
       </div>)}</div>
     </section>
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

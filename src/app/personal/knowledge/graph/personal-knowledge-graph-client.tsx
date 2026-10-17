@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { OperationPanel } from "@/components/operation-panel";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
@@ -36,6 +37,7 @@ export function PersonalKnowledgeGraphClient({ username, isSystemAdmin }: { user
   const [providers, setProviders] = useState<Provider[]>([]);
   const [documentId, setDocumentId] = useState("");
   const [providerId, setProviderId] = useState("");
+  const [extractOpen, setExtractOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -93,6 +95,7 @@ export function PersonalKnowledgeGraphClient({ username, isSystemAdmin }: { user
       if (!response.ok) throw new Error((await safeResponseError(response, "关系提取失败")).message);
       const result = await response.json() as { suggested: number };
       setMessage({ text: `提取完成，返回 ${result.suggested} 条候选关系。请核对原文后逐条审核。`, error: false });
+      setExtractOpen(false);
       await load();
     } catch (cause) { setMessage({ text: cause instanceof Error ? cause.message : "关系提取失败", error: true }); }
     finally { setPending(false); }
@@ -144,12 +147,13 @@ export function PersonalKnowledgeGraphClient({ username, isSystemAdmin }: { user
         </section>
 
         <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
-          <h2 className="text-xl font-semibold">提取并审核关系</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-            <label className="text-xs font-semibold text-slate-700">知识文档<select value={selectedDocumentId} onChange={(event) => setDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{documents.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
-            <label className="text-xs font-semibold text-slate-700">个人文本模型<select value={selectedProviderId} onChange={(event) => setProviderId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{providers.length === 0 ? <option value="">尚无已验证模型</option> : providers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.defaultGenerationModelId}</option>)}</select></label>
-            <button type="button" onClick={() => void extract()} disabled={pending || !selectedDocumentId || !selectedProviderId} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "提取候选关系"}</button>
-          </div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">待审核关系</h2><p className="mt-2 text-xs text-slate-500">每条候选保留来源文档与原文证据；确认后才会显示在上方图谱。</p></div><OperationPanel title="提取知识关系候选" triggerLabel="提取候选关系" description="选择文档和个人模型。提交前会显示外发内容与费用确认，模型结果只进入待审核列表。" open={extractOpen} onOpenChange={setExtractOpen} disabled={pending || !selectedDocumentId || !selectedProviderId}>
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <label className="text-xs font-semibold text-slate-700">知识文档<select value={selectedDocumentId} onChange={(event) => setDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{documents.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
+              <label className="text-xs font-semibold text-slate-700">个人文本模型<select value={selectedProviderId} onChange={(event) => setProviderId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{providers.length === 0 ? <option value="">尚无已验证模型</option> : providers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.defaultGenerationModelId}</option>)}</select></label>
+              <button type="button" onClick={() => void extract()} disabled={pending || !selectedDocumentId || !selectedProviderId} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "开始提取"}</button>
+            </div>
+          </OperationPanel></div>
           <h3 className="mt-7 text-sm font-semibold">待审核 · {pendingSuggestions.length}</h3>
           {pendingSuggestions.length === 0 ? <p className="mt-2 text-xs text-slate-500">暂无待审核关系。</p> : <ul className="mt-3 space-y-3">{pendingSuggestions.map((row) => <li key={row.id} className="rounded-2xl border border-slate-200 p-4"><p className="text-sm font-semibold">{row.subject} <span className="text-xs text-slate-400">({kindLabel[row.subjectKind] ?? row.subjectKind})</span> — {row.predicate} → {row.object} <span className="text-xs text-slate-400">({kindLabel[row.objectKind] ?? row.objectKind})</span></p><p className="mt-2 text-xs leading-5 text-slate-600">来源：{row.documentTitle} · “{row.evidence}”</p>{row.stale ? <p className="mt-2 text-xs text-amber-700">来源文档已更新；此候选不能再接受，请重新提取。</p> : null}<div className="mt-3 flex gap-2"><button type="button" disabled={pending || row.stale} onClick={() => void review(row.id, "accepted")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">确认关系</button><button type="button" disabled={pending} onClick={() => void review(row.id, "rejected")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">忽略</button></div></li>)}</ul>}
         </section>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AdminPageHeader } from "@/components/admin-page-header";
+import { OperationPanel } from "@/components/operation-panel";
 
 type ReviewState = "eligible" | "active";
 type ReviewConclusion = "read_only_verified" | "read_only_rejected" | "needs_research";
@@ -324,6 +325,7 @@ export function McpReviewWorkbench() {
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const load = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
@@ -415,8 +417,7 @@ export function McpReviewWorkbench() {
             <StatusBadges candidate={selectedCandidate} />
           </div>
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">Schema、annotations 和远端描述均为不可信远端声明，仅供审核。这里展示的是服务端已净化结构，不代表平台已经信任其内容。</div>
-          <div className="mt-5 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,.85fr)]">
-          <div className="min-w-0">
+          <div className="mt-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500">只读能力</p><p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.state === "active" ? "已进入 V2 只读审核流" : "工具声明为只读候选"}</p><p className="mt-1 text-xs leading-5 text-slate-500">仍需以当前审核结论和快照有效性为准。</p></div>
             <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500">风险</p><p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.riskLevel ? riskLabels[selectedCandidate.riskLevel] : "尚无审核结论"}</p><p className="mt-1 text-xs leading-5 text-slate-500">{selectedCandidate.conclusion && selectedCandidate.conclusion in conclusionLabels ? conclusionLabels[selectedCandidate.conclusion as ReviewConclusion] : "等待管理员记录受控结论"}</p></div>
@@ -444,11 +445,10 @@ export function McpReviewWorkbench() {
           </details>
           {effectiveReason(selectedCandidate) ? <p className="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700">当前安全状态：{effectiveReason(selectedCandidate)}。如需更新证据，请先确认旧证据的处理状态。</p> : null}
           </div>
-          <div className="min-w-0">
-          {selectedCandidate.reviewStatus === "approved"
-            ? <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-xs leading-5 text-emerald-800" role="status">当前 tuple 已有不可变 APPROVED 审核；为避免打断现有项目授权，不能重复提交正向审核。若快照失效，请先按治理流程处理旧证据。</div>
-            : <ReviewForm key={selectedCandidate.tool.id} candidate={selectedCandidate} onCompleted={reviewCompleted} />}
-          </div>
+          <div className="mt-6 flex justify-end">
+            {selectedCandidate.reviewStatus === "approved"
+              ? <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-xs leading-5 text-emerald-800" role="status">当前 tuple 已有不可变 APPROVED 审核；为避免打断现有项目授权，不能重复提交正向审核。若快照失效，请先按治理流程处理旧证据。</div>
+              : <OperationPanel title={`审核 ${selectedCandidate.tool.title || selectedCandidate.tool.name}`} triggerLabel="记录管理员审核" open={reviewOpen} onOpenChange={setReviewOpen} description="审核只针对当前净化快照记录受控结论，不会触发远端工具操作。"><ReviewForm key={selectedCandidate.tool.id} candidate={selectedCandidate} onCompleted={(conclusion) => { setReviewOpen(false); reviewCompleted(conclusion); }} /></OperationPanel>}
           </div>
         </> : <div className="flex min-h-80 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center"><div><p className="text-sm font-semibold text-slate-700">当前工具已不在此列表中</p><p className="mt-2 text-xs leading-5 text-slate-500">请返回审核列表，重新选择当前可用的工具快照。</p></div></div>}
       </section>}

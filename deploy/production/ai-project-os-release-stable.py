@@ -1087,9 +1087,9 @@ def _cache_validate_plan(plan_bytes, plan_digest, target_tag, target_revision,
             'CACHE_PLAN_IDENTITY_INVALID')
     created = plan.get('createdAt')
     expires = plan.get('expiresAt')
-    current_time = int(time.time()) if now is None else now
+    current_time = time.time() if now is None else now
     require(type(created) is int and type(expires) is int
-            and created <= current_time <= expires
+            and created <= current_time < expires
             and 0 < expires - created <= CACHE_PLAN_TTL_SECONDS,
             'CACHE_PLAN_EXPIRED_OR_INVALID')
     inventory_ids = plan.get('inventoryIds')
@@ -1147,15 +1147,28 @@ def _cache_candidate_selection(selected_records, inventory_ids, fresh_records):
             'changed': changed, 'newlyAppeared': appeared}
 
 
-def _cache_prune_ids(identifiers):
+def _cache_plan_remaining(plan, monotonic_deadline=None):
+    now = time.time()
+    require(plan['createdAt'] <= now < plan['expiresAt'],
+            'CACHE_PLAN_EXPIRED_OR_INVALID')
+    remaining = plan['expiresAt'] - now
+    if monotonic_deadline is not None:
+        remaining = min(remaining, monotonic_deadline - time.monotonic())
+    require(remaining > 0, 'CACHE_PLAN_EXPIRED_OR_INVALID')
+    return remaining
+
+
+def _cache_prune_ids(identifiers, *, timeout_seconds=600):
     require(isinstance(identifiers, list) and 0 < len(identifiers) <= 32
             and len(set(identifiers)) == len(identifiers)
             and all(isinstance(item, str) and CACHE_RECORD_ID.fullmatch(item) is not None
                     for item in identifiers), 'CACHE_PRUNE_ID_INVALID')
     filter_value = 'id~=^(' + '|'.join(identifiers) + ')$'
     require(len(filter_value) <= 4096, 'CACHE_PRUNE_FILTER_TOO_LARGE')
+    require(type(timeout_seconds) in (int, float) and 0 < timeout_seconds <= 600,
+            'CACHE_PRUNE_TIMEOUT_INVALID')
     docker('buildx', 'prune', '--builder', 'default', '--all', '--force',
-           '--filter', filter_value, timeout=600)
+           '--filter', filter_value, timeout=timeout_seconds)
 
 
 def _cache_runtime_state(target_tag, target_revision):
@@ -1227,6 +1240,8 @@ def cache_clean(target_tag, target_revision, plan_digest):
     installed = _cache_installed_tooling()
     plan = _cache_validate_plan(plan_bytes, plan_digest, target_tag,
                                 target_revision, installed['toolingRevision'])
+    started_at = time.monotonic()
+    monotonic_deadline = started_at + _cache_plan_remaining(plan)
     source, installed, protection_before = _cache_runtime_state(target_tag, target_revision)
     require(protection_before == plan['protection'], 'CACHE_PROTECTED_RESOURCE_DRIFT')
     records_before = _cache_read_records()
@@ -1245,6 +1260,7 @@ def cache_clean(target_tag, target_revision, plan_digest):
     final_protection = protection_before
     try:
         while pending:
+            _cache_plan_remaining(plan, monotonic_deadline)
             _source_now, _installed_now, current_protection = _cache_runtime_state(
                 target_tag, target_revision)
             if current_protection != plan['protection']:
@@ -1261,8 +1277,9 @@ def cache_clean(target_tag, target_revision, plan_digest):
             if not fresh_candidates:
                 break
             batch = fresh_candidates[:32]
+            timeout_seconds = min(600, _cache_plan_remaining(plan, monotonic_deadline))
             attempted.extend(batch)
-            _cache_prune_ids(batch)
+            _cache_prune_ids(batch, timeout_seconds=timeout_seconds)
             pending = [item for item in pending if item not in batch]
             _source_after, _installed_after, final_protection = _cache_runtime_state(
                 target_tag, target_revision)

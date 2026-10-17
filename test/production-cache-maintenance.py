@@ -150,6 +150,7 @@ class CachePlanTests(unittest.TestCase):
             (encoded, digest, TAG, REVISION, 'c' * 40, 101),
             (encoded, digest, TAG, REVISION, TOOLING_REVISION,
              101 + DEPLOYER.CACHE_PLAN_TTL_SECONDS),
+            (encoded, digest, TAG, REVISION, TOOLING_REVISION, plan['expiresAt']),
         )
         for args in cases:
             with self.subTest(args=args[1:]), self.assertRaises(RuntimeError):
@@ -317,6 +318,70 @@ class CacheCommandTests(unittest.TestCase):
                     DEPLOYER._cache_prune_ids(hostile)
                 docker_mock.assert_not_called()
 
+    def test_prune_timeout_is_positive_and_bounded_by_plan_remaining_life(self):
+        with patch.object(DEPLOYER, 'docker') as docker_mock:
+            DEPLOYER._cache_prune_ids(['cache_a'], timeout_seconds=0.25)
+        self.assertEqual(docker_mock.call_args.kwargs['timeout'], 0.25)
+        for timeout in (0, -1, True, 601, float('inf'), float('nan')):
+            with self.subTest(timeout=timeout), patch.object(DEPLOYER, 'docker') as docker_mock:
+                with self.assertRaisesRegex(RuntimeError, 'CACHE_PRUNE_TIMEOUT_INVALID'):
+                    DEPLOYER._cache_prune_ids(['cache_a'], timeout_seconds=timeout)
+                docker_mock.assert_not_called()
+
+    def test_running_clean_stops_before_prune_or_next_batch_when_plan_expires(self):
+        # Expiry during snapshot collection, between batches, and after clock rollback.
+        for expire_at in ('snapshot', 'next-batch', 'clock-rollback'):
+            with self.subTest(expire_at=expire_at):
+                records = [selected('cache_' + str(index).zfill(2)) for index in range(33)]
+                plan = {
+                    'schema': 1, 'operation': 'cache-maintenance-plan',
+                    'tag': TAG, 'revision': REVISION, 'toolingRevision': TOOLING_REVISION,
+                    'createdAt': 100, 'expiresAt': 100 + DEPLOYER.CACHE_PLAN_TTL_SECONDS,
+                    'protection': protection_snapshot(),
+                    'inventoryIds': [item['id'] for item in records],
+                    'selectedRecords': records, 'summary': {},
+                }
+                encoded = DEPLOYER._cache_plan_bytes(plan)
+                installed = {'toolingRevision': TOOLING_REVISION}
+                clock = {'wall': plan['expiresAt'] - 0.5, 'monotonic': 0}
+                runtime_calls = []
+                prune_calls = []
+                audits = []
+
+                def runtime(*_args):
+                    runtime_calls.append(True)
+                    if expire_at == 'snapshot' and len(runtime_calls) == 2:
+                        clock['wall'] = plan['expiresAt']
+                    return ({'tag': TAG, 'revision': REVISION}, installed, plan['protection'])
+
+                def prune(identifiers, *, timeout_seconds):
+                    prune_calls.append((identifiers, timeout_seconds))
+                    if expire_at == 'clock-rollback':
+                        clock['wall'] = 101
+                        clock['monotonic'] = 0.5
+                    else:
+                        clock['wall'] = plan['expiresAt']
+
+                with patch.object(DEPLOYER, '_read_trusted_host_file', return_value=encoded), \
+                        patch.object(DEPLOYER, '_cache_installed_tooling', return_value=installed), \
+                        patch.object(DEPLOYER, '_cache_runtime_state', side_effect=runtime), \
+                        patch.object(DEPLOYER, '_cache_read_records', return_value=records), \
+                        patch.object(DEPLOYER, '_cache_available_bytes', return_value=1000), \
+                        patch.object(DEPLOYER.time, 'time', side_effect=lambda: clock['wall']), \
+                        patch.object(DEPLOYER.time, 'monotonic', side_effect=lambda: clock['monotonic']), \
+                        patch.object(DEPLOYER, '_cache_prune_ids', side_effect=prune), \
+                        patch.object(DEPLOYER, '_cache_write_audit', side_effect=audits.append), \
+                        patch.object(DEPLOYER, '_cache_emit_report') as emit:
+                    with self.assertRaisesRegex(RuntimeError, 'CACHE_PLAN_EXPIRED_OR_INVALID'):
+                        DEPLOYER.cache_clean(TAG, REVISION, DEPLOYER.sha256(encoded))
+                self.assertEqual(len(prune_calls), 0 if expire_at == 'snapshot' else 1)
+                if prune_calls:
+                    self.assertEqual(len(prune_calls[0][0]), 32)
+                    self.assertEqual(prune_calls[0][1], 0.5)
+                self.assertEqual(audits[-1]['status'], 'FAILED')
+                self.assertEqual(audits[-1]['failureCode'], 'STABLE_CACHE_PLAN_EXPIRED_OR_INVALID')
+                emit.assert_not_called()
+
     def test_clean_reports_net_filesystem_change_separately_from_cache_bytes(self):
         planned = selected('cache_a', size=8192)
         plan = {
@@ -338,7 +403,8 @@ class CacheCommandTests(unittest.TestCase):
                 patch.object(DEPLOYER, '_cache_runtime_state', return_value=runtime), \
                 patch.object(DEPLOYER, '_cache_read_records', side_effect=records_sequence), \
                 patch.object(DEPLOYER, '_cache_available_bytes', side_effect=[1000, 1080]), \
-                patch.object(DEPLOYER, '_cache_prune_ids', side_effect=prune_calls.append), \
+                patch.object(DEPLOYER, '_cache_prune_ids', side_effect=lambda batch, **_kw: prune_calls.append(batch)), \
+                patch.object(DEPLOYER.time, 'time', return_value=101), \
                 patch.object(DEPLOYER, '_cache_write_audit'), \
                 patch.object(DEPLOYER, '_cache_emit_report', side_effect=reports.append):
             DEPLOYER.cache_clean(TAG, REVISION, 'd' * 64)
@@ -375,6 +441,7 @@ class CacheCommandTests(unittest.TestCase):
                 patch.object(DEPLOYER, '_cache_read_records', side_effect=[[planned], [now_protected], [now_protected]]), \
                 patch.object(DEPLOYER, '_cache_available_bytes', side_effect=[1000, 1000]), \
                 patch.object(DEPLOYER, '_cache_prune_ids') as prune_mock, \
+                patch.object(DEPLOYER.time, 'time', return_value=101), \
                 patch.object(DEPLOYER, '_cache_write_audit'), \
                 patch.object(DEPLOYER, '_cache_emit_report', side_effect=reports.append):
             DEPLOYER.cache_clean(TAG, REVISION, 'e' * 64)
@@ -404,6 +471,7 @@ class CacheCommandTests(unittest.TestCase):
                 patch.object(DEPLOYER, '_cache_read_records', side_effect=[[planned], []]), \
                 patch.object(DEPLOYER, '_cache_available_bytes', side_effect=[1000, 1000]), \
                 patch.object(DEPLOYER, '_cache_prune_ids') as prune_mock, \
+                patch.object(DEPLOYER.time, 'time', return_value=101), \
                 patch.object(DEPLOYER, '_cache_write_audit'), \
                 patch.object(DEPLOYER, '_cache_emit_report', side_effect=reports.append):
             with self.assertRaisesRegex(RuntimeError, 'CACHE_PROTECTED_RESOURCE_DRIFT'):

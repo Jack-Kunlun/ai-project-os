@@ -13,6 +13,6 @@ test("stable production cache maintenance guards pass offline", () => {
   assert.equal(result.error, undefined, result.error?.message);
   const output = `${result.stdout}\n${result.stderr}`;
   assert.equal(result.status, 0, output);
-  assert.match(output, /Ran 16 tests/u);
+  assert.match(output, /Ran 18 tests/u);
   assert.match(output, /OK/u);
 });

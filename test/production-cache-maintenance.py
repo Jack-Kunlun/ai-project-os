@@ -282,7 +282,10 @@ class CacheCommandTests(unittest.TestCase):
                 'release_protocol': 'stable-v2-images',
                 'target_image_ids': json.dumps({'app': current_ids[0],
                                                 'worker': current_ids[1],
-                                                'migrate': current_ids[2]}),
+                                                'migrate': current_ids[2],
+                                                'git-worker': current_ids[1],
+                                                'reconcile': current_ids[1],
+                                                'principal-bootstrap': current_ids[1]}),
                 'source_tag': 'v1.0.8', 'source_revision': 'c' * 40,
             },
         }
@@ -295,6 +298,15 @@ class CacheCommandTests(unittest.TestCase):
             unverified_current[0] = True
             with self.assertRaisesRegex(RuntimeError, 'CACHE_PROTECTED_IMAGES_MISSING'):
                 DEPLOYER._cache_protected_resource_snapshot(source)
+            unverified_current[0] = False
+            valid_images = json.loads(source['receipt']['target_image_ids'])
+            for invalid_images in (
+                {key: value for key, value in valid_images.items() if key != 'git-worker'},
+                {**valid_images, 'reconcile': current_ids[2]},
+            ):
+                source['receipt']['target_image_ids'] = json.dumps(invalid_images)
+                with self.assertRaisesRegex(RuntimeError, 'CACHE_IMAGE_RECEIPT_INVALID'):
+                    DEPLOYER._cache_protected_resource_snapshot(source)
         self.assertEqual(snapshot['ownedImageIds'], sorted(current_ids + previous_ids + legacy_ids))
         self.assertEqual(snapshot['unverifiedImages'][0]['id'], unverified_id)
         self.assertEqual(snapshot['unverifiedImages'][0]['reasons'], ['legacy-project', 'legacy-service'])

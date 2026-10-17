@@ -982,7 +982,9 @@ def _cache_protected_resource_snapshot(source):
                                     object_pairs_hook=_cache_unique_json_object)
     except (json.JSONDecodeError, TypeError, ValueError) as error:
         raise RuntimeError('STABLE_CACHE_IMAGE_RECEIPT_INVALID') from error
-    require(isinstance(receipt_images, dict) and set(receipt_images) == {'app', 'worker', 'migrate'},
+    require(isinstance(receipt_images, dict) and set(receipt_images) == LEGACY_IMAGE_SERVICES
+            and all(receipt_images[service] == receipt_images['worker']
+                    for service in ('git-worker', 'reconcile', 'principal-bootstrap')),
             'CACHE_IMAGE_RECEIPT_INVALID')
     current_receipt_ids = sorted({_cache_validate_image_id(value)
                                   for value in receipt_images.values()})

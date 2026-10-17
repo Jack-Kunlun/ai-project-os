@@ -2,7 +2,7 @@
 
 GitHub Actions 只保留 **CI** 和 **发布正式版本**。用户在「发布正式版本」点击 **Run workflow**、选择 `main`；代码提交和 CI 成功不会自动发布生产。
 
-Workflow 的 `operation` 默认为 `release`，执行下文正式发布。`cache-inspect`、`cache-clean`、`images-inspect` 和 `images-clean` 是独立的生产维护模式，复用同一 production 凭据与发布锁，不创建标签或 Release，也不切换应用或执行迁移。
+Workflow 的 `operation` 默认为 `release`，执行下文正式发布。`cache-inspect`、`cache-clean`、`images-inspect`、`images-clean`、`retired-containers-inspect` 和 `retired-containers-clean` 是独立的生产维护模式，复用同一 production 凭据与发布锁，不创建标签或 Release，也不切换应用或执行迁移。
 
 ## 生产缓存维护
 
@@ -25,6 +25,12 @@ Workflow 的 `operation` 默认为 `release`，执行下文正式发布。`cache
 `images-clean` 先重新盘点并生成 15 分钟 root 私有计划，仅处理归属确认、严格早于上一版本、无任何容器引用且不属于当前/上一版本的固定范围镜像。每次删除前后核对所有镜像 ID、容器及状态、数据卷、配置、数据库账本和健康，漂移即停止。只用完整不可变 ID 执行非强制 `image rm --no-prune`，不清理父镜像，不回退到标签删除或强制删除；引擎拒绝的镜像保留并报告。新出现或变化的记录不会追加到计划。
 
 产物 `production-image-maintenance` 保存检查与清理 JSON、逐项保留原因、实际移除 ID、保护证明、公网健康和文件系统可用空间净变化。镜像标称大小包含共享层，不能直接视为释放空间。维护结束删除 Runner 临时 SSH 身份；业务数据、上传文件、历史备份、容器和数据卷不清理。
+
+## 指定旧版停止容器维护
+
+`retired-containers-inspect`、`retired-containers-clean` 仅接受源码中冻结的两个 `0.8.0-dev.4` 容器：旧 Prisma 迁移任务与数据库角色校准任务。检查固定容器/镜像 ID、项目/服务/版本标签、源码定义的完整命令、非特权用户、成功退出与停止时间、禁止重启、空挂载、其他容器依赖及可写层变化。未知文件路径只报告数量和哈希；出现非临时文件变化、挂载、依赖或身份不明时保留。目标容器的用途诊断模板不读取 Env、容器日志或文件内容。
+
+清理使用 15 分钟 root 私有计划和现有生产锁，每次重新核对全部容器、镜像、卷、配置、当前/上一版本及数据库账本。仅对固定容器 ID 使用非强制 `docker container rm`，不带删除卷参数，不停止或重启任何容器，不使用 prune，不清理镜像或业务数据。只允许相应的已验证容器记录从快照消失；其他变化立即停止。后续镜像删除通过既有 `images-clean` 单独串行执行，重新确认无容器引用后才处理对应历史镜像。产物 `production-retired-container-maintenance` 记录用途、检查、实际删除、磁盘变化和资源保护；维护结束清理 Runner 临时 SSH 身份。
 
 ## 日常发布
 
@@ -52,7 +58,7 @@ Workflow 的 `operation` 默认为 `release`，执行下文正式发布。`cache
 
 健康验收和成功回执之后，保留当前及上一版本的应用/Worker/迁移镜像，以及任何容器仍引用的镜像；仅删除更早且属于本应用的无引用镜像，不使用强制删除。默认 BuildKit 的闲置缓存目标为约 2 GB。清理失败会记录维护提示，健康服务和成功回执保持有效。
 
-不执行宽泛 `system prune`、容器/卷清理或业务目录删除。数据卷、数据库、用户文件、历史备份及其他应用镜像不会清理。
+常规发布不执行宽泛 `system prune`、容器/卷清理或业务目录删除。指定旧版容器维护只删除上文两个固定且再次验证的容器；数据卷、数据库、用户文件、历史备份及其他应用镜像不会清理。
 
 ## 验收边界
 

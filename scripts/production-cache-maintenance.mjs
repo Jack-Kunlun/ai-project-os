@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +20,7 @@ function requireValue(value, code) {
 export function sourceContext(env = process.env) {
   requireValue(env.GITHUB_REPOSITORY === "Jack-Kunlun/ai-project-os"
     && env.GITHUB_REF === "refs/heads/main" && SHA.test(env.GITHUB_SHA ?? ""), "MAIN_CONTEXT_INVALID");
-  requireValue(["cache-inspect", "cache-clean", "images-inspect", "images-clean"]
+  requireValue(["cache-inspect", "cache-clean", "images-inspect", "images-clean", "retired-containers-inspect", "retired-containers-clean"]
     .includes(env.CACHE_MAINTENANCE_OPERATION), "OPERATION_INVALID");
   requireValue(VERSION.test(env.PRODUCTION_SOURCE_VERSION ?? "")
     && SHA.test(env.PRODUCTION_SOURCE_SHA ?? "") && VERSION.test(env.RELEASE_VERSION ?? ""), "SOURCE_INVALID");
@@ -244,6 +245,101 @@ export function parseImageMaintenanceReport(log, operation, context, expectedPla
   return value;
 }
 
+const RETIRED_PREFIX = "RETIRED_CONTAINER_REPORT ";
+const RETIRED_SCOPE = new Map([
+  ["456e94bcebb6e9c8ba47a412c8feebec1a8d3a869806e60e5ebcc4a8029867e2", ["reconcile", "sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266"]],
+  ["b81a7ac54512254f6872400128ebd77c5f90aa089eba93bb24c94b165e07feff", ["migrate", "sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9"]],
+]);
+const RETIRED_REASONS = ["container-missing", "identity-unconfirmed", "purpose-unconfirmed",
+  "not-completed-successfully", "finish-time-unconfirmed", "too-recent", "restart-policy-unconfirmed",
+  "mounts-present", "runtime-dependency-present", "referenced-by-container", "writable-business-path-unconfirmed"];
+const jsonDigest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+export function parseRetiredContainerReport(log, operation, context, expectedDigest, inspected) {
+  requireValue(typeof log === "string" && Buffer.byteLength(log) <= 2 * 1024 * 1024, "LOG_INVALID");
+  const lines = log.split(/\r?\n/u).filter((line) => line.startsWith(RETIRED_PREFIX));
+  requireValue(lines.length === 1, "RETIRED_REPORT_COUNT_INVALID");
+  const value = JSON.parse(lines[0].slice(RETIRED_PREFIX.length));
+  requireValue(value?.schema === 1 && value.operation === operation && value.tag === context.tag
+    && value.revision === context.revision && DIGEST.test(value.planDigest ?? "")
+    && same(value.scopeIds, [...RETIRED_SCOPE.keys()]), "RETIRED_REPORT_IDENTITY_INVALID");
+  validateProtection(value, context);
+  const protection = value.protection;
+  const inventory = protection.containerInventory;
+  requireValue(Array.isArray(inventory) && inventory.length <= 1024
+    && new Set(inventory.map((item) => item?.id)).size === inventory.length
+    && inventory.every((item) => DIGEST.test(item?.id ?? "") && IMAGE.test(item?.image ?? "")
+      && CONTAINER_STATUSES.includes(item.status) && DIGEST.test(item.fingerprint ?? ""))
+    && same(inventory.map((item) => item.id), inventory.map((item) => item.id).sort())
+    && inventory.length === protection.containerCount
+    && protection.containerSnapshotSha256 === jsonDigest(inventory.map(({ id, image }) => ({ id, image })))
+    && protection.containerReferencesSha256 === jsonDigest(inventory.map(({ id, image, status }) => ({ id, image, status })))
+    && validateImageIds(protection.allImageIds)
+    && [...protection.ownedImageIds, ...protection.unverifiedImages.map((item) => item.id)]
+      .every((id) => protection.allImageIds.includes(id))
+    && safeCount(protection.volumeCount) && DIGEST.test(protection.volumeSnapshotSha256 ?? ""),
+  "RETIRED_INVENTORY_INVALID");
+  const records = operation === "retired-container-inspect" ? value.records : value.recordsAfter;
+  requireValue(Array.isArray(records) && same(records.map((item) => item?.id), value.scopeIds), "RETIRED_RECORDS_INVALID");
+  for (const item of records) {
+    const [service, image] = RETIRED_SCOPE.get(item.id);
+    requireValue(item.service === service && item.image === image && typeof item.present === "boolean"
+      && typeof item.eligible === "boolean" && DIGEST.test(item.fingerprint ?? "")
+      && [service, "unknown"].includes(item.purpose)
+      && ["0.8.0-dev.4", null].includes(item.version)
+      && Array.isArray(item.retainReasons) && item.retainReasons.every((reason) => RETIRED_REASONS.includes(reason))
+      && item.present === inventory.some((container) => container.id === item.id), "RETIRED_RECORD_INVALID");
+    if (item.present) {
+      requireValue(inventory.some((container) => container.id === item.id && container.image === item.image)
+        && CONTAINER_STATUSES.includes(item.status) && Number.isSafeInteger(item.exitCode)
+        && safeCount(item.mountCount) && DIGEST.test(item.mountsSha256 ?? "")
+        && Array.isArray(item.referencedByContainerIds)
+        && item.referencedByContainerIds.every((id) => DIGEST.test(id) && inventory.some((other) => other.id === id))
+        && safeCount(item.writableChanges?.count) && safeCount(item.writableChanges?.unexpectedCount)
+        && item.writableChanges.unexpectedCount <= item.writableChanges.count
+        && DIGEST.test(item.writableChanges.sha256 ?? "") && DIGEST.test(item.writableChanges.unexpectedSha256 ?? ""),
+      "RETIRED_PRESENT_RECORD_INVALID");
+    } else {
+      requireValue(!item.eligible && same(item.retainReasons, ["container-missing"]), "RETIRED_MISSING_INVALID");
+    }
+    requireValue(!item.eligible || (item.present && item.version === "0.8.0-dev.4" && item.purpose === service
+      && item.status === "exited" && item.exitCode === 0 && item.mountCount === 0
+      && item.referencedByContainerIds.length === 0 && item.writableChanges.unexpectedCount === 0
+      && item.retainReasons.length === 0 && ["", "no"].includes(item.restartPolicy)
+      && Number.isFinite(Date.parse(item.startedAt)) && Date.parse(item.startedAt) > 0
+      && Date.parse(item.startedAt) <= Date.parse(item.finishedAt)
+      && Date.parse(item.finishedAt) <= Date.now() - 3_600_000
+      && ![...protection.currentImageIds, ...protection.previousImageIds].includes(item.image)),
+    "RETIRED_ELIGIBILITY_INVALID");
+  }
+  if (operation === "retired-container-inspect") return value;
+  requireValue(operation === "retired-container-clean" && inspected && value.planDigest === expectedDigest
+    && value.planDigest === inspected.planDigest && value.protectionVerified === true && value.expired === false,
+  "RETIRED_CLEAN_PLAN_INVALID");
+  for (const key of ["attemptedIds", "removedIds", "retainedIds"]) {
+    requireValue(Array.isArray(value[key]) && new Set(value[key]).size === value[key].length
+      && value[key].every((id) => RETIRED_SCOPE.has(id)), "RETIRED_CLEAN_IDS_INVALID");
+  }
+  const selected = inspected.records.filter((item) => item.eligible).map((item) => item.id);
+  requireValue(value.attemptedIds.every((id) => selected.includes(id))
+    && value.removedIds.every((id) => value.attemptedIds.includes(id) && !records.find((item) => item.id === id).present)
+    && same(value.retainedIds, selected.filter((id) => !value.removedIds.includes(id)).sort())
+    && Array.isArray(value.engineRefused) && value.engineRefused.every((item) => value.retainedIds.includes(item.id)
+      && value.attemptedIds.includes(item.id) && ["timeout", "engine-refused", "container-remains"].includes(item.reason))
+    && same(protection.containerInventory, inspected.protection.containerInventory.filter((item) => !value.removedIds.includes(item.id)))
+    && records.filter((item) => !value.removedIds.includes(item.id))
+      .every((item) => same(item, inspected.records.find((before) => before.id === item.id))), "RETIRED_CLEAN_DIFF_INVALID");
+  const stableKeys = ["allImageIds", "currentImageIds", "previousImageIds", "ownedImageIds", "ownedImageCount",
+    "unverifiedImageCount", "unverifiedImages", "previousTag", "previousRevision", "volumeCount", "volumeSnapshotSha256",
+    "postgresId", "migrationCount", "migrationManifestSha256", "configHashes", "checkoutRevision", "deploymentReceiptSha256"];
+  requireValue(stableKeys.every((key) => same(protection[key], inspected.protection[key]))
+    && ["localHealth", "publicHealth", "database", "worker", "migrationLedger"].every((key) => value.checks?.[key] === true)
+    && safeCount(value.availableBytesBefore) && safeCount(value.availableBytesAfter)
+    && Number.isSafeInteger(value.netAvailableBytesDelta)
+    && value.netAvailableBytesDelta === value.availableBytesAfter - value.availableBytesBefore, "RETIRED_PROTECTION_INVALID");
+  return value;
+}
+
 function writeEnv(values) {
   requireValue(typeof process.env.GITHUB_ENV === "string" && process.env.GITHUB_ENV.length > 0, "ENV_FILE_REQUIRED");
   appendFileSync(process.env.GITHUB_ENV, Object.entries(values).map(([key, value]) => `${key}=${value}\n`).join(""));
@@ -280,6 +376,25 @@ async function main(args) {
     healthyProductionPayload(payload, context.version);
     writeFileSync(args[1], `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     console.log(`CACHE_MAINTENANCE_PUBLIC_HEALTH_OK version=${context.version}`);
+    return;
+  }
+  if ((args.length === 3 && args[0] === "parse-retired-inspect") || (args.length === 4 && args[0] === "parse-retired-clean")) {
+    const operation = args[0] === "parse-retired-inspect" ? "retired-container-inspect" : "retired-container-clean";
+    const inspected = operation === "retired-container-clean" ? parseRetiredContainerReport(
+      RETIRED_PREFIX + JSON.stringify(JSON.parse(readFileSync(args[3], "utf8"))), "retired-container-inspect", context) : undefined;
+    const report = parseRetiredContainerReport(readFileSync(args[1], "utf8"), operation,
+      context, process.env.RETIRED_CONTAINER_PLAN_DIGEST, inspected);
+    writeFileSync(args[2], `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    if (operation === "retired-container-inspect") writeEnv({ RETIRED_CONTAINER_PLAN_DIGEST: report.planDigest });
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      const records = operation === "retired-container-inspect" ? report.records : report.recordsAfter;
+      const lines = ["### 旧版已停止容器维护", "", `运行版本：${report.tag} / ${report.revision}`,
+        "", "| 容器 ID | 用途 | 现存 | 可回收 | 保留原因 |", "| --- | --- | --- | --- | --- |"];
+      for (const item of records) lines.push(`| ${item.id} | ${item.purpose} | ${item.present} | ${item.eligible} | ${item.retainReasons.join(", ")} |`);
+      if (operation === "retired-container-clean") lines.push("", `实际删除 ${report.removedIds.length} 个容器；镜像和数据卷未删除；磁盘净变化 ${report.netAvailableBytesDelta} bytes。`);
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n\n`);
+    }
+    console.log(`RETIRED_CONTAINER_REPORT_VERIFIED operation=${operation} tag=${context.tag}`);
     return;
   }
   if ((args.length === 3 && args[0] === "parse-image-inspect") || (args.length === 4 && args[0] === "parse-image-clean")) {

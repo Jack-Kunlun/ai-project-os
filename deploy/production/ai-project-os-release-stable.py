@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+from datetime import datetime
 from decimal import Decimal
 import hashlib
 import importlib.util
@@ -44,6 +45,8 @@ CACHE_MAINTENANCE_PLAN = Path('/var/lib/ai-project-os/cache-maintenance-plan.jso
 CACHE_MAINTENANCE_AUDIT = Path('/var/lib/ai-project-os/cache-maintenance-last.json')
 IMAGE_MAINTENANCE_PLAN = Path('/var/lib/ai-project-os/image-maintenance-plan.json')
 IMAGE_MAINTENANCE_AUDIT = Path('/var/lib/ai-project-os/image-maintenance-last.json')
+RETIRED_CONTAINER_PLAN = Path('/var/lib/ai-project-os/retired-container-plan.json')
+RETIRED_CONTAINER_AUDIT = Path('/var/lib/ai-project-os/retired-container-last.json')
 BACKUP_SOURCE = 'deploy/production/ai-project-os-backup'
 ARTIFACT_SOURCE = 'deploy/production/ai_project_os_backup_artifact.py'
 DEPLOYER_SOURCE = 'deploy/production/ai-project-os-release-stable.py'
@@ -2293,6 +2296,323 @@ def _ci_runs(revision, event):
             and item.get('status') == 'completed' and item.get('conclusion') == 'success']
 
 
+# Frozen by the explicit request to retire these two completed 0.8.0-dev.4 jobs.
+RETIRED_CONTAINER_SCOPE = {
+    '456e94bcebb6e9c8ba47a412c8feebec1a8d3a869806e60e5ebcc4a8029867e2': (
+        'reconcile', 'sha256:3e3660173cabc686ed1e9ae1ffeadfba6b388707b141c49e7eb2b002c66a9266'),
+    'b81a7ac54512254f6872400128ebd77c5f90aa089eba93bb24c94b165e07feff': (
+        'migrate', 'sha256:4ab705882c2fde74880c9e971e3a675a6176f29762307c4c7fb78be6a819d9e9'),
+}
+# Exact commands in df0f227669d0ea62c6119bd9b057c38f3b14d4d7:compose.yaml/Dockerfile.
+_RETIRED_COMMANDS = {
+    'reconcile': ['node', 'node_modules/tsx/dist/cli.mjs', 'scripts/reconcile-database-principals.ts'],
+    'migrate': ['node', 'node_modules/prisma/build/index.js', 'migrate', 'deploy', '--config', 'prisma.config.ts'],
+}
+_RETIRED_FIELDS = (
+    '.Id', '.Image', '.Name', '.State.Status', '.State.Running', '.State.Paused',
+    '.State.Restarting', '.State.Dead', '.State.ExitCode', '.State.OOMKilled',
+    '.State.StartedAt', '.State.FinishedAt',
+    '(index .Config.Labels "com.docker.compose.project")',
+    '(index .Config.Labels "com.docker.compose.service")',
+    '(index .Config.Labels "org.opencontainers.image.version")',
+    '.Config.Cmd', '.Config.Entrypoint', '.HostConfig.RestartPolicy.Name', '.Mounts',
+    '.HostConfig.Links', '.HostConfig.VolumesFrom', '.HostConfig.NetworkMode',
+    '.HostConfig.PidMode', '.HostConfig.IpcMode', '.ExecIDs', '.HostConfig.AutoRemove',
+    '.Config.User', '.HostConfig.Privileged', '.Config.WorkingDir',
+)
+_RETIRED_TEMPLATE = ('{{printf "[' + ','.join(['%s'] * len(_RETIRED_FIELDS)) + ']" '
+                     + ' '.join('(json ' + field + ')' for field in _RETIRED_FIELDS) + '}}')
+_RETIRED_EPHEMERAL_ROOTS = ('/tmp', '/var/tmp', '/dev', '/run', '/home/node/.cache',
+                            '/home/node/.npm', '/app/node_modules/.cache')
+_RETIRED_METADATA_PARENTS = ('/etc', '/var', '/home', '/home/node', '/app', '/app/node_modules')
+
+
+def _retired_diff(identifier):
+    require(identifier in RETIRED_CONTAINER_SCOPE, 'RETIRED_SCOPE_INVALID')
+    output = docker('container', 'diff', identifier, timeout=60)
+    require(len(output) <= 256 * 1024, 'RETIRED_DIFF_TOO_LARGE')
+    lines = sorted(output.splitlines())
+    require(len(lines) <= 2048 and len(lines) == len(set(lines)), 'RETIRED_DIFF_INVALID')
+    unexpected = []
+    for line in lines:
+        require(len(line) >= 3 and line[:2] in ('A ', 'C ', 'D '), 'RETIRED_DIFF_INVALID')
+        path = line[2:]
+        require(path.startswith('/') and str(PurePosixPath(path)) == path
+                and '..' not in PurePosixPath(path).parts
+                and not any(ord(char) < 32 for char in path), 'RETIRED_DIFF_INVALID')
+        ephemeral = any(path == root or path.startswith(root + '/')
+                        for root in _RETIRED_EPHEMERAL_ROOTS)
+        metadata_only = line[0] == 'C' and path in _RETIRED_METADATA_PARENTS
+        if not (ephemeral or metadata_only):
+            unexpected.append(line)
+    return {'count': len(lines), 'unexpectedCount': len(unexpected),
+            'sha256': sha256(_cache_json_bytes(lines)),
+            'unexpectedSha256': sha256(_cache_json_bytes(unexpected))}
+
+
+def _retired_details(containers):
+    identifiers = [item['id'] for item in containers]
+    if not identifiers:
+        return {}
+    output = docker('inspect', '--format', _RETIRED_TEMPLATE, *identifiers, timeout=120)
+    require(len(output) <= 1024 * 1024, 'RETIRED_INSPECT_TOO_LARGE')
+    rows = output.splitlines()
+    require(len(rows) == len(identifiers), 'RETIRED_INSPECT_INVALID')
+    result = {}
+    for line in rows:
+        value = _image_parse_json(line, 'RETIRED_INSPECT_INVALID')
+        require(isinstance(value, list) and len(value) == len(_RETIRED_FIELDS)
+                and isinstance(value[0], str) and value[0] in identifiers
+                and value[0] not in result and isinstance(value[1], str)
+                and re.fullmatch(r'sha256:[a-f0-9]{64}', value[1]) is not None
+                and isinstance(value[2], str) and len(value[2]) <= 256
+                and value[3] in CACHE_CONTAINER_STATUSES
+                and isinstance(value[18], list) and len(value[18]) <= 128,
+                'RETIRED_INSPECT_INVALID')
+        require(all(isinstance(mount, dict) for mount in value[18]), 'RETIRED_MOUNTS_INVALID')
+        result[value[0]] = value
+    require(set(result) == set(identifiers), 'RETIRED_INSPECT_INVALID')
+    return result
+
+
+def _retired_record(identifier, details, image_records, protected_ids, now):
+    service, expected_image = RETIRED_CONTAINER_SCOPE[identifier]
+    value = details.get(identifier)
+    if value is None:
+        return {'id': identifier, 'image': expected_image, 'service': service,
+                'version': '0.8.0-dev.4', 'purpose': service, 'present': False,
+                'eligible': False, 'retainReasons': ['container-missing'],
+                'fingerprint': sha256(_cache_json_bytes([identifier, False]))}
+    reasons = []
+    identity_valid = (value[1] == expected_image
+                      and value[2] == '/ai-project-os-' + service + '-1'
+                      and value[12:15] == [PROJECT, service, '0.8.0-dev.4'])
+    image = image_records.get(expected_image)
+    image_valid = (image is not None and image['present']
+                   and image['ownership'] == 'confirmed' and image['version'] == '0.8.0-dev.4'
+                   and image['service'] == service
+                   and image['containerReferences'] == [{'id': identifier, 'status': 'exited'}]
+                   and expected_image not in protected_ids)
+    if not (identity_valid and image_valid):
+        reasons.append('identity-unconfirmed')
+    command_valid = (value[15] == _RETIRED_COMMANDS[service]
+                     and value[16] in (None, [], ['docker-entrypoint.sh'])
+                     and value[26] in ('node', '1000', '1000:1000') and value[28] == '/app'
+                     and value[27] is False)
+    if not command_valid:
+        reasons.append('purpose-unconfirmed')
+    if not (value[3] == 'exited' and all(value[index] is False for index in (4, 5, 6, 7, 9, 25))
+            and type(value[8]) is int and value[8] == 0 and value[24] in (None, [])):
+        reasons.append('not-completed-successfully')
+    finished_age = None
+    try:
+        require(all(isinstance(value[index], str) and re.fullmatch(
+            r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z',
+            value[index]) is not None for index in (10, 11)), 'RETIRED_TIME_INVALID')
+        started = datetime.fromisoformat(value[10].replace('Z', '+00:00')).timestamp()
+        finished = datetime.fromisoformat(value[11].replace('Z', '+00:00')).timestamp()
+        require(0 < started <= finished <= now, 'RETIRED_TIME_INVALID')
+        finished_age = int(now - finished)
+    except (ValueError, TypeError, AttributeError, RuntimeError):
+        reasons.append('finish-time-unconfirmed')
+    if finished_age is not None and finished_age < 3600:
+        reasons.append('too-recent')
+    if value[17] not in ('', 'no'):
+        reasons.append('restart-policy-unconfirmed')
+    if value[18]:
+        reasons.append('mounts-present')
+    if value[19] or value[20] or any(isinstance(value[index], str)
+                                    and value[index].startswith('container:') for index in (21, 22, 23)):
+        reasons.append('runtime-dependency-present')
+    referents = []
+    for other_id, other in details.items():
+        if other_id == identifier:
+            continue
+        dependencies = [other[index] for index in (19, 20, 21, 22, 23)]
+        dependencies.extend(mount.get('Source', '') for mount in other[18])
+        encoded = json.dumps(dependencies, ensure_ascii=True, sort_keys=True)
+        id_tokens = re.findall(r'(?<![a-f0-9])[a-f0-9]{4,64}(?![a-f0-9])', encoded)
+        if any(identifier.startswith(token) for token in id_tokens) or value[2].lstrip('/') in encoded:
+            referents.append(other_id)
+    if referents:
+        reasons.append('referenced-by-container')
+    changes = _retired_diff(identifier)
+    if changes['unexpectedCount']:
+        reasons.append('writable-business-path-unconfirmed')
+    return {'id': identifier, 'image': value[1], 'service': service,
+            'version': '0.8.0-dev.4' if identity_valid else None,
+            'purpose': service if command_valid else 'unknown', 'present': True,
+            'status': value[3], 'exitCode': value[8], 'startedAt': value[10], 'finishedAt': value[11],
+            'restartPolicy': value[17] if value[17] in ('', 'no') else 'unknown',
+            'mountCount': len(value[18]), 'mountsSha256': sha256(_cache_json_bytes(value[18])),
+            'referencedByContainerIds': sorted(referents), 'writableChanges': changes,
+            'eligible': not reasons, 'retainReasons': sorted(set(reasons)),
+            'fingerprint': sha256(_cache_json_bytes({'container': value, 'changes': changes}))}
+
+
+def _retired_runtime(target_tag, target_revision):
+    source, installed, base, snapshot = _image_runtime_snapshot(target_tag, target_revision)
+    details = _retired_details(snapshot['containers'])
+    inventory = [{'id': identifier, 'image': value[1], 'status': value[3],
+                  'fingerprint': sha256(_cache_json_bytes(value))}
+                 for identifier, value in sorted(details.items())]
+    require([{key: item[key] for key in ('id', 'image', 'status')} for item in inventory]
+            == snapshot['containers']
+            and [{key: item[key] for key in ('id', 'image')} for item in inventory] == base['containers'],
+            'RETIRED_INVENTORY_DRIFT')
+    images = {item['id']: item for item in snapshot['images']}
+    protected = set(base['currentImageIds'] + base['previousImageIds'])
+    records = [_retired_record(identifier, details, images, protected, time.time())
+               for identifier in RETIRED_CONTAINER_SCOPE]
+    return source, installed, base, snapshot, inventory, records
+
+
+def _retired_protection(base, snapshot, inventory):
+    return {'base': base, 'allImageIds': snapshot['allImageIds'], 'containers': inventory}
+
+
+def _retired_matches(plan, base, snapshot, inventory, records, removed):
+    expected = json.loads(_cache_json_bytes(plan['protection']))
+    expected['base']['containers'] = [item for item in expected['base']['containers']
+                                      if item['id'] not in removed]
+    expected['containers'] = [item for item in expected['containers'] if item['id'] not in removed]
+    expected_records = {item['id']: item for item in plan['records']}
+    return (expected == _retired_protection(base, snapshot, inventory)
+            and all((not item['present']) if item['id'] in removed
+                    else item == expected_records[item['id']] for item in records))
+
+
+def _retired_public_protection(base, snapshot, inventory, digest):
+    value = _image_public_protection(base, snapshot, digest)
+    value['containerInventory'] = inventory
+    return value
+
+
+def _retired_emit(value):
+    data = _cache_json_bytes(value)
+    require(len(data) <= 512 * 1024, 'RETIRED_REPORT_TOO_LARGE')
+    atomic_install(RETIRED_CONTAINER_AUDIT, data, 0o600)
+    print('RETIRED_CONTAINER_REPORT ' + data.decode('ascii'), flush=True)
+
+
+def retired_container_inspect(target_tag, target_revision):
+    _source, installed, base, snapshot, inventory, records = _retired_runtime(target_tag, target_revision)
+    now = int(time.time())
+    plan = {'schema': 1, 'operation': 'retired-container-clean', 'tag': target_tag,
+            'revision': target_revision, 'toolingRevision': installed['toolingRevision'],
+            'createdAt': now, 'expiresAt': now + CACHE_PLAN_TTL_SECONDS,
+            'scopeIds': list(RETIRED_CONTAINER_SCOPE), 'records': records,
+            'protection': _retired_protection(base, snapshot, inventory)}
+    data = _cache_plan_bytes(plan)
+    digest = sha256(data)
+    atomic_install(RETIRED_CONTAINER_PLAN, data, 0o600)
+    _retired_emit({'schema': 1, 'operation': 'retired-container-inspect', 'tag': target_tag,
+                   'revision': target_revision, 'scopeIds': list(RETIRED_CONTAINER_SCOPE),
+                   'planDigest': digest, 'records': records,
+                   'protection': _retired_public_protection(base, snapshot, inventory, digest)})
+
+
+def _retired_validate_plan(data, digest, target_tag, target_revision, tooling_revision):
+    require(isinstance(digest, str) and HEX64.fullmatch(digest) is not None
+            and sha256(data) == digest, 'RETIRED_PLAN_DIGEST_INVALID')
+    plan = _image_parse_json(data.decode('ascii'), 'RETIRED_PLAN_INVALID')
+    require(isinstance(plan, dict) and set(plan) == {
+        'schema', 'operation', 'tag', 'revision', 'toolingRevision', 'createdAt',
+        'expiresAt', 'scopeIds', 'records', 'protection'}, 'RETIRED_PLAN_INVALID')
+    require(plan['schema'] == 1 and plan['operation'] == 'retired-container-clean'
+            and plan['tag'] == target_tag and plan['revision'] == target_revision
+            and plan['toolingRevision'] == tooling_revision
+            and plan['scopeIds'] == list(RETIRED_CONTAINER_SCOPE), 'RETIRED_PLAN_IDENTITY_INVALID')
+    require(type(plan['createdAt']) is int and type(plan['expiresAt']) is int
+            and 0 < plan['expiresAt'] - plan['createdAt'] <= CACHE_PLAN_TTL_SECONDS,
+            'RETIRED_PLAN_TIME_INVALID')
+    _cache_plan_remaining(plan)
+    require(isinstance(plan['records'], list) and len(plan['records']) == 2
+            and [item.get('id') for item in plan['records']] == list(RETIRED_CONTAINER_SCOPE)
+            and all(item.get('image') == RETIRED_CONTAINER_SCOPE[item['id']][1]
+                    and type(item.get('eligible')) is bool
+                    and type(item.get('present')) is bool
+                    and HEX64.fullmatch(item.get('fingerprint', '')) is not None
+                    for item in plan['records']), 'RETIRED_PLAN_CONTENT_INVALID')
+    return plan
+
+
+def _retired_remove_id(identifier, timeout_seconds):
+    require(identifier in RETIRED_CONTAINER_SCOPE and type(timeout_seconds) in (int, float)
+            and 0 < timeout_seconds <= 120, 'RETIRED_REMOVE_INVALID')
+    executable = BINARIES['docker']
+    HELPER.trusted(executable)
+    require(stat.S_ISREG(Path(executable).stat().st_mode) and os.access(executable, os.X_OK),
+            'EXECUTABLE_INVALID')
+    try:
+        result = subprocess.run([executable, 'container', 'rm', identifier], env=PROCESS_ENV,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=timeout_seconds, check=False)
+    except subprocess.TimeoutExpired:
+        return 'timeout'
+    return 'command-succeeded' if result.returncode == 0 else 'engine-refused'
+
+
+def retired_container_clean(target_tag, target_revision, digest):
+    installed = _cache_installed_tooling()
+    data = _read_trusted_host_file(RETIRED_CONTAINER_PLAN, 0o600, 1024 * 1024)
+    plan = _retired_validate_plan(data, digest, target_tag, target_revision, installed['toolingRevision'])
+    deadline = time.monotonic() + _cache_plan_remaining(plan)
+    _source, _installed, base, snapshot, inventory, records = _retired_runtime(target_tag, target_revision)
+    require(_retired_matches(plan, base, snapshot, inventory, records, set()), 'RETIRED_PLAN_DRIFT')
+    available_before = _image_available_bytes(base['dockerRoot'])
+    attempted, removed, refused = [], set(), []
+    protected = True
+    expired = False
+    eligible = {item['id'] for item in plan['records'] if item['eligible']}
+    try:
+        for identifier in RETIRED_CONTAINER_SCOPE:
+            if identifier not in eligible:
+                continue
+            _cache_plan_remaining(plan, deadline)
+            _source, _installed, base, snapshot, inventory, records = _retired_runtime(target_tag, target_revision)
+            if not _retired_matches(plan, base, snapshot, inventory, records, removed):
+                protected = False
+                break
+            remaining = min(120, _cache_plan_remaining(plan, deadline))
+            attempted.append(identifier)
+            outcome = _retired_remove_id(identifier, remaining)
+            _source, _installed, base, snapshot, inventory, records = _retired_runtime(target_tag, target_revision)
+            if identifier not in {item['id'] for item in inventory}:
+                removed.add(identifier)
+            else:
+                refused.append({'id': identifier, 'reason': outcome if outcome != 'command-succeeded' else 'container-remains'})
+            if not _retired_matches(plan, base, snapshot, inventory, records, removed):
+                protected = False
+                break
+    except Exception:
+        _retired_emit({'schema': 1, 'operation': 'retired-container-clean-failed',
+                       'tag': target_tag, 'revision': target_revision, 'planDigest': digest,
+                       'attemptedIds': attempted, 'removedIds': sorted(removed),
+                       'protectionVerified': False})
+        raise
+    _source, _installed, base, snapshot, inventory, records = _retired_runtime(target_tag, target_revision)
+    protected = protected and _retired_matches(plan, base, snapshot, inventory, records, removed)
+    try:
+        _cache_plan_remaining(plan, deadline)
+    except RuntimeError:
+        expired = True
+    available_after = _image_available_bytes(base['dockerRoot'])
+    # _retired_runtime revalidates both health endpoints, live writers, PG identity and ledger.
+    checks = {key: True for key in ('localHealth', 'publicHealth', 'database', 'worker', 'migrationLedger')}
+    report = {'schema': 1, 'operation': 'retired-container-clean', 'tag': target_tag,
+              'revision': target_revision, 'scopeIds': list(RETIRED_CONTAINER_SCOPE),
+              'planDigest': digest, 'recordsAfter': records,
+              'attemptedIds': attempted, 'removedIds': sorted(removed),
+              'retainedIds': sorted(eligible - removed), 'engineRefused': refused,
+              'expired': expired, 'protectionVerified': protected, 'checks': checks,
+              'availableBytesBefore': available_before, 'availableBytesAfter': available_after,
+              'netAvailableBytesDelta': available_after - available_before,
+              'protection': _retired_public_protection(base, snapshot, inventory, digest)}
+    _retired_emit(report)
+    require(protected and not expired, 'RETIRED_PROTECTION_OR_EXPIRY_FAILED')
+
+
 def _run_has_jobs(run, required_names):
     run_id = run.get('id')
     require(isinstance(run_id, int) and run_id > 0, 'CI_RUN_ID_INVALID')
@@ -4290,6 +4610,16 @@ def main(args):
             require(HEX64.fullmatch(confirmation) is not None,
                     'CACHE_PLAN_DIGEST_INVALID')
             cache_clean(target_tag, revision, confirmation)
+            return
+        if command in ('retired-container-inspect', 'retired-container-clean'):
+            _cache_installed_tooling()
+            if command == 'retired-container-inspect':
+                require(confirmation == 'CONFIRM_RETIRED_CONTAINER_INSPECT',
+                        'RETIRED_INSPECT_CONFIRMATION_INVALID')
+                retired_container_inspect(target_tag, revision)
+                return
+            require(HEX64.fullmatch(confirmation) is not None, 'RETIRED_PLAN_DIGEST_INVALID')
+            retired_container_clean(target_tag, revision, confirmation)
             return
         if command in ('image-inspect', 'image-clean'):
             _cache_installed_tooling()

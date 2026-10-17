@@ -30,6 +30,14 @@ if [[ "$original_command" =~ ^clean-images\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[
   exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
     image-clean "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
 fi
+if [[ "$original_command" =~ ^inspect-retired-containers\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ (CONFIRM_RETIRED_CONTAINER_INSPECT)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
+    retired-container-inspect "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+if [[ "$original_command" =~ ^clean-retired-containers\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ ([0-9a-f]{64})$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
+    retired-container-clean "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
 if [[ "$original_command" =~ ^deploy-stable\ (v[1-9][0-9]*\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))\ ([0-9a-f]{40})\ (CONFIRM_STABLE_CI_IMAGES)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-release-stable \
     deploy "${BASH_REMATCH[1]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"

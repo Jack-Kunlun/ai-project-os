@@ -1,0 +1,66 @@
+{
+  "record_kind": "historical_local_acceptance",
+  "record_note": "本记录对应正式发布前的本地验收；其中不提交或部署的范围约束已被 2026-10-19 用户明确要求发布 1.1.0 的指令替代。最终范围见 docs/releases/v1.1.0.md，部署结果以精确主分支 CI、发布回执与公网健康为准。",
+  "objective": "用户侧本地验收通过后，按确认原型对齐管理平台，并补齐问答安全用量聚合",
+  "target_version": "1.1.0",
+  "prerequisite": "user platform candidate-source-v12 accepted locally; 19/19 authenticated browser checks passed",
+  "classification": {
+    "task": "S4",
+    "risk": "high",
+    "reason": "管理壳为客户端变化；总览新增对私有问答审计的只读安全聚合，需要保持数据和身份隔离"
+  },
+  "slices": [
+    {
+      "name": "管理壳与栏目",
+      "observable": "五个直接一级入口、组内横向栏目、紧凑白灰蓝页面、单一账户入口和移动端导航",
+      "allowed": "管理端组件、布局、样式和相应 UI 合同；全部既有真实操作可达",
+      "non_goals": "用户侧、服务端权限、业务写操作、依赖、原型示例数据",
+      "status": "accepted_local"
+    },
+    {
+      "name": "问答安全用量聚合",
+      "observable": "今日、趋势和失败统计包含平台问答，排除个人 BYOK，不泄露问答正文",
+      "allowed": "system-overview 只读聚合与聚焦测试；实际 PG 暴露成功问答审计漏存用量，补入同一成功事务",
+      "non_goals": "私有问答明细接口、额度人工补扣退款、Schema 与计费外发写路径",
+      "status": "accepted_local"
+    },
+    {
+      "name": "管理端集成验收",
+      "observable": "定向测试、相关 PG、默认覆盖率、lint/type/build/performance、浏览器和同镜像候选通过",
+      "status": "accepted_local"
+    }
+  ],
+  "verification_budget": {
+    "independent_review_max": 1,
+    "postgres": "affected unified-question integration gate; prior unchanged 91-gate evidence reused",
+    "browser": "existing authenticated 19-case suite with updated navigation expectations and admin screenshots",
+    "expand_only_on": "失败、新的跨模块影响或项目强制门禁"
+  },
+  "constraints": [
+    "不覆盖用户侧已验收功能",
+    "不虚构原型示例统计，仅展示有实际来源的能力",
+    "不提交推送合并部署发布"
+  ],
+  "new_evidence": "隔离 PostgreSQL 新断言证实成功 UnifiedQuestionAudit 的 Token 默认为 0；仅修复成功事务的用量与安全 requestId 字段，结算及外发顺序保持原合同。独立审查纳入这一精确变更。",
+  "verification_evidence": {
+    "backend_review": "Independent read-only review High; no remaining actionable findings in frozen backend scope",
+    "postgres": "admin-unified-question-pg-v3.log: 2/2 passed, no skip; real success usage and Shanghai midnight boundary",
+    "static": "Full lint passed; final affected lint and typecheck passed",
+    "default_coverage": "1423 passed, 171 opt-in PG skipped; line 61.52 / branch 79.33 / function 67.68",
+    "browser_first_pass": "17/19 passed; discovered contrast, opacity transition, trend keyboard focus, and loading status semantics; focused fixes applied, final candidate pending",
+    "candidate_source": "candidate-source-admin-v2: 05ddce81c1936dc8893f9297e89b9c9ae5c42dbb152b82a48d3c28d6794b631e",
+    "performance": "candidate admin-v2: all budgets passed; static inventory 823.8/850 KiB, graph 184.6/185 KiB, admin SMS 156.0/160 KiB",
+    "compose_candidate": "LOCAL_RELEASE_CANDIDATE_OK; 148 migrations; health, workerRestart, restartPersistence and six-row businessDataPersistence passed; cleanup verified; releaseEligible false",
+    "final_ui_checks": "20/20 admin/copy/style contracts plus 19/19 affected UI contracts passed after accessibility fixes; final affected lint/typecheck passed",
+    "business_snapshot_sha256": "6bd777cb055edba02b2efbe57e3cddc2f8e24f9eda6c50e55115748e4b430c98",
+    "browser_final": "browser-e2e-admin-v2.log: 19/19 passed in 2.3m, desktop/mobile admin WCAG sweep, keyboard trend scrolling, all authenticated user flows",
+    "snapshot_runtime_sources": "All runtime sources match candidate-source-admin-v2; subsequent differences are delivery documents only"
+  },
+  "status": "accepted_local_not_deployed",
+  "source_checkpoint": {
+    "manifest": "candidate-source-admin-v2",
+    "sha256": "05ddce81c1936dc8893f9297e89b9c9ae5c42dbb152b82a48d3c28d6794b631e",
+    "state": "uncommitted_local_candidate",
+    "release_eligible": false
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "record_kind": "historical_local_acceptance",
+  "record_note": "本记录对应正式发布前的本地验收；其中不提交或部署的范围约束已被 2026-10-19 用户明确要求发布 1.1.0 的指令替代。最终范围见 docs/releases/v1.1.0.md，部署结果以精确主分支 CI、发布回执与公网健康为准。",
+  "objective": "先将用户侧实际功能按 prototypes/project-os-rethink 对齐，用户侧验收后再开始管理平台",
+  "baseline": {
+    "path": "worktrees/usage-flow-guidance",
+    "sha": "c5cac951cd38842db516b253861712047fc57a30",
+    "version": "1.0.13",
+    "branch": "codex/prototype-user-platform"
+  },
+  "scope": [
+    "常驻侧栏、四个全局入口、可切换当前项目与六个直接项目入口",
+    "真实工作台、项目列表、项目概览、项目计划、资料/整理结果/后台识别",
+    "统一智能问答、逐轮范围、持久化会话、完整回答与不可变引用",
+    "我的知识及真实来源/事实知识图谱",
+    "简报调查、自动化、项目管理和账户/团队辅助入口"
+  ],
+  "constraints": [
+    "使用真实认证后接口与数据库，不复制原型 localStorage 或示例业务数据",
+    "保留服务端 RBAC、每次外发范围确认、额度和审计边界",
+    "保护既有资料与历史；新增结构采用兼容迁移",
+    "用户侧已本地验收，管理平台独立切片实施；不提交推送合并部署发布"
+  ],
+  "slices": [
+    {
+      "name": "用户侧框架与导航",
+      "observable": "所有用户页面共享原型侧栏，切换项目后进入对应栏目",
+      "status": "accepted_local"
+    },
+    {
+      "name": "真实会话与范围服务",
+      "observable": "同会话可跨轮选择范围，重开继续追问并查看当时来源",
+      "status": "accepted_local"
+    },
+    {
+      "name": "页面与操作对齐",
+      "observable": "用户侧各栏目布局、入口和真实操作与原型一致",
+      "status": "accepted_local"
+    },
+    {
+      "name": "验证与独立审查",
+      "observable": "按项目高风险门禁完成验证，修复一次独立审查中的问题",
+      "status": "accepted_local"
+    }
+  ],
+  "verification_budget": {
+    "baseline": "受影响定向测试、默认测试/覆盖率、Prisma 生成校验、lint/typecheck/build/performance",
+    "high_risk": "因新增服务端与会话 Schema，完整隔离 PostgreSQL 业务门禁、认证与数据库主体门禁及认证后浏览器/A11y；数据库和容器操作先确认实际隔离环境",
+    "independent_review_max": 1,
+    "expand_only_on": "失败、发现跨模块影响或项目强制门禁",
+    "production": "不在本次执行"
+  },
+  "admin_platform": "用户侧验收后完成管理端；最终集成候选本地验收通过，未提交或部署",
+  "target_version": "1.1.0",
+  "verification_evidence": {
+    "prisma": "client generated; schema valid; 148 migration directories validated",
+    "typecheck_and_lint": "passed; production candidate build also passed typecheck",
+    "default_coverage": {
+      "total": 1593,
+      "passed": 1422,
+      "skipped_postgres": 171,
+      "failed": 0,
+      "line_percent": 61.49,
+      "branch_percent": 79.31,
+      "function_percent": 67.65
+    },
+    "unified_question_postgres": "2/2 passed after latest history permission fix; viewer/archived history cannot be re-sent, remains readable",
+    "full_postgres": "91/91 passed in isolated QA cluster",
+    "browser": "19/19 passed against local candidate-source-v12, including authenticated flows, mobile keyboard focus, WCAG sweep and real graph sources; Ask provider responses use an explicit interaction fixture",
+    "independent_review": "passed with supplemental history model-use permission review; critical findings closed",
+    "production": "not run; no source commit or release",
+    "account_auth": "PHONE_AUTH_POSTGRES_GATE_OK",
+    "database_oid10": "passed with 148 migrations",
+    "performance": "passed against final user-side build; all static assets 818.3 KiB / 850 KiB",
+    "compose_candidate": "final user-side local candidate passed health, 148 migrations, worker restart and 6-row business-data restart persistence; temporary resources cleaned; releaseEligible=false"
+  },
+  "user_platform_status": "accepted_local_not_deployed",
+  "source_checkpoint": {
+    "manifest": "candidate-source-v12",
+    "sha256": "072ff1dcd56791a059ff826055810fd1edb5a253746e544199292b1250353b6b",
+    "state": "uncommitted_local_candidate",
+    "release_eligible": false
+  },
+  "final_integration": {
+    "candidate": "candidate-source-admin-v2",
+    "sha256": "05ddce81c1936dc8893f9297e89b9c9ae5c42dbb152b82a48d3c28d6794b631e",
+    "browser": "19/19 passed; user and admin authenticated flows, mobile/keyboard/WCAG",
+    "postgres": "latest related 2/2 passed after success audit usage fix; prior unaffected full 91-gate evidence reused",
+    "performance": "all budgets passed; static inventory823.8/850KiB",
+    "compose": "health/restart/worker/business persistence passed; cleanup verified; releaseEligible=false",
+    "external_provider": "not live-tested; browser response fixtures and real PostgreSQL evidence are separate"
+  }
+}

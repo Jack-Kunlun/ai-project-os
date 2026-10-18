@@ -4,21 +4,25 @@
 
 ## 1. 管理工作台与权限边界
 
-管理工作台的一级入口如下：
+1.1.0 管理侧栏保留五个直接入口：“平台总览、用户与权益、配置中心、安全中心、运维中心”。用户与权益下提供用户、会员、额度；配置中心提供模型能力、短信服务、探测预算；安全中心提供 MCP 审核和审计记录；运维中心提供失败收件箱和资源与备份。组内栏目横向显示，指南和管理员账户从顶部进入。具体页面与权限如下：
 
 | 页面 | 用途 | 权限 |
 | --- | --- | --- |
 | `/admin` | 应用服务状态、数据库/Worker 检查和安全聚合 | 平台管理员 |
 | `/admin/models` | 平台供应商、模型连接和逐项能力配置 | 平台管理员 |
+| `/admin/sms` | 短信供应商和手机号认证配置 | 平台管理员 |
 | `/admin/credits` | 新注册赠送策略、额度记录和人工治理 | 平台管理员 |
 | `/admin/operations/probes` | 供应商连接探测预算和告警阈值 | 平台管理员 |
 | `/admin/connectors/mcp` | MCP 净化快照和不可变安全审核 | 平台管理员 |
 | `/admin/users` | 账号状态、会员和用户额度摘要 | 平台管理员 |
+| `/admin/users/memberships` | 会员申请、授予、延期与撤销 | 平台管理员 |
 | `/admin/audit` | 安全证据和变更历史 | 平台管理员 |
 | `/admin/operations/failures` | 失败收件箱和待对账状态 | 平台管理员 |
 | `/admin/operations/backups` | 备份/运维状态 | 初始超级管理员按更严格规则读取 |
 | `/admin/guide` | 管理员流程、安全和验收 | 平台管理员 |
 | `/admin/account` | 管理员登录资料和安全设置 | 平台管理员 |
+
+平台总览按上海自然日展示真实聚合。平台调用用量和失败分类包含统一智能问答，以及额度预留能够证明为平台托管的旧个人知识问答；个人 BYOK 不进入平台用量。这里只提供日期、数量、Token 和安全错误分类，不提供他人的问题、回答、引用或凭据。查询失败显示“未取得”，不会当作零；运行中的调用不计作已完成或结果未知。
 
 `/settings` 与 `/system/*` 只保留受守卫的兼容跳转，不是当前管理导航。`/admin/connectors/git` 和 `/system/account-access` 已退出正常入口；访问时分别回到平台总览或用户运营页面。`/admin/users/memberships` 是用户与权益下的会员二级页面；`/system/memberships` 对 system admin 兼容跳转 `/admin/users/memberships`，普通用户返回用户工作台；`/system/operations` 仅 initial super admin 可用并兼容跳转 `/admin/operations/backups`，其他 system admin 按现有安全行为返回不可见页面，普通用户返回用户工作台。`/connections` 与 `/connections/mcp` 属于普通用户个人连接流程，不是管理员连接器页面。
 

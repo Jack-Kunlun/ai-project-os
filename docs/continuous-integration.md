@@ -21,7 +21,7 @@ CI 使用 Node.js 24、pnpm 10 和隔离 PostgreSQL 18。`scripts/ci-impact-plan
 3. 对一次性、名称受限的测试数据库实际运行 `pnpm test:postgres-gates` 中登记的全部 PostgreSQL 门禁。
 4. 安装 Chromium，并通过 `pnpm test:browser-e2e` 启动本次构建的应用与 Worker 容器（本地未提供镜像时仍可构建）。
 5. 在全新数据库中初始化管理员，检查安全响应头、Dashboard、健康接口、项目列表、使用指南和 MCP 连接页；同时拒绝浏览器控制台错误，并对关键页面执行 WCAG 2.2 A/AA 自动扫描。
-6. 对同一次生产构建执行 `pnpm performance:check`，校验共享 JavaScript、单文件 JavaScript、全局 CSS、全部静态客户端资源，以及六个关键路由的 gzip 体积预算。
+6. 对同一次生产构建执行 `pnpm performance:check`，校验共享 JavaScript、单文件 JavaScript、全局 CSS、全部静态客户端资源，以及配置中的关键路由 gzip 体积预算。
 7. 运行 `pnpm release:local`，构建唯一隔离的 Compose 候选，核对迁移、镜像版本、容器与 API 健康，重启后复验并精确清理候选资源。
 
 浏览器门禁固定为单 Worker，失败时保留截图、trace、视频和 HTML 报告。数据库和临时主密钥在门禁结束时精确清理；运行器只接受 `127.0.0.1:56432/postgres` 或等价 loopback 管理地址，并且只操作固定的 `ai_project_os_browser_e2e_test` 数据库。应用端口默认从 loopback 动态分配；如显式设置 `BROWSER_E2E_PORT`，运行器会先拒绝已被占用的端口。Playwright 只接受运行器注入的 `http://127.0.0.1:<port>`，避免误测其他本地服务。
@@ -33,6 +33,8 @@ CI 使用 Node.js 24、pnpm 10 和隔离 PostgreSQL 18。`scripts/ci-impact-plan
 0.8 邮箱候选同时新增邮箱验证客户端并更新到 Next.js 16.3.8。2026-10-13 精确主分支 CI（`fcc5ba6`）的库存实测为 784.1 KiB，本地为 784.0 KiB；前一成功主分支 `bc90bc9` 为 779.2 KiB，本轮增加约 0.63%。现有 780 KiB 上限只比前一实测多 0.8 KiB，因此将库存上限调整为 792 KiB，保留约 1% 余量。共享 JavaScript、单文件 JavaScript、CSS 和全部关键路由上限保持不变；本轮 CI 的这些指标全部通过。此调整只重新设定全站构建库存基线，不改变计量算法、文件排除规则或首屏预算；该历史候选按当时规则要求完整主分支与标签 CI，当前正式版采用上文的同 SHA 复用规则。
 
 1.0.3 候选增加管理员资源监控、知识导入视觉模型确认和项目概览入口。隔离生产构建实测全局 CSS 15,409 字节、全站库存 811,986 字节，分别比原上限多 49 和 978 字节；共享 JavaScript 为 131,233 字节、最大文件为 66,182 字节，全部关键路由均低于原预算。针对这些新增界面，将 CSS 上限设为 15.25 KiB、全站库存设为 800 KiB，保留约 1% 的库存余量。计量算法、排除规则、共享和单文件脚本及关键路由预算保持原值；后续同 SHA CI 仍须实际验证。
+
+1.1.0 候选新增项目工作台、统一问答和个人知识图谱路由。性能门禁从各 Next 客户端引用 manifest 的 `entryCSSFiles` 中匹配唯一根布局项：路径分隔符规范化后须精确以 `src/app/layout` 结尾，并兼容 Docker、绝对 checkout 和 Windows 路径；跨页面 manifest 去重，路由 CSS 仍全部计入静态客户端资源库存。导出构建实测根布局 CSS 14,948 字节（上限 15,616 字节）、全站静态客户端资源 817.3 KiB、共享 JavaScript 128.2 KiB、最大 JavaScript 文件 64.6 KiB，均低于既有 15.25、145、75 KiB 上限及新设 850 KiB 库存上限。关键路由将旧 `/projects` 入口替换为 `/personal/projects`（165 KiB），并新增 `/ask`（180 KiB）和 `/personal/knowledge/graph`（185 KiB）；本次导出分别为 152.2、150.5 和 183.6 KiB。全站库存继续统计所有页面与路由 CSS/JavaScript，仅排除 Next 生成的服务端 API 路由入口桩。
 
 容器交付门禁的隔离与清理规则见[本地持续交付候选门禁](local-release.md)。它只验证一次性候选，不创建 tag、不升级正式 Compose，也不替代真实外部服务现场验收。CI 候选复用同次构建的镜像，清理隔离资源时保留共享镜像供后续发布。
 

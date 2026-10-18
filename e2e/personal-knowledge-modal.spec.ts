@@ -16,7 +16,7 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await page.goto("/personal/knowledge");
   await expect(page.getByRole("heading", { name: "我的知识", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "标题", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "新建知识", exact: true }).click();
+  await page.locator("header").filter({ has: page.getByRole("heading", { name: "我的知识", exact: true }) }).getByRole("button", { name: "新建知识", exact: true }).click();
   const modal = page.getByRole("dialog", { name: "新建知识", exact: true });
   await expect(modal).toBeVisible();
   const title = modal.getByRole("textbox", { name: "标题", exact: true });

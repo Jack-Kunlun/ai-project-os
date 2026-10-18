@@ -14,7 +14,7 @@ test("login keeps drafts and real authentication while fitting the platform on d
   await username.fill(user.username);
   await password.fill("IncorrectBrowserPassword!");
   await page.getByRole("button", { name: "登 录", exact: true }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.locator("form").getByRole("alert")).toHaveText("用户名或密码错误");
   await expect(username).toHaveValue(user.username);
   await expect(password).toHaveValue("IncorrectBrowserPassword!");
   for (const width of [1440, 390, 320]) {

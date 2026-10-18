@@ -358,7 +358,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   }
 
   await expect(page).toHaveURL(/\/admin$/u);
-  await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "平台总览", exact: true })).toBeVisible();
 
   const browser = page.context().browser();
   if (browser === null) throw new Error("BROWSER_SMOKE_BROWSER_UNAVAILABLE");
@@ -375,7 +375,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
     await registrationPage.getByLabel("确认密码", { exact: true }).fill("BrowserSignup2026Password!");
     await registrationPage.getByRole("button", { name: "创建账号", exact: true }).click();
     await expect(registrationPage).toHaveURL(/\/dashboard$/u);
-    await expect(registrationPage.getByRole("heading", { name: `欢迎回来，${registrationUsername}`, exact: true })).toBeVisible();
+    await expect(registrationPage.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
+    await expect(registrationPage.getByRole("link", { name: `账户设置，${registrationUsername}`, exact: true })).toBeVisible();
     const registered = await getEntitlementDb().appUser.findUniqueOrThrow({ where: { username: registrationUsername } });
     expect(registered.role).toBe("user");
     expect(registered.email).toBeNull();
@@ -390,7 +391,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page).toHaveURL(/\/admin$/u);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/admin$/u);
-  await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "平台总览", exact: true })).toBeVisible();
 
   const adminContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
   const adminPage = await adminContext.newPage();
@@ -399,7 +400,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await adminPage.getByLabel("密码", { exact: true }).fill(adminPassword);
   await adminPage.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(adminPage).toHaveURL(/\/admin$/u);
-  await expect(adminPage.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
+  await expect(adminPage.getByRole("heading", { name: "平台总览", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "退出", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/u);
@@ -407,17 +408,32 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.getByLabel("密码", { exact: true }).fill(ownerPassword);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expect(page.getByRole("heading", { name: `欢迎回来，${ownerUsername}`, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true })).toBeVisible();
   await page.reload();
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expect(page.getByRole("heading", { name: `欢迎回来，${ownerUsername}`, exact: true })).toBeVisible();
-  await expect(page.getByText("AI PROJECT OS", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "AI Project OS 工作台", exact: true })).toBeVisible();
   await expect(page.getByText(/内部开发版/u)).toHaveCount(0);
   await expect(page).toHaveTitle("AI Project OS");
-  await expect(page.getByText(/当前没有可访问项目/u)).toBeVisible();
+  await expect(page.getByText(/当前没有可访问的项目/u)).toBeVisible();
+  const globalNavigation = page.getByRole("navigation", { name: "全局入口", exact: true });
+  await expect(globalNavigation.getByRole("link")).toHaveCount(4);
+  for (const destination of ["工作台", "智能问答", "我的项目", "我的知识"]) {
+    await expect(globalNavigation.getByRole("link", { name: destination, exact: true })).toBeVisible();
+  }
+  await expect(globalNavigation.getByRole("link", { name: "工作台", exact: true })).toHaveAttribute("aria-current", "page");
+  const emptyProjectNavigation = page.getByRole("navigation", { name: "当前项目导航", exact: true });
+  const disabledProjectLinks = emptyProjectNavigation.locator('[aria-disabled="true"]');
+  await expect(disabledProjectLinks).toHaveCount(6);
+  for (const destination of ["项目计划", "项目资料", "项目概览", "简报与调查", "项目自动化", "项目管理"]) {
+    await expect(disabledProjectLinks.filter({ hasText: destination })).toHaveAttribute("aria-disabled", "true");
+  }
   await expect(page.getByText("运行正常", { exact: true })).toHaveCount(0);
-  await expectNoHorizontalOverflow(page, "/dashboard", `欢迎回来，${ownerUsername}`, "dashboard");
+  await expectNoHorizontalOverflow(page, "/dashboard", "工作台", "dashboard");
   await expectNoAccessibilityViolations(page, "dashboard");
+  await page.screenshot({ path: "test-results/v110/dashboard-desktop.png" });
 
   const healthResponse = await request.get("/api/health");
   expect(healthResponse.ok()).toBe(true);
@@ -485,7 +501,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expectNoAccessibilityViolations(page, "git connection tooltip");
   await gitDialog.getByRole("button", { name: "关闭弹窗" }).click();
 
-  await page.goto("/projects");
+  await page.goto("/personal/projects");
   await expect(page.getByRole("heading", { name: "我的项目" })).toBeVisible();
   await expect(page.getByText("匹配 0 个", { exact: true })).toBeVisible();
   await expect(page.getByText(/第 1 \/ 1 页/u)).toHaveCount(0);
@@ -495,9 +511,44 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.getByLabel("项目名称", { exact: true }).fill(projectName);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   const projectCard = page.locator("article").filter({ has: page.getByRole("heading", { name: projectName, exact: true }) });
-  const projectHref = await projectCard.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
+  const projectHref = await projectCard.getByRole("link", { name: `查看项目 ${projectName}`, exact: true }).getAttribute("href");
   expect(projectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   const projectId = projectHref!.split("/")[2]!;
+
+  const secondProjectName = `Browser layout project ${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  await page.getByRole("button", { name: "＋ 新建项目" }).click();
+  await page.getByLabel("项目名称", { exact: true }).fill(secondProjectName);
+  await page.getByRole("button", { name: "创建项目", exact: true }).click();
+  const secondProjectCard = page.locator("article").filter({ has: page.getByRole("heading", { name: secondProjectName, exact: true }) });
+  const secondProjectHref = await secondProjectCard.getByRole("link", { name: `查看项目 ${secondProjectName}`, exact: true }).getAttribute("href");
+  expect(secondProjectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
+  const secondProjectId = secondProjectHref!.split("/")[2]!;
+  const projectTitleLayout = await secondProjectCard.evaluate((card) => {
+    const title = card.querySelector("h2");
+    const status = card.querySelector("h2")?.parentElement?.parentElement?.nextElementSibling;
+    if (!title || !status) throw new Error("PROJECT_CARD_HEADING_MISSING");
+    return { titleRight: title.getBoundingClientRect().right, statusLeft: status.getBoundingClientRect().left };
+  });
+  expect(projectTitleLayout.titleRight).toBeLessThanOrEqual(projectTitleLayout.statusLeft);
+  const createdProjectsPicker = page.getByRole("combobox", { name: "切换当前项目", exact: true });
+  await expect(createdProjectsPicker).toContainText(projectName);
+  await expect(createdProjectsPicker).toContainText(secondProjectName);
+  await page.screenshot({ path: "test-results/v110/projects-desktop.png" });
+
+  await page.goto(`${projectHref!}/plan?cursor=old-cursor&run=11111111-1111-4111-8111-111111111111&source=22222222-2222-4222-8222-222222222222&filter=unread`);
+  await expect(page.getByRole("heading", { name: projectName, exact: true })).toBeVisible();
+  const projectPicker = page.getByRole("combobox", { name: "切换当前项目", exact: true });
+  await expect(projectPicker).toBeEnabled();
+  await projectPicker.selectOption(secondProjectId);
+  await expect(page).toHaveURL(new RegExp(`/projects/${secondProjectId}/plan$`, "u"));
+  expect(new URL(page.url()).search).toBe("");
+  const secondProjectNavigation = page.getByRole("navigation", { name: `${secondProjectName} 项目导航`, exact: true });
+  await expect(secondProjectNavigation.getByRole("link", { name: "项目计划", exact: true })).toHaveAttribute("aria-current", "page");
+  for (const destination of ["项目计划", "项目资料", "项目概览", "简报与调查", "项目自动化", "项目管理"]) {
+    await expect(secondProjectNavigation.getByRole("link", { name: destination, exact: true })).toBeVisible();
+  }
+  await page.screenshot({ path: "test-results/v110/project-plan-desktop.png" });
+
   await page.goto(`${projectHref!}/repositories`);
   await expect(page.getByRole("heading", { name: "代码仓库", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "自动读取授权", exact: true })).toBeVisible();
@@ -512,14 +563,14 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(repositoryDimensions.documentWidth, `Git authorization page must fit 390px: ${JSON.stringify(repositoryDimensions)}`).toBeLessThanOrEqual(repositoryDimensions.viewportWidth);
   if (projectRepositoryViewport !== null) await page.setViewportSize(projectRepositoryViewport);
   await page.goto(`${projectHref!}/materials`);
-  await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
-  await expectNoHorizontalOverflow(page, `${projectHref!}/materials`, "原始资料来源库", "project materials");
+  await expect(page.getByRole("heading", { name: "资料来源", exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page, `${projectHref!}/materials`, "资料来源", "project materials");
 
   const addSourceTrigger = page.locator("#add-source-trigger");
   await expect(addSourceTrigger).toBeVisible();
   await addSourceTrigger.click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?view=add&kind=all$`, "u"));
-  const addSourceDialog = page.getByRole("dialog", { name: "添加来源" });
+  const addSourceDialog = page.getByRole("dialog", { name: "添加资料" });
   await expect(addSourceDialog).toBeVisible();
   const closeSourceDialog = addSourceDialog.getByRole("button", { name: "关闭", exact: true });
   await expect(closeSourceDialog).toBeFocused();
@@ -550,20 +601,20 @@ test("first-run administrator and personal workspace Owner stay separate across 
   const sourceRow = sourceList.getByRole("listitem").filter({ hasText: sourceText });
   await expect(sourceRow).toBeVisible();
 
-  const sourceSearchInput = page.getByPlaceholder("搜索正文、来源链接或内容哈希");
+  const sourceSearchInput = page.getByRole("textbox", { name: "搜索原始资料", exact: true });
   await sourceSearchInput.fill("Browser smoke");
   await sourceSearchInput.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=all$`, "u"));
-  await page.getByLabel("按原始资料类型筛选").selectOption("manual");
+  await page.getByRole("navigation", { name: "按资料类型筛选" }).getByRole("button", { name: "手工文本", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=manual$`, "u"));
   const materialColumns = page.getByRole("navigation", { name: "项目资料栏目", exact: true });
   await materialColumns.getByRole("link", { name: "整理结果", exact: true }).click();
   await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("review");
   await expect(page.getByRole("heading", { name: "待核对内容", exact: true })).toBeVisible();
-  await expect(page.locator("#review-queue").getByText(/^当前没有待审核 AI 候选。/u)).toBeVisible();
+  await expect(page.locator("#review-queue").getByText("当前没有待核对的整理结果。", { exact: true })).toBeVisible();
   await materialColumns.getByRole("link", { name: "资料", exact: true }).click();
-  await expect(page.getByPlaceholder("搜索正文、来源链接或内容哈希")).toHaveValue("Browser smoke");
-  await expect(page.getByLabel("按原始资料类型筛选")).toHaveValue("manual");
+  await expect(page.getByRole("textbox", { name: "搜索原始资料", exact: true })).toHaveValue("Browser smoke");
+  await expect(page.getByRole("navigation", { name: "按资料类型筛选" }).getByRole("button", { name: "手工文本", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#sources-heading")).toBeVisible();
 
   const returnedSourceRow = page.getByRole("list", { name: "项目原始资料列表", exact: true }).getByRole("listitem").filter({ hasText: sourceText });
@@ -590,40 +641,43 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(candidateResponse.status()).toBe(201);
 
   await page.goto(`/projects/${projectId}`);
-  await page.getByRole("link", { name: "开始审核 →", exact: true }).click();
+  await page.getByRole("region", { name: "项目关键指标", exact: true }).getByRole("link", { name: /^待核对内容/u }).click();
   await expect(page).toHaveURL(/[?&]status=candidate(?:&|$)/u);
   await expect(page.getByRole("combobox", { name: "按审核状态筛选", exact: true })).toHaveValue("candidate");
   await expect(page.getByText("待核对的项目记录", { exact: true })).toBeVisible();
   await page.goto(`/projects/${projectId}`);
   const overviewMetrics = page.getByRole("region", { name: "项目关键指标", exact: true });
   await expect(overviewMetrics.getByRole("link")).toHaveCount(4);
-  await overviewMetrics.getByRole("link", { name: /^资料来源/u }).click();
+  await overviewMetrics.getByRole("link", { name: /^项目资料/u }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?.*focus=sources-heading`, "u"));
   await expect(page.locator("#sources-heading")).toBeFocused();
   await page.goto(`/projects/${projectId}`);
-  await overviewMetrics.getByRole("link", { name: /^文件/u }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/assets\\?`, "u"));
-  await expect(page.getByRole("heading", { name: "已上传文件", exact: true })).toBeVisible();
+  await overviewMetrics.getByRole("link", { name: /^进行中工作/u }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/plan$`, "u"));
+  await expect(page.getByRole("heading", { name: "项目计划", exact: true })).toBeVisible();
   await page.goto(`/projects/${projectId}`);
   await overviewMetrics.getByRole("link", { name: /^已确认事实/u }).click();
   await expect(page).toHaveURL(/[?&]status=confirmed(?:&|$)/u);
   await expect(page.getByRole("combobox", { name: "按审核状态筛选", exact: true })).toHaveValue("confirmed");
   await expect(page.locator("#confirmed-facts")).toBeFocused();
   await page.goto(`/projects/${projectId}`);
-  const pendingMetric = overviewMetrics.getByRole("link", { name: /^待处理/u });
+  const pendingMetric = page.getByRole("link", { name: /有事项需要关注/u });
   await pendingMetric.focus();
   await page.keyboard.press("Enter");
+  await expect(page.locator("#attention-details")).toHaveAttribute("open", "");
   await expect(page.locator("#attention-details")).toBeFocused();
-  await expect(page.locator("#attention-details").getByRole("link", { name: /^项目记忆索引/u })).toBeVisible();
+  await expect(page.locator("#attention-details").getByLabel("按任务状态筛选")).toBeVisible();
   const metricViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth)).toBe(true);
   await expectNoAccessibilityViolations(page, "project overview metric shortcuts mobile");
   if (metricViewport !== null) await page.setViewportSize(metricViewport);
-  const failedTasksLink = page.getByRole("link", { name: /失败任务/u });
+  const failedTasksLink = page.getByRole("link", { name: "查看任务运行记录 →", exact: true });
   await expect(failedTasksLink).toBeVisible();
   await failedTasksLink.click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?status=failed&focus=task-runs&from=overview&returnTo=`, "u"));
+  await expect(page.locator("#task-runs")).toBeFocused();
+  await page.getByLabel("按任务状态筛选").selectOption("failed");
+  await expect.poll(() => new URL(page.url()).searchParams.get("status")).toBe("failed");
   await expect(page.getByLabel("按任务状态筛选")).toHaveValue("failed");
   await expect(page.locator("#task-runs")).toBeFocused();
   await expect(page.getByText("BROWSER_SMOKE_PENDING", { exact: false })).toBeVisible();
@@ -642,8 +696,9 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto(`/projects/${projectId}/intelligence?focus=runtime-readiness`);
   await expect(page.locator("#runtime-readiness")).toBeFocused();
-  await expect(page.getByText("就绪条件", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("当前缺失", { exact: true }).first()).toBeVisible();
+  for (const label of ["项目分析路由", "向量模型路由", "兼容的记忆索引"]) {
+    await expect(page.locator("#runtime-readiness").getByText(label, { exact: true })).toBeVisible();
+  }
   await expect(page.getByRole("heading", { name: "当前 AI 路由边界", exact: true })).toBeVisible();
   await expect(page.getByText(/当前项目/u).first()).toBeVisible();
 
@@ -661,41 +716,54 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await automationPreview.getByRole("button", { name: "返回修改", exact: true }).click();
 
   await page.goto("/dashboard");
-  const dashboardJobLink = page.locator(`a[href="/projects/${projectId}/jobs/${browserSmokeFixtures.jobId}"]`);
+  const dashboardJobLink = page.locator(`a[href="/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}"]`);
   await expect(dashboardJobLink).toBeVisible();
   await dashboardJobLink.click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/jobs/${browserSmokeFixtures.jobId}$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}$`, "u"));
   await expect(page.getByRole("heading", { name: "项目简报", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(
     page,
     "/dashboard",
-    `欢迎回来，${ownerUsername}`,
+    "工作台",
     "dashboard with recent job",
     async (dashboardPage) => {
-      await expect(dashboardPage.locator(`a[href="/projects/${projectId}/jobs/${browserSmokeFixtures.jobId}"]`)).toBeVisible();
+      await expect(dashboardPage.locator(`a[href="/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}"]`)).toBeVisible();
     },
   );
 
   const mobileViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/dashboard");
-  const mobileNavigationTargets = [
-    { name: /打开通知中心/u, path: /\/notifications$/u },
-    { name: `个人中心：${ownerUsername}`, path: /\/profile$/u },
-  ] as const;
-  for (const target of mobileNavigationTargets) {
-    const link = page.getByRole("link", { name: target.name });
-    await expect(link).toBeVisible();
-    await link.focus();
-    await expect(link).toBeFocused();
-    await link.press("Enter");
-    await expect(page).toHaveURL(target.path);
-    await page.goBack();
-    await expect(page).toHaveURL(/\/dashboard$/u);
-    await expect(page.getByRole("heading", { name: `欢迎回来，${ownerUsername}` })).toBeVisible();
-  }
+  const openNavigation = page.getByRole("button", { name: "打开导航", exact: true });
+  await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
+  await openNavigation.click();
+  const mobileNavigation = page.locator("#user-shell-navigation");
+  await expect(openNavigation).toHaveAttribute("aria-expanded", "true");
+  await expect(mobileNavigation.getByRole("button", { name: "关闭导航", exact: true })).toBeFocused();
+  const mobileGlobalNavigation = mobileNavigation.getByRole("navigation", { name: "全局入口", exact: true });
+  await expect(mobileGlobalNavigation.getByRole("link")).toHaveCount(4);
+  const mobileProjectNavigation = mobileNavigation.getByRole("navigation", { name: `${projectName} 项目导航`, exact: true });
+  await expect(mobileProjectNavigation.getByRole("link")).toHaveCount(6);
+  await page.keyboard.press("Escape");
+  await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
+  await expect(openNavigation).toBeFocused();
+
+  await openNavigation.click();
+  await mobileNavigation.getByRole("navigation", { name: "全局入口", exact: true }).getByRole("link", { name: "我的项目", exact: true }).click();
+  await expect(page).toHaveURL(/\/personal\/projects$/u);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
+
+  await openNavigation.click();
+  await mobileNavigation.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true }).click();
+  await expect(page).toHaveURL(/\/profile$/u);
+  await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dashboard$/u);
   if (mobileViewport !== null) await page.setViewportSize(mobileViewport);
 
   await expectNoHorizontalOverflow(page, "/notifications", "活动记录", "notifications");
@@ -763,8 +831,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByText(browserSmokeFixtures.unreadTitle, { exact: true })).toHaveCount(0);
 
   await page.goto("/guide");
-  await expect(page.getByRole("heading", { name: "从账号进入，到可信的项目协作。" })).toBeVisible();
-  await expect(page.getByText(/创建项目 → 项目配置 → 项目概览 → 项目计划 → 项目资料 → AI 工作台 → 项目自动化/u)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "普通用户操作指南", exact: true })).toBeVisible();
+  await expect(page.getByText(/创建项目 → 项目配置 → 项目概览 → 项目计划 → 项目资料 → 智能问答 → 项目自动化/u)).toBeVisible();
   await expectNoAccessibilityViolations(page, "guide");
 
   await page.goto("/profile");
@@ -914,8 +982,13 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expectNoAccessibilityViolations(page, "personal models mobile");
   if (originalViewport !== null) await page.setViewportSize(originalViewport);
 
+  await page.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true }).click();
+  await expect(page).toHaveURL(/\/profile$/u);
+  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await expect(page).toHaveURL(/\/login$/u);
+
   await adminPage.goto("/admin");
-  await expect(adminPage.getByRole("heading", { name: "管理员总览" })).toBeVisible();
+  await expect(adminPage.getByRole("heading", { name: "平台总览" })).toBeVisible();
   await expect(adminPage.getByRole("navigation", { name: "管理工作台导航" })).toBeVisible();
   await expect(adminPage.getByText("平台额度总览", { exact: true })).toBeVisible();
   const initialPendingActions = adminPage.locator('[aria-labelledby="admin-pending-actions-title"]');

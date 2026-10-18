@@ -14,6 +14,7 @@ import {
   expectedR02AdminNavigationLinkCount,
   r02ProjectGuardRoutes,
   r02ProjectRoutes,
+  readR02AccessibilityViolations,
   R02_PUBLIC_ROUTE_EXPECTATIONS,
   R02_ADMIN_ROUTES,
   R02_VIEWPORTS,
@@ -150,7 +151,7 @@ async function createR02Project(page: Parameters<typeof signInR02Admin>[0]): Pro
   await page.getByLabel("项目名称", { exact: true }).fill(name);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   const projectCard = page.locator("article").filter({ has: page.getByRole("heading", { name, exact: true }) });
-  const href = await projectCard.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
+  const href = await projectCard.getByRole("link", { name: `查看项目 ${name}`, exact: true }).getAttribute("href");
   expect(href).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   return { id: href!.split("/")[2]!, name };
 }
@@ -348,6 +349,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   await ownerPage.goto("/projects?focus=r02-header");
   await expectR02NoAccessibilityViolations(ownerPage, "projects shared header@1440");
 
+  const adminAccessibility: unknown[] = [];
   for (const width of R02_VIEWPORTS) {
     await page.setViewportSize({ width, height: 844 });
     for (const route of R02_ADMIN_ROUTES) {
@@ -357,17 +359,38 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       await expectR02SettledRoute(page, route, `${route.path}@${width}`);
       await expectR02AdminBrand(page);
       await expectR02NoHorizontalOverflow(page, `${route.path}@${width}`);
+      if (width === 1440 || (width === 390 && ["/admin", "/admin/users", "/admin/models", "/admin/sms", "/admin/audit", "/admin/operations/failures"].includes(route.path))) {
+        const violations = await readR02AccessibilityViolations(page);
+        if (violations.length > 0) adminAccessibility.push({ surface: `${route.path}@${width}`, violations });
+      }
       if (width >= 1024) {
         await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true })).toBeVisible();
         await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(expectedR02AdminNavigationLinkCount(route.path));
+        for (const label of ["平台总览", "用户与权益", "配置中心", "安全中心", "运维中心"]) {
+          await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link", { name: label, exact: true })).toBeVisible();
+        }
       } else {
         await expect(page.getByRole("button", { name: "打开导航", exact: true })).toBeVisible();
       }
+      if (width === 1440 && ["/admin", "/admin/users", "/admin/models", "/admin/audit", "/admin/operations/failures"].includes(route.path)) {
+        const name = route.path === "/admin" ? "overview" : route.path.split("/").at(-1)!;
+        await page.screenshot({ path: `test-results/v110/admin-${name}-desktop.png` });
+      }
+      if (width === 390 && route.path === "/admin") {
+        await page.screenshot({ path: "test-results/v110/admin-overview-mobile.png" });
+      }
       if (route.path === "/admin") {
-        const readinessHeading = page.getByRole("heading", { name: "管理员总览", exact: true });
+        const readinessHeading = page.getByRole("heading", { name: "平台总览", exact: true });
         await expectR02InViewport(page, readinessHeading, `admin primary heading@${width}`);
         const pendingActionsHeading = page.getByRole("heading", { name: "待处理事项", exact: true });
         await expectR02InViewport(page, pendingActionsHeading, `admin pending actions@${width}`);
+        if (width === 390) {
+          const trend = page.getByRole("region", { name: "运营趋势明细", exact: true });
+          await trend.focus();
+          await expect(trend).toBeFocused();
+          await page.keyboard.press("ArrowRight");
+          await expect.poll(() => trend.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+        }
       }
       if (route.path === "/admin/models") {
         await expect(page.locator("main header").getByRole("button", { name: "新增供应商", exact: true }), `platform model primary action@${width}`).toBeVisible();
@@ -375,20 +398,22 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       }
       if (width < 1024) await expectR02MobileDrawer(page, route.path);
     }
-    if (width === 390) await expectR02NoAccessibilityViolations(page, "admin representative@390");
   }
+  expect(adminAccessibility, "admin pages must satisfy automated WCAG 2.2 A/AA checks").toEqual([]);
 
   await page.goto("/admin/connectors/git");
   await expect(page).toHaveURL(/\/admin$/u);
-  await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "平台总览", exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/admin");
   await expectR02SettledRoute(page, R02_ADMIN_ROUTES[0], "admin drawer navigation source@390");
   await page.getByRole("button", { name: "打开导航", exact: true }).click();
   const mobileDrawer = page.getByRole("dialog", { name: "管理工作台导航" });
-  await mobileDrawer.getByRole("button", { name: "展开安全中心", exact: true }).click();
-  await mobileDrawer.getByRole("link", { name: "审计记录", exact: true }).click();
+  await mobileDrawer.getByRole("link", { name: "安全中心", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/connectors\/mcp$/u);
+  await expect(mobileDrawer).toBeHidden();
+  await page.getByRole("navigation", { name: "管理栏目", exact: true }).getByRole("link", { name: "审计记录", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/u);
   await expect(mobileDrawer).toBeHidden();
   await expectR02SettledRoute(page, R02_ADMIN_ROUTES.find((route) => route.path === "/admin/audit")!, "admin drawer navigation target@390");
@@ -396,18 +421,24 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   await page.setViewportSize({ width: 1440, height: 844 });
   const project = await createR02Project(ownerPage);
   const projectRoutes = r02ProjectRoutes(project.id, project.name);
+  const projectAccessibility: unknown[] = [];
+  const corePaths = new Set(["", "/plan", "/materials", "/intelligence", "/automations", "/governance"].map((suffix) => `/projects/${project.id}${suffix}`));
   for (const route of projectRoutes) {
     const response = await ownerPage.goto(route.path);
     expect(response?.status(), `${route.path} must be reachable in production browser`).toBeLessThan(400);
     await expectR02SettledRoute(ownerPage, route, `${route.path}@1440`);
     await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
     await expectR02NoHorizontalOverflow(ownerPage, `${route.path}@1440`);
+    if (corePaths.has(route.path)) {
+      projectAccessibility.push(...(await readR02AccessibilityViolations(ownerPage)).map((violation) => ({ surface: `${route.path}@1440`, ...violation })));
+    }
   }
   const representativePaths = new Set([
     `/projects/${project.id}`,
     `/projects/${project.id}/materials`,
     `/projects/${project.id}/intelligence`,
     `/projects/${project.id}/automations`,
+    `/projects/${project.id}/governance`,
   ]);
   for (const width of R02_VIEWPORTS.slice(1)) {
     await ownerPage.setViewportSize({ width, height: 844 });
@@ -416,8 +447,12 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       await expectR02SettledRoute(ownerPage, route, `${route.path}@${width} representative`);
       await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
       await expectR02NoHorizontalOverflow(ownerPage, `${route.path}@${width} representative`);
+      if (width === 390) {
+        projectAccessibility.push(...(await readR02AccessibilityViolations(ownerPage)).map((violation) => ({ surface: `${route.path}@390`, ...violation })));
+      }
     }
   }
+  expect(projectAccessibility, "core project pages must satisfy automated WCAG 2.2 A/AA checks").toEqual([]);
   for (const path of r02ProjectGuardRoutes(project.id)) {
     const response = await ownerPage.goto(path);
     expect(response?.status(), `${path} guard must render without a server error`).toBeLessThan(500);

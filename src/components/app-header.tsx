@@ -1,8 +1,13 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { NotificationBell } from "./notification-bell";
+import { UserShell } from "./user-shell";
+import { isUserShellPath } from "@/lib/user-navigation";
 
 /** Global user-facing destinations that can own the active navigation state. */
-type PrimarySection = "dashboard" | "projects" | "personalKnowledge" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide" | "admin";
+type PrimarySection = "dashboard" | "ask" | "projects" | "personalKnowledge" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide" | "admin";
 type ProjectSection = "overview" | "configuration" | "members" | "materials" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
 
 const primaryItems = [
@@ -17,22 +22,30 @@ const overviewSections: readonly ProjectSection[] = ["overview"];
 const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
 
 /**
- * Render the shared user header. `active` is supplied by the protected server
- * page so navigation state never depends on client-side URL parsing.
+ * Preserve the long-standing AppHeader call contract while rendering the
+ * persistent user shell only on user-facing routes.
  */
-export function AppHeader({
-  username,
-  active,
-  projectId,
-  projectSection,
-  isSystemAdmin = false,
-}: {
+type AppHeaderProps = Readonly<{
   username: string;
   active: PrimarySection;
   projectId?: string;
   projectSection?: ProjectSection;
   isSystemAdmin?: boolean;
-}) {
+}>;
+
+/** Keep the shared import and legacy/admin header contract stable. */
+export function AppHeader(props: AppHeaderProps): React.JSX.Element {
+  const pathname = usePathname() ?? "/";
+  return isUserShellPath(pathname) ? <UserShell username={props.username} /> : <LegacyAppHeader {...props} />;
+}
+
+function LegacyAppHeader({
+  username,
+  active,
+  projectId,
+  projectSection,
+  isSystemAdmin = false,
+}: AppHeaderProps): React.JSX.Element {
   const initial = username.slice(0, 1).toUpperCase();
   const guideActive = active === "guide";
   const guideHref = projectId ? `/guide?projectId=${encodeURIComponent(projectId)}` : "/guide";

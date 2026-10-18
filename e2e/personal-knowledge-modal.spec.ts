@@ -14,10 +14,10 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
   await page.goto("/personal/knowledge");
-  await expect(page.getByRole("heading", { name: "我的内容", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "我的知识", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "标题", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "新建内容", exact: true }).click();
-  const modal = page.getByRole("dialog", { name: "新建个人知识", exact: true });
+  await page.getByRole("button", { name: "新建知识", exact: true }).click();
+  const modal = page.getByRole("dialog", { name: "新建知识", exact: true });
   await expect(modal).toBeVisible();
   const title = modal.getByRole("textbox", { name: "标题", exact: true });
   await title.fill("未保存的验收草稿");
@@ -26,7 +26,7 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await expect(title).toHaveValue("未保存的验收草稿");
   await modal.getByRole("button", { name: "关闭", exact: true }).focus();
   await page.keyboard.press("Shift+Tab");
-  await expect(modal.getByRole("button", { name: "创建内容", exact: true })).toBeFocused();
+  await expect(modal.getByRole("button", { name: "创建知识", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(modal.getByRole("button", { name: "关闭", exact: true })).toBeFocused();
 
@@ -39,7 +39,7 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
     const error = modal.getByRole("alert");
     await expect(error).toContainText("2,000 字符");
     const measurements = await Promise.all([
-      error.boundingBox(), modal.getByRole("button", { name: "创建内容", exact: true }).boundingBox(),
+      error.boundingBox(), modal.getByRole("button", { name: "创建知识", exact: true }).boundingBox(),
       page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight, documentWidth: document.documentElement.scrollWidth })),
     ]);
     const [errorBox, submitBox, viewport] = measurements;
@@ -53,42 +53,45 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   page.on("request", request => {
     if (request.method() === "POST" && new URL(request.url()).pathname === "/api/personal/knowledge") creates += 1;
   });
-  await modal.getByRole("button", { name: "创建内容", exact: true }).click();
+  await modal.getByRole("button", { name: "创建知识", exact: true }).click();
   await expect(modal.getByRole("alert")).toContainText("2,000 字符");
   expect(creates).toBe(0);
   await modal.getByRole("checkbox", { name: /作为个人通用记忆/u }).uncheck();
-  await modal.getByRole("button", { name: "创建内容", exact: true }).click();
+  await modal.getByRole("button", { name: "创建知识", exact: true }).click();
   await expect(modal).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: savedTitle, exact: true })).toBeVisible();
+  const savedRow = page.getByRole("button").filter({ has: page.getByText(savedTitle, { exact: true }) });
+  await expect(savedRow).toBeVisible();
   expect(creates).toBe(1);
   await page.reload();
-  await page.getByRole("button").filter({ has: page.getByRole("heading", { name: savedTitle, exact: true }) }).click();
-  await expect(page.getByRole("heading", { name: savedTitle, exact: true })).toBeVisible();
+  await page.getByRole("button").filter({ has: page.getByText(savedTitle, { exact: true }) }).click();
+  const detail = page.getByRole("dialog", { name: "个人知识详情", exact: true });
+  await expect(detail.getByRole("heading", { name: savedTitle, exact: true })).toBeVisible();
   const providerResponse = await page.request.get("/api/me/ai-providers");
   expect(providerResponse.status()).toBe(200);
   expect(await providerResponse.json()).toHaveProperty("providers");
-  await page.getByRole("button", { name: "编辑", exact: true }).click();
-  const edit = page.getByRole("dialog", { name: "编辑个人知识", exact: true });
+  await detail.getByRole("button", { name: "编辑", exact: true }).click();
+  const edit = page.getByRole("dialog", { name: "编辑知识", exact: true });
   await expect(edit.getByRole("textbox", { name: "标题", exact: true })).toHaveValue(savedTitle);
   const revisedTitle = `${savedTitle} v2`;
   await edit.getByRole("textbox", { name: "标题", exact: true }).fill(revisedTitle);
   await edit.getByRole("button", { name: "保存新版本", exact: true }).click();
   await expect(edit).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: revisedTitle, exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(detail.getByRole("heading", { name: revisedTitle, exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "编辑", exact: true }).click();
   await edit.getByRole("textbox", { name: "标题", exact: true }).fill("将被放弃的改动");
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "放弃修改并离开", exact: true }).click();
   await expect(edit).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: revisedTitle, exact: true })).toBeVisible();
+  await expect(detail.getByRole("heading", { name: revisedTitle, exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
-  await page.getByRole("button", { name: "← 返回我的内容", exact: true }).click();
+  await detail.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByRole("button", { name: "导入文件", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "导入个人知识", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "导入知识", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
   expect(pageErrors).toEqual([]);
+  await page.screenshot({ path: "test-results/v110/personal-knowledge-desktop.png" });
 });
 
 test("personal vision import defaults to platform and requires page and billing confirmation", async ({ page }) => {
@@ -127,7 +130,7 @@ test("personal vision import defaults to platform and requires page and billing 
   await expect(page).toHaveURL(/\/dashboard$/u);
   await page.goto("/personal/knowledge");
   await page.getByRole("button", { name: "导入文件", exact: true }).click();
-  const importing = page.getByRole("dialog", { name: "导入个人知识", exact: true });
+  const importing = page.getByRole("dialog", { name: "导入知识", exact: true });
   await expect(importing.getByRole("combobox", { name: "图片及扫描 PDF 识别模型", exact: true })).toHaveValue(providerId);
   const file = {
     name: "synthetic-vision.png", mimeType: "image/png",
@@ -146,7 +149,7 @@ test("personal vision import defaults to platform and requires page and billing 
   await importing.getByLabel("选择文件", { exact: true }).setInputFiles(file);
   await expect(confirmation).toBeVisible();
   await confirmation.getByRole("button", { name: "确认发送", exact: true }).click();
-  const preview = page.getByRole("dialog", { name: "新建个人知识", exact: true });
+  const preview = page.getByRole("dialog", { name: "新建知识", exact: true });
   await expect(preview).toBeVisible();
   await expect(preview.getByRole("textbox", { name: "标题", exact: true })).toHaveValue("视觉导入验收");
   await expect(preview.getByRole("textbox", { name: /^正文/u })).toHaveValue("合成图片识别预览，尚未保存。");

@@ -1,0 +1,184 @@
+.supportPage,
+.exportWorkspace {
+  color: #27313d;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.supportPage {
+  min-height: 100vh;
+  background: #fff;
+}
+
+.exportWorkspace {
+  margin-top: 20px;
+}
+
+.supportPage > :global(div[class*="mx-auto"]) {
+  width: 100%;
+  max-width: 1500px;
+  margin-inline: auto;
+  padding: 28px 32px;
+}
+
+.supportPage :global(h1),
+.exportWorkspace :global(h1) {
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.supportPage :global(p[class*="uppercase"][class*="tracking-"]),
+.exportWorkspace :global(p[class*="uppercase"][class*="tracking-"]) {
+  display: none;
+}
+
+.supportPage :global(section[class*="pb-8"][class*="pt-10"]),
+.supportPage :global(section[class*="pb-8"][class*="pt-12"]),
+.supportPage :global(section[class*="pb-10"][class*="pt-12"]) {
+  padding-top: 0;
+  padding-bottom: 20px;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"]),
+.supportPage :global(section[class*="bg-gradient-to-r"]) {
+  border: 1px solid #e3e7ed;
+  border-radius: 6px;
+  background: #fff;
+  background-image: none;
+  color: #27313d;
+  padding: 20px;
+  box-shadow: none;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"] h1),
+.supportPage :global(section[class*="bg-gradient-to-r"] h1) {
+  margin-top: 0;
+  color: #27313d;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"] p),
+.supportPage :global(section[class*="bg-gradient-to-r"] p) {
+  margin-top: 8px;
+  color: #627086;
+  line-height: 1.7;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"] [class~="text-white"]),
+.supportPage :global(section[class*="bg-gradient-to-r"] [class~="text-white"]) {
+  color: #27313d;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"] [class~="text-slate-300"]),
+.supportPage :global(section[class*="bg-gradient-to-r"] [class~="text-slate-300"]) {
+  color: #627086;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"] [class*="border-white/"]),
+.supportPage :global(section[class*="bg-gradient-to-r"] [class*="border-white/"]) {
+  border-color: #dfe4eb;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"] [class*="bg-white/"]),
+.supportPage :global(section[class*="bg-gradient-to-r"] [class*="bg-white/"]) {
+  background-color: #f7f8fa;
+}
+
+.supportPage :global(section[class*="bg-gradient-to-br"] [class*="focus-visible:outline-white"]),
+.supportPage :global(section[class*="bg-gradient-to-r"] [class*="focus-visible:outline-white"]) {
+  outline-color: #3566c9;
+}
+
+.supportPage :global([class~="text-slate-400"]:not(pre):not(code)),
+.exportWorkspace :global([class~="text-slate-400"]:not(pre):not(code)) {
+  color: #627086;
+}
+
+.supportPage :global([class~="rounded-3xl"]),
+.supportPage :global([class~="rounded-2xl"]),
+.exportWorkspace :global([class~="rounded-3xl"]),
+.exportWorkspace :global([class~="rounded-2xl"]) {
+  border-radius: 6px;
+}
+
+.supportPage :global([class~="rounded-xl"]),
+.supportPage :global([class~="rounded-lg"]),
+.exportWorkspace :global([class~="rounded-xl"]),
+.exportWorkspace :global([class~="rounded-lg"]) {
+  border-radius: 4px;
+}
+
+.supportPage :global([class*="shadow-"]),
+.exportWorkspace :global([class*="shadow-"]) {
+  box-shadow: none;
+}
+
+.supportPage :global(section[class~="p-7"]),
+.supportPage :global(section[class~="p-8"]),
+.exportWorkspace :global(section[class~="p-7"]),
+.exportWorkspace :global(section[class~="p-8"]) {
+  padding: 20px;
+}
+
+.supportPage :global(section[class~="p-6"]),
+.exportWorkspace :global(section[class~="p-6"]) {
+  padding: 18px;
+}
+
+.supportPage :global(article[class~="p-6"]),
+.supportPage :global(article[class~="p-7"]),
+.exportWorkspace :global(article[class~="p-6"]),
+.exportWorkspace :global(article[class~="p-7"]) {
+  padding: 18px;
+}
+
+.supportPage :global(button[class~="bg-slate-950"]),
+.supportPage :global(a[class~="bg-slate-950"]),
+.exportWorkspace :global(button[class~="bg-slate-950"]),
+.exportWorkspace :global(a[class~="bg-slate-950"]) {
+  border-color: #3566c9;
+  background-color: #3566c9;
+  color: #fff;
+}
+
+.supportPage :global([class*="text-cyan-"]),
+.supportPage :global([class*="text-violet-"]),
+.exportWorkspace :global([class*="text-cyan-"]),
+.exportWorkspace :global([class*="text-violet-"]) {
+  color: #3566c9;
+}
+
+.supportPage :global([class*="bg-cyan-"]),
+.supportPage :global([class*="bg-violet-"]),
+.exportWorkspace :global([class*="bg-cyan-"]),
+.exportWorkspace :global([class*="bg-violet-"]) {
+  background-color: #edf3ff;
+}
+
+.supportPage :global([class*="border-cyan-"]),
+.supportPage :global([class*="border-violet-"]),
+.exportWorkspace :global([class*="border-cyan-"]),
+.exportWorkspace :global([class*="border-violet-"]) {
+  border-color: #dbe6fb;
+}
+
+.supportPage :global(input:not([type="checkbox"]):not([type="radio"])),
+.supportPage :global(select),
+.supportPage :global(textarea),
+.exportWorkspace :global(input:not([type="checkbox"]):not([type="radio"])),
+.exportWorkspace :global(select),
+.exportWorkspace :global(textarea) {
+  border-radius: 4px;
+}
+
+@media (max-width: 700px) {
+  .supportPage > :global(div[class*="mx-auto"]) {
+    padding: 20px 16px;
+  }
+
+  .supportPage :global(section[class*="bg-gradient-to-br"]),
+  .supportPage :global(section[class*="bg-gradient-to-r"]) {
+    padding: 16px;
+  }
+}

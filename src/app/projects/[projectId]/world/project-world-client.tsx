@@ -65,7 +65,7 @@ type WorldAudit = {
   createdAt: string;
   actor: { username: string; displayName: string | null };
 };
-type WorldPayload = {
+export type WorldPayload = {
   permission: "owner" | "edit" | "view";
   project: { id: string; name: string; slug: string; description: string | null };
   state: {
@@ -151,7 +151,7 @@ function shortFingerprint(value: string): string {
   return `${value.slice(0, 10)}…${value.slice(-6)}`;
 }
 
-export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
+export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedded = false }: { username: string; projectId: string; isSystemAdmin: boolean; embedded?: boolean }) {
   const [world, setWorld] = useState<WorldPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<string | null>(null);
@@ -233,11 +233,12 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
 
   const meta = statusMeta[world?.state.status ?? "insufficient_data"];
 
+  const RootElement = embedded ? "section" : "main";
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="world" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
-        <div className="mb-5"><ProjectOverviewParentLink projectId={projectId} /></div>
+    <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[#f4f6fb] text-slate-950"}>
+      {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="world" isSystemAdmin={isSystemAdmin} /> : null}
+      <div className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10"}>
+        {!embedded ? <>        <div className="mb-5"><ProjectOverviewParentLink projectId={projectId} /></div>
         <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">
           <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-violet-500/25 blur-3xl" />
           <div className="relative flex flex-wrap items-end justify-between gap-7">
@@ -246,17 +247,17 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
               <h1 className="mt-3 text-3xl font-semibold tracking-[-0.035em] sm:text-5xl">{world?.project.name ? `${world.project.name} · 状态治理` : "项目状态治理"}</h1>
               <p className="mt-4 text-sm leading-7 text-slate-300">这里仅处理事实关系、替代链和不可变状态快照等高级管理操作；日常状态、风险与计划信号已经汇总到项目概览。</p>
             </div>
-            <div className="min-w-64 rounded-2xl border border-white/10 bg-white/[0.06] p-5 backdrop-blur">
+            <div className="min-w-64 rounded-md border border-white/10 bg-white/[0.06] p-5 backdrop-blur">
               <div className="flex items-center gap-3"><span className={`h-3 w-3 rounded-full ${meta.glow}`} /><span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${meta.tone}`}>{meta.label}</span></div>
               <p className="mt-3 max-w-xs text-sm leading-6 text-slate-300">{meta.detail}</p>
               <button type="button" onClick={() => void mutate({ operation: "captureState" }, "capture", "当前项目状态已固化；相同输入不会重复创建快照。")} disabled={!canEdit || pending !== null} className="mt-5 flex min-h-11 w-full items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50 disabled:opacity-40">{pending === "capture" ? "固化中…" : "固化当前状态"}</button>
             </div>
           </div>
-        </section>
+        </section></> : <div className="mb-5 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">当前项目状态与完整审计记录</p><button type="button" onClick={() => void mutate({ operation: "captureState" }, "capture", "当前项目状态已固化。")} disabled={!canEdit || pending !== null} className="rounded border border-slate-200 px-3 py-2 text-xs">固化状态快照</button></div>}
 
-        {world?.permission === "view" ? <div className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-700">你当前拥有只读权限，可以查看状态、证据和历史，但不能建立关系、替代事实或固化快照。</div> : null}
-        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error}</span><button type="button" onClick={() => void reload()} className="inline-flex min-h-9 items-center justify-center font-semibold underline underline-offset-4">重试</button></div> : null}
-        {message ? <div role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">{message}</div> : null}
+        {world?.permission === "view" ? <div className="mt-5 rounded-md border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-700">你当前拥有只读权限，可以查看状态、证据和历史，但不能建立关系、替代事实或固化快照。</div> : null}
+        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-md border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error}</span><button type="button" onClick={() => void reload()} className="inline-flex min-h-9 items-center justify-center font-semibold underline underline-offset-4">重试</button></div> : null}
+        {message ? <div role="status" className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">{message}</div> : null}
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6" aria-label="项目状态指标">
           <Metric label="当前事实" value={world?.state.counts.activeFacts ?? 0} detail={`关联工作项 ${world?.state.counts.linkedWorkItems ?? 0}`} loading={loading} />
@@ -275,11 +276,11 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
             </div>
           </div>
           <aside className="space-y-6">
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-md border border-slate-200 bg-white p-6 ">
               <SectionHeading eyebrow="State manifest" title="状态指纹" detail="每次计算都固定实际输入，便于复现与核对。" compact />
               <dl className="mt-5 space-y-4 text-xs"><FingerprintRow label="输入清单" value={world?.state.inputManifestFingerprint} /><FingerprintRow label="当前状态" value={world?.state.snapshotFingerprint} /><div><dt className="text-slate-400">计算时点</dt><dd className="mt-1 font-medium text-slate-700">{formatDate(world?.state.asOf ?? null)}</dd></div></dl>
             </section>
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-md border border-slate-200 bg-white p-6 ">
               <SectionHeading eyebrow="Plan health" title="计划联动" detail="状态与项目计划使用同一套确定性健康度。" compact />
               <div className="mt-5 grid grid-cols-2 gap-3 text-center text-xs"><SmallMetric label="逾期" value={world?.state.planHealth.counts.overdue ?? 0} /><SmallMetric label="受阻" value={world?.state.planHealth.counts.blocked ?? 0} /><SmallMetric label="即将到期" value={world?.state.planHealth.counts.dueSoon ?? 0} /><SmallMetric label="未分配" value={world?.state.planHealth.counts.unassigned ?? 0} /></div>
               <Link href={`/projects/${projectId}/plan`} className="mt-5 flex min-h-11 items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">打开项目计划</Link>
@@ -319,7 +320,7 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
         <section className="mt-10 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <div>
             <SectionHeading eyebrow="Open conflicts" title="当前冲突" detail="这里只展示同时指向当前有效事实的开放冲突；处置仍在记忆质量页面完成。" />
-            <div className="mt-4 space-y-3">{(world?.qualityIssues.filter((issue) => issue.kind === "conflict") ?? []).length === 0 ? <Empty title="没有当前事实冲突" detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-2xl border border-rose-200 bg-white p-5"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-rose-600">冲突强度 {Math.round(issue.score * 100)}%</span><span className="text-[12px] text-slate-400">{formatDate(issue.detectedAt)}</span></div><p className="mt-3 text-sm leading-6 text-slate-600">{issue.explanation}</p></article>)}</div>
+            <div className="mt-4 space-y-3">{(world?.qualityIssues.filter((issue) => issue.kind === "conflict") ?? []).length === 0 ? <Empty title="没有当前事实冲突" detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-md border border-rose-200 bg-white p-5"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-rose-600">冲突强度 {Math.round(issue.score * 100)}%</span><span className="text-[12px] text-slate-400">{formatDate(issue.detectedAt)}</span></div><p className="mt-3 text-sm leading-6 text-slate-600">{issue.explanation}</p></article>)}</div>
             <Link href={`/projects/${projectId}/memory-quality`} className="mt-4 flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">进入记忆质量处置</Link>
           </div>
           <div>
@@ -331,26 +332,26 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
           </div>
         </section>
 
-        <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="mt-10 rounded-md border border-slate-200 bg-white p-6 ">
           <SectionHeading eyebrow="Historical facts" title="非当前事实" detail="这些事实不会进入当前状态判断，但证据、版本和替代链仍可追溯。" compact />
           <div className="mt-5 flex flex-wrap gap-2">{world?.facts.filter((fact) => fact.lifecycle !== "active").map((fact) => <span key={fact.id} title={fact.title} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-medium text-slate-600">{lifecycleLabels[fact.lifecycle]} · {fact.title}</span>)}{!loading && world?.facts.every((fact) => fact.lifecycle === "active") ? <span className="text-sm text-slate-400">当前没有非当前事实。</span> : null}</div>
         </section>
       </div>
-    </main>
+    </RootElement>
   );
 }
 
 function Metric({ label, value, detail, loading }: { label: string; value: number; detail: string; loading: boolean }) {
-  return <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><p className="text-xs font-semibold text-slate-500">{label}</p>{loading ? <div className="mt-3 h-8 w-14 animate-pulse rounded bg-slate-100" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>}<p className="mt-3 text-xs text-slate-400">{detail}</p></article>;
+  return <article className="rounded-md border border-slate-200/80 bg-white p-5 "><p className="text-xs font-semibold text-slate-500">{label}</p>{loading ? <div className="mt-3 h-8 w-14 animate-pulse rounded bg-slate-100" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>}<p className="mt-3 text-xs text-slate-400">{detail}</p></article>;
 }
 
 function SectionHeading({ eyebrow, title, detail, compact = false }: { eyebrow: string; title: string; detail: string; compact?: boolean }) {
-  return <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">{eyebrow}</p><h2 className={`mt-2 font-semibold tracking-tight ${compact ? "text-xl" : "text-2xl"}`}>{title}</h2><p className="mt-2 text-sm leading-6 text-slate-500">{detail}</p></div>;
+  return <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">{eyebrow}</p><h2 className={`mt-2 font-semibold tracking-tight ${compact ? "text-xl" : "text-base"}`}>{title}</h2><p className="mt-2 text-sm leading-6 text-slate-500">{detail}</p></div>;
 }
 
 function FactCard({ fact }: { fact: WorldFact }) {
   const meta = factMeta[fact.type];
-  return <article className="min-w-0 max-w-full overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{meta.label}</span><span className="text-[12px] text-slate-400">证据版本 #{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-slate-900">{fact.title}</h3><p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-slate-600">{fact.content}</p><div className="mt-4 min-w-0 max-w-full overflow-hidden rounded-2xl bg-slate-50 p-4 text-xs text-slate-500"><p className="max-w-full [overflow-wrap:anywhere]">来源：{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}>证据清单 {shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]">工作项：{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
+  return <article className="min-w-0 max-w-full overflow-hidden rounded-md border border-slate-200 bg-white p-5 "><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{meta.label}</span><span className="text-[12px] text-slate-400">证据版本 #{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-slate-900">{fact.title}</h3><p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-slate-600">{fact.content}</p><div className="mt-4 min-w-0 max-w-full overflow-hidden rounded-md bg-slate-50 p-4 text-xs text-slate-500"><p className="max-w-full [overflow-wrap:anywhere]">来源：{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}>证据清单 {shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]">工作项：{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
 }
 
 function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, error, onErrorDismiss, onRetire }: {
@@ -365,7 +366,7 @@ function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, er
 }) {
   const [reason, setReason] = useState("");
   const [open, setOpen] = useState(false);
-  return <article className={`rounded-3xl border bg-white p-5 shadow-sm ${relation.stale ? "border-amber-200" : "border-slate-200"}`}>
+  return <article className={`rounded-md border bg-white p-5  ${relation.stale ? "border-amber-200" : "border-slate-200"}`}>
     <div className="flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{relationLabels[relation.kind]}</span>{relation.stale ? <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">版本已变化</span> : <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">当前有效</span>}</div>
     <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm"><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{sourceTitle}</span><span className="text-slate-300">→</span><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{targetTitle}</span></div>
     <p className="mt-4 text-sm leading-6 text-slate-600">{relation.rationale}</p>
@@ -374,7 +375,7 @@ function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, er
 }
 
 function Workbench({ title, eyebrow, description, children }: { title: string; eyebrow: string; description: string; children: React.ReactNode }) {
-  return <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7"><SectionHeading eyebrow={eyebrow} title={title} detail={description} compact /><div className="mt-6 space-y-4">{children}</div></section>;
+  return <section className="rounded-md border border-slate-200 bg-white p-6  sm:p-7"><SectionHeading eyebrow={eyebrow} title={title} detail={description} compact /><div className="mt-6 space-y-4">{children}</div></section>;
 }
 
 function SelectField({ label, value, onChange, disabled, children }: { label: string; value: string; onChange: (value: string) => void; disabled: boolean; children: React.ReactNode }) {
@@ -386,7 +387,7 @@ function TextField({ label, value, onChange, placeholder, disabled }: { label: s
 }
 
 function Empty({ title, detail, href, action }: { title: string; detail: string; href?: string; action?: string }) {
-  return <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center"><p className="font-semibold text-slate-700">{title}</p><p className="mt-2 text-sm leading-6 text-slate-500">{detail}</p>{href && action ? <Link href={href} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white">{action}</Link> : null}</div>;
+  return <div className="rounded-md border border-dashed border-slate-300 bg-white px-6 py-10 text-center"><p className="font-semibold text-slate-700">{title}</p><p className="mt-2 text-sm leading-6 text-slate-500">{detail}</p>{href && action ? <Link href={href} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white">{action}</Link> : null}</div>;
 }
 
 function FingerprintRow({ label, value }: { label: string; value?: string }) {
@@ -398,7 +399,7 @@ function SmallMetric({ label, value }: { label: string; value: number }) {
 }
 
 function HistoryPanel({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><h3 className="text-sm font-semibold text-slate-800">{title}</h3><div className="mt-4 divide-y divide-slate-100">{children}</div></section>;
+  return <section className="rounded-md border border-slate-200 bg-white p-5 "><h3 className="text-sm font-semibold text-slate-800">{title}</h3><div className="mt-4 divide-y divide-slate-100">{children}</div></section>;
 }
 
 function HistoryRow({ title, detail, fingerprint }: { title: string; detail: string; fingerprint?: string }) {

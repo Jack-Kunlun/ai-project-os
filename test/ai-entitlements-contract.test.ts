@@ -123,6 +123,7 @@ type FakeReservation = {
   routeUpdatedAt?: Date | null;
   providerConfigurationVersion?: number | null;
   routeFenceFingerprint?: string | null;
+  unifiedQuestionConfirmationId?: string | null;
 };
 
 class FakeEntitlementDb {
@@ -136,6 +137,12 @@ class FakeEntitlementDb {
   readonly personalQaAudits: Array<{
     ownerUserId: string;
     status: "running" | "unknown" | "completed";
+    completedAt: Date | null;
+    providerConnection: { scope: "platform" | "user" };
+  }> = [];
+  readonly unifiedQuestionAudits: Array<{
+    ownerUserId: string;
+    status: "running" | "unknown" | "succeeded" | "failed";
     completedAt: Date | null;
     providerConnection: { scope: "platform" | "user" };
   }> = [];
@@ -321,6 +328,19 @@ class FakeEntitlementDb {
     ).length,
   };
 
+  readonly unifiedQuestionAudit = {
+    count: async ({ where }: { where: {
+      ownerUserId: string;
+      providerConnection: { scope: "platform" };
+      OR: Array<{ status: "running" } | { status: "unknown"; completedAt: null }>;
+    } }) => this.unifiedQuestionAudits.filter((audit) =>
+      audit.ownerUserId === where.ownerUserId &&
+      audit.providerConnection.scope === where.providerConnection.scope &&
+      where.OR.some((condition) => condition.status === audit.status &&
+        (condition.status === "running" || audit.completedAt === condition.completedAt)),
+    ).length,
+  };
+
   readonly backgroundJobAttempt = {
     findFirst: async ({ where }: { where: { jobId: string; dispatchState: { in: string[] } } }) => this.dispatchedJobs.has(where.jobId) ? { id: `attempt-${where.jobId}` } : null,
   };
@@ -425,6 +445,45 @@ test("reservation idempotency rejects raw, charged, and complete route snapshot 
   }, fake as never);
   assert.equal(replay.created, false);
   assert.equal(replay.reservedTokens, 12);
+});
+
+test("unified Q&A reservations bind one platform call to its confirmation and hold uncertain expiry", async () => {
+  const fake = new FakeEntitlementDb();
+  const userId = randomUUID();
+  const confirmationId = randomUUID();
+  const providerConnectionId = randomUUID();
+  const callKey = `unified-question:${confirmationId}`;
+  const routeSnapshot = {
+    source: "platform_default" as const,
+    routeId: randomUUID(),
+    routeVersion: 5,
+    routeUpdatedAt: new Date("2026-09-02T00:00:00.000Z"),
+    providerConfigurationVersion: 4,
+    quotaMultiplierBps: 12_500,
+    routeFenceFingerprint: "c".repeat(64),
+  };
+  fake.addGrant(userId, 20_000, activeGrantExpiry());
+  const first = await reservePlatformTokens({
+    userId, unifiedQuestionConfirmationId: confirmationId, providerConnectionId,
+    callKey, operation: "generateWithContext", modelId: "deepseek-v4-flash",
+    rawEstimatedTokens: 100, routeSnapshot,
+    now: new Date("2026-09-02T00:00:00.000Z"),
+  }, fake as never);
+  assert.equal(first.created, true);
+  assert.equal(fake.reservations.get(first.reservationId)?.unifiedQuestionConfirmationId, confirmationId);
+  await assert.rejects(() => reservePlatformTokens({
+    userId, unifiedQuestionConfirmationId: randomUUID(), providerConnectionId,
+    callKey, operation: "generateWithContext", modelId: "deepseek-v4-flash",
+    rawEstimatedTokens: 100, routeSnapshot,
+  }, fake as never), entitlementError("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED"));
+
+  const reservation = fake.reservations.get(first.reservationId);
+  assert.ok(reservation);
+  reservation.expiresAt = new Date("2026-09-01T23:59:00.000Z");
+  const recovery = await recoverExpiredPlatformTokenReservations({ userId, now: new Date("2026-09-02T00:01:00.000Z") }, fake as never);
+  assert.equal(recovery.held, 1);
+  assert.equal(reservation.status, "held");
+  assert.equal(reservation.reconciliationRequired, true);
 });
 
 test("pre-dispatch release restores the reservation and unknown usage is held", async () => {
@@ -572,6 +631,23 @@ test("platform personal QA shares execution concurrency without blocking on term
     providerConnection: { scope: "user" },
   });
   await assertPlatformConcurrency(user, fake as never);
+});
+
+test("unified-question audits share platform concurrency without changing personal QA accounting", async () => {
+  const fake = new FakeEntitlementDb();
+  const userId = randomUUID();
+  const user = { id: userId, role: "user" as const };
+
+  fake.unifiedQuestionAudits.push({ ownerUserId: userId, status: "running", completedAt: null, providerConnection: { scope: "platform" } });
+  await assert.rejects(() => assertPlatformConcurrency(user, fake as never), entitlementError("AI_PLATFORM_CONCURRENCY_LIMIT"));
+
+  fake.unifiedQuestionAudits[0] = { ownerUserId: userId, status: "unknown", completedAt: new Date(), providerConnection: { scope: "platform" } };
+  await assertPlatformConcurrency(user, fake as never);
+  fake.unifiedQuestionAudits.push({ ownerUserId: userId, status: "unknown", completedAt: null, providerConnection: { scope: "platform" } });
+  await assert.rejects(() => assertPlatformConcurrency(user, fake as never), entitlementError("AI_PLATFORM_CONCURRENCY_LIMIT"));
+  fake.unifiedQuestionAudits.pop();
+  fake.personalQaAudits.push({ ownerUserId: userId, status: "running", completedAt: null, providerConnection: { scope: "platform" } });
+  await assert.rejects(() => assertPlatformConcurrency(user, fake as never), entitlementError("AI_PLATFORM_CONCURRENCY_LIMIT"));
 });
 
 test("personal BYOK is unreachable while platform admins follow platform entitlement gates", async () => {

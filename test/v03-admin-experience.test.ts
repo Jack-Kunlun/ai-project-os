@@ -46,7 +46,7 @@ test("platform model responsibilities are split into independent admin surfaces"
   assert.doesNotMatch(client, /<h1 className=.*>平台模型<\/h1>/u);
   assert.match(client, /ProviderCreateForm/u);
   assert.doesNotMatch(client, /PlatformProviderProbeBudgetPanel|PlatformDefaultRoutesPanel|PlatformGrantOfferPolicyPanel|PlatformCreditGovernancePanel|adminView/u);
-  assert.match(shell, /label: "能力配置"/u);
+  assert.match(shell, /label: "模型能力"/u);
   assert.doesNotMatch(shell, /href: "\/admin\/models\/routes"/u);
   assert.match(shell, /href: "\/admin\/credits"/u);
   assert.match(shell, /href: "\/admin\/operations\/probes"/u);

@@ -19,15 +19,21 @@ test("personal project search makes archived selection explicit and keeps all-ac
   const archivedProjectId = "22222222-2222-4222-8222-222222222222";
   await page.route("**/api/projects?*", async (route) => {
     const view = new URL(route.request().url()).searchParams.get("view");
-    await route.fulfill({ json: { projects: view === "archived"
+    const projects = view === "archived"
       ? [{ id: archivedProjectId, name: "Archived Beta", archivedAt: "2026-09-01T00:00:00.000Z" }]
-      : [{ id: activeProjectId, name: "Active Alpha", archivedAt: null }] } });
+      : [{ id: activeProjectId, name: "Active Alpha", archivedAt: null }];
+    await route.fulfill({ json: {
+      projects,
+      pagination: { page: 1, pageSize: 50, total: projects.length, totalPages: 1 },
+      counts: { active: 1, archived: 1 },
+      canCreateProject: false,
+    } });
   });
   await page.route("**/api/personal/knowledge?query=*&limit=20", (route) => route.fulfill({ json: { documents: [] } }));
   await page.route("**/api/personal/knowledge/project-search", (route) => route.fulfill({ json: { results: [], selectedProjects: [] } }));
 
   await page.goto("/personal/knowledge");
-  await page.getByRole("button", { name: "智能检索", exact: true }).click();
+  await page.getByRole("button", { name: "智能检索与索引", exact: true }).click();
   await page.getByRole("button", { name: "项目来源搜索", exact: true }).click();
   await expect(page.getByRole("heading", { name: "搜索我的空间", exact: true })).toBeVisible();
   const activeProject = page.getByRole("button").filter({ hasText: "Active Alpha" });

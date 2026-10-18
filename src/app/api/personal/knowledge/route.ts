@@ -18,6 +18,7 @@ const listQuerySchema = z.object({
   query: z.string().trim().max(240).optional(),
   limit: z.coerce.number().int().min(1).max(PERSONAL_KNOWLEDGE_PAGE_MAX_SIZE).default(PERSONAL_KNOWLEDGE_PAGE_DEFAULT_SIZE),
   cursor: z.string().trim().min(1).max(512).optional(),
+  isDefaultMemory: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
 }).strict();
 
 /** Prevent owner scoped knowledge payloads from entering shared HTTP caches. */
@@ -44,8 +45,8 @@ export async function GET(request: Request) {
     assertUniqueQueryKeys(url);
     const query = listQuerySchema.parse(Object.fromEntries(url.searchParams));
     const result = query.query === undefined
-      ? await listPersonalKnowledgeDocuments(actor, { limit: query.limit, cursor: query.cursor })
-      : await searchPersonalKnowledgeDocuments(actor, { query: query.query, limit: query.limit, cursor: query.cursor });
+      ? await listPersonalKnowledgeDocuments(actor, { limit: query.limit, cursor: query.cursor, isDefaultMemory: query.isDefaultMemory })
+      : await searchPersonalKnowledgeDocuments(actor, { query: query.query, limit: query.limit, cursor: query.cursor, isDefaultMemory: query.isDefaultMemory });
     return noStore(NextResponse.json(result));
   } catch (error) {
     return noStore(handleApiError(error));

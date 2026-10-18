@@ -18,7 +18,7 @@ async function projectFixture(page: Page) {
   await page.getByLabel("项目名称", { exact: true }).fill(name);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   const card = page.locator("article").filter({ has: page.getByRole("heading", { name, exact: true }) });
-  const href = await card.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
+  const href = await card.getByRole("link", { name: `查看项目 ${name}`, exact: true }).getAttribute("href");
   expect(href).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   return href!.slice("/projects/".length);
 }
@@ -55,7 +55,7 @@ test("materials keep editing separate, retain drafts, and chain text import into
   const projectId = await projectFixture(page);
   const flow = await mockModelFlow(page, projectId);
   await page.goto(`/projects/${projectId}/materials`);
-  await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "资料来源", exact: true })).toBeVisible();
   await expect(page.locator("#project-item-form")).toHaveCount(0);
   await page.getByRole("navigation", { name: "项目资料栏目" }).getByRole("link", { name: "整理结果", exact: true }).click();
   const editTrigger = page.getByRole("button", { name: "手动补充", exact: true });
@@ -71,7 +71,7 @@ test("materials keep editing separate, retain drafts, and chain text import into
   await editor.getByRole("button", { name: "返回查看", exact: true }).click();
   await page.screenshot({ path: "test-results/page-workflows-auto-facts/materials-view.png" });
   await page.locator("#add-source-trigger").click();
-  const intake = page.getByRole("dialog", { name: "添加来源", exact: true });
+  const intake = page.getByRole("dialog", { name: "添加资料", exact: true });
   const text = `Browser imported factual source ${randomUUID()}`;
   await intake.locator("#manual-text textarea").fill(text);
   await intake.getByRole("button", { name: "加入原始资料", exact: true }).click();

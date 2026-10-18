@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/app-header";
 import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
 import { jobStatusLabels, type JobAttemptSummary } from "@/lib/workspace-summary";
+import supportStyles from "../project-support.module.css";
 
 type Job = {
   id: string;
@@ -84,7 +85,7 @@ export function ProjectControlClient({ username, isSystemAdmin }: { username: st
   }, [reload]);
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="control" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div>

@@ -5,6 +5,7 @@ import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { OperationPanel } from "@/components/operation-panel";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import type { McpExportOperation } from "@/lib/mcp-export-grants";
+import supportStyles from "../project-support.module.css";
 
 type Grant = Readonly<{
   id: string;
@@ -161,7 +162,7 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
     }
   }
 
-  return <div className="mt-6 space-y-6">
+  return <div className={`${supportStyles.exportWorkspace} mt-6 space-y-6`}>
     {dialog}
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Outbound MCP</p>

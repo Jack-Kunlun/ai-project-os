@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import styles from "../support-pages.module.css";
 
 type ResourceCount = number | "1+" | null;
 
@@ -315,16 +316,14 @@ export function PersonalOverviewClient(): React.JSX.Element {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
-      <section className="rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-11">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal workspace</p>
-        <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">我的空间</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里统一展示当前账号可访问的项目和个人资源。个人知识留在个人空间，项目资料与记忆留在各自项目；项目 A 的约定不会自动成为项目 B 的规则。</p>
-          </div>
-          <Link href="/personal/configuration" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">管理个人资源</Link>
+    <div className={styles.content}>
+      <section className={styles.pageHeader}>
+        <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Personal workspace</p>
+            <h1 className={styles.pageTitle}>我的空间</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里展示当前账号可访问的项目和个人资源。个人知识留在个人空间，项目资料与记忆留在各自项目。</p>
         </div>
+        <Link href="/personal/configuration" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50">管理个人资源</Link>
       </section>
 
       {state.error ? <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{state.error}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重新加载</button></div> : null}

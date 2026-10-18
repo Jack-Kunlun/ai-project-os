@@ -10,10 +10,10 @@ import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
-import { buildMaterialsReturnTo, isAddSourceView, parseMaterialKind, parseProjectItemReviewStatus, type MaterialKind } from "./materials/materials-navigation";
+import styles from "./project-materials.module.css";
+import { buildMaterialsReturnTo, buildProjectQuestionHref, isAddSourceView, MATERIAL_SOURCE_CATEGORIES, parseMaterialKind, parseProjectItemReviewStatus, type MaterialKind } from "./materials/materials-navigation";
 import { ProjectMaterialIntake } from "./project-material-intake";
 import { ProjectMaterialReviewQueue } from "./project-material-review-queue";
-import { ProjectQuestionWorkspace } from "./memory/project-memory-client";
 import { ProjectProcessingTasks } from "./project-processing-tasks";
 
 type ProjectItem = {
@@ -224,6 +224,10 @@ function itemActionText(action: ItemAction): string {
 
 export function ProjectDetailClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
+  return <ProjectDetailWorkspace key={projectId} projectId={projectId} username={username} isSystemAdmin={isSystemAdmin} />;
+}
+
+function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projectId: string; username: string; isSystemAdmin: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("materials", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -240,7 +244,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   const sourceKind: MaterialKind = queryMaterialKind;
   const sourcePage = navigation.page ?? 1;
   const itemStatus = parseProjectItemReviewStatus(navigation.status ?? (navigation.view === "review" ? "confirmed" : undefined));
-  const materialsView = navigation.view === "ask" || navigation.view === "tasks" || navigation.view === "review"
+  const materialsView = navigation.view === "tasks" || navigation.view === "review"
     ? navigation.view
     : !navigation.view && ((!focusSourceId && itemStatus !== "all") || focusSourceId === "confirmed-facts" || focusSourceId === "items-heading" || focusSourceId === "review-queue") ? "review" : "materials";
   const [isSourceDetailLoading, setIsSourceDetailLoading] = useState(false);
@@ -280,6 +284,11 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
     occurredAt: "",
     expectedUpdatedAt: "",
   });
+
+  useEffect(() => {
+    if (navigation.view !== "ask") return;
+    router.replace(buildProjectQuestionHref(projectId), { scroll: false });
+  }, [navigation.view, projectId, router]);
 
   useEffect(() => {
     if (!focusSourceId) {
@@ -334,7 +343,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
     };
   }, [focusSourceId, isItemsLoading, isSourcesLoading, project, sources]);
 
-  function replaceMaterialsQuery(input: { view?: "add" | "review" | "ask" | "tasks" | null; status?: ReturnType<typeof parseProjectItemReviewStatus>; search?: string; kind?: MaterialKind; page?: number }): void {
+  function replaceMaterialsQuery(input: { view?: "add" | "review" | "tasks" | null; status?: ReturnType<typeof parseProjectItemReviewStatus>; search?: string; kind?: MaterialKind; page?: number }): void {
     const status = input.status ?? itemStatus;
     const href = buildProjectHref(projectId, "materials", {
       status: status === "all" ? null : status,
@@ -365,6 +374,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
     sourceRequestControllerRef.current = controller;
     const isCurrentRequest = () => !controller.signal.aborted && sourceRequestIdRef.current === requestId;
     setIsSourcesLoading(true);
+    setSourceError(null);
     try {
       const loaded = await getSources(projectId, { page: sourcePage, search: deferredSourceSearch, kind: sourceKind }, controller.signal);
       if (!isCurrentRequest()) return;
@@ -725,102 +735,71 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
   return (
     <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}>
       {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
-      <div className="border-b border-slate-200/80 pb-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+      <div className={styles.pageHeader}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project materials</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 项目资料</h1>
-            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">放资料、看整理结果、向项目提问。识别在后台处理，可以随时查看进度。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Project materials</p>
+            <h1 aria-label={`${project.name} · 项目资料`} className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-slate-950">项目资料</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">查看有来源的资料、整理结果和后台识别任务。</p>
           </div>
-          <div className="flex flex-wrap gap-3" aria-label="资料主要操作">
-            <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} disabled={Boolean(project.archivedAt)} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:opacity-50">添加资料</button>
+          <div className="flex flex-wrap gap-2" aria-label="资料主要操作">
+            <Link href={buildProjectQuestionHref(projectId)} className={styles.secondaryAction}>智能问答</Link>
+            <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} disabled={Boolean(project.archivedAt)} className={styles.primaryAction}>添加资料</button>
           </div>
         </div>
       </div>
 
-      <nav aria-label="项目资料栏目" className="mt-6 flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-2">
-        {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "ask", label: "问项目" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-indigo-500 ${materialsView === tab.view ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:bg-white/70"}`}>{tab.label}{tab.view === "review" && itemCounts.candidate > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900">{itemCounts.candidate}</span> : null}</Link>)}
+      <nav aria-label="项目资料栏目" className={styles.tabs}>
+        {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`${styles.tab} ${materialsView === tab.view ? styles.tabActive : ""}`}>{tab.label}{tab.view === "review" && itemCounts.candidate > 0 ? <span className={styles.countBadge}>{itemCounts.candidate}</span> : null}</Link>)}
       </nav>
 
-      {materialsView === "ask" ? <ProjectQuestionWorkspace projectId={projectId} /> : null}
-      {materialsView === "tasks" ? <ProjectProcessingTasks projectId={projectId} onChanged={reloadProjectAndSources} /> : null}
+      {materialsView === "tasks" ? <ProjectProcessingTasks key={projectId} projectId={projectId} onChanged={reloadProjectAndSources} /> : null}
 
-      {materialsView === "materials" ? <section id="source-library" aria-labelledby="sources-heading" className="mt-6 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
-        <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
+      {materialsView === "materials" ? <section id="source-library" aria-labelledby="sources-heading" className={styles.sourceSection}>
+        <div className={styles.sectionHeading}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source library</p>
-            <h2 id="sources-heading" tabIndex={-1} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">原始资料来源库</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">这里保存文本、文件、网页和仓库发布的原始内容。它们是可追溯输入，不等同于 AI 候选、已确认事实或 AI 可引用记忆。</p>
+            <h2 id="sources-heading" tabIndex={-1} className="text-lg font-semibold text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">资料来源</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">保留原文和来源，可查看版本并追溯整理结果。</p>
           </div>
-          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isSourcesLoading ? "读取中…" : `${sourcePagination.total} 条原始资料`}</span>
+          <span className={styles.totalCount}>{isSourcesLoading ? "读取中…" : sourceError ? "读取失败" : `${sourcePagination.total} 条资料`}</span>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="note">
-          <strong className="font-semibold">安全提示：</strong>这里只保存原始资料，不代表已确认事实或 AI 摘要。不要录入密码、Token、私密连接串，也不要使用带凭据的 URL。
-        </div>
+        <p className={styles.safetyNote} role="note"><strong>安全提示：</strong>资料不会自动成为已确认事实；请勿提交密码、Token 或带凭据的链接。</p>
 
-        {sourceError ? (
-          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert">{sourceError}</div>
-        ) : null}
-        {sourceSuccess ? (
-          <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{sourceSuccess}</div>
-        ) : null}
+        {sourceError ? <div className={styles.errorNotice} role="alert">{sourceError}</div> : null}
+        {sourceSuccess ? <div className={styles.successNotice} role="status" aria-live="polite">{sourceSuccess}</div> : null}
 
-        <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center">
-          <label className="min-w-0 flex-1"><span className="sr-only">搜索原始资料</span><input value={sourceSearch} onChange={(event) => { replaceMaterialsQuery({ search: event.target.value, page: 1 }); }} placeholder="搜索正文、来源链接或内容哈希" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
-          <label className="sm:w-48"><span className="sr-only">按原始资料类型筛选</span><select value={sourceKind} onChange={(event) => { const value = parseMaterialKind(event.target.value); replaceMaterialsQuery({ kind: value, page: 1 }); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部资料类型</option><option value="manual">手工文本</option><option value="document">文档</option><option value="screenshot">图片或截图</option><option value="web">网页</option><option value="github">GitHub</option><option value="git">Git 仓库</option></select></label>
-        </div>
-
-        <div className="mt-8 min-w-0">
-          <div className="min-w-0">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Traceable inputs</p>
-                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">原始资料清单</h3>
-              </div>
-              <span className="text-xs text-slate-400">按最近接入排序</span>
+        <div className={styles.sourceLayout}>
+          <nav aria-label="按资料类型筛选" className={styles.categoryNav}>
+            {MATERIAL_SOURCE_CATEGORIES.map((category) => <button key={category.value} type="button" aria-pressed={sourceKind === category.value} onClick={() => replaceMaterialsQuery({ kind: category.value, page: 1 })} className={`${styles.categoryButton} ${sourceKind === category.value ? styles.categoryButtonActive : ""}`}>{category.label}</button>)}
+          </nav>
+          <div className={styles.sourceContent}>
+            <div className={styles.sourceTools}>
+              <label className="min-w-0 flex-1"><span className="sr-only">搜索原始资料</span><input value={sourceSearch} onChange={(event) => { replaceMaterialsQuery({ search: event.target.value, page: 1 }); }} placeholder="搜索资料内容、来源链接或哈希" className={styles.searchInput} /></label>
+              <span className="shrink-0 text-xs text-slate-400">按最近接入排序</span>
             </div>
 
-            {isSourcesLoading ? (
-              <div className="mt-5 space-y-3" aria-label="正在加载项目资料">
-                {[1, 2].map((item) => <div key={item} className="h-40 animate-pulse rounded-2xl bg-slate-100" />)}
-              </div>
-            ) : sources.length === 0 ? (
-              <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
-                <p className="text-sm font-medium text-slate-700">{sourceSearch.trim() || sourceKind !== "all" ? "没有匹配的原始资料" : "还没有原始资料"}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-500">{sourceSearch.trim() || sourceKind !== "all" ? "调整关键词或资料类型后重试。" : "使用上方“添加来源”收集文本、文件、网页或代码仓库资料。"}</p>
-              </div>
-            ) : (
-              <ul className="mt-5 min-w-0 space-y-4" aria-label="项目原始资料列表">
-                {sources.map((source) => (
-                  <li key={source.id} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-600">原始资料</span>
+            {isSourcesLoading ? <div role="status" className={styles.loadingRows} aria-label="正在加载项目资料">{[1, 2, 3].map((item) => <div key={item} className={styles.loadingRow} aria-hidden="true" />)}</div>
+              : sourceError ? null
+                : sources.length === 0 ? <div className={styles.emptyState}>
+                  <p className="text-sm font-medium text-slate-700">{sourceSearch.trim() || sourceKind !== "all" ? "没有匹配的资料" : "还没有项目资料"}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{sourceSearch.trim() || sourceKind !== "all" ? "调整搜索词或资料类型后重试。" : "可以添加文本、图片、文档、网页或代码仓库资料。"}</p>
+                </div>
+                  : <ul className={styles.sourceList} aria-label="项目原始资料列表">
+                    {sources.map((source) => (
+                      <li key={source.id} className={styles.sourceRow}>
+                        <div className={styles.sourceRowMain}>
+                          <div className={styles.sourceMeta}><span className={styles.kindBadge}>{source.kind}</span><span>{source.kind === "manual" ? "手工文本" : "来源已接入"}</span><time dateTime={source.ingestedAt}>{formatSourceDate(source.ingestedAt)}</time></div>
+                          <h3 className={styles.sourcePreview}>{source.preview || "未提供文字预览"}</h3>
                         </div>
-                        <h4 className="mt-3 line-clamp-2 text-sm font-semibold leading-6 text-slate-900">{source.preview || "未提供文字预览"}</h4>
-                        <p className="mt-2 text-xs text-slate-500">{source.kind === "manual" ? "手工输入资料" : "外部来源已绑定"} · 最近接入于 {formatSourceDate(source.ingestedAt)}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-                        <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { status: itemStatus, search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">查看详情</Link>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteSource(source)}
-                          disabled={deletingSourceId !== null}
-                          className="inline-flex min-h-9 items-center justify-center rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          aria-label={`删除原始资料 ${source.preview.slice(0, 24)}`}
-                        >
-                          {deletingSourceId === source.id ? "删除中…" : "删除"}
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <ListPagination {...sourcePagination} onPageChange={(page) => { replaceMaterialsQuery({ page }); }} disabled={isSourcesLoading} />
+                        <div className={styles.sourceActions}>
+                          <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { status: itemStatus, search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className={styles.detailAction}>查看详情</Link>
+                          <button type="button" onClick={() => void handleDeleteSource(source)} disabled={deletingSourceId !== null} className={styles.deleteAction} aria-label={`删除原始资料 ${source.preview.slice(0, 24)}`}>{deletingSourceId === source.id ? "删除中…" : "删除"}</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>}
+            {!sourceError ? <ListPagination {...sourcePagination} onPageChange={(page) => { replaceMaterialsQuery({ page }); }} disabled={isSourcesLoading} /> : null}
           </div>
         </div>
       </section> : null}
@@ -832,7 +811,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
             <h2 id="items-heading" tabIndex={-1} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">已确认事实</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">查看 AI 自动整理和人工补充的事实，每条记录都能回溯原始资料；有冲突或不确定的内容单独进入待处理。</p>
           </div>
-          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isItemsLoading ? "读取中…" : `${itemCounts.confirmed} 已确认 · ${itemCounts.candidate} 待确认`}</span>
+          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isItemsLoading ? "读取中…" : itemError ? "读取失败" : `${itemCounts.confirmed} 已确认 · ${itemCounts.candidate} 待确认`}</span>
         </div>
 
         {itemError ? (
@@ -993,7 +972,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
             <div className="mt-5 space-y-4" aria-label="正在加载项目条目">
               {[1, 2].map((item) => <div key={item} className="h-56 animate-pulse rounded-2xl bg-slate-100" />)}
             </div>
-          ) : items.length === 0 ? (
+          ) : itemError ? null : items.length === 0 ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
               <p className="text-sm font-medium text-slate-700">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? "没有匹配的项目条目" : "还没有项目条目"}</p>
               <p className="mt-2 text-sm leading-6 text-slate-500">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? "调整关键词、类型或状态后重试。" : "从上方选择原始资料并保存第一条决策、进展、问题或风险候选。"}</p>
@@ -1014,7 +993,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
               ))}
               </ul>
           )}
-          <ListPagination {...itemPagination} onPageChange={setItemPage} disabled={isItemsLoading} />
+          {!itemError ? <ListPagination {...itemPagination} onPageChange={setItemPage} disabled={isItemsLoading} /> : null}
         </div>
       </section></> : null}
       <ProjectMaterialIntake projectId={projectId} onChanged={reloadProjectAndSources} open={isAddSourceOpen} kind={intakeKind} onClose={() => replaceMaterialsQuery({ view: null })} />

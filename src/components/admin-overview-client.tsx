@@ -161,23 +161,39 @@ export function AdminOverviewClient() {
   }, loading);
 
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
-    <AdminPageHeader title="管理员总览" meta={overview ? `测量于 ${formatDate(overview.service.measuredAt)} · ${overview.service.version}` : "正在读取最新状态…"} />
+    <AdminPageHeader title="平台总览" meta={overview ? `测量于 ${formatDate(overview.service.measuredAt)} · ${overview.service.version}` : loading ? "正在读取最新状态…" : "未取得最新状态"} />
 
     {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
 
-    <section className="mt-6 rounded-3xl border border-amber-200 bg-amber-50/70 p-6 shadow-sm sm:p-7" aria-labelledby="admin-pending-actions-title">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Operations queue</p>
-          <h2 id="admin-pending-actions-title" className="mt-2 text-xl font-semibold text-slate-950">待处理事项</h2>
-          <p className="mt-2 text-xs leading-5 text-slate-600">只根据本次已取得的安全聚合判断。数量为 0 表示当前测量没有待办；“未取得”表示证据尚未返回。</p>
-        </div>
-        <span className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600">平台运营视角</span>
+    <section className="mt-5" aria-labelledby="admin-service-health-title">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Service health</p><h2 id="admin-service-health-title" className="mt-1 text-lg font-semibold text-slate-950">服务健康</h2></div>
+        <span className="text-xs text-slate-500">状态仅依据本次安全读取</span>
       </div>
-      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">{pendingActions.map((action) => <ActionCard key={action.key} action={action} />)}</div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatusCard label="应用服务" value={loading ? "读取中…" : overview ? "正常" : "未取得"} detail={loading ? "等待安全读取" : overview ? `版本 ${overview.service.version}` : "本次测量未取得应用状态。"} tone="emerald" />
+        <StatusCard label="数据库" value={loading ? "读取中…" : overview?.service.database === "up" ? "可用" : "未取得"} detail={loading ? "等待安全读取" : overview?.service.database === "up" ? "只读健康检查通过" : "本次测量未取得数据库健康证据。"} tone="cyan" />
+        <StatusCard label="Worker" value={loading ? "读取中…" : worker ? workerLabel(worker.status) : "未取得"} detail={loading ? "等待安全读取" : worker ? workerDetail(worker) : "本次测量未取得 Worker 状态。"} tone="violet" />
+      </div>
     </section>
 
-    <section className="mt-6" aria-labelledby="admin-kpi-title">
+    <section className="mt-5 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="admin-pending-actions-title">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Operations queue</p>
+          <h2 id="admin-pending-actions-title" className="mt-1 text-lg font-semibold text-slate-950">待处理事项</h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">只根据本次已取得的安全聚合判断。数量为 0 表示当前测量没有待办；“未取得”表示证据尚未返回。</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">{pendingActions.map((action) => <ActionCard key={action.key} action={action} />)}</div>
+    </section>
+
+    <section className="mt-5 grid items-stretch gap-3 lg:grid-cols-[0.8fr_1.2fr]" aria-label="平台规模与额度">
+      <div className="flex h-full flex-col rounded-2xl border border-slate-200/80 bg-white p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Safe counts</p><h2 className="mt-1 text-lg font-semibold">平台规模</h2><div className="mt-auto grid grid-cols-3 gap-2 pt-4"><Count label="用户" value={overview?.counts.users} /><Count label="有效会员" value={overview?.counts.activeMemberships} /><Count label="已验证平台连接" value={overview?.counts.verifiedPlatformModels} /></div></div>
+      <div className="flex h-full flex-col rounded-2xl border border-slate-200/80 bg-white p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Platform credit ledger</p><h2 className="mt-1 text-lg font-semibold">平台额度总览</h2><p className="mt-1 text-xs leading-5 text-slate-600">只读聚合：累计发放、当前可用、预留 / 待核对占用和已确认消耗。</p><div className="mt-auto grid grid-cols-2 gap-2 pt-4 sm:grid-cols-4"><Count label="累计发放" value={overview?.tokens.issuedTokens} /><Count label="当前可用" value={overview?.tokens.availableTokens} /><Count label="预留 / 待核对占用" value={overview?.tokens.reservedTokens} /><Count label="已确认消耗" value={overview?.tokens.consumedTokens} /></div></div>
+    </section>
+
+    <section className="mt-5" aria-labelledby="admin-kpi-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Today · Asia/Shanghai</p><h2 id="admin-kpi-title" className="mt-1 text-xl font-semibold text-slate-950">核心指标</h2></div>
         <span className="text-xs text-slate-400">不含个人 BYOK · 未接入支付金额</span>
@@ -185,7 +201,7 @@ export function AdminOverviewClient() {
       <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">
         <KpiCard label="今日新增用户" value={analyticsValue(overview?.analytics.today.newUsers, loading)} detail="普通用户创建数" />
         <KpiCard label="今日托管 Token" value={analyticsValue(overview?.analytics.today.platformTokens, loading)} detail="仅 usageKnown=true" />
-        <KpiCard label="调用待核对" value={analyticsValue(overview?.analytics.today.unknownCalls, loading)} detail="usageKnown=false" />
+        <KpiCard label="调用待核对" value={analyticsValue(overview?.analytics.today.unknownCalls, loading)} detail="仅终态待核对" />
         <KpiCard label="今日额度消耗" value={analyticsValue(overview?.analytics.today.settledQuota, loading)} detail="已结算平台额度" />
         <KpiCard label="有效会员" value={analyticsValue(overview?.analytics.today.activeMemberships, loading)} detail="当前有效资格" />
       </div>
@@ -208,12 +224,6 @@ export function AdminOverviewClient() {
       </div>
     </section>
 
-    <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="应用服务状态">
-      <StatusCard label="应用服务" value={loading ? "读取中…" : overview ? "正常" : "未取得"} detail={loading ? "等待安全读取" : overview ? `版本 ${overview.service.version}` : "本次测量未取得应用状态。"} tone="emerald" />
-      <StatusCard label="数据库" value={loading ? "读取中…" : overview?.service.database === "up" ? "可用" : "未取得"} detail={loading ? "等待安全读取" : "只读健康检查"} tone="cyan" />
-      <StatusCard label="Worker" value={loading ? "读取中…" : worker ? workerLabel(worker.status) : "未取得"} detail={loading ? "等待安全读取" : worker ? workerDetail(worker) : "本次测量未取得 Worker 状态。"} tone="violet" />
-    </section>
-
     <section className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 shadow-sm sm:p-7" aria-labelledby="default-route-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -226,11 +236,6 @@ export function AdminOverviewClient() {
       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-2xl border border-dashed border-indigo-200 bg-white/70 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? "正在读取默认路由状态…" : "未取得默认路由证据。"}</div>}
       </div>
-    </section>
-
-    <section className="mt-6 grid items-stretch gap-6 lg:grid-cols-[1fr_1.2fr]">
-      <div className="flex h-full flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Safe counts</p><h2 className="mt-2 text-xl font-semibold">平台规模</h2><div className="mt-auto grid grid-cols-3 gap-3 pt-5"><Count label="用户" value={overview?.counts.users} /><Count label="有效会员" value={overview?.counts.activeMemberships} /><Count label="已验证平台连接" value={overview?.counts.verifiedPlatformModels} /></div></div>
-      <div className="flex h-full flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Platform credit ledger</p><h2 className="mt-2 text-xl font-semibold">平台额度总览</h2><p className="mt-2 text-xs leading-5 text-slate-500">只读聚合：累计发放、当前可用、预留 / 待核对占用和已确认消耗。</p><div className="mt-auto grid grid-cols-2 gap-3 pt-5 sm:grid-cols-4"><Count label="累计发放" value={overview?.tokens.issuedTokens} /><Count label="当前可用" value={overview?.tokens.availableTokens} /><Count label="预留 / 待核对占用" value={overview?.tokens.reservedTokens} /><Count label="已确认消耗" value={overview?.tokens.consumedTokens} /></div></div>
     </section>
 
     <section className="mt-6 grid gap-6 lg:grid-cols-3" aria-label="安全与恢复状态">
@@ -259,7 +264,7 @@ function AnalyticsTrendSection({ overview, loading }: { overview: SystemOverview
   const trend = overview?.analytics.trends.days7 ?? [];
   return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="admin-trend-title">
     <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">7-day trend</p><h2 id="admin-trend-title" className="mt-1 text-xl font-semibold text-slate-950">运营趋势</h2></div><span className="text-xs text-slate-400">每日零值保留，读取失败显示“未取得”</span></div>
-    <div className="mt-4 overflow-x-auto"><table className="min-w-[600px] w-full border-collapse text-left text-xs"><thead><tr className="border-b border-slate-100 text-slate-400"><th className="whitespace-nowrap px-3 py-2 font-semibold">日期</th><th className="whitespace-nowrap px-3 py-2 font-semibold">新增用户</th><th className="whitespace-nowrap px-3 py-2 font-semibold">托管 Token</th><th className="whitespace-nowrap px-3 py-2 font-semibold">待核对调用</th><th className="whitespace-nowrap px-3 py-2 font-semibold">额度消耗</th></tr></thead><tbody>{trend.length === 0 ? <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">{loading ? "正在读取趋势…" : "未取得趋势证据。"}</td></tr> : trend.map((point) => <tr key={point.date} className="border-b border-slate-50 last:border-0"><th className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700">{point.date}</th><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.newUsers, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.platformTokens, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.unknownCalls, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.settledQuota, loading)}</td></tr>)}</tbody></table></div>
+    <div role="region" aria-label="运营趋势明细" tabIndex={0} className="mt-4 overflow-x-auto"><table className="min-w-[600px] w-full border-collapse text-left text-xs"><thead><tr className="border-b border-slate-100 text-slate-400"><th className="whitespace-nowrap px-3 py-2 font-semibold">日期</th><th className="whitespace-nowrap px-3 py-2 font-semibold">新增用户</th><th className="whitespace-nowrap px-3 py-2 font-semibold">托管 Token</th><th className="whitespace-nowrap px-3 py-2 font-semibold">待核对调用</th><th className="whitespace-nowrap px-3 py-2 font-semibold">额度消耗</th></tr></thead><tbody>{trend.length === 0 ? <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">{loading ? "正在读取趋势…" : "未取得趋势证据。"}</td></tr> : trend.map((point) => <tr key={point.date} className="border-b border-slate-50 last:border-0"><th className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700">{point.date}</th><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.newUsers, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.platformTokens, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.unknownCalls, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.settledQuota, loading)}</td></tr>)}</tbody></table></div>
   </section>;
 }
 
@@ -330,6 +335,6 @@ function StatusCard({ label, value, detail, tone }: { label: string; value: stri
   return <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><p className="text-xs font-semibold text-slate-500">{label}</p><p className={`mt-3 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${styles[tone]}`}>{value}</p><p className="mt-3 text-xs leading-5 text-slate-500">{detail}</p></article>;
 }
 
-function Count({ label, value }: { label: string; value?: number }) {
-  return <div className="rounded-2xl bg-slate-50 px-3 py-4"><p className="text-2xl font-semibold text-slate-900">{value === undefined ? "—" : value.toLocaleString("zh-CN")}</p><p className="mt-1 text-[12px] text-slate-500">{label}</p></div>;
+function Count({ label, value }: { label: string; value?: number | null }) {
+  return <div className="rounded-2xl bg-slate-50 px-3 py-4"><p className="text-2xl font-semibold text-slate-900">{value === undefined || value === null ? "—" : value.toLocaleString("zh-CN")}</p><p className="mt-1 text-[12px] text-slate-500">{label}</p></div>;
 }

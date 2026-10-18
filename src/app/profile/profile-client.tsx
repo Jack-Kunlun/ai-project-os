@@ -9,6 +9,7 @@ import { AccountPhonePanel } from "@/components/account-phone-panel";
 import { AppHeader } from "@/components/app-header";
 import { EmailCodeInput } from "@/components/email-code-input";
 import { OperationPanel } from "@/components/operation-panel";
+import styles from "../support-pages.module.css";
 
 type Profile = {
   id: string;
@@ -105,13 +106,15 @@ export function ProfileClient({
   }, [load]);
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+    <main className={styles.page}>
       <AppHeader username={headerUsername} active="profile" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-5xl px-5 pb-16 pt-9 sm:px-8 lg:px-10">
-        <section>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Account</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">个人中心</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">查看身份来源、工作区角色和会话状态，维护个人资料与本地恢复凭据。</p>
+      <div className={styles.content}>
+        <section className={styles.pageHeader}>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Account</p>
+            <h1 className={`${styles.pageTitle} mt-3`}>个人中心</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">查看身份来源、工作区角色和会话状态，维护个人资料与本地恢复凭据。</p>
+          </div>
         </section>
 
         {error ? <div role="alert" className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重试</button></div> : null}

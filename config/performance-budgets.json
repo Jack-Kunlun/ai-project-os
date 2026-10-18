@@ -4,19 +4,21 @@
     "sharedJavaScriptGzipBytes": 148480,
     "largestJavaScriptAssetGzipBytes": 76800,
     "globalCssGzipBytes": 15616,
-    "totalStaticClientGzipBytes": 819200
+    "totalStaticClientGzipBytes": 870400
   },
   "criticalRoutes": {
     "/setup": 158720,
     "/dashboard": 168960,
-    "/projects": 168960,
+    "/personal/projects": 168960,
     "/guide": 158720,
     "/connections/mcp": 179200,
     "/system/account-access": 158720,
     "/personal": 174080,
     "/personal/knowledge": 184320,
+    "/personal/knowledge/graph": 189440,
     "/login": 158720,
     "/register": 158720,
-    "/admin/sms": 163840
+    "/admin/sms": 163840,
+    "/ask": 184320
   }
 }

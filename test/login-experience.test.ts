@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("login page exposes the reference layout and real configured auth choices", async () => {
-  const [form, page, apiErrors, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
+test("login page aligns with the workspace and preserves configured auth choices", async () => {
+  const [form, loginStyles, page, apiErrors, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
     readFile("src/app/login/login-form.tsx", "utf8"),
+    readFile("src/app/login/login.module.css", "utf8"),
     readFile("src/app/login/page.tsx", "utf8"),
     readFile("src/lib/api-errors.ts", "utf8"),
     readFile("src/app/api/auth/login/route.ts", "utf8"),
@@ -18,6 +19,7 @@ test("login page exposes the reference layout and real configured auth choices",
   ]);
 
   assert.match(form, /让项目知识可追溯/u);
+  assert.match(form, /import styles from "\.\/login\.module\.css"/u);
   assert.match(form, /BrandMark/u);
   assert.match(await readFile("src/components/brand-mark.tsx", "utf8"), /ai-project-os-admin-crisp\.png/u);
   assert.doesNotMatch(form, />OS<\/span>/u);
@@ -34,8 +36,14 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(form, /href="\/help"/u);
   assert.match(form, /TermsIcon/u);
   assert.match(form, /HelpIcon/u);
-  assert.match(form, /text-\[12px\]/u);
-  assert.match(form, /sm:mt-7/u);
+  assert.match(loginStyles, /background: #f7f8fa/u);
+  assert.match(loginStyles, /#3566c9/u);
+  assert.match(loginStyles, /@media \(max-width: 760px\)/u);
+  assert.match(loginStyles, /@media \(max-width: 380px\)/u);
+  assert.match(loginStyles, /min-height: 44px/u);
+  assert.match(loginStyles, /:focus-visible/u);
+  assert.doesNotMatch(form, /radial-gradient|linear-gradient|shadow-\[/u);
+  assert.doesNotMatch(loginStyles, /gradient/u);
   assert.match(form, /githubLoginAvailable/u);
   assert.match(form, /平台管理员尚未完成初始化/u);
   assert.match(page, /getGitHubOAuthAvailability/u);

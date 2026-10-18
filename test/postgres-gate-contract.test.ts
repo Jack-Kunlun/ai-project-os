@@ -52,6 +52,13 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
     databaseUrlEnv: "LOCAL_REGISTRATION_TEST_DATABASE_URL",
     setup: "migrate",
   });
+  assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "unified-question"), {
+    id: "unified-question",
+    file: "test/unified-question-postgres.test.ts",
+    database: "ai_project_os_unified_question_test",
+    gateEnv: "UNIFIED_QUESTION_POSTGRES_GATE",
+    setup: "migrate",
+  });
   assert.deepEqual(POSTGRES_GATES.find((gate) => gate.id === "authenticated-web-source"), {
     id: "authenticated-web-source",
     file: "test/authenticated-web-source-postgres.test.ts",

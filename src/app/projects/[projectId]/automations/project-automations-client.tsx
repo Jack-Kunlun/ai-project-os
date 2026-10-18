@@ -9,6 +9,7 @@ import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { automationFailurePresentation } from "@/lib/automation-failure-presentation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
+import styles from "./project-automations-client.module.css";
 
 type RuleKind = "repositorySync" | "memoryQuality" | "memoryIndex" | "projectBrief" | "webSourceSync" | "projectPlanHealth";
 type AutomationRunResult = {
@@ -137,7 +138,11 @@ function automationSuccessEvidence(rule: AutomationRule): string {
     : `最近成功运行：${formatDateTime(new Date(latestSuccessfulRun.completedAt))}`;
 }
 
-export function ProjectAutomationsClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
+export function ProjectAutomationsClient(props: { username: string; projectId: string; isSystemAdmin: boolean }) {
+  return <ProjectAutomationsWorkspace key={props.projectId} {...props} />;
+}
+
+function ProjectAutomationsWorkspace({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("automations", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
   const runQuery = navigation.run;
@@ -151,26 +156,47 @@ export function ProjectAutomationsClient({ username, projectId, isSystemAdmin }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const loadRequestIdRef = useRef(0);
+  const loadControllerRef = useRef<AbortController | null>(null);
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    const requestId = ++loadRequestIdRef.current;
+    loadControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
+    const isCurrentRequest = () => !controller.signal.aborted && loadRequestIdRef.current === requestId;
     if (showLoading) setLoading(true);
     try {
       const query = runQuery === null ? "" : `?run=${encodeURIComponent(runQuery)}`;
-      const response = await fetch(`/api/projects/${projectId}/automations${query}`, { cache: "no-store" });
+      const response = await fetch(`/api/projects/${projectId}/automations${query}`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(await responseError(response, "自动化规则加载失败"));
       const payload = await response.json() as { rules: AutomationRule[]; capabilities?: AutomationCapabilities; run?: AutomationRun | null };
+      if (!isCurrentRequest()) return;
       setRules(payload.rules);
       setCapabilities(payload.capabilities ?? readOnlyCapabilities);
       setFocusedRun(payload.run ?? null);
       setError(null);
     } catch (cause) {
+      if (!isCurrentRequest()) return;
       setError(cause instanceof Error ? cause.message : "自动化规则加载失败");
     } finally {
-      if (showLoading) setLoading(false);
+      if (isCurrentRequest()) {
+        loadControllerRef.current = null;
+        if (showLoading) setLoading(false);
+      }
     }
   }, [projectId, runQuery]);
 
-  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
+    return () => {
+      window.clearTimeout(timer);
+      loadRequestIdRef.current += 1;
+      loadControllerRef.current?.abort();
+    };
+  }, [reload]);
+
+  useEffect(() => () => loadControllerRef.current?.abort(), []);
 
   useEffect(() => {
     if (focusedRun === null) return;
@@ -183,18 +209,32 @@ export function ProjectAutomationsClient({ username, projectId, isSystemAdmin }:
   }, [focusedRun]);
 
   const effectiveCapabilities = capabilities ?? readOnlyCapabilities;
+  const runHref = (runId: string) => buildProjectHref(projectId, "automations", {
+    run: runId,
+    from: navigation.from,
+    view: navigation.view,
+    cursor: navigation.cursor,
+    focus: navigation.focus,
+    returnTo: navigation.returnTo,
+  });
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className={styles.page}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="automations" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
-        <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Persistent worker</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目自动化</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">规则和运行记录保存在数据库，由独立 Worker 领取并带租约执行。网页来源刷新与本地治理任务可自动完成；Git 计划只读在项目 Git 页面单独双确认授权。向模型发送内容的任务只会准备边界并通知你确认，不会静默外传。</p>
-        </section>
-        {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
-        <div className="mt-8 space-y-7">
-          {effectiveCapabilities.canCreate ? <OperationPanel title="添加自动化" triggerLabel="添加自动化" open={createOpen} onOpenChange={setCreateOpen} description="先预览规则影响范围，再确认保存。保存后由独立 Worker 在首次运行时间领取任务。"><AutomationForm projectId={projectId} onCreated={(rule) => { setRules((current) => [...current, rule]); setCreateOpen(false); }} /></OperationPanel> : <p className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm leading-6 text-slate-600">自动化由项目 Owner 管理。你当前是{effectiveCapabilities.permission === "edit" ? " Editor" : " Viewer"}，可以查看规则、运行时间和失败建议。</p>}
-          <section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Rules</p><h2 className="mt-2 text-2xl font-semibold">运行规则</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${rules.length} 条`}</span></div>{focusedRun ? <AutomationRunDetail projectId={projectId} run={focusedRun} returnHref={notificationReturnHref} /> : null}<div className="space-y-4">{!loading && rules.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">还没有可运行的自动化规则。Git 计划只读请到项目 Git 页面单独授权；这里可预览网页来源、记忆质量或项目计划提醒。</div> : rules.map((rule) => <AutomationCard key={rule.id} projectId={projectId} rule={rule} capabilities={effectiveCapabilities} focusedRunId={focusedRun?.id ?? runQuery} onReload={reload} />)}</div></section>
+      <div className={styles.content}>
+        <header className={styles.pageHeader}>
+          <div><h1 className="text-2xl font-semibold tracking-tight text-slate-950">项目自动化</h1><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">查看规则、最近运行和异常，所有规则变更都需要明确操作。</p></div>
+          <div className="flex flex-wrap gap-2"><Link className={styles.headerLink} href={`/projects/${encodeURIComponent(projectId)}/intelligence`}>项目简报与调查</Link><Link className={styles.headerLink} href={`/projects/${encodeURIComponent(projectId)}/configuration`}>配置 AI 路由</Link></div>
+        </header>
+        <p className={styles.safetyNote}>模型相关规则只生成待确认通知；实际外发仍需在 AI 工作台逐次确认。</p>
+        {error ? <div role="alert" className={styles.errorNotice}>{error}</div> : null}
+        <div className={styles.workspace}>
+          {effectiveCapabilities.canCreate ? <OperationPanel title="添加自动化" triggerLabel="添加自动化" open={createOpen} onOpenChange={setCreateOpen} variant="drawer" description="先预览规则影响范围，再确认保存。保存后由 Worker 在预计时间领取任务。"><AutomationForm projectId={projectId} onCreated={(rule) => { setRules((current) => [...current, rule]); setCreateOpen(false); }} /></OperationPanel> : <p className={styles.permissionNote}>自动化由项目 Owner 管理。你当前是{effectiveCapabilities.permission === "edit" ? " Editor" : " Viewer"}，可以查看规则、运行时间和失败建议。</p>}
+          <section aria-labelledby="automation-rules-heading">
+            <div className={styles.listHeading}><h2 id="automation-rules-heading" className="text-base font-semibold text-slate-900">运行规则</h2><span className="text-xs text-slate-400">{loading ? "读取中…" : error ? "读取失败" : `${rules.length} 条`}</span></div>
+            {focusedRun ? <AutomationRunDetail projectId={projectId} run={focusedRun} returnHref={notificationReturnHref} /> : null}
+            {loading ? <div className={styles.loadingRow} aria-label="正在读取自动化规则" /> : error ? null : rules.length === 0 ? <div className={styles.emptyState}>还没有自动化规则。选择“添加自动化”查看当前项目可用的规则和影响范围。</div> : <div className={styles.ruleList}>{rules.map((rule) => <AutomationCard key={`${projectId}:${rule.id}`} projectId={projectId} rule={rule} capabilities={effectiveCapabilities} focusedRunId={focusedRun?.id ?? runQuery} onReload={reload} runHref={runHref} />)}</div>}
+          </section>
         </div>
       </div>
     </main>
@@ -296,19 +336,121 @@ function AutomationRunResultView({ result }: { result: AutomationRunResult | nul
 
 function AutomationRunDetail({ projectId, run, returnHref }: { projectId: string; run: AutomationRun; returnHref: string | null }) {
   const failure = run.status === "failed" ? automationFailurePresentation(run.failureCode) : null;
-  return <section id={`automation-run-${run.id}`} tabIndex={-1} aria-labelledby={`automation-run-title-${run.id}`} className="mb-5 scroll-mt-28 rounded-2xl border border-indigo-200 bg-indigo-50 p-5 outline-none focus:ring-4 focus:ring-indigo-100"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">运行详情</p><h3 id={`automation-run-title-${run.id}`} className="mt-2 text-base font-semibold text-indigo-950">{run.rule?.name ?? "自动化运行"}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-800">{runStatusLabels[run.status] ?? run.status}</span></div><p className="mt-3 text-xs text-indigo-800">计划时间：{new Date(run.scheduledFor).toISOString()} · 浏览器时间：{new Date(run.scheduledFor).toLocaleString("zh-CN")} · 仅用于本次查看</p>{failure ? <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-5 text-indigo-950"><p className="font-semibold">{failure.title}</p><p className="mt-1">{failure.reason}</p><p className="mt-1">下一步：{failure.nextStep}</p><p className="mt-1 font-mono text-[12px]">错误代码：{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : <p className="mt-4 text-xs text-indigo-800">该运行没有失败建议。</p>}<AutomationRunResultView result={run.result} /><div className="mt-4 flex flex-wrap gap-2">{returnHref ? <Link href={returnHref} className="inline-flex rounded-xl bg-indigo-700 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-600">返回活动记录</Link> : null}<a href={buildProjectHref(projectId, "automations", { run: run.id })} className="inline-flex rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800">保留此运行上下文</a></div></section>;
+  return <section id={`automation-run-${run.id}`} tabIndex={-1} aria-labelledby={`automation-run-title-${run.id}`} className={`${styles.runDetail} outline-none focus:ring-4 focus:ring-indigo-100`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-indigo-700">运行详情</p><h3 id={`automation-run-title-${run.id}`} className="mt-1 text-base font-semibold text-indigo-950">{run.rule?.name ?? "自动化运行"}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-800">{runStatusLabels[run.status] ?? run.status}</span></div><p className="mt-3 text-xs text-indigo-800">计划时间：{new Date(run.scheduledFor).toISOString()} · 浏览器时间：{new Date(run.scheduledFor).toLocaleString("zh-CN")} · 仅用于本次查看</p>{failure ? <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-5 text-indigo-950"><p className="font-semibold">{failure.title}</p><p className="mt-1">{failure.reason}</p><p className="mt-1">下一步：{failure.nextStep}</p><p className="mt-1 font-mono text-[12px]">错误代码：{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : <p className="mt-4 text-xs text-indigo-800">该运行没有失败建议。</p>}<AutomationRunResultView result={run.result} /><div className="mt-4 flex flex-wrap gap-2">{returnHref ? <Link href={returnHref} className="inline-flex rounded-xl bg-indigo-700 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-600">返回活动记录</Link> : null}<a href={buildProjectHref(projectId, "automations", { run: run.id })} className="inline-flex rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800">保留此运行上下文</a></div></section>;
 }
 
-function AutomationCard({ projectId, rule, capabilities, focusedRunId, onReload }: { projectId: string; rule: AutomationRule; capabilities: AutomationCapabilities; focusedRunId: string | null; onReload: () => Promise<void> }) {
-  const [pending, setPending] = useState(false); const [message, setMessage] = useState<string | null>(null); const latest = rule.runs[0];
-  async function patch(body: unknown) { setPending(true); setMessage(null); try { const response = await fetch(`/api/projects/${projectId}/automations/${rule.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(await responseError(response, "规则更新失败")); await onReload(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "规则更新失败"); } finally { setPending(false); } }
-  async function runNow() { setPending(true); setMessage(null); try { const response = await fetch(`/api/projects/${projectId}/automations/${rule.id}/run`, { method: "POST" }); if (!response.ok) throw new Error(await responseError(response, "立即运行失败")); setMessage("已排到 Worker 队列，完成结果会进入通知中心。"); await onReload(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "立即运行失败"); } finally { setPending(false); } }
+function AutomationCard({ projectId, rule, capabilities, focusedRunId, onReload, runHref }: { projectId: string; rule: AutomationRule; capabilities: AutomationCapabilities; focusedRunId: string | null; onReload: () => Promise<void>; runHref: (runId: string) => string }) {
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const latest = rule.runs[0];
   const frozen = rule.kind === "repositorySync";
-  const failure = latest?.failureCode ? automationFailurePresentation(latest.failureCode) : null;
-  const highlighted = latest?.id === focusedRunId;
-  return <article className={`rounded-3xl border bg-white p-6 shadow-sm outline-none ${highlighted ? "border-indigo-400 ring-4 ring-indigo-100" : "border-slate-200"}`} tabIndex={highlighted ? -1 : undefined}><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{rule.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${frozen ? "bg-amber-50 text-amber-700" : rule.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{frozen ? "自动化已冻结" : rule.status === "active" ? "运行中" : "已暂停"}</span></div><p className="mt-2 text-xs text-slate-500">{kindLabels[rule.kind]} · {intervalLabel(rule.intervalMinutes)}</p></div><p className="text-xs text-slate-400">连续失败 {rule.consecutiveFailures} 次</p></div><div className="mt-5 grid gap-3 sm:grid-cols-3"><Info label="下次运行" value={formatDateTime(new Date(rule.nextRunAt))} /><Info label="最近运行" value={rule.lastRunAt ? formatDateTime(new Date(rule.lastRunAt)) : "尚未运行"} /><Info label="最近结果" value={latest?.status ? runStatusLabels[latest.status] ?? latest.status : "—"} /></div><div className="mt-5"><ScopeEvidenceCard title="已保存规则边界" evidence={{ scope: `仅当前项目 · ${kindLabels[rule.kind]}`, owner: "当前项目 Owner", payer: automationPayer(rule), affectedProjects: "仅当前项目", latestSuccess: automationSuccessEvidence(rule) }} /></div>{failure ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-800"><p className="font-semibold">{failure.title}</p><p>{failure.reason}</p><p>下一步：{failure.nextStep}</p><p className="mt-1 font-mono text-[12px]">错误代码：{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : null}<div className="mt-5 flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-xs text-slate-600">{message ?? (frozen ? "旧版 Git 规则已冻结；历史规则会在 Worker 领取前安全暂停。" : rule.kind === "memoryIndex" || rule.kind === "projectBrief" ? "只创建 waitingConsent 通知，不选模型、不扣费、不发送项目内容。" : "运行记录和租约均持久化。")}</p>{capabilities.canManage && !frozen ? <div className="flex gap-2">{rule.status === "active" ? <button type="button" onClick={() => void patch({ enabled: false })} disabled={pending} className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50">暂停</button> : <button type="button" onClick={() => void patch({ enabled: true })} disabled={pending} className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50">启用</button>}{capabilities.canRunNow && rule.status === "active" ? <button type="button" onClick={() => void runNow()} disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">立即运行</button> : null}</div> : null}</div></article>;
+  const latestFailure = rule.runs.find((run) => run.failureCode !== null);
+  const failure = latestFailure?.failureCode ? automationFailurePresentation(latestFailure.failureCode) : null;
+  const highlighted = rule.runs.some((run) => run.id === focusedRunId);
+
+  async function patch(body: unknown) {
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/automations/${rule.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "规则更新失败"));
+      await onReload();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "规则更新失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function runNow() {
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/automations/${rule.id}/run`, { method: "POST" });
+      if (!response.ok) throw new Error(await responseError(response, "立即运行失败"));
+      setMessage("已排到 Worker 队列，完成结果会进入通知中心。");
+      await onReload();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "立即运行失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return <article className={`${styles.ruleRow} ${highlighted ? styles.ruleRowHighlighted : ""}`} tabIndex={highlighted ? -1 : undefined}>
+    <div className={styles.ruleHeading}>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-sm font-semibold text-slate-900">{rule.name}</h3><span className={frozen ? styles.statusFrozen : rule.status === "active" ? styles.statusActive : styles.statusPaused}>{frozen ? "已冻结" : rule.status === "active" ? "运行中" : "已暂停"}</span></div>
+        <p className="mt-1 text-xs text-slate-500">{kindLabels[rule.kind]} · {intervalLabel(rule.intervalMinutes)}</p>
+      </div>
+      <div className={styles.ruleControls}>
+        {capabilities.canManage && !frozen ? <button type="button" onClick={() => void patch({ enabled: rule.status !== "active" })} disabled={pending} aria-pressed={rule.status === "active"} className={styles.toggleButton}>{pending ? "保存中…" : rule.status === "active" ? "暂停" : "启用"}</button> : null}
+        <OperationPanel title={`自动化详情：${rule.name}`} triggerLabel="更多" variant="drawer" description="查看规则边界、最近运行、异常与可用操作。">
+          <div className={styles.detailPanel}>
+            <ScopeEvidenceCard title="已保存规则边界" evidence={{ scope: `仅当前项目 · ${kindLabels[rule.kind]}`, owner: "当前项目 Owner", payer: automationPayer(rule), affectedProjects: "仅当前项目", latestSuccess: automationSuccessEvidence(rule) }} />
+            <p role="status" className={styles.detailNote}>下次运行：{formatDateTime(new Date(rule.nextRunAt))} · {frozen ? "旧版 Git 规则已冻结；Worker 领取前会安全暂停。" : rule.kind === "memoryIndex" || rule.kind === "projectBrief" ? "只创建 waitingConsent 通知，不选模型、不扣费、不发送项目内容。" : "运行记录和租约均持久化。"}</p>
+            {failure ? <div className={styles.failureNotice}><p className="font-semibold">{failure.title}</p><p className="mt-1">{failure.reason}</p><p className="mt-1">下一步：{failure.nextStep}</p><p className="mt-1 font-mono">错误代码：{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : null}
+            <section className={styles.historySection} aria-labelledby={`automation-history-${rule.id}`}>
+              <div className={styles.historyHeading}><h4 id={`automation-history-${rule.id}`}>最近运行记录</h4><span>最多显示 5 条</span></div>
+              {rule.runs.length === 0 ? <p className="mt-3 text-xs text-slate-500">尚无运行记录。</p> : <ul className={styles.historyList}>{rule.runs.map((run) => <li key={run.id}><Link href={runHref(run.id)} className={styles.historyLink}><span>{runStatusLabels[run.status] ?? run.status}</span><time dateTime={run.scheduledFor}>{formatDateTime(new Date(run.createdAt ?? run.scheduledFor))}</time><span aria-hidden="true">查看 →</span></Link></li>)}</ul>}
+            </section>
+            {capabilities.canManage && !frozen ? <div className={styles.detailActions}>
+              {editing ? <AutomationEditForm projectId={projectId} rule={rule} onCancel={() => setEditing(false)} onSaved={async () => { setEditing(false); await onReload(); }} /> : <button type="button" className={styles.toggleButton} onClick={() => setEditing(true)}>编辑规则</button>}
+              {capabilities.canRunNow && rule.status === "active" ? <button type="button" onClick={() => void runNow()} disabled={pending} className={styles.runButton}>{pending ? "已提交…" : "立即运行"}</button> : null}
+              {message ? <p role="alert" className={styles.actionMessage}>{message}</p> : null}
+            </div> : null}
+          </div>
+        </OperationPanel>
+      </div>
+    </div>
+    <div className={styles.ruleMeta}>
+      <div><span>频率</span><strong>{intervalLabel(rule.intervalMinutes)}</strong></div>
+      <div><span>上次运行</span><strong>{rule.lastRunAt ? formatDateTime(new Date(rule.lastRunAt)) : "尚未运行"}</strong></div>
+      <div><span>最近结果</span><strong>{latest?.status ? runStatusLabels[latest.status] ?? latest.status : "—"}</strong></div>
+      <div><span>连续失败</span><strong>{rule.consecutiveFailures} 次</strong></div>
+    </div>
+    {message ? <p role="status" className={styles.rowMessage}>{message}</p> : null}
+  </article>;
+}
+
+function AutomationEditForm({ projectId, rule, onCancel, onSaved }: { projectId: string; rule: AutomationRule; onCancel: () => void; onSaved: () => Promise<void> }) {
+  const [name, setName] = useState(rule.name);
+  const [intervalMinutes, setIntervalMinutes] = useState(String(rule.intervalMinutes));
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/automations/${rule.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, intervalMinutes: Number(intervalMinutes) }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "规则保存失败"));
+      await onSaved();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "规则保存失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return <form className={styles.editForm} onSubmit={(event) => void save(event)}>
+    <h4 className="text-sm font-semibold text-slate-900">编辑规则</h4>
+    <label className={styles.editLabel}>名称<input className={styles.editField} value={name} onChange={(event) => setName(event.target.value)} required maxLength={100} /></label>
+    <label className={styles.editLabel}>执行频率<select className={styles.editField} value={intervalMinutes} onChange={(event) => setIntervalMinutes(event.target.value)}><option value="60">每小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option><option value="10080">每周</option></select></label>
+    <p className="text-xs leading-5 text-slate-500">保存时只更新名称和频率；项目范围、通知对象和规则配置保持现有值。</p>
+    {error ? <p role="alert" className={styles.actionMessage}>{error}</p> : null}
+    <div className="flex flex-wrap gap-2"><button type="button" onClick={onCancel} disabled={pending} className={styles.toggleButton}>返回</button><button type="submit" disabled={pending || !name.trim()} className={styles.runButton}>{pending ? "保存中…" : "保存规则"}</button></div>
+  </form>;
 }
 
 function formatDateTime(value: Date) { return `${value.toLocaleString("zh-CN")} · ${Intl.DateTimeFormat().resolvedOptions().timeZone || "浏览器时区"}`; }
-
-function Info({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-slate-50 px-4 py-3"><span className="block text-[12px] text-slate-400">{label}</span><strong className="mt-1 block truncate text-xs font-semibold text-slate-700">{value}</strong></div>; }

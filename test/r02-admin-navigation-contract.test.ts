@@ -39,22 +39,32 @@ test("system-admin identity is passed from protected server pages to shared head
   assert.doesNotMatch(teamPage, /isSystemAdmin\s*:\s*true/u);
 });
 
-test("admin navigation is a persistent desktop sidebar with an accessible mobile drawer", async () => {
-  const shell = await read("src/components/admin-shell.tsx");
+test("admin navigation is five direct destinations with a separate section bar and accessible mobile drawer", async () => {
+  const [shell, workspaceStyles] = await Promise.all([
+    read("src/components/admin-shell.tsx"),
+    read("src/app/admin/admin-workspace.module.css"),
+  ]);
   const primarySource = shell.split("const primaryItems", 2)[1]?.split("];", 1)[0] ?? "";
   const itemKeys = [...primarySource.matchAll(/key:\s*"([A-Za-z]+)"/gu)].map((match) => match[1]);
   assert.equal(itemKeys.length, 5);
-  assert.match(shell, /w-60 shrink-0 overflow-y-auto[\s\S]*lg:block/u);
-  assert.match(shell, /min-h-0 flex-1 overflow-x-hidden overflow-y-auto/u);
-  assert.match(shell, /lg:hidden/u);
+  for (const [label, href] of [["平台总览", "/admin"], ["用户与权益", "/admin/users"], ["配置中心", "/admin/models"], ["安全中心", "/admin/connectors/mcp"], ["运维中心", "/admin/operations/failures"]]) {
+    assert.match(primarySource, new RegExp(`label: "${label}", href: "${href.replaceAll("/", "\\/")}"`, "u"));
+  }
+  assert.match(shell, /<nav aria-label="管理工作台导航" className="admin-primary-navigation">/u);
+  assert.match(shell, /<nav aria-label="管理栏目" className="admin-module-navigation">/u);
+  assert.doesNotMatch(shell, /aria-expanded=\{isExpanded\}|admin-nav-/u);
+  assert.match(workspaceStyles, /width: 218px/u);
+  assert.match(workspaceStyles, /flex: 0 0 59px/u);
+  assert.match(workspaceStyles, /@media \(max-width: 900px\)/u);
   assert.match(shell, /role="dialog" aria-modal="true"/u);
+  assert.match(shell, /aria-labelledby="admin-mobile-navigation-title" aria-label="管理工作台导航"/u);
   assert.match(shell, /event\.key === "Escape"/u);
   assert.match(shell, /previousFocus\?\.focus\(\)/u);
   assert.match(shell, /document\.activeElement === first/u);
   assert.match(shell, /document\.activeElement === last/u);
-  assert.match(shell, /aria-current=\{currentPath === item\.href \? "page" : undefined\}/u);
+  assert.match(shell, /aria-current=\{current \? \(pathname === item\.href \? "page" : "location"\) : undefined\}/u);
   assert.match(shell, /aria-current=\{current \? "page" : undefined\}/u);
-  assert.doesNotMatch(shell, /overflow-x-auto/u);
+  for (const label of ["用户", "会员", "额度", "模型能力", "短信服务", "探测预算", "MCP 审核", "审计记录", "失败收件箱", "资源与备份"]) assert.match(shell, new RegExp(`label: "${label}"`, "u"));
 });
 
 test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle guards", async () => {

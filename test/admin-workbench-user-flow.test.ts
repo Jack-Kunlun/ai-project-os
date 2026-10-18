@@ -167,12 +167,13 @@ test("Git project repository routes pass the session actor to the service author
 });
 
 test("admin workbench and overview are server protected and dashboard has no global provider count", async () => {
-  const [layout, page, overviewRoute, overviewService, shell, header, profile, dashboardRoute, settings, connections, connectionsMcp, operations] = await Promise.all([
+  const [layout, page, overviewRoute, overviewService, shell, workspaceCss, header, profile, dashboardRoute, settings, connections, connectionsMcp, operations] = await Promise.all([
     readFile("src/app/admin/layout.tsx", "utf8"),
     readFile("src/app/admin/page.tsx", "utf8"),
     readFile("src/app/api/system/overview/route.ts", "utf8"),
     readFile("src/lib/system-overview.ts", "utf8"),
     readFile("src/components/admin-shell.tsx", "utf8"),
+    readFile("src/app/admin/admin-workspace.module.css", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
     readFile("src/app/profile/profile-client.tsx", "utf8"),
     readFile("src/app/api/dashboard/route.ts", "utf8"),
@@ -191,9 +192,12 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.match(overviewService, /platformTokenReservation\.aggregate/u);
   assert.match(overviewService, /status: \{ in: \["reserved", "held"\] \}/u);
   assert.doesNotMatch(overviewService, /project\.count|first-project/u);
-  for (const label of ["Dashboard", "用户与权益", "配置中心", "安全中心", "运维中心"]) assert.match(shell, new RegExp(label, "u"));
+  for (const label of ["平台总览", "用户与权益", "配置中心", "安全中心", "运维中心"]) assert.match(shell, new RegExp(label, "u"));
   assert.doesNotMatch(shell, /Git 连接|MCP 连接|用户与会员|\/admin\/connectors\/git/u);
-  assert.match(shell, /label: "能力配置"/u);
+  assert.match(shell, /label: "模型能力"/u);
+  assert.match(shell, /aria-label="管理栏目"/u);
+  assert.match(workspaceCss, /\.workspace :global\(\.admin-module-navigation\)/u);
+  assert.match(workspaceCss, /\.workspace :global\(a:focus-visible\)/u);
   assert.doesNotMatch(shell, /\/admin\/models\/routes/u);
   assert.match(shell, /\/admin\/credits/u);
   assert.match(shell, /\/admin\/operations\/probes/u);
@@ -215,7 +219,10 @@ test("admin overview uses read-only aggregates and exposes no identity or creden
   const now = new Date("2026-09-03T00:00:00.000Z");
   const calls: string[] = [];
   const db = {
-    $queryRaw: async () => { calls.push("health"); return [{ ok: 1 }]; },
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      calls.push("health");
+      return query.strings?.join("").includes('WITH "platformFailures"') ? [] : [{ ok: 1 }];
+    },
     appUser: {
       findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
       count: async () => { calls.push("users"); return 7; },
@@ -236,13 +243,15 @@ test("admin overview uses read-only aggregates and exposes no identity or creden
   assert.equal(overview.backup.access, "restricted");
   assert.equal(overview.backup.snapshotRead, "restricted");
   assert.equal(overview.backup.freshness.status, "restricted");
-  assert.deepEqual(calls.sort(), ["available", "health", "health", "health", "health", "health", "issued", "memberships", "providers", "reservations", "reservations", "users", "worker"].sort());
+  assert.deepEqual(calls.sort(), ["available", "health", "health", "health", "health", "health", "health", "issued", "memberships", "providers", "reservations", "reservations", "users", "worker"].sort());
 });
 
 test("admin overview keeps control-plane readiness separate from live-call evidence", async () => {
   const now = new Date("2026-09-03T00:00:00.000Z");
   const db = {
-    $queryRaw: async () => [{ ok: 1 }],
+    $queryRaw: async (query: { strings?: readonly string[] }) => query.strings?.join("").includes('WITH "platformFailures"')
+      ? [{ safeErrorCode: "PROVIDER_TIMEOUT", count: BigInt(2) }]
+      : [{ ok: 1 }],
     appUser: {
       findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
       count: async () => 1,
@@ -254,7 +263,6 @@ test("admin overview keeps control-plane readiness separate from live-call evide
     workerRuntime: { findUnique: async () => ({ status: "running", heartbeatAt: new Date(now.getTime() - 1_000), consecutiveFailures: 2 }) },
     platformDefaultAiRoute: { findMany: async () => [] },
     platformBootstrap: { findUnique: async () => ({ initialAdminUserId: actorId }) },
-    providerCallAudit: { groupBy: async () => [{ safeErrorCode: "PROVIDER_TIMEOUT", _count: { _all: 2 } }] },
     projectMcpActionDispatchAttempt: { groupBy: async () => [{ safeErrorCode: "MCP_DISPATCH_FAILED", _count: { _all: 1 } }] },
     backgroundJob: { groupBy: async () => [{ failureCode: "JOB_FAILED", _count: { _all: 3 } }] },
     automationRun: { groupBy: async () => [] },
@@ -372,6 +380,9 @@ test("admin overview labels MCP failures as bounded control-plane evidence and k
 });
 
 test("admin overview pending actions distinguish loading, failed, zero, unknown, and positive evidence", async () => {
+  const overviewSource = await readFile(new URL("../src/components/admin-overview-client.tsx", import.meta.url), "utf8");
+  assert.match(overviewSource, /label="调用待核对"[^\n]+detail="仅终态待核对"/u);
+  assert.doesNotMatch(overviewSource, /detail="usageKnown=false"/u);
   type Project = (data: {
     failureTotal: number | null;
     pendingMcp: number | null;
@@ -410,12 +421,22 @@ test("admin overview pending actions distinguish loading, failed, zero, unknown,
 test("admin failure aggregates use terminal completedAt windows, retain null-code evidence, exclude personal BYOK, and include automation and controlled actions", async () => {
   const now = new Date("2026-09-03T00:00:00.000Z");
   const whereBySource: Array<{ source: string; where: Record<string, unknown> }> = [];
+  let platformFailureSql = "";
   const capture = (source: string, rows: readonly Record<string, unknown>[]) => async (input: { where?: Record<string, unknown> }) => {
     whereBySource.push({ source, where: input.where ?? {} });
     return rows;
   };
   const db = {
-    $queryRaw: async () => [],
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join("") ?? "";
+      if (!sql.includes('WITH "platformFailures"')) return [];
+      platformFailureSql = sql;
+      return [
+        { safeErrorCode: "PLATFORM_PROVIDER_FAILURE", count: BigInt(1) },
+        { safeErrorCode: "UNIFIED_QUESTION_FAILED", count: BigInt(1) },
+        { safeErrorCode: "PERSONAL_QA_FAILED", count: BigInt(1) },
+      ];
+    },
     appUser: {
       findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
       count: async () => 1,
@@ -426,20 +447,6 @@ test("admin failure aggregates use terminal completedAt windows, retain null-cod
     platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
     workerRuntime: { findUnique: async () => null },
     platformBootstrap: { findUnique: async () => ({ initialAdminUserId: actorId }) },
-    // Simulate both ownership classes. A Prisma groupBy applies the predicate
-    // before returning rows, so this callback models platform inclusion and
-    // personal BYOK exclusion together with the captured where clause.
-    providerCallAudit: {
-      groupBy: async (input: { where?: Record<string, unknown> }) => {
-        whereBySource.push({ source: "provider", where: input.where ?? {} });
-        return input.where?.billingMode === "platform" && input.where?.payerKind === "platformCaller"
-          ? [{ safeErrorCode: "PLATFORM_PROVIDER_FAILURE", _count: { _all: 1 } }]
-          : [
-            { safeErrorCode: "PLATFORM_PROVIDER_FAILURE", _count: { _all: 1 } },
-            { safeErrorCode: "PERSONAL_BYOK_FAILURE", _count: { _all: 1 } },
-          ];
-      },
-    },
     projectMcpActionDispatchAttempt: { groupBy: capture("mcp", [{ safeErrorCode: "MCP_PRE_DISPATCH_REJECTED", _count: { _all: 1 } }]) },
     backgroundJob: { groupBy: capture("background", [{ failureCode: null, _count: { _all: 1 } }]) },
     automationRun: { groupBy: capture("automation", [{ failureCode: "AUTOMATION_EXECUTION_FAILED", _count: { _all: 1 } }]) },
@@ -447,24 +454,30 @@ test("admin failure aggregates use terminal completedAt windows, retain null-cod
   } as unknown as PrismaClient;
 
   const overview = await getSystemOverview(currentAdminActor, db, now);
-  assert.equal(overview.failures.total, 5);
-  assert.deepEqual(overview.failures.providerCalls.byCode, [{ code: "PLATFORM_PROVIDER_FAILURE", count: 1 }]);
+  assert.equal(overview.failures.total, 7);
+  assert.deepEqual(overview.failures.providerCalls.byCode.map((row) => row.code).sort(), [
+    "PERSONAL_QA_FAILED", "PLATFORM_PROVIDER_FAILURE", "UNIFIED_QUESTION_FAILED",
+  ]);
   assert.deepEqual(overview.failures.backgroundJobs.byCode, [{ code: "UNCLASSIFIED_FAILURE", count: 1 }]);
   assert.deepEqual(overview.failures.automationRuns.byCode, [{ code: "AUTOMATION_EXECUTION_FAILED", count: 1 }]);
   assert.deepEqual(overview.failures.controlledActions.byCode, [{ code: "UNCLASSIFIED_FAILURE", count: 1 }]);
   assert.equal(overview.failures.mcpCalls.byCode[0]?.code, "MCP_PRE_DISPATCH_REJECTED");
   assert.equal(overview.failures.window.from, "2026-08-27T00:00:00.000Z");
   assert.equal(overview.failures.window.to, now.toISOString());
-  assert.equal(whereBySource.length, 5);
+  assert.equal(whereBySource.length, 4);
   for (const entry of whereBySource) {
     const completedAt = entry.where.completedAt as { gte?: Date; lte?: Date } | undefined;
     assert.equal(completedAt?.gte?.toISOString(), "2026-08-27T00:00:00.000Z", entry.source);
     assert.equal(completedAt?.lte?.toISOString(), now.toISOString(), entry.source);
     assert.equal("createdAt" in entry.where, false, entry.source);
   }
-  const providerWhere = whereBySource.find((entry) => entry.source === "provider")?.where;
-  assert.equal(providerWhere?.billingMode, "platform");
-  assert.equal(providerWhere?.payerKind, "platformCaller");
+  assert.match(platformFailureSql, /"billingMode" = 'platform'/u);
+  assert.match(platformFailureSql, /"payerKind" = 'platform_caller'/u);
+  assert.match(platformFailureSql, /FROM "UnifiedQuestionAudit"/u);
+  assert.match(platformFailureSql, /FROM "PersonalKnowledgeQaAudit"/u);
+  assert.match(platformFailureSql, /"personalKnowledgeQaChallengeId"/u);
+  assert.match(platformFailureSql, /"routeSource" = 'platform_default'/u);
+  assert.doesNotMatch(platformFailureSql, /"question"|"answer"|"evidenceManifest"|"credentialSecretFingerprint"/u);
 });
 
 test("admin overview keeps backup permission failures distinct from restricted access", async () => {
@@ -541,16 +554,22 @@ test("admin overview rejects an unverified actor before reading operational aggr
   assert.equal(operationalRead, false);
 });
 
-test("admin navigation source implements a persistent desktop rail and focus-contained mobile drawer", async () => {
-  const shell = await readFile("src/components/admin-shell.tsx", "utf8");
+test("admin navigation exposes five direct destinations, a module section, and a focus-contained mobile drawer", async () => {
+  const [shell, workspaceCss] = await Promise.all([
+    readFile("src/components/admin-shell.tsx", "utf8"),
+    readFile("src/app/admin/admin-workspace.module.css", "utf8"),
+  ]);
   assert.match(shell, /^"use client";/u);
-  // AppHeader owns the sticky top layer; the admin sub-navigation remains in
-  // normal flow so it cannot cover the header at any viewport width.
-  assert.doesNotMatch(shell, /sticky top-2 z-40/u);
+  const primaryItems = shell.match(/const primaryItems:[\s\S]*?\];/u)?.[0] ?? "";
+  assert.ok(primaryItems.length > 0);
+  assert.equal([...primaryItems.matchAll(/\{ key: "(?:overview|users|configuration|security|operations)"/gu)].length, 5);
+  for (const label of ["平台总览", "用户与权益", "配置中心", "安全中心", "运维中心"]) {
+    assert.match(primaryItems, new RegExp(`label: "${label}"`, "u"));
+  }
+  assert.match(shell, /aria-label="管理工作台导航"/u);
+  assert.match(shell, /aria-label="管理栏目"/u);
   assert.match(shell, /const moduleGroups: ReadonlyArray/u);
-  assert.match(shell, /aria-controls=\{`admin-nav-\$\{item\.key\}`\}/u);
-  assert.match(shell, /border-l border-slate-200/u);
-  assert.match(shell, /lg:block/u);
+  assert.match(shell, /aria-controls="admin-mobile-navigation"/u);
   assert.match(shell, /aria-expanded=\{drawerOpen\}/u);
   assert.match(shell, /role="dialog"/u);
   assert.match(shell, /aria-modal="true"/u);
@@ -561,7 +580,10 @@ test("admin navigation source implements a persistent desktop rail and focus-con
   assert.match(shell, /originalBodyOverflow/u);
   assert.match(shell, /addEventListener\("focusin"/u);
   assert.match(shell, /drawerRef\.current\?\.contains/u);
-  assert.match(shell, /focus-visible:outline-2/u);
+  assert.match(workspaceCss, /\.workspace :global\(\.admin-primary-navigation\)/u);
+  assert.match(workspaceCss, /\.workspace :global\(\.admin-module-navigation\)/u);
+  assert.match(workspaceCss, /\.workspace :global\(a:focus-visible\)/u);
+  assert.match(workspaceCss, /@media \(max-width: 900px\)/u);
   assert.doesNotMatch(shell, /平台管理员不进入项目、团队和用户工作区/u);
   assert.doesNotMatch(shell, /不展示用户项目、团队或个人连接/u);
 });
@@ -583,9 +605,9 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   ]);
 
   assert.match(guide, /普通用户操作指南/u);
-  assert.match(guide, /Git 仓库从“项目配置 → 代码仓库”接入/u);
-  assert.match(guide, /个人凭据和撤权在“我的空间 → 配置 → Git 授权管理”维护/u);
-  assert.match(guide, /MCP 个人连接在“我的空间”配置/u);
+  assert.match(guide, /代码仓库接入和读取范围在“项目配置 → 代码仓库”管理/u);
+  assert.match(guide, /“我的空间 → 配置 → Git 授权管理”维护个人凭据/u);
+  assert.match(guide, /MCP 个人连接从“我的空间”进入/u);
   assert.match(userDocs, /项目概览/u);
   assert.match(userDocs, /项目六个一级入口/u);
   assert.match(userDocs, /只有当前工作区 Owner\/Admin 可以创建项目/u);
@@ -636,9 +658,9 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(repositories, /自动读取需另外完成双确认/u);
   assert.match(repositories, /写入、提交和 Pull Request 保持关闭/u);
   assert.match(repositories, /查看运行历史/u);
-  assert.match(guide, /Git 仓库从“项目配置 → 代码仓库”接入/u);
-  assert.match(guide, /个人凭据和撤权在“我的空间 → 配置 → Git 授权管理”维护/u);
-  assert.match(guide, /MCP 个人连接在“我的空间”配置/u);
+  assert.match(guide, /代码仓库接入和读取范围在“项目配置 → 代码仓库”管理/u);
+  assert.match(guide, /“我的空间 → 配置 → Git 授权管理”维护个人凭据/u);
+  assert.match(guide, /MCP 个人连接从“我的空间”进入/u);
   assert.match(repositories, /href="\/personal\/connections\/git"/u);
   assert.match(repositories, /资料已发布到项目/u);
   assert.doesNotMatch(guide, /新增模型、Git 或 MCP 连接/u);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  buildProjectQuestionHref,
   buildMaterialsReturnTo,
   parseMaterialKind,
   parseProjectItemReviewStatus,
@@ -37,17 +38,22 @@ test("materials return context rejects open redirects and unknown query state", 
   assert.equal(safeMaterialsReturnTo(projectId, `/projects/${projectId}/materials?page=0`), null);
 });
 
-test("materials workspace has separate source, intake dialog, and AI review routes", async () => {
-  const [materials, intake, review, reviewPage, detail, overview] = await Promise.all([
+test("project materials questions use the unified project-scoped route", () => {
+  assert.equal(buildProjectQuestionHref(projectId), `/ask?scope=project&projectId=${projectId}`);
+});
+
+test("materials workspace has source, intake, review, and unified question routes", async () => {
+  const [materials, intake, factImport, review, reviewPage, detail, overview] = await Promise.all([
     readFile("src/app/projects/[projectId]/project-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-material-intake.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/project-fact-import.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-material-review-queue.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/materials/review/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/materials/sources/[sourceId]/source-detail-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-overview-client.tsx", "utf8"),
   ]);
 
-  assert.match(materials, /原始资料来源库/u);
+  assert.match(materials, /资料来源/u);
   assert.match(materials, /id="add-source-trigger"/u);
   assert.match(materials, /buildMaterialsReturnTo/u);
   assert.match(materials, /parseProjectItemReviewStatus\(navigation\.status/u);
@@ -55,12 +61,17 @@ test("materials workspace has separate source, intake dialog, and AI review rout
   assert.match(materials, /id="confirmed-facts" tabIndex=\{-1\}/u);
   assert.match(materials, /focusesItems \? isItemsLoading : isSourcesLoading/u);
   assert.match(materials, /<ProjectMaterialReviewQueue[^>]*embedded/u);
-  assert.match(materials, /<ProjectQuestionWorkspace/u);
+  assert.match(materials, /buildProjectQuestionHref\(projectId\)/u);
+  assert.doesNotMatch(materials, /<ProjectQuestionWorkspace/u);
+  assert.match(materials, /router\.replace\(buildProjectQuestionHref\(projectId\)/u);
   assert.match(materials, /<ProjectProcessingTasks/u);
   assert.match(intake, /role="dialog"/u);
   assert.match(intake, /aria-modal="true"/u);
   assert.match(intake, /event.key === "Escape"/u);
   assert.match(intake, /event.shiftKey/u);
+  assert.match(factImport, /buildProjectQuestionHref\(projectId\)/u);
+  assert.match(factImport, /打开智能问答/u);
+  assert.doesNotMatch(factImport, /view: "ask"/u);
   assert.match(reviewPage, /ProjectMaterialReviewPage/u);
   assert.match(review, /navigation\.filter/u);
   assert.match(review, /buildProjectHref/u);

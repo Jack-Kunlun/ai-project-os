@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useDeferredValue, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
-import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { ListPagination } from "@/components/list-pagination";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
+import styles from "./projects-client.module.css";
+import { notifyUserProjectsChanged } from "@/lib/user-navigation";
 
 type ProjectsView = "active" | "archived";
 type ProjectsPayload = {
@@ -60,69 +61,82 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<ProjectsView>("active");
+  const requestSequence = useRef(0);
+  const activeController = useRef<AbortController | null>(null);
 
   const load = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    const sequence = ++requestSequence.current;
+    activeController.current?.abort();
+    const controller = new AbortController();
+    activeController.current = controller;
     if (showLoading) setLoading(true);
     try {
       const query = new URLSearchParams({ view, page: String(page), pageSize: "20" });
       if (deferredSearch.trim()) query.set("search", deferredSearch.trim());
-      const response = await fetch(`/api/projects?${query}`, { cache: "no-store" });
+      const response = await fetch(`/api/projects?${query}`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(await readError(response, "项目列表加载失败"));
       const next = await response.json() as ProjectsPayload;
+      if (sequence !== requestSequence.current) return;
       setPayload(next);
       if (page > next.pagination.totalPages) setPage(next.pagination.totalPages);
       setError(null);
     } catch (loadError) {
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
       setError(loadError instanceof Error ? loadError.message : "项目列表加载失败");
     } finally {
-      if (showLoading) setLoading(false);
+      if (sequence === requestSequence.current && showLoading) setLoading(false);
     }
   }, [deferredSearch, page, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load({ showLoading: true }), 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      requestSequence.current += 1;
+      activeController.current?.abort();
+    };
   }, [load]);
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+    <main className={styles.page}>
       <AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />
-      <PersonalWorkspaceNav active="projects" />
-      <div className="mx-auto max-w-7xl px-5 pb-16 pt-9 sm:px-8 lg:px-10">
-        <section className="flex flex-col gap-5 border-b border-slate-200 pb-8 sm:flex-row sm:items-end sm:justify-between">
+      <div className={styles.content}>
+        <section className={styles.heading}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Projects</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">我的项目</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">集中管理项目空间，从项目内导航进入资料、AI 工作台和其他功能。</p>
+            <p className={styles.eyebrow}>PROJECTS</p>
+            <h1>我的项目</h1>
+            <p className={styles.subtitle}>项目资料、共识与工作都保存在各自的空间中。</p>
           </div>
-          {payload.canCreateProject ? <button type="button" onClick={() => setCreateOpen(true)} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500">＋ 新建项目</button> : null}
+          {payload.canCreateProject ? <button type="button" onClick={() => setCreateOpen(true)} className={styles.primaryButton}>＋ 新建项目</button> : null}
         </section>
 
-        {error ? <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline underline-offset-4">重试</button></div> : null}
-        <section className="mt-7" aria-label="项目列表">
-          <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" onClick={() => { setView("active"); setSearch(""); setPage(1); }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === "active" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>进行中 {payload.counts.active}</button>
-              <button type="button" onClick={() => { setView("archived"); setSearch(""); setPage(1); }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === "archived" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>已归档 {payload.counts.archived}</button>
-              <span className="ml-1 text-xs text-slate-400">{loading ? "正在读取…" : `匹配 ${payload.pagination.total} 个`}</span>
+        {error ? <div className={styles.error} role="alert"><span>{error}</span><button type="button" onClick={() => void load({ showLoading: true })}>重试</button></div> : null}
+        <section className={styles.listSection} aria-label="项目列表">
+          <div className={styles.toolbar}>
+            <div className={styles.filters} role="group" aria-label="项目状态">
+              <button type="button" aria-pressed={view === "active"} onClick={() => { setView("active"); setPage(1); }} className={view === "active" ? styles.selectedFilter : styles.filterButton}>进行中 <span>{loading || error ? "—" : payload.counts.active}</span></button>
+              <button type="button" aria-pressed={view === "archived"} onClick={() => { setView("archived"); setPage(1); }} className={view === "archived" ? styles.selectedFilter : styles.filterButton}>已归档 <span>{loading || error ? "—" : payload.counts.archived}</span></button>
+              <span className={styles.matchCount}>{loading ? "正在读取…" : error ? "结果暂不可用" : `匹配 ${payload.pagination.total} 个`}</span>
             </div>
-            <label className="relative block min-w-0 sm:w-72">
+            <label className={styles.searchBox}>
               <span className="sr-only">搜索项目</span>
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
-              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="搜索名称、描述或 slug" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-indigo-300 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="搜索项目" />
             </label>
           </div>
 
           {loading ? (
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">{[1, 2].map((item) => <div key={item} className="h-64 animate-pulse rounded-3xl bg-slate-200" />)}</div>
+            <div className={styles.projectGrid} aria-label="正在读取项目">{[1, 2, 3].map((item) => <div key={item} className={styles.projectSkeleton} />)}</div>
+          ) : error ? (
+            <div className={styles.emptyState}><h2>项目列表暂不可用</h2><p>请求失败时不会使用旧数据填充列表。</p><button type="button" onClick={() => void load({ showLoading: true })}>重新读取</button></div>
           ) : payload.projects.length === 0 ? (
-            <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-              <p className="text-base font-semibold text-slate-800">{search.trim() ? "没有匹配的项目" : view === "active" ? payload.canCreateProject ? "还没有进行中的项目" : "等待工作区授权" : "还没有归档项目"}</p>
-              <p className="mt-2 text-sm text-slate-500">{search.trim() ? "换一个项目名称、描述或 slug 关键词试试。" : view === "active" ? payload.canCreateProject ? "创建项目后，就可以录入资料、连接仓库并建立智能记忆。" : "请联系当前工作区 Owner/Admin 授予你创建项目或访问项目的权限。" : "归档不会删除数据；归档项目会集中显示在这里并可随时恢复。"}</p>
-              {!search.trim() && view === "active" && payload.canCreateProject ? <button type="button" onClick={() => setCreateOpen(true)} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white">创建第一个项目</button> : null}
+            <div className={styles.emptyState}>
+              <h2>{search.trim() ? "没有匹配的项目" : view === "active" ? payload.canCreateProject ? "还没有进行中的项目" : "等待工作区授权" : "还没有归档项目"}</h2>
+              <p>{search.trim() ? "换一个项目名称或描述关键词试试。" : view === "active" ? payload.canCreateProject ? "创建项目后，就可以添加资料、建立计划并继续工作。" : "请联系当前工作区 Owner/Admin 授予你创建项目或访问项目的权限。" : "归档项目会集中显示在这里；项目数据仍可恢复使用。"}</p>
+              {!search.trim() && view === "active" && payload.canCreateProject ? <button type="button" onClick={() => setCreateOpen(true)} className={styles.primaryButton}>创建第一个项目</button> : null}
             </div>
           ) : (
-            <><div className="mt-5 grid gap-5 lg:grid-cols-2">
+            <><div className={styles.projectGrid}>
               {payload.projects.map((project) => <ProjectCard key={project.id} project={project} />)}
             </div>{payload.pagination.totalPages > 1 ? <ListPagination {...payload.pagination} onPageChange={setPage} disabled={loading} /> : null}</>
           )}
@@ -136,40 +150,26 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
 
 function ProjectCard({ project }: { project: WorkspaceProject }) {
   const archived = project.archivedAt !== null;
-  const checks = [project._count.sources > 0, project.memoryIndexPointer !== null];
-  const progress = Math.round((checks.filter(Boolean).length / checks.length) * 100);
   const latestJob = project.backgroundJobs[0];
 
   return (
-    <article
-      className={`group flex h-full flex-col rounded-3xl border bg-white p-6 shadow-sm transition ${archived ? "border-slate-200 opacity-90" : "border-slate-200/80 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-950/5"}`}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className={`truncate text-xl font-semibold tracking-tight ${archived ? "text-slate-700" : "text-slate-900"}`}>{project.name}</h2>
-          <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description || "还没有项目描述。进入资料与条目补充背景，让后续记忆更容易理解。"}</p>
-        </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] font-bold ${archived ? "bg-slate-100 text-slate-600" : project.memoryIndexPointer ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{archived ? "已归档" : project.memoryIndexPointer ? "记忆就绪" : "待建立记忆"}</span>
+    <article className={`${styles.projectCard} ${archived ? styles.archivedCard : ""}`}>
+      <div className={styles.cardHeading}>
+        <div className={styles.projectIdentity}><span aria-hidden="true" className={styles.projectMark}>{project.name.slice(0, 1)}</span><div><h2>{project.name}</h2><p>{project.description || "尚未填写项目说明。"}</p></div></div>
+        <span className={styles.projectStatus}>{archived ? "已归档" : project.memoryIndexPointer ? "记忆已建立" : "待建立记忆"}</span>
       </div>
-      <div className="mt-5 grid grid-cols-4 gap-2"><SmallStat label="文件" value={project._count.assets} /><SmallStat label="事实" value={project._count.items} /><SmallStat label="仓库" value={project._count.repositoryLinks} /><SmallStat label="智能体" value={project._count.projectAgentRuns} /></div>
-      {archived ? (
-        <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">归档于 {formatDate(project.archivedAt!)}。项目数据未删除；恢复后才能继续修改或运行任务。</div>
-      ) : (
-        <div className="mt-5">
-          <div className="flex items-center justify-between text-[12px] text-slate-400"><span>资料与记忆进度</span><span>{progress}%</span></div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${progress}%` }} /></div>
-        </div>
-      )}
-      <div className="mt-auto flex pt-5">
-        <Link href={`/projects/${project.id}`} className={`inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition ${archived ? "border border-slate-200 text-slate-700 hover:border-indigo-200 hover:text-indigo-700" : "bg-slate-950 text-white hover:bg-indigo-600"}`}>{archived ? "查看项目" : "进入项目"}</Link>
+      <div className={styles.projectStats}><SmallStat label="来源" value={project._count.sources} /><SmallStat label="文件" value={project._count.assets} /><SmallStat label="条目" value={project._count.items} /><SmallStat label="仓库" value={project._count.repositoryLinks} /></div>
+      {archived ? <p className={styles.archiveNote}>归档于 {formatDate(project.archivedAt!)}。项目数据仍可恢复使用。</p> : null}
+      <div className={styles.cardFooter}>
+        <span>更新于 {formatDate(project.updatedAt)}{latestJob ? ` · ${jobLabels[latestJob.kind]} ${jobStatusLabels[latestJob.status]}` : ""}</span>
+        <Link href={`/projects/${project.id}`} aria-label={`查看项目 ${project.name}`}>进入项目 →</Link>
       </div>
-      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${jobStatusLabels[latestJob.status]}` : "暂无任务"}</span></div>
     </article>
   );
 }
 
 function SmallStat({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-xl bg-slate-50 px-3 py-3"><p className="text-lg font-semibold text-slate-800">{value}</p><p className="mt-0.5 text-[10px] text-slate-400">{label}</p></div>;
+  return <div className={styles.stat}><strong>{value}</strong><span>{label}</span></div>;
 }
 
 function CreateProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => Promise<void> }) {
@@ -192,6 +192,7 @@ function CreateProjectDialog({ onClose, onCreated }: { onClose: () => void; onCr
       const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, description }) });
       if (!response.ok) throw new Error(await readError(response, "项目创建失败"));
       await onCreated();
+      notifyUserProjectsChanged();
       onClose();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "项目创建失败");

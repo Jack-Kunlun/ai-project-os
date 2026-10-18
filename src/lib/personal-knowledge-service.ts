@@ -71,6 +71,7 @@ export const personalKnowledgeRelationSchema = z.object({
 const paginationSchema = z.object({
   limit: z.number().int().min(1).max(PERSONAL_KNOWLEDGE_PAGE_MAX_SIZE).default(PERSONAL_KNOWLEDGE_PAGE_DEFAULT_SIZE),
   cursor: z.string().trim().min(1).max(512).optional(),
+  isDefaultMemory: z.boolean().optional(),
 }).strict();
 
 /** Version keyset pagination accepted by the revision history endpoint. */
@@ -83,6 +84,7 @@ const searchSchema = z.object({
   query: z.string().trim().max(240).default(""),
   limit: z.number().int().min(1).max(PERSONAL_KNOWLEDGE_PAGE_MAX_SIZE).default(PERSONAL_KNOWLEDGE_PAGE_DEFAULT_SIZE),
   cursor: z.string().trim().min(1).max(512).optional(),
+  isDefaultMemory: z.boolean().optional(),
 }).strict();
 
 export type PersonalKnowledgeErrorCode =
@@ -310,14 +312,14 @@ function parseRevisionNumber(value: unknown): number {
 }
 
 /** Apply bounded defaults to document list pagination. */
-function parsePagination(value: Readonly<{ limit?: number; cursor?: string }> | undefined) {
+function parsePagination(value: Readonly<{ limit?: number; cursor?: string; isDefaultMemory?: boolean }> | undefined) {
   const parsed = paginationSchema.safeParse(value ?? {});
   if (!parsed.success) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
   return parsed.data;
 }
 
 /** Apply bounds to a personal search query and its document cursor. */
-function parseSearch(value: Readonly<{ query?: string; limit?: number; cursor?: string }> | undefined) {
+function parseSearch(value: Readonly<{ query?: string; limit?: number; cursor?: string; isDefaultMemory?: boolean }> | undefined) {
   const parsed = searchSchema.safeParse(value ?? {});
   if (!parsed.success) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
   return parsed.data;
@@ -647,19 +649,22 @@ export async function createPersonalKnowledgeDocument(
 /** List active personal documents with bounded keyset pagination. */
 export async function listPersonalKnowledgeDocuments(
   actor: PersonalKnowledgeActor,
-  options?: Readonly<{ limit?: number; cursor?: string }>,
+  options?: Readonly<{ limit?: number; cursor?: string; isDefaultMemory?: boolean }>,
   db: KnowledgeReadDb = getDb(),
 ): Promise<Readonly<{ documents: readonly Readonly<Record<string, unknown>>[]; nextCursor: string | null }>> {
   const query = parsePagination(options);
   await assertActorForRead(db, actor);
   const cursor = decodeCursor(query.cursor);
+  const listFilters: Prisma.PersonalKnowledgeDocumentWhereInput[] = [];
+  if (query.isDefaultMemory !== undefined) listFilters.push({ isDefaultMemory: query.isDefaultMemory });
+  if (cursor !== null) listFilters.push({
+    OR: [
+      { updatedAt: { lt: cursor.updatedAt } },
+      { updatedAt: cursor.updatedAt, id: { lt: cursor.id } },
+    ],
+  });
   const documents = await db.personalKnowledgeDocument.findMany({
-    where: activeOwnerWhere(actor.id, cursor === null ? undefined : {
-      OR: [
-        { updatedAt: { lt: cursor.updatedAt } },
-        { updatedAt: cursor.updatedAt, id: { lt: cursor.id } },
-      ],
-    }),
+    where: activeOwnerWhere(actor.id, listFilters.length === 0 ? undefined : { AND: listFilters }),
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
     take: query.limit + 1,
     select: listDocumentSelect,
@@ -675,7 +680,7 @@ export async function listPersonalKnowledgeDocuments(
 /** Search only the current owner's active title/body snapshots. */
 export async function searchPersonalKnowledgeDocuments(
   actor: PersonalKnowledgeActor,
-  options?: Readonly<{ query?: string; limit?: number; cursor?: string }>,
+  options?: Readonly<{ query?: string; limit?: number; cursor?: string; isDefaultMemory?: boolean }>,
   db: KnowledgeReadDb = getDb(),
 ): Promise<Readonly<{ documents: readonly Readonly<Record<string, unknown>>[]; nextCursor: string | null }>> {
   const query = parseSearch(options);
@@ -696,6 +701,7 @@ export async function searchPersonalKnowledgeDocuments(
     where: activeOwnerWhere(actor.id, {
       AND: [
         textWhere,
+        ...(query.isDefaultMemory === undefined ? [] : [{ isDefaultMemory: query.isDefaultMemory }]),
         ...(cursor === null ? [] : [{
           OR: [
             { updatedAt: { lt: cursor.updatedAt } },

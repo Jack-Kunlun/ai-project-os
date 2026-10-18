@@ -5,14 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
-import { modalNativeBackdropClassName } from "@/components/modal-styles";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
-import { PersonalKnowledgeQaPanel } from "./personal-knowledge-qa-panel";
+import { buildPersonalKnowledgeHistoryHref, PersonalKnowledgeQaPanel } from "./personal-knowledge-qa-panel";
 import { PersonalKnowledgeNextSteps } from "./personal-knowledge-next-steps";
 import { PersonalProjectSearchPanel } from "./personal-project-search-panel";
 import { PersonalSemanticIndexPanel } from "./personal-semantic-index-panel";
 import { PersonalSemanticSearchPanel } from "./personal-semantic-search-panel";
 import { PersonalKnowledgeEditor, validateKnowledgeDraft, type KnowledgeDraft } from "./personal-knowledge-editor";
+import styles from "./personal-knowledge.module.css";
 
 /** Keep list requests bounded and aligned with the service default page size. */
 const PAGE_SIZE = 20;
@@ -57,6 +57,7 @@ type KnowledgeRevisionDetail = KnowledgeRevision & Readonly<{ content: string }>
 type EditorMode = "view" | "edit" | "create";
 type WorkspaceSection = "library" | "search";
 type LibraryScreen = "list" | "view";
+type KnowledgeFilter = "all" | "memory";
 type KnowledgeModal = "editor" | "import" | null;
 type SearchTool = "semantic" | "index" | "project";
 type VisionProviderOption = Readonly<{
@@ -162,6 +163,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const [listError, setListError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [knowledgeFilter, setKnowledgeFilter] = useState<KnowledgeFilter>("all");
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -198,8 +200,10 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
   const knowledgeDialogRef = useRef<HTMLDialogElement | null>(null);
+  const detailDialogRef = useRef<HTMLDialogElement | null>(null);
   const knowledgeModalRef = useRef<KnowledgeModal>(null);
   const modalReturnScreenRef = useRef<LibraryScreen>("list");
+  const detailHistoryEntryRef = useRef(false);
 
   const editorDirty = mode === "create"
     ? draft.title !== emptyDraft.title || draft.content !== emptyDraft.content || draft.isDefaultMemory !== emptyDraft.isDefaultMemory
@@ -253,6 +257,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const requestTokenRef = useRef(0);
   const navigationPendingRef = useRef(false);
   const queryNavigationPendingRef = useRef(false);
+  const expectedDocumentQueryRef = useRef<Readonly<{ value: string | null }> | null>(null);
   const reconcileDocumentQueryRef = useRef<() => Promise<boolean>>(async () => false);
 
   useEffect(() => {
@@ -266,14 +271,29 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     return () => { window.document.body.style.overflow = previousOverflow; };
   }, [knowledgeModal]);
 
+  useEffect(() => {
+    const detailDialog = detailDialogRef.current;
+    if (!detailDialog) return;
+    if (libraryScreen === "view" && workspaceSection === "library") {
+      if (!detailDialog.open) detailDialog.showModal();
+      window.requestAnimationFrame(() => detailDialog.querySelector<HTMLButtonElement>("[data-detail-close]")?.focus());
+    } else if (detailDialog.open) {
+      detailDialog.close();
+    }
+  }, [libraryScreen, workspaceSection]);
+
   async function confirmWithKnowledgeModal(
     options: Parameters<typeof confirm>[0],
     reopen: "always" | "on-cancel" = "always",
   ): Promise<boolean> {
     const dialogElement = knowledgeDialogRef.current;
+    const detailElement = detailDialogRef.current;
     const wasOpen = dialogElement?.open === true;
+    const detailWasOpen = detailElement?.open === true;
     if (wasOpen) dialogElement.close();
+    if (detailWasOpen) detailElement.close();
     const result = await confirm(options);
+    if (detailWasOpen && detailElement?.isConnected && !detailElement.open) detailElement.showModal();
     if (wasOpen && knowledgeModalRef.current !== null && (reopen === "always" || !result.confirmed)) {
       dialogElement?.showModal();
     }
@@ -343,17 +363,50 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     }
   }
 
-  function openSearchTool(tool: SearchTool): void {
+  function clearDocumentQuery(usePush = false): void {
+    const destination = new URL(window.location.href);
+    destination.searchParams.delete("document");
+    expectedDocumentQueryRef.current = parseDocumentQuery(new URL(window.location.href).searchParams.get("document")) === null
+      ? null
+      : { value: null };
+    acceptedDocumentIdRef.current = null;
+    setAcceptedDocumentId(null);
+    detailHistoryEntryRef.current = false;
+    const href = `${destination.pathname}${destination.search}${destination.hash}`;
+    if (usePush) router.push(href, { scroll: false });
+    else router.replace(href, { scroll: false });
+  }
+
+  async function openSearchTool(tool: SearchTool): Promise<void> {
+    if (saving || !await confirmDiscardDraft()) return;
+    if (knowledgeModalRef.current !== null) setKnowledgeModal(null);
+    if (libraryScreen === "view") clearDocumentQuery(true);
+    invalidateListRequest();
+    invalidateMutationRequests();
+    setSelectedDocumentId(null);
+    clearDetailState();
     setSearchTool(tool);
-    void openWorkspaceSection("search");
+    setWorkspaceSection("search");
+    setLibraryScreen("list");
+    setMessage(null);
   }
 
   async function returnToList(): Promise<void> {
     if (saving || !await confirmDiscardDraft()) return;
     if (mode === "edit" || mode === "create") restoreSavedDraft();
+    if (detailHistoryEntryRef.current) {
+      detailHistoryEntryRef.current = false;
+      router.back();
+      return;
+    }
     setMessage(null);
+    acceptedDocumentIdRef.current = null;
+    setAcceptedDocumentId(null);
+    setSelectedDocumentId(null);
+    clearDetailState();
+    clearDocumentQuery();
     setLibraryScreen("list");
-    void loadDocuments();
+    void loadDocuments(null);
   }
 
   function handleInternalNavigation(event: MouseEvent<HTMLElement>): void {
@@ -452,8 +505,10 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       function restoreAcceptedDocumentQuery(): void {
         const destination = new URL(window.location.href);
         const acceptedId = acceptedDocumentIdRef.current;
+        const currentId = parseDocumentQuery(destination.searchParams.get("document"));
         if (acceptedId === null) destination.searchParams.delete("document");
         else destination.searchParams.set("document", acceptedId);
+        expectedDocumentQueryRef.current = currentId === acceptedId ? null : { value: acceptedId };
         router.replace(`${destination.pathname}${destination.search}${destination.hash}`, { scroll: false });
       }
 
@@ -478,12 +533,21 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       setWorkspaceSection("library");
       setKnowledgeModal(null);
       setLibraryScreen(nextDocumentId === null ? "list" : "view");
+      // A query arriving from direct navigation or browser Back/Forward is not
+      // a row click we own. Closing it should clear the query in place instead
+      // of navigating away from the user's previous page.
+      detailHistoryEntryRef.current = false;
       setMessage(null);
       return true;
     };
   });
 
   useEffect(() => {
+    const expectedQuery = expectedDocumentQueryRef.current;
+    if (expectedQuery !== null) {
+      if (requestedDocumentId === expectedQuery.value) expectedDocumentQueryRef.current = null;
+      else return;
+    }
     if (requestedDocumentId === acceptedDocumentIdRef.current || queryNavigationPendingRef.current) return;
     queryNavigationPendingRef.current = true;
     void reconcileDocumentQueryRef.current().then((accepted) => {
@@ -498,7 +562,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     });
   }, [queryReconcileVersion, requestedDocumentId]);
 
-  const loadDocuments = useCallback(async () => {
+  const loadDocuments = useCallback(async (preferredDocumentId: string | null = acceptedDocumentId) => {
     listRequestRef.current?.controller.abort();
     const request = { token: ++requestTokenRef.current, controller: new AbortController() };
     listRequestRef.current = request;
@@ -507,6 +571,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
       if (searchQuery) params.set("query", searchQuery);
       if (cursor) params.set("cursor", cursor);
+      if (knowledgeFilter === "memory") params.set("isDefaultMemory", "true");
       const response = await fetch(`/api/personal/knowledge?${params.toString()}`, { cache: "no-store", signal: request.controller.signal });
       if (!response.ok) throw new Error(await readError(response, "个人知识加载失败"));
       const result = unwrapList(await response.json());
@@ -518,10 +583,10 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       // resetting the selected document or replacing the current draft.
       if (knowledgeModalRef.current !== null) return;
       const currentSelectedId = selectedIdRef.current;
-      const nextSelectedId = acceptedDocumentId
+      const nextSelectedId = preferredDocumentId
         ?? (currentSelectedId && result.documents.some((item) => item.id === currentSelectedId)
         ? currentSelectedId
-        : result.documents[0]?.id ?? null);
+        : null);
       if (nextSelectedId !== currentSelectedId) {
         mutationTokenRef.current += 1;
         detailRequestRef.current?.controller.abort();
@@ -559,7 +624,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         setListLoading(false);
       }
     }
-  }, [acceptedDocumentId, cursor, searchQuery]);
+  }, [acceptedDocumentId, cursor, knowledgeFilter, searchQuery]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDocuments(), 0);
@@ -619,7 +684,22 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     setCursor(null);
     setCursorStack([]);
     setSelectedDocumentId(null);
+    setLibraryScreen("list");
     clearDetailState();
+  }
+
+  /** Apply the server-side general-memory filter and start a fresh cursor chain. */
+  function selectKnowledgeFilter(nextFilter: KnowledgeFilter): void {
+    if (nextFilter === knowledgeFilter) return;
+    invalidateListRequest();
+    invalidateMutationRequests();
+    setKnowledgeFilter(nextFilter);
+    setCursor(null);
+    setCursorStack([]);
+    setSelectedDocumentId(null);
+    clearDetailState();
+    setLibraryScreen("list");
+    setMessage(null);
   }
 
   /** Advance one keyset page while retaining the cursor needed to go back. */
@@ -736,6 +816,15 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     setMode("view");
     setLibraryScreen("view");
     setMessage(null);
+    acceptedDocumentIdRef.current = documentId;
+    setAcceptedDocumentId(documentId);
+    detailHistoryEntryRef.current = true;
+    const destination = new URL(window.location.href);
+    destination.searchParams.set("document", documentId);
+    expectedDocumentQueryRef.current = parseDocumentQuery(new URL(window.location.href).searchParams.get("document")) === documentId
+      ? null
+      : { value: documentId };
+    router.push(`${destination.pathname}${destination.search}${destination.hash}`, { scroll: false });
   }
 
   /** Create or revise a document using the currently rendered version fence. */
@@ -769,16 +858,26 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       if (!response.ok) throw new Error(await readError(response, isCreate ? "内容创建失败" : "内容保存失败"));
       const next = unwrapDocument(await response.json());
       if (mutationTokenRef.current !== mutationToken || (!isCreate && selectedIdRef.current !== targetId)) return;
-      setCurrentDocument(next);
-      setDraft({ title: next.title, content: next.content, isDefaultMemory: next.isDefaultMemory });
-      setSelectedDocumentId(next.id);
+      if (isCreate) {
+        setCurrentDocument(null);
+        setDraft(emptyDraft);
+        setSelectedDocumentId(null);
+        acceptedDocumentIdRef.current = null;
+        setAcceptedDocumentId(null);
+        detailHistoryEntryRef.current = false;
+        clearDocumentQuery();
+      } else {
+        setCurrentDocument(next);
+        setDraft({ title: next.title, content: next.content, isDefaultMemory: next.isDefaultMemory });
+        setSelectedDocumentId(next.id);
+      }
       setMode("view");
       setWorkspaceSection("library");
-      setLibraryScreen(isCreate ? "view" : modalReturnScreenRef.current);
+      setLibraryScreen(isCreate ? "list" : modalReturnScreenRef.current);
       setKnowledgeModal(null);
       clearHistoryState();
       setMessage({ tone: "success", text: isCreate ? "个人知识已创建。" : "个人知识已保存为新版本。" });
-      await loadDocuments();
+      await loadDocuments(isCreate ? null : next.id);
     } catch (cause) {
       if (mutationTokenRef.current !== mutationToken) return;
       setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "内容保存失败" });
@@ -819,8 +918,9 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       setSelectedDocumentId(null);
       clearDetailState();
       setLibraryScreen("list");
+      clearDocumentQuery();
       setMessage({ tone: "success", text: "个人知识已删除。" });
-      await loadDocuments();
+      await loadDocuments(null);
     } catch (cause) {
       if (mutationTokenRef.current !== mutationToken) return;
       setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "内容删除失败" });
@@ -957,77 +1057,100 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const editing = mode === "edit" || mode === "create";
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950" onClickCapture={handleInternalNavigation}>
+    <main className={styles.page} onClickCapture={handleInternalNavigation}>
       <AppHeader username={username} active="personalKnowledge" isSystemAdmin={isSystemAdmin} />
       <PersonalWorkspaceNav active="knowledge" />
-      <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
-        <section className="rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-11">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal workspace</p>
-          <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">个人知识</h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">保存后会直接打开内容供你阅读或针对本篇提问。按意思搜索时先建立个人语义索引；要让项目使用，请手动复制到项目资料。只有明确标记的个人通用记忆会自动补充你发起的项目 AI 请求。</p>
-            </div>
-            <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-3 lg:w-[34rem]">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-3">无需项目</div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-3">纯文本版本</div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-3">随时导出</div>
-            </div>
+      <div className={styles.content}>
+        <header className={styles.heading}>
+          <div>
+            <h1>我的知识</h1>
+            <p>维护个人知识、通用记忆与知识图谱。</p>
           </div>
-        </section>
+          <div className={styles.headingActions}>
+            <Link href={buildPersonalKnowledgeHistoryHref()} className={styles.button}>历史会话</Link>
+            <button type="button" onClick={() => openKnowledgeModal("import")} className={styles.button}>导入文件</button>
+            <button type="button" onClick={startCreate} className={styles.buttonPrimary}>新建知识</button>
+          </div>
+        </header>
 
-        <nav className="mt-6 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm" aria-label="个人知识功能分区">
-          <button type="button" aria-current={workspaceSection === "library" ? "page" : undefined} onClick={() => void openWorkspaceSection("library")} className={`min-h-11 rounded-xl px-2 py-2 text-sm font-semibold ${workspaceSection === "library" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>我的知识</button>
-          <button type="button" aria-current={workspaceSection === "search" ? "page" : undefined} onClick={() => void openWorkspaceSection("search")} className={`min-h-11 rounded-xl px-2 py-2 text-sm font-semibold ${workspaceSection === "search" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>智能检索</button>
-        </nav>
+        {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`${styles.feedback} ${message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess}`}>{message.text}</div> : null}
 
-        {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-5 py-4 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</div> : null}
+        {workspaceSection === "library" ? <>
+          <nav className={styles.tabs} aria-label="知识栏目">
+            <button type="button" aria-current={knowledgeFilter === "all" ? "page" : undefined} aria-pressed={knowledgeFilter === "all"} onClick={() => selectKnowledgeFilter("all")} className={`${styles.tab} ${knowledgeFilter === "all" ? styles.activeTab : ""}`}>全部知识</button>
+            <button type="button" aria-current={knowledgeFilter === "memory" ? "page" : undefined} aria-pressed={knowledgeFilter === "memory"} onClick={() => selectKnowledgeFilter("memory")} className={`${styles.tab} ${knowledgeFilter === "memory" ? styles.activeTab : ""}`}>通用记忆</button>
+            <Link href="/personal/knowledge/graph" className={styles.tabLink}>知识图谱</Link>
+          </nav>
 
-        {workspaceSection === "library" ? (
-          libraryScreen === "list" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Knowledge list</p>
-                <h2 className="mt-2 text-2xl font-semibold">我的内容</h2>
-                <Link href="/personal/knowledge/graph" className="mt-2 inline-block text-xs font-semibold text-indigo-700 underline underline-offset-2">查看知识图谱 →</Link>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => openKnowledgeModal("import")} className="rounded-xl border border-indigo-200 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">导入文件</button>
-                <button type="button" onClick={startCreate} className="rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500">新建内容</button>
+          {knowledgeFilter === "memory" ? <p className={styles.notice}>仅显示你明确标记为通用记忆的内容；这些约定会用于你发起的项目 AI 请求。</p> : null}
+
+          <section aria-label={knowledgeFilter === "memory" ? "通用记忆列表" : "全部知识列表"}>
+            <div className={styles.toolbar}>
+              <form onSubmit={submitSearch} className={styles.searchForm}>
+                <label className="min-w-0 flex-1">
+                  <span className="sr-only">搜索个人知识标题或正文</span>
+                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索知识标题或正文" maxLength={240} className={styles.searchInput} />
+                </label>
+                <button type="submit" className={styles.button}>搜索</button>
+              </form>
+              <div className={styles.toolbarActions}>
+                <button type="button" onClick={() => void openSearchTool("semantic")} className={styles.button}>智能检索与索引</button>
               </div>
             </div>
 
-            <form onSubmit={submitSearch} className="mt-5 flex gap-2">
-              <label className="min-w-0 flex-1">
-                <span className="sr-only">搜索个人知识</span>
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索标题或正文" maxLength={240} className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-              </label>
-              <button type="submit" className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700">搜索</button>
-            </form>
+            {listError ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}><p>{listError}</p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline">重新加载</button></div> : null}
+            {listLoading ? <p className="py-5 text-sm text-slate-500" role="status" aria-live="polite">正在加载知识…</p> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} filter={knowledgeFilter} onCreate={startCreate} /> : <div className={styles.list}>
+              {documents.map((item) => <button key={item.id} type="button" aria-haspopup="dialog" aria-current={item.id === selectedId ? "true" : undefined} onClick={() => selectDocument(item.id)} className={`${styles.row} ${item.id === selectedId ? styles.selectedRow : ""}`}>
+                <span className={styles.rowBody}>
+                  <span className={styles.rowTitle}>{item.title}</span>
+                  <span className={styles.rowExcerpt}>{item.excerpt ?? `已保存 ${formatBytes(item.byteCount)}，打开查看正文。`}</span>
+                </span>
+                <span className={styles.rowMeta}>
+                  {item.isDefaultMemory ? <span className={styles.memoryBadge}>通用记忆</span> : null}
+                  <span className={styles.versionBadge}>v{item.version}</span>
+                  <span>更新于 {formatDate(item.updatedAt)}</span>
+                </span>
+              </button>)}
+            </div>}
 
-            {listError ? <div role="alert" className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{listError}</p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline">重新加载</button></div> : null}
-            {listLoading ? <div className="mt-5 space-y-3" aria-label="正在加载个人知识"><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /><div className="h-20 animate-pulse rounded-2xl bg-slate-100" /></div> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} onCreate={startCreate} /> : <div className="mt-5 space-y-2">{documents.map((item) => <button key={item.id} type="button" onClick={() => selectDocument(item.id)} className={`block w-full rounded-2xl border p-4 text-left transition ${item.id === selectedId ? "border-indigo-300 bg-indigo-50/60 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200 hover:bg-slate-50"}`}><div className="flex items-start justify-between gap-3"><h3 className="min-w-0 truncate text-sm font-semibold text-slate-800">{item.title}</h3><span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">v{item.version}</span></div><p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{item.excerpt ?? `已保存 ${formatBytes(item.byteCount)}，点击查看正文。`}</p><p className="mt-2 text-xs text-slate-400">更新于 {formatDate(item.updatedAt)}</p></button>)}</div>}
+            {documents.length > 0 ? <nav className={styles.pager} aria-label="个人知识分页"><span>第 {pageNumber} 页</span><div className={styles.rowActions}><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className={styles.button}>上一页</button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className={styles.button}>下一页</button></div></nav> : null}
+          </section>
+        </> : null}
 
-            {documents.length > 0 ? <nav className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4" aria-label="个人知识分页"><span className="text-xs text-slate-400">第 {pageNumber} 页</span><div className="flex gap-2"><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">上一页</button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">下一页</button></div></nav> : null}
-          </section> : null
-        ) : null}
-
-        {workspaceSection === "library" && libraryScreen === "view" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
-          <button type="button" onClick={() => void returnToList()} className="mb-5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">← 返回我的内容</button>
-          {detailLoading ? <div className="space-y-4" aria-label="正在加载内容"><div className="h-7 w-2/3 animate-pulse rounded bg-slate-100" /><div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" /><div className="h-72 animate-pulse rounded-2xl bg-slate-100" /></div> : document ? <><PersonalKnowledgeNextSteps key={`${document.id}:${document.version}`} content={document.content} onOpenSemanticIndex={() => openSearchTool("index")} /><DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} /></> : <EmptyDetail onCreate={startCreate} />}
-        </section> : null}
-
-        {workspaceSection === "search" ? <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Search tools</p>
-          <h2 className="mt-2 text-2xl font-semibold">智能检索</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">按用途选择一个检索工具，当前页面只显示所选工具。</p>
-          <nav className="mt-5 grid gap-2 sm:grid-cols-3" aria-label="智能检索工具">
-            <button type="button" aria-current={searchTool === "semantic" ? "page" : undefined} onClick={() => setSearchTool("semantic")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "semantic" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>个人语义搜索</button>
-            <button type="button" aria-current={searchTool === "index" ? "page" : undefined} onClick={() => setSearchTool("index")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "index" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>索引管理</button>
-            <button type="button" aria-current={searchTool === "project" ? "page" : undefined} onClick={() => setSearchTool("project")} className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${searchTool === "project" ? "bg-indigo-600 text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>项目来源搜索</button>
+        {workspaceSection === "search" ? <section className={styles.searchTools}>
+          <div className={styles.heading}>
+            <div><h1>智能检索与索引</h1><p>搜索个人知识，管理语义索引，或查找项目来源。</p></div>
+            <button type="button" onClick={() => void openWorkspaceSection("library")} className={styles.button}>返回知识列表</button>
+          </div>
+          <nav className={styles.tabs} aria-label="智能检索工具">
+            <button type="button" aria-current={searchTool === "semantic" ? "page" : undefined} onClick={() => setSearchTool("semantic")} className={`${styles.tab} ${searchTool === "semantic" ? styles.activeTab : ""}`}>个人语义搜索</button>
+            <button type="button" aria-current={searchTool === "index" ? "page" : undefined} onClick={() => setSearchTool("index")} className={`${styles.tab} ${searchTool === "index" ? styles.activeTab : ""}`}>索引管理</button>
+            <button type="button" aria-current={searchTool === "project" ? "page" : undefined} onClick={() => setSearchTool("project")} className={`${styles.tab} ${searchTool === "project" ? styles.activeTab : ""}`}>项目来源搜索</button>
           </nav>
-          <div className="mt-5">{searchTool === "semantic" ? <PersonalSemanticSearchPanel onManageIndex={() => setSearchTool("index")} /> : searchTool === "index" ? <PersonalSemanticIndexPanel onOpenSemanticSearch={() => setSearchTool("semantic")} /> : <PersonalProjectSearchPanel />}</div>
+          <div>{searchTool === "semantic" ? <PersonalSemanticSearchPanel onManageIndex={() => setSearchTool("index")} /> : searchTool === "index" ? <PersonalSemanticIndexPanel onOpenSemanticSearch={() => setSearchTool("semantic")} /> : <PersonalProjectSearchPanel />}</div>
         </section> : null}
+      </div>
+
+      <dialog
+        ref={detailDialogRef}
+        aria-label="个人知识详情"
+        aria-modal="true"
+        tabIndex={-1}
+        onCancel={(event) => { event.preventDefault(); void returnToList(); }}
+        onClick={(event: MouseEvent<HTMLDialogElement>) => {
+          if (event.target !== event.currentTarget) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) void returnToList();
+        }}
+        className={styles.detailDialog}
+      >
+        <div className={styles.detailContent}>
+          {detailLoading ? <p role="status" className="py-8 text-sm text-slate-500">正在加载知识详情…</p> : document ? <>
+            <DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onClose={() => void returnToList()} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} />
+            <PersonalKnowledgeNextSteps key={`${document.id}:${document.version}`} content={document.content} onOpenSemanticIndex={() => void openSearchTool("index")} />
+          </> : <>{message?.tone === "error" ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}>{message.text}</div> : null}<EmptyDetail onCreate={startCreate} /></>}
+        </div>
+      </dialog>
 
         <dialog
           ref={knowledgeDialogRef}
@@ -1063,14 +1186,15 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
               void requestCloseKnowledgeModal();
             }
           }}
-          className={`m-auto max-h-[90dvh] w-full max-w-4xl overflow-hidden rounded-3xl border-0 bg-white p-0 text-slate-900 shadow-2xl max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none ${modalNativeBackdropClassName} sm:w-11/12`}
+          className={styles.knowledgeDialog}
+          data-variant={knowledgeModal === "editor" ? mode : knowledgeModal ?? undefined}
         >
-          {knowledgeModal === "editor" ? <div className="h-[90dvh] max-h-[90dvh] min-h-0 max-sm:h-dvh max-sm:max-h-dvh">
+          {knowledgeModal === "editor" ? <div className={mode === "create" ? "h-[78dvh] max-h-[760px] min-h-0 max-sm:h-[88dvh]" : "h-dvh max-h-dvh min-h-0"}>
             <PersonalKnowledgeEditor mode={mode === "create" ? "create" : "edit"} draft={draft} saving={saving} error={message?.tone === "error" ? message.text : null} notice={message?.tone === "success" ? message.text : null} onDraftChange={updateDraft} onCancel={() => void requestCloseKnowledgeModal()} onSubmit={saveDraft} />
           </div> : null}
-          {knowledgeModal === "import" ? <div className="flex max-h-[90dvh] min-h-0 flex-col max-sm:h-dvh max-sm:max-h-dvh">
+          {knowledgeModal === "import" ? <div className="flex h-dvh max-h-dvh min-h-0 flex-col">
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7">
-              <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Import</p><h2 id="knowledge-modal-title" className="mt-1 text-xl font-semibold">导入个人知识</h2></div>
+              <div><h2 id="knowledge-modal-title" className="text-xl font-semibold">导入知识</h2></div>
               <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} aria-label="关闭导入弹窗" className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">关闭</button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
@@ -1102,20 +1226,21 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             </div>
           </div> : null}
         </dialog>
-      </div>
       {dialog}
     </main>
   );
 }
 
 /** Explain an empty list or search result and preserve the create entry point. */
-function EmptyList({ searchQuery, onCreate }: { searchQuery: string; onCreate: () => void }): React.JSX.Element {
-  return <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">{searchQuery ? "没有匹配的个人知识" : "还没有个人知识"}</p><p className="mt-2 text-xs leading-5 text-slate-500">{searchQuery ? "换一个关键词，或清空搜索后查看全部内容。" : "无需创建项目，先把想法、资料摘要或规则保存下来。"}</p>{!searchQuery ? <button type="button" onClick={onCreate} className="mt-4 rounded-lg bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white">创建第一条</button> : null}</div>;
+function EmptyList({ searchQuery, filter, onCreate }: { searchQuery: string; filter: KnowledgeFilter; onCreate: () => void }): React.JSX.Element {
+  const title = searchQuery ? "没有匹配的知识" : filter === "memory" ? "还没有通用记忆" : "还没有个人知识";
+  const description = searchQuery ? "换一个关键词，或清空搜索后查看全部内容。" : filter === "memory" ? "编辑知识并明确标记为通用记忆后，会显示在这里。" : "新建或导入一条知识，开始整理个人资料。";
+  return <div className={styles.empty}><p className="font-semibold text-slate-700">{title}</p><p className="mt-2">{description}</p>{!searchQuery && filter === "all" ? <button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}>新建知识</button> : null}</div>;
 }
 
 /** Render the neutral detail state before a document has been selected. */
 function EmptyDetail({ onCreate }: { onCreate: () => void }): React.JSX.Element {
-  return <div className="flex min-h-[28rem] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-12 text-center"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-2xl text-indigo-700">✦</span><h2 className="mt-5 text-xl font-semibold text-slate-800">选择一条内容开始</h2><p className="mt-2 max-w-md text-sm leading-6 text-slate-500">个人知识独立于项目存在。可以先独立整理，之后再决定是否把它带入项目工作流。</p><button type="button" onClick={onCreate} className="mt-5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500">新建个人知识</button></div>;
+  return <div className={styles.empty}><h2 className="font-semibold text-slate-700">这条知识暂不可用</h2><p className="mt-2">内容可能已删除，或当前账号已不能访问。</p><button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}>新建知识</button></div>;
 }
 
 type DocumentDetailProps = Readonly<{
@@ -1131,6 +1256,7 @@ type DocumentDetailProps = Readonly<{
   revisionError: string | null;
   exporting: ExportFormat | null;
   deleting: boolean;
+  onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onExport: (format: ExportFormat) => void;
@@ -1154,6 +1280,7 @@ function DocumentDetail({
   revisionError,
   exporting,
   deleting,
+  onClose,
   onEdit,
   onDelete,
   onExport,
@@ -1166,14 +1293,14 @@ function DocumentDetail({
     <article>
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Personal document</p>
-          <h2 className="mt-2 break-words text-2xl font-semibold tracking-[-0.02em]">{document.title}</h2>
+          <h2 id="personal-knowledge-detail-title" className="break-words text-xl font-semibold tracking-[-0.02em]">{document.title}</h2>
           {document.isDefaultMemory ? <span className="mt-2 inline-block rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">个人通用记忆 · 项目 AI 可自动参考</span> : null}
           <p className="mt-2 text-xs text-slate-400">版本 {document.version} · {formatBytes(document.byteCount)} · 更新于 {formatDate(document.updatedAt)}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <button type="button" onClick={onEdit} className="rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500">编辑</button>
-          <button type="button" onClick={onDelete} disabled={deleting} className="rounded-xl border border-rose-200 px-3.5 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50">{deleting ? "删除中…" : "删除"}</button>
+        <div className={styles.rowActions}>
+          <button type="button" onClick={onClose} data-detail-close className={styles.button}>关闭</button>
+          <button type="button" onClick={onEdit} className={styles.buttonPrimary}>编辑</button>
+          <button type="button" onClick={onDelete} disabled={deleting} className={styles.buttonDanger}>{deleting ? "删除中…" : "删除"}</button>
         </div>
       </div>
 

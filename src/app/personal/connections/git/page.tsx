@@ -8,5 +8,5 @@ export const dynamic = "force-dynamic";
 /** Render the owner-scoped Git resource in the personal workspace shell. */
 export default async function PersonalGitConnectionsPage(): Promise<React.JSX.Element> {
   const user = await requirePageSession();
-  return <main className="min-h-screen bg-[#f4f6fb] text-slate-950"><AppHeader username={user.username} active="personalKnowledge" isSystemAdmin={user.role === "admin"} /><PersonalWorkspaceNav active="git" /><GitConnectionsClient /></main>;
+  return <main className="min-h-screen bg-white text-slate-950"><AppHeader username={user.username} active="personalKnowledge" isSystemAdmin={user.role === "admin"} /><PersonalWorkspaceNav active="git" /><GitConnectionsClient /></main>;
 }

@@ -15,7 +15,7 @@ export default async function PersonalModelsPage(): Promise<React.JSX.Element> {
   const membership = await getMembershipStatus(user.id);
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+    <main className="min-h-screen bg-white text-slate-950">
       <AppHeader username={user.username} active="personalKnowledge" isSystemAdmin={user.role === "admin"} />
       <PersonalWorkspaceNav active="models" />
       <PersonalModelsClient

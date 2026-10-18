@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { jobStatusLabels, type DashboardPayload, type DashboardQuota, type DashboardState, type JobKind, type JobStatus, type RecentJob } from "@/lib/workspace-summary";
+import { jobStatusLabels, type DashboardPayload, type DashboardQuota, type JobKind, type RecentJob, type WorkspaceProject } from "@/lib/workspace-summary";
+import styles from "./dashboard-client.module.css";
 
 const emptyPayload: DashboardPayload = {
   state: "zero-project",
@@ -41,6 +42,14 @@ type PersonalDashboardSnapshot = Readonly<{
   modelCount: number | null;
   gitCount: number | null;
   mcpCount: number | null;
+}>;
+
+type DashboardAttention = Readonly<{
+  id: string;
+  title: string;
+  detail: string;
+  href: string;
+  tone: "danger" | "warning" | "neutral";
 }>;
 
 const emptyPersonalSnapshot: PersonalDashboardSnapshot = {
@@ -96,36 +105,72 @@ async function readError(response: Response, fallback: string): Promise<string> 
 }
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function formatQuotaExpiry(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
-function jobHref(job: Pick<RecentJob, "id" | "kind" | "project">): string {
-  if (!job.project) return "/dashboard";
-  return `/projects/${job.project.id}/jobs/${job.id}`;
+function jobHref(job: Pick<RecentJob, "id" | "project">): string {
+  return job.project ? `/projects/${job.project.id}/jobs/${job.id}` : "/dashboard";
 }
 
-function stateLabel(state: DashboardState): string {
-  return {
-    "zero-project": "还没有可访问项目",
-    "empty-plan": "项目计划尚未建立工作项",
-    running: "有任务正在运行",
-    "needs-attention": "有项目需要关注",
-    healthy: "当前状态稳定",
-  }[state];
+function buildAttentionItems(payload: DashboardPayload): DashboardAttention[] {
+  const items: DashboardAttention[] = [];
+  const seen = new Set<string>();
+  const add = (item: DashboardAttention) => {
+    if (seen.has(item.id)) return;
+    seen.add(item.id);
+    items.push(item);
+  };
+
+  for (const job of payload.recentJobs) {
+    if (job.status !== "failed" && job.status !== "unknown" && !job.reconciliationRequired) continue;
+    const projectName = job.project?.name ?? "项目任务";
+    add({
+      id: `job:${job.id}`,
+      title: `${jobLabels[job.kind]}${job.reconciliationRequired ? "需要核对" : job.status === "failed" ? "执行失败" : "结果待确认"}`,
+      detail: `${projectName} · ${jobStatusLabels[job.status]} · ${formatDate(job.createdAt)}`,
+      href: jobHref(job),
+      tone: job.status === "failed" || job.status === "unknown" ? "danger" : "warning",
+    });
+  }
+
+  for (const entry of payload.operations) {
+    if (entry.health.status === "empty") continue;
+    const signal = entry.health.signals[0];
+    add({
+      id: `plan:${entry.project.id}`,
+      title: signal?.title ?? `${entry.project.name}的计划需要关注`,
+      detail: `${entry.project.name} · 逾期 ${entry.health.counts.overdue} · 受阻 ${entry.health.counts.blocked}`,
+      href: signal ? `/projects/${entry.project.id}/plan?focus=${encodeURIComponent(signal.workItemId)}${signal.kind === "blocked" ? "&status=blocked" : ""}` : `/projects/${entry.project.id}/plan`,
+      tone: entry.health.status === "atRisk" ? "danger" : "warning",
+    });
+  }
+
+  for (const entry of payload.worlds) {
+    const statusLabel = entry.world.status === "at_risk" ? "项目状态存在风险" : entry.world.status === "needs_attention" ? "项目状态需要关注" : "项目资料不足以判断状态";
+    add({
+      id: `world:${entry.project.id}`,
+      title: `${entry.project.name} · ${statusLabel}`,
+      detail: `事实 ${entry.world.counts.activeFacts} · 问题 ${entry.world.counts.issues} · 风险 ${entry.world.counts.risks} · 冲突 ${entry.world.counts.activeConflicts}`,
+      href: `/projects/${entry.project.id}#current-state`,
+      tone: entry.world.status === "at_risk" ? "danger" : entry.world.status === "needs_attention" ? "warning" : "neutral",
+    });
+  }
+
+  if (payload.summary.pendingAssetReviews > 0) {
+    add({
+      id: "asset-reviews",
+      title: `${payload.summary.pendingAssetReviews} 条文件识别结果待核对`,
+      detail: "打开项目列表，进入对应项目的文件资料继续核对。",
+      href: "/projects",
+      tone: "warning",
+    });
+  }
+
+  return items.slice(0, 4);
 }
 
 export function DashboardClient({ username, isSystemAdmin = false }: { username: string; isSystemAdmin?: boolean }) {
@@ -144,13 +189,14 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
     setLoading(true);
     try {
       const response = await fetch("/api/dashboard", { cache: "no-store", signal: controller.signal });
-      if (!response.ok) throw new Error(await readError(response, "Dashboard 加载失败"));
+      if (!response.ok) throw new Error(await readError(response, "工作台加载失败"));
+      const next = await response.json() as DashboardPayload;
       if (sequence !== requestSequence.current) return;
-      setPayload(await response.json() as DashboardPayload);
+      setPayload(next);
       setError(null);
     } catch (loadError) {
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
-      setError(loadError instanceof Error ? loadError.message : "Dashboard 加载失败");
+      setError(loadError instanceof Error ? loadError.message : "工作台加载失败");
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
@@ -197,179 +243,111 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
     if (error) return { label: "暂时无法确认工作空间状态", detail: "请求失败时不推断项目健康度，请重试以获取最新状态。", href: "/dashboard", action: "重新读取" };
     const { summary, projects } = payload;
     const riskyWorld = payload.worlds.find((entry) => entry.world.status === "at_risk");
-    if (riskyWorld) {
-      return { label: `核对「${riskyWorld.project.name}」的项目状态`, detail: `当前有 ${riskyWorld.world.counts.issues} 个问题、${riskyWorld.world.counts.risks} 个风险和 ${riskyWorld.world.counts.activeConflicts} 个事实冲突。`, href: `/projects/${riskyWorld.project.id}#current-state`, action: "打开项目概览" };
-    }
+    if (riskyWorld) return { label: `核对「${riskyWorld.project.name}」的项目状态`, detail: `当前有 ${riskyWorld.world.counts.issues} 个问题、${riskyWorld.world.counts.risks} 个风险和 ${riskyWorld.world.counts.activeConflicts} 个事实冲突。`, href: `/projects/${riskyWorld.project.id}#current-state`, action: "打开项目概览" };
     const atRisk = payload.operations.find((entry) => entry.health.status === "atRisk");
     if (atRisk) {
       const signal = atRisk.health.signals[0];
-      const href = signal ? `/projects/${atRisk.project.id}/plan#work-item-${signal.workItemId}` : `/projects/${atRisk.project.id}/plan`;
-      return { label: `处理「${atRisk.project.name}」的计划风险`, detail: `当前有 ${atRisk.health.counts.overdue} 项逾期、${atRisk.health.counts.blocked} 项受阻。`, href, action: "打开项目计划" };
+      return { label: `处理「${atRisk.project.name}」的计划风险`, detail: `当前有 ${atRisk.health.counts.overdue} 项逾期、${atRisk.health.counts.blocked} 项受阻。`, href: signal ? `/projects/${atRisk.project.id}/plan#work-item-${signal.workItemId}` : `/projects/${atRisk.project.id}/plan`, action: "打开项目计划" };
     }
-    if (summary.projects === 0) {
-      return { label: "创建第一个项目", detail: "项目会隔离资料、仓库、记忆和智能分析记录。", href: "/projects", action: "前往项目" };
-    }
+    if (summary.projects === 0) return { label: "创建第一个项目", detail: "项目会隔离资料、仓库、记忆和智能分析记录。", href: "/projects", action: "前往我的项目" };
     if (payload.state === "empty-plan") {
       const current = projects[0]!;
       return { label: `为「${current.name}」建立计划`, detail: "当前没有足够的计划工作项可判断运行状态，先添加一个目标明确的工作项。", href: `/projects/${current.id}/plan`, action: "打开项目计划" };
     }
     if (summary.pendingAssetReviews > 0) {
-      const current = projects.find((project) => project._count.assets > 0) ?? projects[0]!;
-      return { label: "核对文件识别结果", detail: `${summary.pendingAssetReviews} 个文件正在等待人工确认，确认前不会进入项目记忆。`, href: `/projects/${current.id}/assets`, action: "进入文件资料" };
+      return { label: "核对待确认的文件识别结果", detail: `${summary.pendingAssetReviews} 个文件正在等待人工确认，打开项目列表后进入对应项目核对。`, href: "/projects", action: "查看项目" };
     }
     const unindexed = projects.find((project) => project.memoryIndexPointer === null);
-    if (unindexed) {
-      return { label: `为「${unindexed.name}」建立智能记忆`, detail: "先准备资料，再生成可用于检索和问答的语义索引。", href: `/projects/${unindexed.id}/memory`, action: "建立索引" };
-    }
+    if (unindexed) return { label: `为「${unindexed.name}」建立智能记忆`, detail: "先准备资料，再生成可用于检索和问答的语义索引。", href: `/projects/${unindexed.id}/memory`, action: "建立索引" };
     const current = projects[0]!;
     return { label: "项目智能能力已经就绪", detail: "可以生成状态简报，或针对当前项目开展一次只读调查。", href: `/projects/${current.id}/intelligence`, action: "进入项目智能体" };
   }, [error, loading, payload]);
 
+  const attentionItems = useMemo(() => buildAttentionItems(payload), [payload]);
+
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+    <main className={styles.page}>
       <AppHeader username={username} active="dashboard" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto min-w-0 max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
-        <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10 lg:px-12">
-          <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-indigo-500/30 blur-3xl" />
-          <div className="absolute bottom-0 right-1/3 h-28 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
-          <div className="relative grid min-w-0 gap-8 lg:grid-cols-[1.25fr_0.75fr] lg:items-end">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Your workspace</p>
-              <h1 className="mt-4 break-words text-3xl font-semibold tracking-[-0.035em] sm:text-5xl">欢迎回来，{username}</h1>
-              <p className="mt-4 max-w-2xl break-words text-sm leading-7 text-slate-300 sm:text-base">先处理个人知识、额度和连接，再查看项目动态与待办。模型能力由平台默认模型或个人双确认委托提供。</p>
-              <div className="mt-7 flex flex-wrap gap-3">
-                <Link href="/personal" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">我的空间</Link>
-                <Link href="/projects" className="rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15">我的项目</Link>
-                <Link href="/guide#dashboard" className="rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15">查看使用指南</Link>
-              </div>
-            </div>
-            <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.07] p-5 backdrop-blur">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-200">推荐下一步</p>
-                <span role="img" aria-label={error ? "状态读取失败" : stateLabel(loading ? "running" : payload.state)} className={`h-2.5 w-2.5 rounded-full ${error ? "bg-rose-400" : loading ? "animate-pulse bg-slate-300" : payload.state === "healthy" ? "bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,.8)]" : payload.state === "needs-attention" ? "bg-amber-400" : "bg-indigo-400"}`} />
-              </div>
-              <h2 className="mt-4 break-words text-xl font-semibold">{nextStep.label}</h2>
-              <p className="mt-2 break-words text-sm leading-6 text-slate-300">{nextStep.detail}</p>
-              <Link href={nextStep.href} className="mt-5 inline-flex text-sm font-semibold text-indigo-200 hover:text-white">{nextStep.action} →</Link>
-            </div>
+      <div className={styles.content}>
+        <section className={styles.heading}>
+          <div>
+            <p className={styles.eyebrow}>YOUR WORKSPACE</p>
+            <h1>工作台</h1>
+            <p className={styles.subtitle}>查看需要处理的事项，并从最近访问的项目继续工作。</p>
           </div>
+          <Link href="/projects" className={styles.primaryButton}>我的项目 <span aria-hidden="true">→</span></Link>
         </section>
 
-        {error ? <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline underline-offset-4">重试</button></div> : null}
+        {error ? <div className={styles.error} role="alert"><span>{error}</span><button type="button" onClick={() => void load()}>重试</button></div> : null}
 
-        <section className="mt-7" aria-labelledby="personal-work-heading">
-          <div className="mb-4"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">My work</p><h2 id="personal-work-heading" className="mt-2 text-2xl font-semibold">我的工作</h2><p className="mt-2 text-sm text-slate-600">个人知识、额度和连接集中在这里；项目状态在下方单独展示。</p></div>
-          <div className="grid gap-4 md:grid-cols-3">
-            <PersonalLinkCard title="个人知识库" detail={personal.loading ? "正在读取个人知识状态…" : personal.knowledgeCount === null || personal.knowledgeBytes === null ? "知识状态暂不可用；仍可进入知识库。" : `${personal.knowledgeCount} 篇文档 · 已用 ${formatBytes(personal.knowledgeBytes)} · ${personal.knowledgeIndex ?? "索引状态未知"}`} href="/personal/knowledge" action="打开知识库" />
-            <QuotaPanel quota={payload.quota} loading={loading} dashboardUnavailable={error !== null} />
-            <PersonalLinkCard title="我的连接" detail={personal.loading ? "正在读取个人连接状态…" : personal.modelCount === null || personal.gitCount === null || personal.mcpCount === null ? "部分连接状态暂不可用；可进入配置逐项查看。" : `模型 ${personal.modelCount} · Git ${personal.gitCount} · MCP ${personal.mcpCount}`} href="/personal/configuration" action="管理连接" />
+        <section className={styles.featureGrid} aria-label="工作台常用信息">
+          <section className={styles.panel} aria-labelledby="attention-heading">
+            <div className={styles.sectionHeading}>
+              <div><p className={styles.eyebrow}>ATTENTION</p><h2 id="attention-heading">需要你关注</h2></div>
+              {!loading && !error ? <span className={styles.count}>{attentionItems.length}</span> : null}
+            </div>
+            {loading ? <LoadingRows /> : error ? <p className={styles.empty}>状态读取失败，重试后再查看待办。</p> : attentionItems.length === 0 ? <p className={styles.empty}>暂无待处理事项。</p> : (
+              <div className={styles.attentionList}>{attentionItems.map((item) => <Link key={item.id} href={item.href} className={styles.attentionItem}>
+                <span className={`${styles.signal} ${styles[item.tone]}`} aria-hidden="true" />
+                <span className={styles.itemCopy}><strong>{item.title}</strong><small>{item.detail}</small></span>
+                <span className={styles.arrow} aria-hidden="true">→</span>
+              </Link>)}</div>
+            )}
+            <Link href={error ? "/dashboard" : "/projects"} className={styles.textLink}>{error ? "重新读取工作台" : "查看项目"} →</Link>
+          </section>
+
+          <aside className={styles.commonPanel} aria-labelledby="common-actions-heading">
+            <p className={styles.eyebrow}>我的工作</p>
+            <h2 id="common-actions-heading">常用操作</h2>
+            <p className={styles.commonIntro}>从个人知识、额度和连接继续；项目资料与计划在各自空间中管理。</p>
+            {error ? <div className={styles.nextStep}><span>下一步暂不可用</span><strong>工作台状态读取失败</strong><button type="button" onClick={() => void load()}>重新读取</button></div> : <Link href={nextStep.href} className={styles.nextStep}>
+              <span>推荐下一步</span><strong>{nextStep.label}</strong><small>{nextStep.detail}</small><b>{nextStep.action} →</b>
+            </Link>}
+            <div className={styles.quickLinks}>
+              <PersonalAction title="个人知识库" detail={personal.loading ? "正在读取…" : personal.knowledgeCount === null || personal.knowledgeBytes === null ? "状态暂不可用" : `${personal.knowledgeCount} 篇文档 · ${formatBytes(personal.knowledgeBytes)}`} href="/personal/knowledge" />
+              <PersonalAction title="我的连接" detail={personal.loading ? "正在读取…" : personal.modelCount === null || personal.gitCount === null || personal.mcpCount === null ? "部分连接状态暂不可用" : `模型 ${personal.modelCount} · Git ${personal.gitCount} · MCP ${personal.mcpCount}`} href="/personal/configuration" />
+              <QuotaAction quota={payload.quota} loading={loading} unavailable={error !== null} />
+            </div>
+          </aside>
+        </section>
+
+        <section className={styles.projectsSection} aria-labelledby="recent-projects-heading">
+          <div className={styles.sectionHeading}>
+            <div><p className={styles.eyebrow}>项目动态</p><h2 id="recent-projects-heading">最近项目</h2></div>
+            <Link href="/projects" className={styles.textLink}>查看全部项目 →</Link>
           </div>
-        </section>
-
-        <section className="mt-9" aria-labelledby="project-activity-heading"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project activity</p><h2 id="project-activity-heading" className="mt-2 text-2xl font-semibold">项目动态</h2><p className="mt-2 text-sm text-slate-600">以下数字只统计当前可访问的进行中项目。</p></section>
-        <section className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label="项目概览指标">
-          <MetricCard label="项目" value={payload.summary.projects} detail="统一工作空间" icon="folder" tone="indigo" loading={loading} unavailable={error !== null} />
-          <MetricCard label="文件资料" value={payload.summary.assets} detail={payload.summary.pendingAssetReviews > 0 ? `${payload.summary.pendingAssetReviews} 个待确认` : "原件与定位片段"} icon="file" tone="cyan" loading={loading} unavailable={error !== null} />
-          <MetricCard label="已确认事实" value={payload.summary.confirmedItems} detail="经过人工审核" icon="check" tone="emerald" loading={loading} unavailable={error !== null} />
-          <MetricCard label="连接仓库" value={payload.summary.repositories} detail="多仓库只读来源" icon="branch" tone="cyan" loading={loading} unavailable={error !== null} />
-          <MetricCard label="智能记忆" value={`${payload.summary.indexedProjects}/${payload.summary.projects}`} detail={payload.summary.activeJobs > 0 ? `${payload.summary.activeJobs} 个任务进行中` : payload.summary.indexedProjects > 0 ? `${payload.summary.indexedProjects} 个项目已建立索引` : "尚未建立活动索引"} icon="spark" tone="violet" loading={loading} unavailable={error !== null} />
-          <MetricCard label="项目状态" value={payload.summary.atRiskWorlds + payload.summary.attentionWorlds} detail={payload.summary.atRiskWorlds > 0 ? `${payload.summary.atRiskWorlds} 个项目存在风险` : payload.summary.attentionWorlds > 0 ? `${payload.summary.attentionWorlds} 个项目需关注` : stateLabel(payload.state)} icon="alert" tone="rose" loading={loading} unavailable={error !== null} />
-        </section>
-
-        <WorldStatusPanel payload={payload} loading={loading} unavailable={error !== null} />
-        <OperationsPanel payload={payload} loading={loading} unavailable={error !== null} />
-
-        <section className="mt-6 grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
-          <ReadinessPanel payload={payload} loading={loading} unavailable={error !== null} />
-          <RecentJobs jobs={payload.recentJobs} loading={loading} unavailable={error !== null} />
+          {loading ? <div className={styles.projectGrid}>{[1, 2, 3].map((item) => <div key={item} className={styles.projectSkeleton} />)}</div> : error ? <p className={styles.empty}>项目状态暂不可用，工作台请求失败时不会显示旧统计。</p> : payload.projects.length === 0 ? <div className={styles.emptyCard}><h3>还没有可访问的项目</h3><p>创建项目，或等待项目负责人授予访问权限。</p><Link href="/projects" className={styles.textLink}>前往我的项目 →</Link></div> : (
+            <div className={styles.projectGrid}>{payload.projects.slice(0, 3).map((project) => <RecentProjectCard key={project.id} project={project} />)}</div>
+          )}
         </section>
       </div>
     </main>
   );
 }
 
-/**
- * Show only the caller's platform-credit advisory. Personal models, Git/MCP
- * connections, and supplier balances are separate configuration or billing
- * domains; an actual action still revalidates quota before it runs.
- */
-function QuotaPanel({ quota, loading, dashboardUnavailable }: { quota: DashboardQuota; loading: boolean; dashboardUnavailable: boolean }) {
-  return <section className="flex h-full min-w-0 flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm" aria-label="当前额度">
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Platform credit</p>
-        <h2 className="mt-2 text-xl font-semibold">当前额度</h2>
-        <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">平台额度按当前发起人计费；个人模型、Git、MCP 和供应商余额不计入这里。实际执行前会再次核验额度。</p>
-      </div>
-    </div>
-    {loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" role="status" aria-label="正在读取额度" /> : dashboardUnavailable || quota.status === "unavailable" ? <div className="mt-5 flex items-center justify-between rounded-2xl bg-slate-50 px-5 py-5"><div><p className="text-3xl font-semibold text-slate-400">—</p><p className="mt-2 text-xs text-slate-500">暂时无法读取当前额度</p></div><span className="text-xs text-slate-400">platform credit</span></div> : <div className="mt-5 flex flex-wrap items-end justify-between gap-4 rounded-2xl bg-indigo-50/70 px-5 py-5"><div><p className="text-3xl font-semibold tracking-tight text-indigo-700">{quota.availableCredits.toLocaleString("zh-CN")}</p><p className="mt-2 text-xs text-slate-600">{quota.availableCredits === 0 ? "当前可用额度为 0，执行前会再次核验额度。" : "当前可用于平台模型调用"}</p></div><div className="text-right text-xs text-slate-600"><p>单位：platform credit</p><p className="mt-1">{quota.nextExpiryAt === null ? "暂无到期额度" : `最早到期：${formatQuotaExpiry(quota.nextExpiryAt)}`}</p></div></div>}
-    <Link href="/credits" className="mt-auto inline-flex pt-5 text-sm font-semibold text-indigo-700 hover:text-indigo-900">查看额度与账单 →</Link>
-  </section>;
+function LoadingRows() {
+  return <div className={styles.loadingRows} role="status" aria-label="正在读取待办">{[1, 2, 3].map((item) => <span key={item} />)}</div>;
 }
 
-function PersonalLinkCard({ title, detail, href, action }: { title: string; detail: string; href: string; action: string }) {
-  return <article className="flex h-full min-w-0 flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm"><h3 className="text-xl font-semibold text-slate-900">{title}</h3><p className="mt-3 text-sm leading-6 text-slate-600">{detail}</p><Link href={href} className="mt-auto inline-flex pt-5 text-sm font-semibold text-indigo-700 hover:text-indigo-900">{action} →</Link></article>;
+function PersonalAction({ title, detail, href }: { title: string; detail: string; href: string }) {
+  return <Link href={href} className={styles.quickLink}><span><strong>{title}</strong><small>{detail}</small></span><span aria-hidden="true">→</span></Link>;
 }
 
-function MetricCard({ label, value, detail, icon, tone, loading, unavailable }: { label: string; value: string | number; detail: string; icon: string; tone: "indigo" | "emerald" | "cyan" | "violet" | "rose"; loading: boolean; unavailable: boolean }) {
-  const tones = {
-    indigo: "bg-indigo-50 text-indigo-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    cyan: "bg-cyan-50 text-cyan-600",
-    violet: "bg-violet-50 text-violet-600",
-    rose: "bg-rose-50 text-rose-600",
-  } as const;
-  return <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold text-slate-500">{label}</p>{loading ? <div className="mt-3 h-8 w-16 animate-pulse rounded bg-slate-100" /> : <p className={`mt-2 break-words text-3xl font-semibold tracking-tight ${unavailable ? "text-slate-400" : ""}`}>{unavailable ? "—" : value}</p>}</div><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tones[tone]}`}><DashboardIcon name={icon} /></span></div><p className="mt-4 break-words text-xs text-slate-500">{unavailable ? "暂时无法确认" : detail}</p></article>;
+function QuotaAction({ quota, loading, unavailable }: { quota: DashboardQuota; loading: boolean; unavailable: boolean }) {
+  const detail = loading ? "正在读取额度…" : unavailable || quota.status === "unavailable" ? "暂时无法读取当前额度" : quota.availableCredits === 0 ? "当前可用额度为 0，实际执行前会再次核验额度。" : `可用于平台模型调用 · 单位 ${quota.unit}`;
+  return <Link href="/credits" className={styles.quickLink}>
+    <span><strong>当前额度 {loading ? "…" : unavailable || quota.status === "unavailable" ? "—" : quota.availableCredits.toLocaleString("zh-CN")}</strong><small>{detail}{!loading && !unavailable && quota.status === "available" && quota.nextExpiryAt ? ` · 最早到期 ${formatQuotaExpiry(quota.nextExpiryAt)}` : ""}</small></span>
+    <span aria-hidden="true">→</span>
+  </Link>;
 }
 
-function OperationsPanel({ payload, loading, unavailable }: { payload: DashboardPayload; loading: boolean; unavailable: boolean }) {
-  const emptyMessage = payload.state === "empty-plan" ? "项目已有访问权限，但还没有可用于判断健康度的工作项。" : "当前没有逾期、受阻或其他需要关注的项目计划信号。";
-  return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Project operations</p><h2 className="mt-2 break-words text-xl font-semibold">项目运营提醒</h2><p className="mt-2 max-w-3xl break-words text-xs leading-5 text-slate-600">这里只汇总需要处理的跨项目信号；项目创建、搜索和完整列表仍在独立“项目”入口。</p></div><div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-rose-50 px-3 py-1 font-semibold text-rose-700">逾期 {unavailable ? "—" : payload.summary.overdueWorkItems}</span><span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700">受阻 {unavailable ? "—" : payload.summary.blockedWorkItems}</span><span className="rounded-full bg-cyan-50 px-3 py-1 font-semibold text-cyan-700">变更待评估 {unavailable ? "—" : payload.summary.openImpactSuggestions}</span><span className="rounded-full bg-violet-50 px-3 py-1 font-semibold text-violet-700">动作待审批 {unavailable ? "—" : payload.summary.pendingActionApprovals}</span></div></div>{loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" /> : unavailable ? <div className="mt-5 rounded-2xl bg-rose-50 px-5 py-7 text-center text-sm text-rose-700">暂时无法读取项目运营状态，请重试。</div> : payload.operations.length === 0 ? <div className={`mt-5 rounded-2xl px-5 py-7 text-center text-sm ${payload.state === "healthy" ? "bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-600"}`}>{emptyMessage}</div> : <div className="mt-5 grid gap-3 lg:grid-cols-2">{payload.operations.map((entry) => { const signal = entry.health.signals[0]; const href = signal ? `/projects/${entry.project.id}/plan#work-item-${signal.workItemId}` : `/projects/${entry.project.id}/plan`; return <Link key={entry.project.id} href={href} className="group min-w-0 rounded-2xl border border-slate-200 p-4 transition hover:border-indigo-200 hover:bg-indigo-50/40"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="break-words text-sm font-semibold text-slate-800">{entry.project.name}</h3><p className="mt-2 break-words text-xs leading-5 text-slate-500">逾期 {entry.health.counts.overdue} · 受阻 {entry.health.counts.blocked} · 即将到期 {entry.health.counts.dueSoon} · 未分配 {entry.health.counts.unassigned}</p></div><span className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold ${entry.health.status === "atRisk" ? "bg-rose-100 text-rose-700" : entry.health.status === "attention" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-700"}`}>{entry.health.status === "atRisk" ? "需立即处理" : entry.health.status === "attention" ? "待处理" : "尚未建立计划"}</span></div><p className="mt-3 text-xs font-semibold text-indigo-600">进入项目计划 →</p></Link>; })}</div>}</section>;
-}
-
-function WorldStatusPanel({ payload, loading, unavailable }: { payload: DashboardPayload; loading: boolean; unavailable: boolean }) {
-  const metadata = {
-    at_risk: { label: "存在风险", tone: "bg-rose-100 text-rose-700", border: "hover:border-rose-200 hover:bg-rose-50/40" },
-    needs_attention: { label: "需要关注", tone: "bg-amber-100 text-amber-700", border: "hover:border-amber-200 hover:bg-amber-50/40" },
-    insufficient_data: { label: "资料不足", tone: "bg-slate-100 text-slate-600", border: "hover:border-slate-300 hover:bg-slate-50" },
-    on_track: { label: "运行正常", tone: "bg-emerald-100 text-emerald-700", border: "hover:border-emerald-200 hover:bg-emerald-50/40" },
-  } as const;
-  const emptyMessage = payload.state === "zero-project"
-    ? "当前没有可访问项目，先创建项目或等待项目 Owner 授权。"
-    : payload.state === "empty-plan"
-      ? "项目已有资料，但尚未建立可用于判断健康度的计划工作项。"
-      : payload.state === "running"
-        ? "任务正在运行，状态会在完成后更新。"
-        : "所有已有足够证据的项目当前没有需要展示的状态提醒。";
-  return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Project world state</p><h2 className="mt-2 break-words text-xl font-semibold">跨项目状态提醒</h2><p className="mt-2 max-w-3xl break-words text-xs leading-5 text-slate-600">由已确认事实、关系、冲突和计划健康度确定性计算；点击项目会回到统一的项目概览。</p></div><div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-rose-50 px-3 py-1 font-semibold text-rose-700">风险 {unavailable ? "—" : payload.summary.atRiskWorlds}</span><span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700">关注 {unavailable ? "—" : payload.summary.attentionWorlds}</span><span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">资料不足 {unavailable ? "—" : payload.summary.insufficientDataWorlds}</span></div></div>{loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" /> : unavailable ? <div className="mt-5 rounded-2xl bg-rose-50 px-5 py-7 text-center text-sm text-rose-700">暂时无法确认跨项目状态，请重试。</div> : payload.worlds.length === 0 ? <div className={`mt-5 rounded-2xl px-5 py-7 text-center text-sm ${payload.state === "healthy" ? "bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-600"}`}>{emptyMessage}</div> : <div className="mt-5 grid gap-3 lg:grid-cols-2">{payload.worlds.map((entry) => { const meta = metadata[entry.world.status]; return <Link key={entry.project.id} href={`/projects/${entry.project.id}#current-state`} className={`group min-w-0 rounded-2xl border border-slate-200 p-4 transition ${meta.border}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="break-words text-sm font-semibold text-slate-800">{entry.project.name}</h3><p className="mt-2 break-words text-xs leading-5 text-slate-500">事实 {entry.world.counts.activeFacts} · 问题 {entry.world.counts.issues} · 风险 {entry.world.counts.risks} · 冲突 {entry.world.counts.activeConflicts}</p></div><span className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-semibold ${meta.tone}`}>{meta.label}</span></div><p className="mt-3 text-xs font-semibold text-indigo-600">进入项目概览 →</p></Link>; })}</div>}</section>;
-}
-
-function ReadinessPanel({ payload, loading, unavailable }: { payload: DashboardPayload; loading: boolean; unavailable: boolean }) {
-  const steps = [
-    { label: "项目空间", detail: "至少创建一个项目", done: payload.summary.projects > 0, href: "/projects" },
-    { label: "智能记忆", detail: `${payload.summary.indexedProjects}/${payload.summary.projects} 个项目有索引`, done: payload.summary.projects > 0 && payload.summary.indexedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/memory` : "/projects" },
-  ];
-  const completed = steps.filter((step) => step.done).length;
-  return <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Setup progress</p><h2 className="mt-2 break-words text-xl font-semibold">项目就绪度</h2><p className="mt-2 break-words text-xs leading-5 text-slate-500">模型路由由平台默认模型或个人双确认委托提供，不在项目内单独配置。</p></div><span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">{loading ? "…" : unavailable ? "—" : `${completed}/${steps.length}`}</span></div>{loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" /> : unavailable ? <div className="mt-5 rounded-2xl bg-rose-50 px-5 py-7 text-center text-sm text-rose-700">暂时无法确认项目就绪度，请重试。</div> : <><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all" style={{ width: `${completed / steps.length * 100}%` }} /></div><div className="mt-5 space-y-2">{steps.map((step, index) => <Link key={step.label} href={step.href} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition hover:bg-slate-50"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-700">{step.label}</span><span className="block truncate text-xs text-slate-400">{step.detail}</span></span><span className="shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500">→</span></Link>)}</div></>}</section>;
-}
-
-function RecentJobs({ jobs, loading, unavailable }: { jobs: RecentJob[]; loading: boolean; unavailable: boolean }) {
-  return <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Recent activity</p><h2 className="mt-2 break-words text-xl font-semibold">最近任务</h2></div><span className="shrink-0 text-xs text-slate-400">{unavailable ? "暂时无法确认" : "自动保留执行状态"}</span></div>{loading ? <div className="mt-5 space-y-3">{[1, 2, 3].map((item) => <div key={item} className="h-12 animate-pulse rounded-xl bg-slate-100" />)}</div> : unavailable ? <div className="mt-5 rounded-2xl bg-rose-50 px-5 py-9 text-center text-sm text-rose-700">暂时无法确认最近任务，请重试。</div> : jobs.length === 0 ? <div className="mt-5 rounded-2xl bg-slate-50 px-5 py-9 text-center text-sm text-slate-500">运行仓库同步、索引或智能分析后，任务会显示在这里。</div> : <div className="mt-5 divide-y divide-slate-100">{jobs.slice(0, 5).map((job) => <Link key={job.id} href={jobHref(job)} className="flex min-w-0 items-center gap-3 py-3.5 first:pt-0 last:pb-0"><StatusDot status={job.status} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-700">{jobLabels[job.kind]}</span><span className="block break-words text-xs text-slate-400">{job.project?.name ?? "系统任务"} · {formatDate(job.createdAt)}</span></span><span className="shrink-0 text-xs font-medium text-slate-500">{jobStatusLabels[job.status]}</span></Link>)}</div>}</section>;
-}
-
-function StatusDot({ status }: { status: JobStatus }) {
-  const styles: Record<JobStatus, string> = { queued: "bg-amber-400", waitingConsent: "bg-amber-400", running: "animate-pulse bg-indigo-500", succeeded: "bg-emerald-500", failed: "bg-rose-500", unknown: "bg-orange-500", cancelled: "bg-slate-400" };
-  return <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${styles[status]}`} />;
-}
-
-function DashboardIcon({ name }: { name: string }) {
-  const paths: Record<string, React.ReactNode> = {
-    folder: <path d="M3 7.5h7l2-2h9v12.75A2.75 2.75 0 0 1 18.25 21H5.75A2.75 2.75 0 0 1 3 18.25V7.5Z" />,
-    check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16.5 9" /></>,
-    branch: <><circle cx="6" cy="5" r="2" /><circle cx="18" cy="7" r="2" /><circle cx="6" cy="19" r="2" /><path d="M6 7v10M8 9c5 0 4-2 8-2" /></>,
-    spark: <path d="m12 3 1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6L12 3Zm6 12 .7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7L18 15Z" />,
-    file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></>,
-    alert: <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17.5h.01" /></>,
-  };
-  return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+function RecentProjectCard({ project }: { project: WorkspaceProject }) {
+  const latestJob = project.backgroundJobs[0];
+  return <Link href={`/projects/${project.id}`} className={styles.projectCard}>
+    <div className={styles.projectCardHeading}><span className={styles.projectMark} aria-hidden="true">{project.name.slice(0, 1)}</span><span className={styles.projectStatus}>{project.memoryIndexPointer ? "记忆已建立" : "待建立记忆"}</span></div>
+    <strong className={styles.projectName}>{project.name}</strong>
+    <p className={styles.projectDescription}>{project.description || "尚未填写项目说明。"}</p>
+    <div className={styles.projectCounts}><span>来源 <b>{project._count.sources}</b></span><span>文件 <b>{project._count.assets}</b></span><span>条目 <b>{project._count.items}</b></span><span>仓库 <b>{project._count.repositoryLinks}</b></span></div>
+    <div className={styles.projectFooter}><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${jobStatusLabels[latestJob.status]}` : "暂无近期任务"}</span></div>
+  </Link>;
 }

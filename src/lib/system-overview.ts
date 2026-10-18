@@ -211,7 +211,7 @@ async function readSystemOverviewAnalyticsRows(db: PrismaClient, start: Date, en
   const [users, calls, quota] = await Promise.all([
     read(
       db.$queryRaw<Array<{ date: string; value: bigint | number | string }>>(Prisma.sql`
-        SELECT to_char("createdAt" AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
+        SELECT to_char("createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
                COUNT(*)::bigint AS "value"
         FROM "AppUser"
         WHERE "role" = 'user'::"AppUserRole"
@@ -224,23 +224,75 @@ async function readSystemOverviewAnalyticsRows(db: PrismaClient, start: Date, en
     ),
     read(
       db.$queryRaw<Array<{ date: string; tokens: bigint | number | string; "unknownCalls": bigint | number | string }>>(Prisma.sql`
-        SELECT to_char("completedAt" AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
+        WITH "platformCalls" AS (
+          SELECT to_char(call."completedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
+                 call."inputTokens"::bigint AS "inputTokens",
+                 call."outputTokens"::bigint AS "outputTokens",
+                 call."usageKnown" AS "usageKnown",
+                 call."status"::text AS "status"
+          FROM "ProviderCallAudit" AS call
+          WHERE call."billingMode" = 'platform'::"AiBillingMode"
+            AND call."payerKind" = 'platform_caller'::"AiRuntimePayerKind"
+            AND call."completedAt" IS NOT NULL
+            AND call."completedAt" >= ${start}
+            AND call."completedAt" < ${end}
+            AND call."status" IN ('succeeded', 'failed', 'unknown')
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "PlatformTokenReservation" AS reservation
+              WHERE reservation."id" = call."reservationId"
+                AND (reservation."unifiedQuestionConfirmationId" IS NOT NULL
+                  OR reservation."personalKnowledgeQaChallengeId" IS NOT NULL)
+            )
+
+          UNION ALL
+
+          SELECT to_char(audit."completedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD'),
+                 audit."inputTokens"::bigint,
+                 audit."outputTokens"::bigint,
+                 audit."usageKnown",
+                 audit."status"::text
+          FROM "UnifiedQuestionAudit" AS audit
+          WHERE audit."completedAt" IS NOT NULL
+            AND audit."completedAt" >= ${start}
+            AND audit."completedAt" < ${end}
+            AND audit."status" IN ('succeeded', 'failed', 'unknown')
+
+          UNION ALL
+
+          SELECT to_char(audit."completedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD'),
+                 audit."inputTokens"::bigint,
+                 audit."outputTokens"::bigint,
+                 audit."usageKnown",
+                 audit."status"::text
+          FROM "PersonalKnowledgeQaAudit" AS audit
+          INNER JOIN "PlatformTokenReservation" AS reservation
+            ON reservation."userId" = audit."ownerUserId"
+           AND reservation."personalKnowledgeQaChallengeId" = audit."challengeId"
+           AND reservation."providerConnectionId" = audit."providerConnectionId"
+           AND reservation."providerConfigurationVersion" = audit."providerConfigurationVersion"
+           AND reservation."modelId" = audit."modelId"
+           AND reservation."operation" = 'generateWithContext'::"AiOperation"
+           AND reservation."routeSource" = 'platform_default'
+           AND reservation."routeId" IS NOT NULL
+           AND reservation."routeVersion" IS NOT NULL
+          WHERE audit."completedAt" IS NOT NULL
+            AND audit."completedAt" >= ${start}
+            AND audit."completedAt" < ${end}
+            AND audit."status" IN ('succeeded', 'failed', 'unknown')
+        )
+        SELECT "date",
                COALESCE(SUM("inputTokens" + "outputTokens") FILTER (WHERE "usageKnown" = TRUE), 0)::bigint AS "tokens",
-               COUNT(*) FILTER (WHERE "usageKnown" = FALSE)::bigint AS "unknownCalls"
-        FROM "ProviderCallAudit"
-        WHERE "billingMode" = 'platform'::"AiBillingMode"
-          AND "payerKind" = 'platform_caller'::"AiRuntimePayerKind"
-          AND "completedAt" IS NOT NULL
-          AND "completedAt" >= ${start}
-          AND "completedAt" < ${end}
-        GROUP BY 1
-        ORDER BY 1
+               COUNT(*) FILTER (WHERE "status" = 'unknown')::bigint AS "unknownCalls"
+        FROM "platformCalls"
+        GROUP BY "date"
+        ORDER BY "date"
       `),
       (rows) => Object.freeze(rows.map((row) => ({ date: safeAnalyticsDate(row.date), tokens: safeAnalyticsInteger(row.tokens), unknownCalls: safeAnalyticsInteger(row.unknownCalls) }))),
     ),
     read(
       db.$queryRaw<Array<{ date: string; value: bigint | number | string }>>(Prisma.sql`
-        SELECT to_char("settledAt" AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
+        SELECT to_char("settledAt" AT TIME ZONE 'UTC' AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
                COALESCE(SUM("settledTokens"), 0)::bigint AS "value"
         FROM "PlatformTokenReservation"
         WHERE "status" = 'settled'::"PlatformTokenReservationStatus"
@@ -263,7 +315,7 @@ function projectTrendPoint(date: string, rows: AnalyticsRows): SystemOverviewTre
   return Object.freeze({ date, newUsers: users, platformTokens: call?.tokens ?? (rows.calls === null ? null : 0), unknownCalls: call?.unknownCalls ?? (rows.calls === null ? null : 0), settledQuota: quota });
 }
 
-async function readSystemOverviewAnalytics(db: PrismaClient, now: Date): Promise<SystemOverviewAnalytics> {
+export async function readSystemOverviewAnalytics(db: PrismaClient, now: Date): Promise<SystemOverviewAnalytics> {
   const days30 = analyticsDateKeys(now, 30);
   const start = shanghaiDayStart(days30[0]!);
   const rows = await readSystemOverviewAnalyticsRows(db, start, now);
@@ -298,6 +350,67 @@ function failureAggregate(
   if (rows === null) return Object.freeze({ total: null, byCode: Object.freeze([]), evidence: "not_obtained" });
   const byCode = normalizeFailureGroups(rows);
   return Object.freeze({ total: byCode.reduce((sum, entry) => sum + entry.count, 0), byCode, evidence: "available" });
+}
+
+async function readPlatformCallFailureAggregate(db: PrismaClient, since: Date, until: Date): Promise<SystemOverviewFailureAggregate> {
+  try {
+    const rows = await db.$queryRaw<Array<{ safeErrorCode: string | null; count: bigint | number | string }>>(Prisma.sql`
+      WITH "platformFailures" AS (
+        SELECT call."safeErrorCode"
+        FROM "ProviderCallAudit" AS call
+        WHERE call."billingMode" = 'platform'::"AiBillingMode"
+          AND call."payerKind" = 'platform_caller'::"AiRuntimePayerKind"
+          AND call."status" IN ('failed', 'unknown')
+          AND call."completedAt" IS NOT NULL
+          AND call."completedAt" >= ${since}
+          AND call."completedAt" <= ${until}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "PlatformTokenReservation" AS reservation
+            WHERE reservation."id" = call."reservationId"
+              AND (reservation."unifiedQuestionConfirmationId" IS NOT NULL
+                OR reservation."personalKnowledgeQaChallengeId" IS NOT NULL)
+          )
+
+        UNION ALL
+
+        SELECT audit."safeErrorCode"
+        FROM "UnifiedQuestionAudit" AS audit
+        WHERE audit."status" IN ('failed', 'unknown')
+          AND audit."completedAt" IS NOT NULL
+          AND audit."completedAt" >= ${since}
+          AND audit."completedAt" <= ${until}
+
+        UNION ALL
+
+        SELECT audit."safeErrorCode"
+        FROM "PersonalKnowledgeQaAudit" AS audit
+        INNER JOIN "PlatformTokenReservation" AS reservation
+          ON reservation."userId" = audit."ownerUserId"
+         AND reservation."personalKnowledgeQaChallengeId" = audit."challengeId"
+         AND reservation."providerConnectionId" = audit."providerConnectionId"
+         AND reservation."providerConfigurationVersion" = audit."providerConfigurationVersion"
+         AND reservation."modelId" = audit."modelId"
+         AND reservation."operation" = 'generateWithContext'::"AiOperation"
+         AND reservation."routeSource" = 'platform_default'
+         AND reservation."routeId" IS NOT NULL
+         AND reservation."routeVersion" IS NOT NULL
+        WHERE audit."status" IN ('failed', 'unknown')
+          AND audit."completedAt" IS NOT NULL
+          AND audit."completedAt" >= ${since}
+          AND audit."completedAt" <= ${until}
+      )
+      SELECT "safeErrorCode", COUNT(*)::bigint AS "count"
+      FROM "platformFailures"
+      GROUP BY "safeErrorCode"
+    `);
+    return failureAggregate(rows.map((row) => ({
+      safeErrorCode: row.safeErrorCode,
+      _count: { _all: safeAnalyticsInteger(row.count) },
+    })));
+  } catch {
+    return failureAggregate(null);
+  }
 }
 
 function routeNotObtained(operation: PlatformDefaultAiOperation): SystemOverviewRoute {
@@ -529,25 +642,7 @@ async function readFailureGroups(db: PrismaClient, since: Date, until: Date): Pr
   controlledActions: SystemOverviewFailureAggregate;
 }>> {
   const [providerCalls, mcpCalls, backgroundJobs, automationRuns, controlledActions] = await Promise.all([
-    (async () => {
-      try {
-        const rows = await db.providerCallAudit.groupBy({
-          by: ["safeErrorCode"],
-          // Keep this aggregate scoped to platform-hosted usage. Personal BYOK
-          // calls are user-owned and must not appear as platform failures.
-          where: {
-            billingMode: "platform",
-            payerKind: "platformCaller",
-            status: { in: ["failed", "unknown"] },
-            completedAt: { gte: since, lte: until },
-          },
-          _count: { _all: true },
-        });
-        return failureAggregate(rows);
-      } catch {
-        return failureAggregate(null);
-      }
-    })(),
+    readPlatformCallFailureAggregate(db, since, until),
     (async () => {
       try {
         const rows = await db.projectMcpActionDispatchAttempt.groupBy({

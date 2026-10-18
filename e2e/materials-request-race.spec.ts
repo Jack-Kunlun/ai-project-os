@@ -36,7 +36,7 @@ async function createProject(page: Page): Promise<string> {
   await page.getByLabel("项目名称", { exact: true }).fill(name);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   const card = page.locator("article").filter({ has: page.getByRole("heading", { name, exact: true }) });
-  const href = await card.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
+  const href = await card.getByRole("link", { name: `查看项目 ${name}`, exact: true }).getAttribute("href");
   expect(href).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   return href!.split("/")[2]!;
 }
@@ -165,7 +165,7 @@ test("materials lists ignore delayed responses after filter changes and unmount"
   });
 
   await page.goto(`/projects/${projectId}/materials`);
-  await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "资料来源", exact: true })).toBeVisible();
   await expect(page.getByText("默认原始资料", { exact: true })).toBeVisible();
   await page.getByRole("navigation", { name: "项目资料栏目" }).getByRole("link", { name: /^整理结果(?:\s+\d+)?$/u }).click();
   const statusFilter = page.getByRole("combobox", { name: "按审核状态筛选", exact: true });
@@ -216,10 +216,10 @@ test("materials lists ignore delayed responses after filter changes and unmount"
   const latestKind = delayedResponse();
   sourceHolds.set("|manual", staleKind);
   sourceHolds.set("|document", latestKind);
-  const kindFilter = page.getByRole("combobox", { name: "按原始资料类型筛选", exact: true });
-  await kindFilter.selectOption("manual");
+  const kindFilter = page.getByRole("navigation", { name: "按资料类型筛选", exact: true });
+  await kindFilter.getByRole("button", { name: "手工文本", exact: true }).click();
   await staleKind.requested.promise;
-  await kindFilter.selectOption("document");
+  await kindFilter.getByRole("button", { name: "文档", exact: true }).click();
   await latestKind.requested.promise;
   staleKind.release.resolve();
   await staleKind.completed.promise;

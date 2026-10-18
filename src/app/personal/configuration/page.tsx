@@ -3,6 +3,7 @@ import { AppHeader } from "@/components/app-header";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { requirePageSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import styles from "../../support-pages.module.css";
 
 export const dynamic = "force-dynamic";
 
@@ -32,26 +33,28 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
   const mcpStatus = resourceStatus(mcpConnections, user.accountAccessVersion, "lastDiscoveredAt");
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+    <main className={styles.page}>
       <AppHeader username={user.username} active="personalKnowledge" isSystemAdmin={user.role === "admin"} />
       <PersonalWorkspaceNav active="configuration" />
-      <div className="mx-auto max-w-6xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
-        <section className="rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-11">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal configuration</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">我的空间配置</h1>
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里管理你拥有的模型、Git 和 MCP 连接。项目配置会展示该项目当前的资源来源，并按项目自己的委托与选择使用；保存个人资源不会自动成为任何项目的默认配置。</p>
+      <div className={styles.content}>
+        <section className={styles.pageHeader}>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Personal configuration</p>
+            <h1 className={styles.pageTitle}>我的空间配置</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里管理你拥有的模型、Git 和 MCP 连接。项目配置会展示该项目当前的资源来源，并按项目自己的委托与选择使用；保存个人资源不会自动成为任何项目的默认配置。</p>
+          </div>
         </section>
 
-        <section className="mt-7 grid gap-5 md:grid-cols-3">
+        <section className={styles.resourceList} aria-label="个人资源">
           <ResourceCard href="/personal/models" eyebrow="AI resources" title="我的模型" description="维护个人模型连接、会员能力和连接状态。" status={modelStatus} verificationLabel="最近测试" />
           <ResourceCard href="/personal/connections/git" eyebrow="Git authorization" title="Git 授权管理" description="维护个人 Git 连接，查看关联项目并撤销项目授权。项目绑定从项目的代码仓库配置发起。" status={gitStatus} verificationLabel="最近测试" />
           <ResourceCard href="/personal/connections/mcp" eyebrow="Tool access" title="我的 MCP 连接" description="维护个人 MCP 连接与安全状态；项目授权仍在项目侧处理。" status={mcpStatus} verificationLabel="最近发现" />
         </section>
 
-        <section className="mt-7 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 text-sm leading-7 text-indigo-950 shadow-sm sm:p-7">
-          <h2 className="text-lg font-semibold">个人资源与项目使用</h2>
-          <p className="mt-2">我的空间负责个人资源的所有权和维护，项目配置负责读取当前有效来源并完成项目范围内的委托或选择。两者职责不同，项目状态变化不会删除你的个人连接。</p>
-          <Link href="/projects" className="mt-4 inline-flex font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看项目并进入项目配置 →</Link>
+        <section className={styles.note}>
+          <h2>个人资源与项目使用</h2>
+          <p>我的空间负责个人资源的所有权和维护，项目配置负责读取当前有效来源并完成项目范围内的委托或选择。两者职责不同，项目状态变化不会删除你的个人连接。</p>
+          <Link href="/projects">查看项目并进入项目配置 →</Link>
         </section>
       </div>
     </main>
@@ -81,7 +84,7 @@ function ResourceCard({ href, eyebrow, title, description, status, verificationL
     timeZone: "Asia/Shanghai", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   }).format(status.latest);
   return (
-    <Link href={href} className="group flex h-full flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md">
+    <Link href={href} className={styles.resourceRow}>
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p>
       <h2 className="mt-3 text-xl font-semibold text-slate-900">{title}</h2>
       <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>

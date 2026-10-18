@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { buildProjectHref } from "@/lib/project-navigation";
+import { buildProjectQuestionHref } from "./materials/materials-navigation";
 import { useEffect, useRef, useState } from "react";
 
 type Confirmation = {
@@ -182,9 +183,9 @@ export function ProjectFactImport({ projectId, sourceIds, onChanged }: {
     {batches.length > 0 ? <button type="button" onClick={() => void organize()} disabled={running} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{running ? "正在提交后台任务…" : "确认发送并加入队列"}</button> : null}
     {result ? <div role="status" className="mt-4 text-sm leading-6 text-indigo-900"><p>已提交 {result.jobs.length} 项任务 · {result.queued} 项处理中 · {result.completed} 项完成{result.failed > 0 ? ` · ${result.failed} 项失败` : ""}{result.unknown > 0 ? ` · ${result.unknown} 项待核实` : ""}{result.cancelled > 0 ? ` · ${result.cancelled} 项已取消` : ""}</p>{result.completed > 0 ? <p className="mt-1">自动形成 {result.confirmed} 条事实 · {result.review} 条待处理 · 跳过 {result.duplicates} 条重复记录</p> : null}<div className="mt-2 flex flex-wrap gap-4"><Link href={buildProjectHref(projectId, "materials", { view: "tasks", from: "materials" })} className="font-semibold underline">查看任务进度</Link>{result.completed > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", status: "confirmed", focus: "confirmed-facts", from: "materials" })} className="underline">查看整理结果</Link> : null}{result.review > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", from: "materials" })} className="underline">处理待核对内容</Link> : null}</div></div> : null}
     {result && result.completed > 0 ? <div className="mt-4 border-t border-indigo-200 pt-4">
-      <p className="text-sm leading-6 text-indigo-900">整理结果已保存。需要继续问项目时，下一步直接提问；待核对内容可在整理结果栏目处理。</p>
+      <p className="text-sm leading-6 text-indigo-900">整理结果已保存。需要继续提问时，可打开智能问答；待核对内容可在整理结果栏目处理。</p>
       <div className="mt-3 flex flex-wrap gap-3">
-        <Link href={buildProjectHref(projectId, "materials", { view: "ask", from: "materials" })} className="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">向项目提问</Link>
+        <Link href={buildProjectQuestionHref(projectId)} className="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">打开智能问答</Link>
         {result.review > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", from: "materials" })} className="inline-flex min-h-11 items-center px-3 py-2 text-sm font-semibold text-indigo-700 underline">处理待核对内容</Link> : null}
       </div>
     </div> : null}

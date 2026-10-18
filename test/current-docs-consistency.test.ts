@@ -88,7 +88,9 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
   assert.match(docs["docs/admin-operation-guide.md"], /停用账号仍可审计，?所有有效结果均为 `effective=false`/u);
   assert.match(docs["docs/admin-operation-guide.md"], /system admin 角色只代表平台管理权限，不隐含任何工作区或项目 Owner 权限/u);
   assert.doesNotMatch(docs["docs/admin-operation-guide.md"], /\| `\/admin\/connectors\/git`/u);
-  assert.doesNotMatch(docs["docs/admin-operation-guide.md"], /\| `\/admin\/users\/memberships`/u);
+  // The v1.1.0 user-and-entitlement navigation exposes the existing membership page.
+  assert.match(docs["docs/admin-operation-guide.md"], /\| `\/admin\/users\/memberships`/u);
+  assert.match(await readFile("src/app/admin/users/memberships/page.tsx", "utf8"), /export default/u);
   assert.doesNotMatch(docs["docs/admin-operation-guide.md"], /\| `\/system\/account-access`/u);
   assert.match(docs["docs/admin-operation-guide.md"], /受守卫的退场跳转/u);
   assert.match(docs["src/app/admin/guide/page.tsx"], /按当前控制面流程完成预算、供应商连接、能力模型和用户治理/u);

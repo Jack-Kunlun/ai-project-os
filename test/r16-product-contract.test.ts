@@ -19,7 +19,8 @@ test("R16 entry points use the shared navigation and evidence contracts", async 
     readFile("src/app/settings/settings-client.tsx", "utf8"),
     readFile("src/app/settings/platform-default-routes-client.tsx", "utf8"),
   ]);
-  assert.match(overview, /status: "failed"/u);
+  assert.match(overview, /summary\.failedJobs/u);
+  assert.match(overview, /查看任务运行记录/u);
   assert.match(overview, /focus: "task-runs"/u);
   assert.match(overview, /parseProjectPageState\("overview"/u);
   assert.match(materials, /parseProjectPageState\("materials"/u);
@@ -34,10 +35,12 @@ test("R16 entry points use the shared navigation and evidence contracts", async 
   assert.match(governance, /tabIndex=\{-1\}/u);
   assert.match(review, /KnowledgeLifecycle/u);
   assert.match(intelligence, /ScopeEvidenceCard/u);
-  assert.match(intelligence, /当前缺失/u);
-  assert.match(intelligence, /就绪条件/u);
-  assert.match(intelligence, /当前状态接口未提供识别与抽取路由的就绪证据/u);
-  assert.match(intelligence, /memoryRuntimeBlocked/u);
+  assert.match(intelligence, /label: "项目分析路由", ready: readiness\.generationRoute/u);
+  assert.match(intelligence, /label: "向量模型路由", ready: readiness\.embeddingRoute/u);
+  assert.match(intelligence, /label: "兼容的记忆索引", ready: readiness\.indexCompatible/u);
+  assert.match(intelligence, /const decision = readiness\.runtimeDecision/u);
+  assert.match(intelligence, /status\.readiness\.runtimeDecision\.canRun/u);
+  assert.match(intelligence, /readiness\.activeIndex \? "当前索引不可用于项目 AI" : "尚未建立"/u);
   assert.doesNotMatch(intelligence, /ready: !loading/u);
   assert.match(automations, /不使用模型或个人连接/u);
   assert.match(automations, /下一次预计运行（UTC）/u);

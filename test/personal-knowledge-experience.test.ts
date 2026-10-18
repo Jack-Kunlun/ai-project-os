@@ -4,20 +4,18 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { PersonalKnowledgeEditor, validateKnowledgeDraft } from "../src/app/personal/knowledge/personal-knowledge-editor";
 
-test("个人知识入口由服务端会话保护并接入全局导航", async () => {
-  const [page, header] = await Promise.all([
+test("个人知识入口保留服务端会话保护并使用全局用户壳", async () => {
+  const [page, header, personalNav] = await Promise.all([
     readFile("src/app/personal/knowledge/page.tsx", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/components/personal-workspace-nav.tsx", "utf8"),
   ]);
 
   assert.match(page, /requirePageSession\(\)/u);
   assert.match(page, /isSystemAdmin=\{user\.role === "admin"\}/u);
-  assert.match(header, /key: "personalKnowledge"/u);
-  assert.match(header, /label: "我的空间"/u);
-  assert.match(header, /href: "\/personal"/u);
-  assert.match(header, /const isActive = item\.key === active/u);
-  assert.match((await readFile("src/components/personal-workspace-nav.tsx", "utf8")), /知识库/u);
-  assert.match((await readFile("src/components/personal-workspace-nav.tsx", "utf8")), /配置/u);
+  assert.match(header, /return isUserShellPath\(pathname\) \? <UserShell username=\{props\.username\} \/> : <LegacyAppHeader/u);
+  assert.match(personalNav, /export function PersonalWorkspaceNav/u);
+  assert.match(personalNav, /return null/u);
 });
 
 test("个人知识页面提供纯文本生命周期入口并保持请求无缓存", async () => {
@@ -46,7 +44,7 @@ test("个人知识页面提供纯文本生命周期入口并保持请求无缓�
   assert.match(source, /revisionContent\?\.documentId === document\.id/u);
   assert.match(source, /加载更多版本/u);
   assert.match(source, /导出 Markdown/u);
-  assert.match(source, /无需创建项目/u);
+  assert.match(source, /<h1>我的知识<\/h1>/u);
   assert.match(source, /PersonalWorkspaceNav/u);
   assert.match(source, /active="knowledge"/u);
   assert.match(source, /useSearchParams/u);
@@ -55,6 +53,20 @@ test("个人知识页面提供纯文本生命周期入口并保持请求无缓�
   assert.doesNotMatch(source, /console\.(log|debug|info|error)/u);
   const saveDraft = source.slice(source.indexOf("async function saveDraft"), source.indexOf("async function deleteDocument"));
   assert.ok(saveDraft.indexOf("validateKnowledgeDraft(draft)") < saveDraft.indexOf("fetch(endpoint"));
+});
+
+test("通用记忆列表筛选使用严格布尔参数并沿用 owner-scoped GET", async () => {
+  const [client, route] = await Promise.all([
+    readFile("src/app/personal/knowledge/knowledge-client.tsx", "utf8"),
+    readFile("src/app/api/personal/knowledge/route.ts", "utf8"),
+  ]);
+
+  assert.match(client, /knowledgeFilter === "memory"\) params\.set\("isDefaultMemory", "true"\)/u);
+  assert.match(client, /setKnowledgeFilter\(nextFilter\);[\s\S]*setCursor\(null\);[\s\S]*setCursorStack\(\[\]\)/u);
+  assert.match(route, /isDefaultMemory: z\.enum\(\["true", "false"\]\)\.transform\(\(value\) => value === "true"\)\.optional\(\)/u);
+  assert.match(route, /\.strict\(\)/u);
+  assert.match(route, /listPersonalKnowledgeDocuments\(actor,[\s\S]*isDefaultMemory: query\.isDefaultMemory/u);
+  assert.match(route, /searchPersonalKnowledgeDocuments\(actor,[\s\S]*isDefaultMemory: query\.isDefaultMemory/u);
 });
 
 test("URL 指定内容的导航先确认草稿，取消时恢复已确认的 URL", async () => {
@@ -76,12 +88,14 @@ test("URL 指定内容的导航先确认草稿，取消时恢复已确认的 URL
   assert.match(transition.slice(confirmationIndex), /restoreAcceptedDocumentQuery\(\)/u);
   assert.match(transition, /router\.replace\(/u);
   assert.match(transition, /requestedDocumentIdRef\.current/u);
+  assert.match(transition, /detailHistoryEntryRef\.current = false/u);
+  assert.match(source, /detailHistoryEntryRef\.current = true;[\s\S]*router\.push\(/u);
   assert.match(source, /requestedDocumentId === acceptedDocumentIdRef\.current \|\| queryNavigationPendingRef\.current/u);
-  assert.match(loader, /const nextSelectedId = acceptedDocumentId/u);
+  assert.match(loader, /const nextSelectedId = preferredDocumentId/u);
   assert.doesNotMatch(loader, /requestedDocumentId(?!Ref)/u);
 });
 
-test("新建和编辑在弹窗中打开且不让旧列表响应覆盖草稿", async () => {
+test("新建使用弹窗、编辑使用抽屉且不让旧列表响应覆盖草稿", async () => {
   const source = await readFile("src/app/personal/knowledge/knowledge-client.tsx", "utf8");
   const modalStart = source.indexOf("function openKnowledgeModal");
   const modalEnd = source.indexOf("async function requestCloseKnowledgeModal", modalStart);
@@ -96,15 +110,18 @@ test("新建和编辑在弹窗中打开且不让旧列表响应覆盖草稿", as
   assert.match(openModal, /invalidateListRequest\(\);\s*setListLoading\(false\);\s*setKnowledgeModal\(next\);/u);
   assert.ok(create.indexOf('openKnowledgeModal("editor")') < create.indexOf("setDraft(emptyDraft)"));
   assert.ok(edit.indexOf('openKnowledgeModal("editor")') < edit.indexOf("setDraft({ title: documentToEdit.title"));
+  assert.match(source, /data-variant=\{knowledgeModal === "editor" \? mode : knowledgeModal \?\? undefined\}/u);
   assert.match(source, /if \(knowledgeModalRef\.current !== null\) return;/u);
   assert.match(source, /onEdit=\{\(\) => startEdit\(document\)\}/u);
 });
 
-test("知识列表和检索保留在主页面，新增、编辑和导入在独立模态框", async () => {
+test("知识列表提供三个栏目，新增用弹窗，编辑和导入用抽屉，检索按需打开", async () => {
   const source = await readFile("src/app/personal/knowledge/knowledge-client.tsx", "utf8");
 
-  assert.match(source, /grid grid-cols-2[\s\S]*我的知识[\s\S]*智能检索/u);
-  assert.doesNotMatch(source, /aria-current=\{workspaceSection === "import"/u);
+  assert.match(source, /aria-label="知识栏目"[\s\S]*全部知识[\s\S]*通用记忆[\s\S]*知识图谱/u);
+  assert.match(source, /params\.set\("isDefaultMemory", "true"\)/u);
+  assert.match(source, /openSearchTool\("semantic"\)/u);
+  assert.match(source, /\/personal\/knowledge\/graph/u);
   assert.match(source, /<dialog[\s\S]*?aria-labelledby="knowledge-modal-title"/u);
   assert.match(source, /dialogElement\.showModal\(\)/u);
   assert.match(source, /onCancel=\{\(event\) => \{ event\.preventDefault\(\); void requestCloseKnowledgeModal\(\); \}\}/u);
@@ -138,10 +155,10 @@ test("2000 字个人通用记忆限制在小屏表单中可见且阻止超限保
   assert.match(overLimitMarkup, /2,001 \/ 2,000 字符/u);
   assert.match(overLimitMarkup, /请缩短正文或取消标记/u);
   assert.match(overLimitMarkup, /aria-invalid="true"/u);
-  const saveButton = overLimitMarkup.match(/<button type="submit"[^>]*>创建内容<\/button>/u)?.[0];
+  const saveButton = overLimitMarkup.match(/<button type="submit"[^>]*>创建知识<\/button>/u)?.[0];
   assert.ok(saveButton);
   assert.doesNotMatch(saveButton, /\sdisabled(?:="")?(?:\s|>)/u);
-  assert.match(overLimitMarkup, /sticky bottom-0/u);
+  assert.match(overLimitMarkup, /knowledge-editor-actions/u);
   assert.match(render(unmarkedDraft), /标记为个人通用记忆后，每条最多 2,000 字符/u);
   assert.match(render(shortenedDraft), /2,000 \/ 2,000 字符/u);
 });

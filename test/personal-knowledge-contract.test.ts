@@ -46,6 +46,7 @@ type DocumentRow = {
   ownerUserId: string;
   state: "active" | "deleted";
   version: number;
+  isDefaultMemory: boolean;
   currentRevisionId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -135,6 +136,7 @@ function matchesDocument(db: PersonalKnowledgeFakeDb, document: DocumentRow, whe
   if (filter.id !== undefined && !scalarCondition(document.id, filter.id)) return false;
   if (filter.state !== undefined && !scalarCondition(document.state, filter.state)) return false;
   if (filter.version !== undefined && !scalarCondition(document.version, filter.version)) return false;
+  if (filter.isDefaultMemory !== undefined && !scalarCondition(document.isDefaultMemory, filter.isDefaultMemory)) return false;
   if (filter.deletedAt !== undefined && !scalarCondition(document.deletedAt, filter.deletedAt)) return false;
   if (filter.updatedAt !== undefined && !scalarCondition(document.updatedAt, filter.updatedAt)) return false;
   const relation = asRecord(filter.currentRevision);
@@ -178,6 +180,7 @@ class PersonalKnowledgeFakeDb {
   };
 
   readonly personalKnowledgeDocument = {
+    count: async ({ where }: { where: unknown }) => [...this.documents.values()].filter((candidate) => matchesDocument(this, candidate, where)).length,
     create: async ({ data }: { data: DocumentRow }) => {
       this.documents.set(data.id, cloneDocument(data));
       return projectDocument(this, data);
@@ -343,6 +346,32 @@ test("owner isolation, deletion tombstones, CAS, revision history and body-free 
   }
 });
 
+test("通用记忆过滤在列表和搜索服务端分页中生效", async () => {
+  const db = seedDb();
+  const memoryOne = await createPersonalKnowledgeDocument({ title: "Needle memory one", content: "needle memory", isDefaultMemory: true }, actor(OWNER_A), db as never, now);
+  await createPersonalKnowledgeDocument({ title: "Needle ordinary", content: "needle ordinary" }, actor(OWNER_A), db as never, new Date(now.getTime() + 1));
+  const memoryTwo = await createPersonalKnowledgeDocument({ title: "Needle memory two", content: "needle memory", isDefaultMemory: true }, actor(OWNER_A), db as never, new Date(now.getTime() + 2));
+
+  const firstPage = await listPersonalKnowledgeDocuments(actor(OWNER_A), { limit: 1, isDefaultMemory: true }, db as never);
+  assert.equal(firstPage.documents.length, 1);
+  assert.equal(firstPage.documents[0]?.isDefaultMemory, true);
+  assert.ok(firstPage.nextCursor);
+
+  const secondPage = await listPersonalKnowledgeDocuments(actor(OWNER_A), { limit: 1, cursor: firstPage.nextCursor!, isDefaultMemory: true }, db as never);
+  assert.equal(secondPage.documents.length, 1);
+  assert.equal(secondPage.documents[0]?.isDefaultMemory, true);
+  assert.equal(secondPage.nextCursor, null);
+  assert.notEqual(firstPage.documents[0]?.id, secondPage.documents[0]?.id);
+  assert.deepEqual(new Set([firstPage.documents[0]?.id, secondPage.documents[0]?.id]), new Set([memoryOne.id, memoryTwo.id]));
+
+  const filteredSearch = await searchPersonalKnowledgeDocuments(actor(OWNER_A), { query: "needle", limit: 10, isDefaultMemory: true }, db as never);
+  assert.equal(filteredSearch.documents.length, 2);
+  assert.ok(filteredSearch.documents.every((document) => document.isDefaultMemory === true));
+  const ordinarySearch = await searchPersonalKnowledgeDocuments(actor(OWNER_A), { query: "needle", limit: 10, isDefaultMemory: false }, db as never);
+  assert.equal(ordinarySearch.documents.length, 1);
+  assert.equal(ordinarySearch.documents[0]?.isDefaultMemory, false);
+});
+
 test("personal graph is explicit, owner isolated, revision aware, and capacity uses current UTF-8 bodies", async () => {
   const db = seedDb();
   const first = await createPersonalKnowledgeDocument({ title: "中文", content: "你好🙂" }, actor(OWNER_A), db as never, now);
@@ -425,7 +454,9 @@ test("mutation services use one explicit root transaction boundary", async () =>
 test("schema and migration keep personal knowledge owner-scoped without project fields", async () => {
   const schema = await readFile("prisma/schema.prisma", "utf8");
   const migration = await readFile("prisma/migrations/20260921010000_add_personal_knowledge_domain/migration.sql", "utf8");
-  const personalSchema = schema.slice(schema.indexOf("model PersonalKnowledgeDocument"), schema.indexOf("model AppUserEmailVerificationAudit"));
+  const personalSchema = [...schema.matchAll(/^model PersonalKnowledge\w+\s+\{[\s\S]*?^\}/gmu)]
+    .map((match) => match[0])
+    .join("\n");
   assert.doesNotMatch(personalSchema, /projectId|workspaceId/u);
   assert.match(personalSchema, /ownerUserId\s+String/u);
   assert.match(personalSchema, /onDelete: NoAction, onUpdate: Cascade/u);

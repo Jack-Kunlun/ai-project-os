@@ -5,6 +5,16 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 export const MATERIAL_KIND_VALUES = ["all", "document", "screenshot", "github", "git", "web", "manual"] as const;
 export type MaterialKind = (typeof MATERIAL_KIND_VALUES)[number];
 
+export const MATERIAL_SOURCE_CATEGORIES: ReadonlyArray<{ value: MaterialKind; label: string }> = [
+  { value: "all", label: "全部资料" },
+  { value: "document", label: "文档" },
+  { value: "screenshot", label: "图片与截图" },
+  { value: "web", label: "网页" },
+  { value: "github", label: "GitHub" },
+  { value: "git", label: "Git 仓库" },
+  { value: "manual", label: "手工文本" },
+];
+
 export const REVIEW_TYPE_VALUES = ["all", "decision", "progress", "issue", "risk"] as const;
 export type ReviewType = (typeof REVIEW_TYPE_VALUES)[number];
 
@@ -106,4 +116,9 @@ export function safeMaterialsReturnTo(projectId: string, value: string | null | 
 
 export function isAddSourceView(value: string | null | undefined): boolean {
   return value === "add";
+}
+
+export function buildProjectQuestionHref(projectId: string): string {
+  const query = new URLSearchParams({ scope: "project", projectId });
+  return `/ask?${query.toString()}`;
 }

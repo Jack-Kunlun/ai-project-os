@@ -7,6 +7,7 @@ import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { OperationPanel } from "@/components/operation-panel";
 import { ProjectOverviewParentLink } from "@/components/project-parent-link";
 import { connectionErrorText, connectionFieldClass, readConnectionError } from "@/app/profile/connections/connection-ui";
+import supportStyles from "../project-support.module.css";
 
 type ProjectToolsClientProps = Readonly<{ username: string; projectId: string; isSystemAdmin: boolean; mcpExportEnabled: boolean; mcpActionsEnabled: boolean }>;
 type ConnectionOption = Readonly<{ id: string; name: string }>;
@@ -293,7 +294,7 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={isSystemAdmin} />
       {dialog}
       <div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">

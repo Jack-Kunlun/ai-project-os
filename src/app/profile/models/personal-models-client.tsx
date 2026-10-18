@@ -7,6 +7,7 @@ import { HelpTooltip } from "@/components/help-tooltip";
 import { OperationPanel } from "@/components/operation-panel";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import styles from "../../support-pages.module.css";
 import {
   createDefaultPersonalModelDraft,
   createPersonalModelConfigurationPatch,
@@ -110,7 +111,7 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
   const canMaintain = membership.status === "active" || membership.status === "expired" || membership.status === "revoked" || membership.status === "none";
 
   return (
-    <div className="mx-auto max-w-6xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
+    <div className={styles.content}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link href="/personal/configuration" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-700">
           <span aria-hidden="true">←</span> 返回我的空间配置
@@ -118,13 +119,13 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
         <span className="text-xs text-slate-400">我的空间 / 我的模型</span>
       </div>
 
-      <section className="mt-6 flex flex-col gap-5 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-7">
+      <section className={`${styles.pageHeader} mt-6`}>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">My models</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">我的模型</h1>
+          <h1 className={`${styles.pageTitle} mt-2`}>我的模型</h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">只管理你自己的模型连接。平台默认模型由管理员统一维护，个人连接不会自动替代项目路由。</p>
         </div>
-        <div className={`shrink-0 rounded-2xl px-4 py-3 text-sm ${canConfigure ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
+        <div className={`max-w-sm shrink-0 text-xs leading-5 ${canConfigure ? "text-emerald-700" : "text-amber-700"}`}>
           <p className="font-semibold">{membershipLabels[membership.status]}</p>
           <p className="mt-1 text-xs leading-5">{membershipDescription(membership)}</p>
         </div>

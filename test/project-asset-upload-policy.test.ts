@@ -110,7 +110,9 @@ test("upload route and UI share server policy, durable admission and quota usage
   assert.match(mcp, /发现快照/u);
   assert.match(mcp, /每次单独审批/u);
   assert.doesNotMatch(projects, /onDoubleClick=\{openProjectFromCard\}/u);
-  assert.match(projects, />\{archived \? "查看项目" : "进入项目"\}</u);
+  assert.match(projects, /const archived = project\.archivedAt !== null/u);
+  assert.match(projects, /archived \? "已归档"/u);
+  assert.match(projects, /<Link href=\{`\/projects\/\$\{project\.id\}`\} aria-label=\{`查看项目 \$\{project\.name\}`\}>进入项目 →<\/Link>/u);
   assert.match(guide, /getUploadPolicy/u);
   assert.match(guide, /maxDeploymentBytes/u);
   assert.match(guide, /软删除但仍保留/u);

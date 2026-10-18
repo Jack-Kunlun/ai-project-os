@@ -18,6 +18,7 @@ import {
 import { ConnectionGovernancePanel, connectionBlockerText } from "../governance-panel";
 import { ConnectionCreateDialog, ConnectionDialogActions } from "../connection-create-dialog";
 import { ConnectionEditDialog } from "../connection-edit-dialog";
+import styles from "../../../support-pages.module.css";
 import {
   createDefaultMcpDraft,
   isActiveMcpAttestation,
@@ -121,20 +122,20 @@ export function McpConnectionsClient() {
   }, [load, loadOwnerDelegations]);
 
   return (
-    <div className="mx-auto max-w-6xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
+    <div className={styles.content}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link href="/personal/configuration" className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><span aria-hidden="true">←</span> 返回我的空间配置</Link>
         <span className="text-xs text-slate-400">我的空间 / 我的连接 / MCP</span>
       </div>
 
-      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+      <section className={`${styles.pageHeader} mt-6`}>
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">My MCP connections</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">我的 MCP 连接</h1>
+            <h1 className={`${styles.pageTitle} mt-2`}>我的 MCP 连接</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">连接只属于当前账户。工具目录和安全摘要只读展示；重新发现、重信任、轮换凭据、停用、启用和删除都必须先完成治理预览与独立确认。</p>
           </div>
-          <div className="rounded-2xl bg-violet-50 px-4 py-3 text-sm text-violet-950 lg:max-w-xs">
+          <div className={styles.safetyNote}>
             <p className="font-semibold">当前使用边界</p>
             <p className="mt-1 text-xs leading-5">项目委托控制面已开放；只读动作在受控环境逐次审批，生产开放仍需验收；自动化保持关闭。新建连接会先执行受限 DNS/地址安全解析，再完成 initialize 和 tools/list 只读测试。</p>
           </div>
@@ -161,7 +162,7 @@ export function McpConnectionsClient() {
 }
 
 function McpOwnerDelegationQueue({ delegations, loading, error, onReload, onMessage }: { delegations: readonly OwnerDelegation[]; loading: boolean; error: string | null; onReload: () => Promise<void>; onMessage: (message: ConnectionMessage) => void }) {
-  return <section className="mt-6 rounded-3xl border border-amber-200/80 bg-amber-50/50 p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Delegation safety</p><h2 className="mt-2 text-xl font-semibold text-slate-900">MCP 项目委托队列</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">这里列出你作为连接所有者的待确认、已确认、当前有效和终态记录。项目名称和项目标识不会在个人页面展示；没有项目访问权时仍只保留最小安全信息。</p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-amber-800">{loading ? "读取中…" : `${delegations.length} 条`}</span></div>{error ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-xs text-rose-700"><span>{error}</span><button type="button" onClick={() => void onReload()} className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500">重试</button></div> : null}{loading ? <div className="mt-4 h-24 animate-pulse rounded-2xl bg-white/70" role="status" aria-label="正在加载 MCP 委托安全记录" /> : delegations.length === 0 && error === null ? <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/60 px-5 py-7 text-center text-xs text-slate-600">当前没有 MCP 项目委托记录。</div> : <div className="mt-4 grid gap-3 lg:grid-cols-2">{delegations.map((delegation) => <McpOwnerDelegationCard key={delegation.id} delegation={delegation} onReload={onReload} onMessage={onMessage} />)}</div>}</section>;
+  return <section className="mt-6 border-y border-amber-200/80 py-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Delegation safety</p><h2 className="mt-2 text-xl font-semibold text-slate-900">MCP 项目委托队列</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">这里列出你作为连接所有者的待确认、已确认、当前有效和终态记录。项目名称和项目标识不会在个人页面展示；没有项目访问权时仍只保留最小安全信息。</p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-amber-800">{loading ? "读取中…" : `${delegations.length} 条`}</span></div>{error ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-xs text-rose-700"><span>{error}</span><button type="button" onClick={() => void onReload()} className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500">重试</button></div> : null}{loading ? <div className="mt-4 h-24 animate-pulse rounded-2xl bg-white/70" role="status" aria-label="正在加载 MCP 委托安全记录" /> : delegations.length === 0 && error === null ? <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/60 px-5 py-7 text-center text-xs text-slate-600">当前没有 MCP 项目委托记录。</div> : <div className="mt-4 grid gap-3 lg:grid-cols-2">{delegations.map((delegation) => <McpOwnerDelegationCard key={delegation.id} delegation={delegation} onReload={onReload} onMessage={onMessage} />)}</div>}</section>;
 }
 
 function McpOwnerDelegationCard({ delegation, onReload, onMessage }: { delegation: OwnerDelegation; onReload: () => Promise<void>; onMessage: (message: ConnectionMessage) => void }) {

@@ -2,55 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { OperationPanel } from "@/components/operation-panel";
+import { WorkspaceDialog } from "@/components/workspace-dialog";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import { buildProjectMaterialsAddHref, copyPersonalKnowledgeBody, filterActiveProjects, type PersonalHandoffProjectOption as ProjectOption } from "@/lib/personal-project-handoff";
 
-const PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const PROJECT_PAGE_SIZE = 50;
-
-type ProjectOption = Readonly<{
-  id: string;
-  name: string;
-  archivedAt: string | null;
-  canEdit?: boolean;
-}>;
 
 type ProjectPage = Readonly<{
   projects?: readonly unknown[];
   pagination?: Readonly<{ totalPages?: number }>;
 }>;
 
-function isProjectOption(value: unknown): value is ProjectOption {
-  if (typeof value !== "object" || value === null) return false;
-  const project = value as Partial<ProjectOption>;
-  return typeof project.id === "string"
-    && PROJECT_ID_PATTERN.test(project.id)
-    && typeof project.name === "string"
-    && (project.archivedAt === null || typeof project.archivedAt === "string")
-    && (project.canEdit === undefined || typeof project.canEdit === "boolean");
-}
-
-/** List accessible active projects; honor explicit edit restrictions when the API exposes them. */
-export function filterActiveProjects(projects: readonly unknown[]): ProjectOption[] {
-  return projects.filter(isProjectOption)
-    .filter((project) => project.archivedAt === null && project.canEdit !== false);
-}
-
-/** Keep personal knowledge content out of navigation; the destination opens the manual source form. */
-export function buildProjectMaterialsAddHref(projectId: string): string {
-  if (!PROJECT_ID_PATTERN.test(projectId)) throw new Error("Invalid project id");
-  const query = new URLSearchParams({ view: "add", kind: "manual" });
-  return `/projects/${encodeURIComponent(projectId)}/materials?${query.toString()}`;
-}
-
-/** Keep clipboard errors visible to the UI instead of treating an attempted copy as success. */
-export async function copyPersonalKnowledgeBody(
-  content: string,
-  clipboard: Pick<Clipboard, "writeText"> | null = typeof navigator === "undefined" ? null : navigator.clipboard,
-): Promise<void> {
-  if (!clipboard || typeof clipboard.writeText !== "function") throw new Error("clipboard_unavailable");
-  await clipboard.writeText(content);
-}
+export { buildProjectMaterialsAddHref, copyPersonalKnowledgeBody, filterActiveProjects } from "@/lib/personal-project-handoff";
 
 async function readProjects(signal: AbortSignal): Promise<ProjectOption[]> {
   const allProjects: unknown[] = [];
@@ -133,14 +96,15 @@ export function PersonalProjectHandoff({ content }: Readonly<{ content: string }
   }
 
   return (
-    <OperationPanel
+    <>
+    <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => handleOpenChange(true)} className="knowledge-question-link">放入项目资料</button>
+    <WorkspaceDialog
       title="复制到项目资料"
-      triggerLabel="放入项目资料"
-      description="复制只会在你明确操作后发生，原内容仍保存在个人知识库。项目资料按项目权限共享；个人通用记忆是另一项设置，只供你发起的项目 AI 参考。"
       open={open}
-      onOpenChange={handleOpenChange}
-      className="inline-flex"
+      onClose={() => handleOpenChange(false)}
+      drawer
     >
+      <p className="mb-5 text-sm leading-6 text-slate-600">复制只会在你明确操作后发生，原内容仍保存在个人知识库。项目资料按项目权限共享；个人通用记忆是另一项设置，只供你发起的项目 AI 参考。</p>
       {projectsLoading ? <p className="text-sm text-slate-600" role="status">正在加载你可访问的进行中项目…</p> : null}
       {projectsError !== null ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700" role="alert"><p>{projectsError}</p><button type="button" onClick={loadProjects} className="mt-2 min-h-10 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700">重新加载项目</button></div> : null}
       {!projectsLoading && projectsError === null && projects.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm leading-6 text-slate-600"><p>没有可访问的进行中项目。你可以先把内容留在个人知识库，或检查项目权限；归档项目不会显示在这里。</p><Link href="/projects" onClick={() => setOpen(false)} className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">前往我的项目</Link></div> : null}
@@ -152,7 +116,7 @@ export function PersonalProjectHandoff({ content }: Readonly<{ content: string }
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
           </label>
-          <p className="text-xs leading-5 text-slate-500">这里列出你可访问的进行中项目；保存资料需要编辑权限。选择目标后复制正文，再到项目的“添加来源”窗口粘贴并确认保存。</p>
+          <p className="text-xs leading-5 text-slate-500">这里列出你可访问的进行中项目；保存资料需要编辑权限。选择目标后复制正文，再到项目的“添加资料”窗口粘贴并确认保存。</p>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => void copyBody()} disabled={!selectedProject} className="min-h-10 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">复制正文</button>
             {selectedProject && (copyState === "copied" || copyState === "fallback") ? <Link href={buildProjectMaterialsAddHref(selectedProject.id)} onClick={() => setOpen(false)} className="inline-flex min-h-10 items-center rounded-lg border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">前往项目并粘贴</Link> : null}
@@ -167,6 +131,7 @@ export function PersonalProjectHandoff({ content }: Readonly<{ content: string }
           ) : null}
         </div>
       ) : null}
-    </OperationPanel>
+    </WorkspaceDialog>
+    </>
   );
 }

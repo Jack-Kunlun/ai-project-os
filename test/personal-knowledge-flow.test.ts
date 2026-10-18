@@ -5,7 +5,7 @@ import {
   buildProjectMaterialsAddHref,
   copyPersonalKnowledgeBody,
   filterActiveProjects,
-} from "../src/app/personal/knowledge/personal-project-handoff";
+} from "../src/lib/personal-project-handoff";
 
 const accessibleProjectId = "1eb3cebd-b9c2-44e0-b235-5b5d25a3b145";
 const readOnlyProjectId = "2eb3cebd-b9c2-44e0-b235-5b5d25a3b146";
@@ -18,12 +18,13 @@ test("保存后打开内容，并在同一处提供阅读、提问、索引和�
     readFile("src/app/personal/knowledge/personal-knowledge-qa-panel.tsx", "utf8"),
   ]);
 
-  assert.match(client, /setLibraryScreen\(isCreate \? "view" : modalReturnScreenRef\.current\)/u);
+  assert.match(client, /setLibraryScreen\(isCreate \? "list" : modalReturnScreenRef\.current\)/u);
   assert.match(client, /<PersonalKnowledgeNextSteps[^>]*content=\{document\.content\}/u);
-  assert.match(nextSteps, /href="#personal-knowledge-qa"/u);
   assert.match(nextSteps, /onOpenSemanticIndex/u);
   assert.match(nextSteps, /<PersonalProjectHandoff content=\{content\}/u);
-  assert.match(qa, /id="personal-knowledge-qa"/u);
+  assert.match(qa, /href=\{buildPersonalKnowledgeAskHref\(documentId\)\}/u);
+  assert.match(qa, /\/ask\?history=1/u);
+  assert.doesNotMatch(qa, /\/api\/personal\/knowledge\/\$\{encodeURIComponent\(documentId\)\}\/qa/u);
 });
 
 test("项目选择展示可访问的进行中项目并提示保存权限，按需加载且生成纯路径跳转", async () => {

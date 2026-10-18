@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
 
 /** Keep mutations out of the reading surface while preserving parent-owned drafts. */
-export function OperationPanel({ title, triggerLabel, description, children, open, onOpenChange, className, disabled, triggerId }: {
+export function OperationPanel({ title, triggerLabel, description, children, open, onOpenChange, className, disabled, triggerId, variant = "modal" }: {
   title: string;
   triggerLabel?: string;
   description?: string;
@@ -15,6 +15,7 @@ export function OperationPanel({ title, triggerLabel, description, children, ope
   className?: string;
   disabled?: boolean;
   triggerId?: string;
+  variant?: "modal" | "drawer";
 }) {
   const [localOpen, setLocalOpen] = useState(false);
   const isOpen = open ?? localOpen;
@@ -71,16 +72,16 @@ export function OperationPanel({ title, triggerLabel, description, children, ope
     }
   }
 
-  return <div className={className}>
-    <button id={triggerId} type="button" disabled={disabled} onClick={() => changeOpen(true)} aria-haspopup="dialog" aria-expanded={isOpen} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{triggerLabel ?? title}</button>
+  return <div className={className} data-operation-panel>
+    <button data-operation-trigger id={triggerId} type="button" disabled={disabled} onClick={() => changeOpen(true)} aria-haspopup="dialog" aria-expanded={isOpen} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{triggerLabel ?? title}</button>
     {hasOpened && typeof document !== "undefined" ? createPortal(
-      <div hidden={!isOpen} inert={!isOpen} aria-hidden={!isOpen || undefined} style={isOpen ? undefined : { display: "none" }} className={`fixed inset-0 z-[60] flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-5`} onMouseDown={(event) => { if (event.target === event.currentTarget) changeOpen(false); }}>
-        <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} tabIndex={-1} onKeyDown={handleKeyDown} className={`flex max-h-[95dvh] w-full max-w-6xl flex-col overflow-hidden rounded-t-2xl outline-none sm:rounded-2xl ${modalSurfaceClassName}`}>
-          <header className={`flex items-start justify-between gap-5 px-6 py-5 sm:px-8 ${modalHeaderClassName}`}>
+      <div hidden={!isOpen} inert={!isOpen} aria-hidden={!isOpen || undefined} style={isOpen ? undefined : { display: "none" }} className={`fixed inset-0 z-[60] flex ${modalBackdropClassName} p-0 ${variant === "drawer" ? "items-stretch justify-end" : "items-end justify-center sm:items-center sm:p-5"}`} onMouseDown={(event) => { if (event.target === event.currentTarget) changeOpen(false); }}>
+        <section data-operation-surface={variant} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} tabIndex={-1} onKeyDown={handleKeyDown} className={`flex w-full flex-col overflow-hidden outline-none ${variant === "drawer" ? "h-dvh max-h-dvh max-w-3xl rounded-none" : "max-h-[95dvh] max-w-6xl rounded-t-2xl sm:rounded-2xl"} ${modalSurfaceClassName}`}>
+          <header data-operation-header className={`flex items-start justify-between gap-5 px-6 py-5 sm:px-8 ${modalHeaderClassName}`}>
             <div><h2 id={titleId} className="text-xl font-semibold text-slate-950">{title}</h2>{description ? <p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-600">{description}</p> : null}</div>
             <button type="button" onClick={() => changeOpen(false)} className="shrink-0 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">返回查看</button>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6 sm:px-8">{children}</div>
+          <div data-operation-content className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6 sm:px-8">{children}</div>
         </section>
       </div>, document.body,
     ) : null}

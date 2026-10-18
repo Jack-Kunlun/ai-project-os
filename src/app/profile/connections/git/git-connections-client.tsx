@@ -18,6 +18,7 @@ import {
 import { ConnectionGovernancePanel, connectionBlockerText } from "../governance-panel";
 import { ConnectionCreateDialog, ConnectionDialogActions } from "../connection-create-dialog";
 import { ConnectionEditDialog } from "../connection-edit-dialog";
+import styles from "../../../support-pages.module.css";
 import {
   createDefaultGitDraft,
   gitProviderLabels,
@@ -101,20 +102,20 @@ export function GitConnectionsClient() {
   }, [load, loadOwnerDelegations]);
 
   return (
-    <div className="mx-auto max-w-6xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
+    <div className={styles.content}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link href="/personal/configuration" className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><span aria-hidden="true">←</span> 返回我的空间配置</Link>
         <span className="text-xs text-slate-400">我的空间 / 授权管理 / Git</span>
       </div>
 
-      <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+      <section className={`${styles.pageHeader} mt-6`}>
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Git authorization management</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">Git 授权管理</h1>
+            <h1 className={`${styles.pageTitle} mt-2`}>Git 授权管理</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">Git 凭据由你个人持有并加密保存。项目代码仓库从项目配置发起连接和范围提案；此处用于维护个人连接、查看受影响项目，并撤销或拒绝项目授权。</p>
           </div>
-          <div className="rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-900 lg:max-w-xs">
+          <div className={styles.safetyNote}>
             <p className="font-semibold">当前使用边界</p>
             <p className="mt-1 text-xs leading-5">个人连接不会自动开放给任何项目。项目页支持一次性手动只读委托和单独的自动读取双确认授权；写入/提交和旧 PAT 路径保持关闭。新建连接会先测试指定仓库和 ref；后续变更仍必须通过安全影响预览。</p>
           </div>
@@ -124,7 +125,7 @@ export function GitConnectionsClient() {
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : message.tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}`}>{message.text}</p> : null}
       {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline">重试</button></div> : null}
 
-      <section className="mt-6 rounded-3xl border border-amber-200/80 bg-amber-50/50 p-5 shadow-sm sm:p-6">
+      <section className="mt-6 border-y border-amber-200/80 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Delegation safety</p><h2 className="mt-2 text-xl font-semibold text-slate-900">项目委托安全管理</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">这里列出你作为连接所有者的未终态委托。即使你已失去项目访问，或项目已归档，仍可撤销后续使用或拒绝尚未生效的委托。</p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-amber-800">{ownerDelegationsLoading ? "读取中…" : `${ownerDelegations.length} 条`}</span></div>
         {ownerDelegationsError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-xs text-rose-700"><span>{ownerDelegationsError}</span><button type="button" onClick={() => void loadOwnerDelegations()} className="font-semibold underline">重试</button></div> : null}
         {ownerDelegationsLoading ? <div className="mt-4 h-24 animate-pulse rounded-2xl bg-white/70" role="status" aria-label="正在加载项目委托安全记录" /> : ownerDelegations.length === 0 && ownerDelegationsError === null ? <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/60 px-5 py-7 text-center text-xs text-slate-600">当前没有需要你处理的项目委托安全记录。</div> : <div className="mt-4 grid gap-3 lg:grid-cols-2">{ownerDelegations.map((delegation) => <OwnerDelegationCard key={delegation.id} delegation={delegation} onReload={loadOwnerDelegations} onMessage={setMessage} />)}</div>}

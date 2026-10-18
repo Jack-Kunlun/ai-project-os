@@ -341,6 +341,7 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
       reservedTokens: true,
       providerCallAudit: { select: { id: true } },
       personalKnowledgeQaChallengeId: true,
+      unifiedQuestionConfirmationId: true,
       personalKnowledgeSemanticChallengeId: true,
       personalKnowledgeExtractionAttemptId: true,
       allocations: {
@@ -364,6 +365,7 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
     // hold for reconciliation instead of refunding a potentially billable call.
     const hasDispatchEvidence = reservation.providerCallAudit !== null || dispatchedAttempt !== null
       || reservation.personalKnowledgeQaChallengeId != null
+      || reservation.unifiedQuestionConfirmationId != null
       || reservation.personalKnowledgeSemanticChallengeId != null
       || reservation.personalKnowledgeExtractionAttemptId != null;
     if (hasDispatchEvidence) {
@@ -487,6 +489,7 @@ export async function recoverExpiredPlatformTokenReservations(
 
 export async function reservePlatformTokens(input: Readonly<{
   userId: string;
+  unifiedQuestionConfirmationId?: string | null;
   jobId?: string | null;
   providerConnectionId?: string | null;
   webAiGrantId?: string | null;
@@ -505,6 +508,10 @@ export async function reservePlatformTokens(input: Readonly<{
   const snapshot = routeSnapshotInput(input.routeSnapshot);
   const reservedTokens = calculateChargedPlatformTokens(rawEstimatedTokens, snapshot.quotaMultiplierBps);
   const callKey = assertLedgerKey(input.callKey);
+  const unifiedQuestionConfirmationId = input.unifiedQuestionConfirmationId ?? null;
+  if (unifiedQuestionConfirmationId !== null && callKey !== `unified-question:${unifiedQuestionConfirmationId}`) {
+    return fail("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
+  }
   const now = input.now ?? new Date();
   return serializable(db, async (tx) => {
     await lockUser(tx, input.userId);
@@ -527,6 +534,7 @@ export async function reservePlatformTokens(input: Readonly<{
         providerConfigurationVersion: true,
         routeFenceFingerprint: true,
         jobId: true,
+        unifiedQuestionConfirmationId: true,
         providerConnectionId: true,
         operation: true,
         modelId: true,
@@ -537,6 +545,7 @@ export async function reservePlatformTokens(input: Readonly<{
       const existingQuotaMultiplierBps = existing.quotaMultiplierBps ?? 10_000;
       if (
         (existing.jobId ?? null) !== (input.jobId ?? null)
+        || (existing.unifiedQuestionConfirmationId ?? null) !== unifiedQuestionConfirmationId
         || (existing.providerConnectionId ?? null) !== (input.providerConnectionId ?? null)
         || (existing.webAiGrantId ?? null) !== (input.webAiGrantId ?? null)
         || existing.operation !== input.operation
@@ -597,6 +606,7 @@ export async function reservePlatformTokens(input: Readonly<{
     const reservationData = {
         id: reservationId,
         userId: input.userId,
+        unifiedQuestionConfirmationId,
         grantId: grant.id,
         webAiGrantId: input.webAiGrantId ?? null,
         webAiGrantReferenceId: input.webAiGrantId ?? null,
@@ -1319,7 +1329,7 @@ export async function assertPlatformConcurrency(
   db: EntitlementDb = getDb(),
 ): Promise<void> {
   await lockUser(db, user.id);
-  const [jobCount, personalQaCount] = await Promise.all([
+  const [jobCount, personalQaCount, unifiedQuestionCount] = await Promise.all([
     db.backgroundJob.count({
     where: {
       requestedById: user.id,
@@ -1358,8 +1368,26 @@ export async function assertPlatformConcurrency(
         providerConnection: { scope: "platform" },
       },
     }) ?? 0),
+    Promise.resolve(
+      (db as unknown as {
+        unifiedQuestionAudit?: {
+          count: (args: Record<string, unknown>) => Promise<number>;
+        };
+      }).unifiedQuestionAudit,
+    ).then((delegate) => delegate?.count({
+      where: {
+        ownerUserId: user.id,
+        OR: [
+          { status: "running" },
+          // Unknown calls with a terminal timestamp retain their token hold,
+          // but no longer occupy the single active dispatch slot.
+          { status: "unknown", completedAt: null },
+        ],
+        providerConnection: { scope: "platform" },
+      },
+    }) ?? 0),
   ]);
-  if (jobCount + personalQaCount > 0) return fail("AI_PLATFORM_CONCURRENCY_LIMIT");
+  if (jobCount + personalQaCount + unifiedQuestionCount > 0) return fail("AI_PLATFORM_CONCURRENCY_LIMIT");
 }
 
 export function estimatePlatformTokens(input: unknown, maxOutputTokens: number): number {

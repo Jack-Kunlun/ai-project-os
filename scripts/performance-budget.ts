@@ -1,5 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { gzipSync } from "node:zlib";
 
 export type PerformanceBudgetConfig = {
@@ -33,7 +33,12 @@ type BuildManifest = {
 
 type ClientReferenceManifest = {
   clientModules?: Record<string, { chunks?: unknown }>;
+  entryCSSFiles?: unknown;
 };
+
+type CssResource = { inlined?: unknown; path?: unknown };
+
+const ROOT_LAYOUT_ENTRY_SUFFIX = "src/app/layout";
 
 function positiveInteger(value: unknown, name: string): number {
   if (!Number.isInteger(value) || Number(value) <= 0) {
@@ -80,21 +85,32 @@ export async function loadPerformanceBudgetConfig(path: string): Promise<Perform
 }
 
 function parseClientReferenceManifest(source: string, path: string): ClientReferenceManifest {
-  const match = source.match(/globalThis\.__RSC_MANIFEST\[[^\]]+\]=(\{[\s\S]*\});?\s*$/u);
-  if (!match?.[1]) throw new Error(`PERFORMANCE_ROUTE_MANIFEST_INVALID:${path}`);
+  const prefix = "globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});globalThis.__RSC_MANIFEST[";
+  if (!source.startsWith(prefix)) throw new Error(`PERFORMANCE_ROUTE_MANIFEST_INVALID:${path}`);
+  const assignmentEnd = source.indexOf("]=", prefix.length);
+  if (assignmentEnd < 0) throw new Error(`PERFORMANCE_ROUTE_MANIFEST_INVALID:${path}`);
   try {
-    return JSON.parse(match[1]) as ClientReferenceManifest;
+    const route = JSON.parse(source.slice(prefix.length, assignmentEnd)) as unknown;
+    const serializedManifest = source.slice(assignmentEnd + 2).trim();
+    if (typeof route !== "string" || !route.startsWith("/") || !serializedManifest.endsWith(";")) {
+      throw new Error("invalid route manifest assignment");
+    }
+    const parsed = JSON.parse(serializedManifest.slice(0, -1)) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid route manifest object");
+    return parsed as ClientReferenceManifest;
   } catch (error) {
     throw new Error(`PERFORMANCE_ROUTE_MANIFEST_INVALID:${path}`, { cause: error });
   }
 }
 
 function assetPath(buildDir: string, manifestPath: string): string {
-  if (!manifestPath.startsWith("static/")) {
+  const normalizedPath = manifestPath.replaceAll("\\", "/");
+  const segments = normalizedPath.split("/");
+  if (!normalizedPath.startsWith("static/") || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
     throw new Error(`PERFORMANCE_ASSET_PATH_INVALID:${manifestPath}`);
   }
   const staticRoot = resolve(buildDir, "static");
-  const fullPath = resolve(buildDir, manifestPath);
+  const fullPath = resolve(buildDir, ...segments);
   if (fullPath !== staticRoot && !fullPath.startsWith(`${staticRoot}${sep}`)) {
     throw new Error(`PERFORMANCE_ASSET_PATH_INVALID:${manifestPath}`);
   }
@@ -113,6 +129,16 @@ async function sumManifestAssets(buildDir: string, assets: Iterable<string>): Pr
   const unique = [...new Set(assets)];
   const sizes = await Promise.all(unique.map((asset) => gzipSize(assetPath(buildDir, asset))));
   return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+async function readClientReferenceManifest(path: string, unreadable: string): Promise<ClientReferenceManifest> {
+  let source: string;
+  try {
+    source = await readFile(path, "utf8");
+  } catch (error) {
+    throw new Error(`${unreadable}:${path}`, { cause: error });
+  }
+  return parseClientReferenceManifest(source, path);
 }
 
 async function listFiles(root: string): Promise<string[]> {
@@ -147,13 +173,7 @@ function routeManifestPath(buildDir: string, route: string): string {
 
 async function routeJavaScriptAssets(buildDir: string, route: string): Promise<string[]> {
   const path = routeManifestPath(buildDir, route);
-  let source: string;
-  try {
-    source = await readFile(path, "utf8");
-  } catch (error) {
-    throw new Error(`PERFORMANCE_ROUTE_MANIFEST_UNREADABLE:${route}:${path}`, { cause: error });
-  }
-  const manifest = parseClientReferenceManifest(source, path);
+  const manifest = await readClientReferenceManifest(path, `PERFORMANCE_ROUTE_MANIFEST_UNREADABLE:${route}`);
   const assets: string[] = [];
   for (const clientModule of Object.values(manifest.clientModules ?? {})) {
     if (!Array.isArray(clientModule.chunks)) continue;
@@ -164,6 +184,65 @@ async function routeJavaScriptAssets(buildDir: string, route: string): Promise<s
     }
   }
   return [...new Set(assets)];
+}
+
+function rootLayoutEntryKeyStatus(entry: string): "match" | "invalid" | "other" {
+  const normalized = entry.replaceAll("\\", "/");
+  const hasLayoutSuffix = normalized === ROOT_LAYOUT_ENTRY_SUFFIX || normalized.endsWith(`/${ROOT_LAYOUT_ENTRY_SUFFIX}`);
+  if (!hasLayoutSuffix) return "other";
+
+  let pathSegments: string[];
+  if (normalized === ROOT_LAYOUT_ENTRY_SUFFIX) {
+    pathSegments = normalized.split("/");
+  } else if (/^[A-Za-z]:\//u.test(normalized)) {
+    pathSegments = normalized.slice(3).split("/");
+  } else if (normalized.startsWith("//")) {
+    pathSegments = normalized.slice(2).split("/");
+    if (pathSegments.length < 5) return "invalid";
+  } else if (normalized.startsWith("/")) {
+    pathSegments = normalized.slice(1).split("/");
+  } else {
+    return "invalid";
+  }
+
+  if (pathSegments.some((segment) => segment === "" || segment === "." || segment === "..")) return "invalid";
+  return pathSegments.length >= 3 && pathSegments.slice(-3).join("/") === ROOT_LAYOUT_ENTRY_SUFFIX ? "match" : "invalid";
+}
+
+async function rootLayoutCssAssets(buildDir: string): Promise<string[]> {
+  const serverAppRoot = resolve(buildDir, "server/app");
+  const manifests = (await listFiles(serverAppRoot))
+    .filter((path) => basename(path) === "page_client-reference-manifest.js");
+  if (manifests.length === 0) throw new Error(`PERFORMANCE_LAYOUT_CSS_MANIFESTS_MISSING:${serverAppRoot}`);
+
+  const assetsByManifest = await Promise.all(manifests.map(async (path) => {
+    const manifest = await readClientReferenceManifest(path, "PERFORMANCE_LAYOUT_CSS_MANIFEST_UNREADABLE");
+    const entries = manifest.entryCSSFiles;
+    if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+      throw new Error(`PERFORMANCE_LAYOUT_CSS_MANIFEST_INVALID:${path}`);
+    }
+    const layoutEntries = Object.entries(entries as Record<string, unknown>)
+      .map(([key, resources]) => ({ key, resources, status: rootLayoutEntryKeyStatus(key) }))
+      .filter((entry) => entry.status !== "other");
+    if (layoutEntries.some((entry) => entry.status === "invalid")) {
+      throw new Error(`PERFORMANCE_LAYOUT_CSS_ENTRY_INVALID:${path}`);
+    }
+    if (layoutEntries.length > 1) throw new Error(`PERFORMANCE_LAYOUT_CSS_ENTRY_AMBIGUOUS:${path}`);
+    const resources = layoutEntries[0]?.resources;
+    if (!Array.isArray(resources) || resources.length === 0) {
+      throw new Error(`PERFORMANCE_LAYOUT_CSS_MISSING:${path}`);
+    }
+    return resources.map((resource: CssResource, index: number) => {
+      if (!resource || typeof resource !== "object" || Array.isArray(resource) || resource.inlined !== false || typeof resource.path !== "string") {
+        throw new Error(`PERFORMANCE_LAYOUT_CSS_RESOURCE_INVALID:${path}:${index}`);
+      }
+      const cssPath = resource.path.replaceAll("\\", "/");
+      if (extname(cssPath) !== ".css") throw new Error(`PERFORMANCE_LAYOUT_CSS_RESOURCE_INVALID:${path}:${index}`);
+      assetPath(buildDir, cssPath);
+      return cssPath;
+    });
+  }));
+  return [...new Set(assetsByManifest.flat())];
 }
 
 export async function measurePerformanceBudget(
@@ -204,6 +283,7 @@ export async function measurePerformanceBudget(
     const routeAssets = await routeJavaScriptAssets(buildDir, route);
     criticalRoutes[route] = await sumManifestAssets(buildDir, [...sharedJavaScript, ...routeAssets]);
   }
+  const globalCssGzipBytes = await sumManifestAssets(buildDir, await rootLayoutCssAssets(buildDir));
 
   return {
     sharedJavaScriptGzipBytes,
@@ -211,9 +291,7 @@ export async function measurePerformanceBudget(
       path: largestJavaScriptAsset.path,
       gzipBytes: largestJavaScriptAsset.gzipBytes,
     },
-    globalCssGzipBytes: measuredAssets
-      .filter((asset) => asset.extension === ".css")
-      .reduce((sum, asset) => sum + asset.gzipBytes, 0),
+    globalCssGzipBytes,
     totalStaticClientGzipBytes: measuredAssets.reduce((sum, asset) => sum + asset.gzipBytes, 0),
     criticalRoutes,
   };

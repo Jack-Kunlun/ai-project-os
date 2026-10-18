@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
+import styles from "./login.module.css";
 
 type PhoneAuthStatus = "disabled" | "unavailable" | "available";
 
@@ -116,78 +117,69 @@ export function LoginForm({
   }
 
   return (
-    <main className="flex min-h-screen flex-col justify-center overflow-x-hidden bg-[radial-gradient(circle_at_8%_5%,rgba(224,231,255,.72),transparent_24%),radial-gradient(circle_at_92%_94%,rgba(237,233,254,.68),transparent_25%),#f7f9fd] px-4 py-4 text-slate-950 sm:px-6 sm:py-5">
-      <div className="mx-auto grid w-full max-w-[1280px] overflow-hidden rounded-[30px] border border-white/90 bg-white shadow-[0_20px_58px_rgba(15,23,42,.12)] lg:min-h-[min(720px,calc(100dvh-70px))] lg:grid-cols-2">
-        <section className="relative order-2 overflow-hidden bg-[radial-gradient(circle_at_91%_0%,rgba(91,33,182,.56),transparent_34%),linear-gradient(145deg,#060b19_0%,#070d1d_60%,#11102c_100%)] px-7 py-7 text-white sm:px-9 sm:py-8 lg:order-1 lg:px-10 lg:py-8 lg:pl-11">
-          <div className="pointer-events-none absolute -bottom-40 right-[-72px] h-80 w-80 rounded-full border border-violet-400/10" />
-          <div className="pointer-events-none absolute -bottom-28 right-[-28px] h-60 w-60 rounded-full border border-indigo-400/10" />
-          <div className="pointer-events-none absolute bottom-[116px] right-10 h-1.5 w-1.5 rounded-full bg-indigo-300/70 shadow-[0_0_18px_6px_rgba(129,140,248,.35)]" />
-          <div className="relative flex min-h-full flex-col">
-            <div className="flex items-center gap-4">
-              <BrandMark size={44} priority className="rounded-[14px]" />
-              <span className="text-[16px] font-semibold tracking-[-0.01em] text-slate-100">AI Project OS</span>
-            </div>
-
-            <div className="mt-8">
-              <p className="text-[12px] font-bold uppercase tracking-[0.27em] text-indigo-400">AI Project OS</p>
-              <h1 className="mt-3 max-w-[560px] text-[34px] font-semibold leading-[1.17] tracking-[-0.045em] sm:text-[38px] lg:text-[36px] xl:text-[42px]">让项目知识可追溯，<br />让每一次行动都有边界。</h1>
-              <p className="mt-4 max-w-[560px] text-[14px] leading-6 text-slate-300">把项目资料、代码来源、当前状态和团队协作放在同一个受控空间中。<br className="hidden xl:block" />系统保留原始证据与引用链，帮助团队从可靠资料出发理解项目。</p>
-            </div>
-
-            <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
-              <Feature icon={<DocumentIcon />} iconTone="bg-indigo-600/35 text-indigo-300" title="资料有出处">来源、文件与代码快照<br />留存内容指纹和定位信息。</Feature>
-              <Feature icon={<ShieldIcon />} iconTone="bg-emerald-500/20 text-emerald-300" title="权限有边界">工作区与项目角色由服务<br />端统一校验。</Feature>
-              <Feature icon={<PeopleIcon />} iconTone="bg-blue-500/20 text-blue-300" title="事实有依据">文件与手工资料有明确证据时<br />可自动成事实；其余内容待核对。</Feature>
-              <Feature icon={<BoltIcon />} iconTone="bg-amber-500/20 text-amber-300" title="动作受控制">外部只读能力逐项授权、<br />逐次审批并留下审计。</Feature>
-            </div>
-
-            <div className="mt-auto flex items-start gap-3 pt-5 text-[12px] leading-5 text-slate-400">
-              <span className="mt-0.5 text-slate-400"><SmallShieldIcon /></span>
-              <p>当前产品支持可追溯资料、事实整理、项目记忆和受控只读能力。<br className="hidden xl:block" />不会替你修改代码、写入 Git、执行 Shell 或部署。</p>
-            </div>
+    <main className={styles.page}>
+      <div className={styles.layout}>
+        <section className={styles.productPanel} aria-label="产品介绍">
+          <div className={styles.brand}>
+            <BrandMark size={36} priority className={styles.brandMark} />
+            <span className={styles.brandName}>AI Project OS</span>
           </div>
+
+          <div className={styles.productSummary}>
+            <p className={styles.eyebrow}>项目工作空间</p>
+            <h1 className={styles.headline}>让项目知识可追溯</h1>
+            <p className={styles.introText}>项目资料、计划与协作信息集中在一个工作区，帮助团队沿着可靠来源推进工作。</p>
+          </div>
+
+          <ul className={styles.capabilities} aria-label="工作区能力">
+            <li><span>01</span><p>问答按轮保留范围与资料引用</p></li>
+            <li><span>02</span><p>知识图谱连接事实和原始资料</p></li>
+            <li><span>03</span><p>项目、计划与成员协作信息集中查看</p></li>
+          </ul>
         </section>
 
-        <section className="order-1 flex items-center bg-[radial-gradient(circle_at_75%_15%,rgba(238,242,255,.8),transparent_36%),#fff] px-7 py-8 sm:px-12 lg:order-2 lg:px-16 lg:py-[42px]">
-          <form onSubmit={submit} className="mx-auto w-full max-w-[500px]">
-            <p className="text-[12px] font-bold uppercase tracking-[0.27em] text-indigo-600">Secure workspace</p>
-            <h2 className="mt-3 text-[30px] font-semibold tracking-[-0.04em] sm:text-[34px]">登录 AI Project OS</h2>
-            <p className="mt-2 text-[14px] leading-6 text-slate-500">使用账号登录你的工作区，继续处理项目资料与治理任务。</p>
+        <section className={styles.loginPanel} aria-label="登录工作区">
+          <form onSubmit={submit} className={styles.form}>
+            <div className={styles.formHeading}>
+              <p className={styles.formEyebrow}>欢迎回来</p>
+              <h2>登录 AI Project OS</h2>
+              <p>使用你的账号进入工作区。</p>
+            </div>
 
             {phoneAuthStatus !== "disabled" ? (
-              <div className="mt-5">
-                <div role="tablist" aria-label="选择登录方式" className="grid grid-cols-2 rounded-xl bg-slate-100 p-1">
-                  <button type="button" role="tab" aria-selected={method === "password"} onClick={() => changeLoginMethod("password")} className={`h-10 rounded-lg px-3 text-sm font-semibold transition ${method === "password" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>用户名密码</button>
-                  <button type="button" role="tab" aria-selected={method === "sms"} disabled={!smsLoginAvailable} onClick={() => changeLoginMethod("sms")} className={`h-10 rounded-lg px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:text-slate-400 ${method === "sms" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>手机号验证码</button>
+              <div className={styles.methodSection}>
+                <div role="tablist" aria-label="选择登录方式" className={styles.methodTabs}>
+                  <button type="button" role="tab" aria-selected={method === "password"} onClick={() => changeLoginMethod("password")} className={`${styles.methodTab} ${method === "password" ? styles.methodTabSelected : ""}`}>用户名密码</button>
+                  <button type="button" role="tab" aria-selected={method === "sms"} disabled={!smsLoginAvailable} onClick={() => changeLoginMethod("sms")} className={`${styles.methodTab} ${method === "sms" ? styles.methodTabSelected : ""}`}>手机号验证码</button>
                 </div>
                 {smsLoginAvailable ? (
-                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                  <p className={styles.methodHint}>
                     {phoneAutoRegistrationEnabled ? "验证码验证后登录；手机号首次使用时会自动创建账号和个人工作区。" : "验证码用于登录已有账号；如需新账号，请先完成注册。"}
                   </p>
-                ) : <p role="status" className="mt-2 text-xs leading-5 text-amber-800">短信服务暂不可用，请稍后重试或联系管理员。</p>}
+                ) : <p role="status" className={`${styles.methodHint} ${styles.statusWarning}`}>短信服务暂不可用，请稍后重试或联系管理员。</p>}
               </div>
             ) : null}
 
             {method === "password" ? (
               <>
-                <label className="mt-7 block text-sm font-semibold" htmlFor="login-username">{emailAuthEnabled ? "用户名、手机号或已验证邮箱" : "用户名或手机号"}</label>
-                <div className="relative mt-2">
-                  <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><UserIcon /></span>
-                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={emailAuthEnabled ? 320 : 64} required placeholder={emailAuthEnabled ? "输入用户名、手机号或已验证邮箱" : "输入用户名或手机号"} className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+                <label className={styles.fieldLabel} htmlFor="login-username">{emailAuthEnabled ? "用户名、手机号或已验证邮箱" : "用户名或手机号"}</label>
+                <div className={styles.inputShell}>
+                  <span className={styles.inputIcon}><UserIcon /></span>
+                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={emailAuthEnabled ? 320 : 64} required placeholder={emailAuthEnabled ? "输入用户名、手机号或已验证邮箱" : "输入用户名或手机号"} className={styles.textInput} />
                 </div>
 
-                <label className="mt-5 block text-sm font-semibold" htmlFor="login-password">密码</label>
-                <div className="relative mt-2">
-                  <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><LockIcon /></span>
-                  <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+                <label className={`${styles.fieldLabel} ${styles.nextFieldLabel}`} htmlFor="login-password">密码</label>
+                <div className={styles.inputShell}>
+                  <span className={styles.inputIcon}><LockIcon /></span>
+                  <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className={styles.textInput} />
                 </div>
               </>
             ) : (
-              <div className="mt-7 space-y-5">
-                <div>
-                  <label className="block text-sm font-semibold" htmlFor="login-phone">手机号</label>
-                  <div className="mt-2 flex h-14 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 transition focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100">
-                    <span aria-hidden="true" className="flex shrink-0 items-center border-r border-slate-200 px-4 text-sm text-slate-500">+86</span>
+              <div className={styles.smsFields}>
+                <div className={styles.smsPhoneField}>
+                  <label className={styles.fieldLabel} htmlFor="login-phone">手机号</label>
+                  <div className={styles.phoneShell}>
+                    <span aria-hidden="true" className={styles.phonePrefix}>+86</span>
                     <input
                       id="login-phone"
                       type="tel"
@@ -204,81 +196,75 @@ export function LoginForm({
                       required
                       pattern="1[3-9][0-9]{9}"
                       placeholder="输入 11 位手机号"
-                      className="min-w-0 flex-1 bg-transparent px-3 text-[16px] outline-none"
+                      className={styles.phoneInput}
                     />
                   </div>
                 </div>
-                <SmsCodeInput
-                  key={phone}
-                  id="login-sms-code"
-                  size="large"
-                  phoneE164={`+86${phone}`}
-                  purpose="login"
-                  availability="available"
-                  code={smsCode}
-                  onCodeChange={setSmsCode}
-                  onChallengeIdChange={setSmsChallengeId}
-                />
+                <div className={styles.smsCodeField}>
+                  <SmsCodeInput
+                    key={phone}
+                    id="login-sms-code"
+                    size="large"
+                    phoneE164={`+86${phone}`}
+                    purpose="login"
+                    availability="available"
+                    code={smsCode}
+                    onCodeChange={setSmsCode}
+                    onChallengeIdChange={setSmsChallengeId}
+                  />
+                </div>
               </div>
             )}
 
             {method === "password" ? (
-              <div className="mt-5 flex justify-end text-[12px]">
-                <Link href="/recover" className="font-semibold text-indigo-600 transition hover:text-indigo-500">忘记账号或密码？</Link>
+              <div className={styles.recoverLink}>
+                <Link href="/recover">忘记账号或密码？</Link>
               </div>
             ) : null}
 
-            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeTone === "error" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{notice}</p> : null}
-            {smsSuccessNotice ? <p role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{smsSuccessNotice}</p> : null}
-            {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
+            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}>{notice}</p> : null}
+            {smsSuccessNotice ? <p role="status" className={`${styles.notice} ${styles.noticeSuccess}`}>{smsSuccessNotice}</p> : null}
+            {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{error}</p> : null}
 
-            <button type="submit" disabled={pending} className="mt-6 h-[52px] w-full rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-[16px] font-semibold tracking-[0.22em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "登录中…" : "登 录"}</button>
+            <button type="submit" disabled={pending} className={styles.submitButton}>{pending ? "登录中…" : "登 录"}</button>
 
-            <p className="mt-4 text-center text-sm text-slate-500">还没有账号？ <Link href="/register" className="font-semibold text-indigo-600 hover:text-indigo-500">创建账号</Link></p>
+            <p className={styles.registerPrompt}>还没有账号？ <Link href="/register">创建账号</Link></p>
 
-            <div className="my-5 flex items-center gap-5 text-sm text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>其他登录方式</span><span className="h-px flex-1 bg-slate-200" /></div>
+            <div className={styles.alternativeHeading}><span />其他登录方式<span /></div>
 
             {githubLoginAvailable ? (
-              <div>
-                <a href={githubHref} className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-300 bg-white text-[16px] font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-indigo-50"><GitHubIcon />使用 GitHub 登录</a>
-                <p className="mt-2 text-center text-[12px] text-slate-400">首次使用 GitHub 登录会自动创建普通用户账号。</p>
+              <div className={styles.providerBlock}>
+                <a href={githubHref} className={styles.providerLink}><GitHubIcon />使用 GitHub 登录</a>
+                <p className={styles.providerHint}>首次使用 GitHub 登录会自动创建普通用户账号。</p>
               </div>
             ) : (
-              <div>
-                <button type="button" disabled className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-200 bg-slate-50 text-[16px] font-semibold text-slate-500"><GitHubIcon />使用 GitHub 登录</button>
-                <p className="mt-2 text-center text-[12px] text-slate-400">{githubUnavailableMessage}</p>
+              <div className={styles.providerBlock}>
+                <button type="button" disabled className={`${styles.providerLink} ${styles.providerUnavailable}`}><GitHubIcon />使用 GitHub 登录</button>
+                <p className={styles.providerHint}>{githubUnavailableMessage}</p>
               </div>
             )}
 
-            {oidcProviders.length > 0 ? <div className="mt-3 space-y-2">{oidcProviders.map((provider) => <a key={provider.id} href={`/api/auth/oidc/start/${provider.id}?returnTo=${encodeURIComponent(returnTo)}`} className="flex min-h-[52px] w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50">使用 {provider.name} 登录</a>)}</div> : null}
+            {oidcProviders.length > 0 ? <div className={styles.oidcProviders}>{oidcProviders.map((provider) => <a key={provider.id} href={`/api/auth/oidc/start/${provider.id}?returnTo=${encodeURIComponent(returnTo)}`} className={styles.oidcLink}>使用 {provider.name} 登录</a>)}</div> : null}
           </form>
         </section>
       </div>
 
-      <footer className="mx-auto mt-6 flex max-w-[1280px] flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-400 sm:mt-7 sm:gap-x-8">
-        <Link href="/privacy" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><SmallShieldIcon />隐私政策</Link>
-        <span className="h-3 w-px bg-slate-300" />
-        <Link href="/terms" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><TermsIcon />服务条款</Link>
-        <span className="h-3 w-px bg-slate-300" />
-        <Link href="/help" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><HelpIcon />帮助文档</Link>
-        <span className="h-3 w-px bg-slate-300" />
-        <Link href="/contact" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><ContactIcon />联系作者</Link>
+      <footer className={styles.footer}>
+        <Link href="/privacy"><SmallShieldIcon />隐私政策</Link>
+        <span aria-hidden="true" />
+        <Link href="/terms"><TermsIcon />服务条款</Link>
+        <span aria-hidden="true" />
+        <Link href="/help"><HelpIcon />帮助文档</Link>
+        <span aria-hidden="true" />
+        <Link href="/contact"><ContactIcon />联系作者</Link>
       </footer>
     </main>
   );
 }
 
-function Feature({ icon, iconTone, title, children }: { icon: ReactNode; iconTone: string; title: string; children: ReactNode }) {
-  return <div className="flex min-h-[92px] items-start gap-3 rounded-2xl border border-white/15 bg-white/[.045] p-3"><span className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl ${iconTone}`}>{icon}</span><div><p className="text-[14px] font-semibold text-white">{title}</p><p className="mt-1 text-[12px] leading-5 text-slate-400">{children}</p></div></div>;
-}
-
 function UserIcon() { return <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5.8 20v-2.1A4.9 4.9 0 0 1 10.7 13h2.6a4.9 4.9 0 0 1 4.9 4.9V20" /></svg>; }
 function LockIcon() { return <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="5.5" y="10" width="13" height="10" rx="2" /><path d="M8.5 10V7.2a3.5 3.5 0 0 1 7 0V10" /><path d="M12 14.4v2.3" /></svg>; }
 function GitHubIcon() { return <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .7A11.5 11.5 0 0 0 8.36 23.1c.58.1.79-.25.79-.56v-2.23c-3.23.7-3.91-1.37-3.91-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.78 1.2 1.78 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.58-.29-5.29-1.29-5.29-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.47.11-3.05 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.4-2.72 5.38-5.3 5.67.42.36.79 1.06.79 2.14v3.25c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" /></svg>; }
-function DocumentIcon() { return <svg aria-hidden="true" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M7 3.5h7l4 4V20H7z" /><path d="M14 3.5V8h4M10 12h5M10 15.5h5" /></svg>; }
-function ShieldIcon() { return <svg aria-hidden="true" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3 19 6v5c0 4.6-2.8 7.7-7 10-4.2-2.3-7-5.4-7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>; }
-function PeopleIcon() { return <svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.2" /><path d="M3.8 19v-2a4.4 4.4 0 0 1 4.4-4.4h1.6a4.4 4.4 0 0 1 4.4 4.4v2M15.5 13.5a3.8 3.8 0 0 1 4.7 3.7V19" /></svg>; }
-function BoltIcon() { return <svg aria-hidden="true" width="25" height="25" viewBox="0 0 24 24" fill="currentColor"><path d="M13.3 2 5.7 13h5L9.9 22 18.4 9.8h-5.2z" /></svg>; }
 function SmallShieldIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 19 6v5c0 4.6-2.8 7.7-7 10-4.2-2.3-7-5.4-7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>; }
 function TermsIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 3.5h9l3 3V20H6z" /><path d="M15 3.5V7h3M9 11h6M9 14.5h6M9 18h4" /></svg>; }
 function HelpIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="9" /><path d="M9.7 9.3a2.5 2.5 0 1 1 3.7 2.2c-.9.45-1.4 1-1.4 2" /><path d="M12 17.5h.01" /></svg>; }

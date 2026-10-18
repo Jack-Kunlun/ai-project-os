@@ -1,163 +1,85 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { OperationPanel } from "@/components/operation-panel";
-import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
+import { WorkspaceDialog } from "@/components/workspace-dialog";
+import { layoutKnowledgeGraph, type KnowledgeGraphNode, type KnowledgeGraphEdge } from "@/lib/knowledge-graph-view";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import { KnowledgeGraphCanvas } from "./knowledge-graph-canvas";
+import ui from "@/components/workspace-ui.module.css";
+import styles from "./knowledge-graph.module.css";
 
-type DocumentNode = Readonly<{ id: string; title: string; version: number }>;
-type DocumentEdge = Readonly<{ id: string; fromDocumentId: string; toDocumentId: string; stale: boolean }>;
-type Suggestion = Readonly<{
-  id: string; documentId: string; documentTitle: string;
-  subject: string; subjectKind: string; predicate: string;
-  object: string; objectKind: string; evidence: string;
-  status: "pending" | "accepted"; stale: boolean;
-}>;
-type GraphPayload = Readonly<{
-  documents: { nodes: DocumentNode[]; edges: DocumentEdge[]; truncated: boolean };
-  suggestions: Suggestion[];
-  truncated: boolean;
-}>;
-type Provider = Readonly<{ id: string; name: string; status: string; defaultGenerationModelId: string | null }>;
+const PersonalKnowledgeGraphTools = dynamic(() => import("./personal-knowledge-graph-tools").then(module => module.PersonalKnowledgeGraphTools), { loading: () => <p role="status">正在加载关系维护…</p> });
 
-const kindLabel: Record<string, string> = { person: "人物", organization: "组织", concept: "概念", place: "地点", other: "其他" };
+type Scope="all"|"personal"|"project";
+type Project={id:string;name:string};
+type Source={id:string;kind:string;preview:string};
+type Fact={id:string;title:string;content:string;sourceExcerpt:string|null;lifecycle:string;revision:{number:number};source:{id:string;kind:string;externalRef:string|null;contentHash:string}};
+type World={facts:Fact[];relations:Array<{id:string;sourceItemId:string;targetItemId:string;kind:string;stale:boolean;rationale:string}>};
+type PersonalGraph={documents:{nodes:Array<{id:string;title:string;version:number}>;edges:Array<{id:string;fromDocumentId:string;toDocumentId:string;stale?:boolean}>;truncated:boolean};suggestions:Array<{id:string;documentId:string;documentTitle:string;subject:string;predicate:string;object:string;evidence:string;status:string;stale:boolean}>;truncated:boolean};
+const relationLabels:Record<string,string>={supports:'支持',contradicts:'冲突',dependsOn:'依赖',blocks:'阻断',causedBy:'导致',resolves:'解决',relatesTo:'关联'};
+const idPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+async function read<T>(response:Response):Promise<T>{if(!response.ok)throw new Error((await safeResponseError(response,'图谱加载失败，请重试。')).message);return response.json() as Promise<T>;}
 
-function positions<T>(items: readonly T[], key: (item: T) => string) {
-  return new Map(items.map((item, index) => {
-    const angle = items.length <= 1 ? 0 : (index / items.length) * Math.PI * 2 - Math.PI / 2;
-    return [key(item), { x: items.length <= 1 ? 50 : 50 + Math.cos(angle) * 38, y: items.length <= 1 ? 50 : 50 + Math.sin(angle) * 36 }] as const;
-  }));
-}
-
-export function PersonalKnowledgeGraphClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
-  const [graph, setGraph] = useState<GraphPayload | null>(null);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [documentId, setDocumentId] = useState("");
-  const [providerId, setProviderId] = useState("");
-  const [extractOpen, setExtractOpen] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
-  const { confirm, dialog } = useAppConfirmDialog();
-
-  const load = useCallback(async () => {
-    try {
-      const [graphResponse, providerResponse] = await Promise.all([
-        fetch("/api/personal/knowledge/graph", { cache: "no-store" }),
-        fetch("/api/me/ai-providers", { cache: "no-store" }),
-      ]);
-      if (!graphResponse.ok) throw new Error((await safeResponseError(graphResponse, "知识图谱加载失败")).message);
-      setGraph(await graphResponse.json() as GraphPayload);
-      if (providerResponse.ok) setProviders((await providerResponse.json() as { providers: Provider[] }).providers.filter((provider) => provider.status === "verified" && provider.defaultGenerationModelId));
-    } catch (cause) {
-      setMessage({ text: cause instanceof Error ? cause.message : "知识图谱加载失败", error: true });
-    } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
-
-  const documents = useMemo(() => graph?.documents.nodes ?? [], [graph]);
-  const selectedDocumentId = documents.some((row) => row.id === documentId) ? documentId : documents[0]?.id ?? "";
-  const selectedProviderId = providers.some((row) => row.id === providerId) ? providerId : providers[0]?.id ?? "";
-  const docPositions = useMemo(() => positions(documents, (node) => node.id), [documents]);
-  const accepted = graph?.suggestions.filter((row) => row.status === "accepted" && !row.stale).slice(0, 20) ?? [];
-  const pendingSuggestions = graph?.suggestions.filter((row) => row.status === "pending") ?? [];
-  const entityNodes = [...new Map(accepted.flatMap((row) => [
-    [`${row.subjectKind}:${row.subject}`, { key: `${row.subjectKind}:${row.subject}`, label: row.subject, kind: row.subjectKind }],
-    [`${row.objectKind}:${row.object}`, { key: `${row.objectKind}:${row.object}`, label: row.object, kind: row.objectKind }],
-  ] as const)).values()];
-  const entityPositions = positions(entityNodes, (node) => node.key);
-
-  async function extract() {
-    if (!selectedDocumentId || !selectedProviderId || pending) return;
-    const provider = providers.find((row) => row.id === selectedProviderId);
-    setPending(true); setMessage(null);
-    try {
-      const preparedResponse = await fetch("/api/personal/knowledge/graph", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "prepare", documentId: selectedDocumentId, providerId: selectedProviderId }),
-      });
-      if (!preparedResponse.ok) throw new Error((await safeResponseError(preparedResponse, "无法准备关系提取")).message);
-      const prepared = await preparedResponse.json() as { attemptId: string; providerName: string; modelId: string };
-      const decision = await confirm({
-        eyebrow: "知识关系提取", title: "发送文档给个人模型提取候选关系？",
-        description: `当前文档正文会发送给 ${prepared.providerName || provider?.name || "所选服务"}（${prepared.modelId}），可能产生服务商费用。结果只进入待审核列表，逐条确认后才显示为实体关系。`,
-        confirmLabel: "确认提取", cancelLabel: "返回",
-      });
-      if (!decision.confirmed) return;
-      const response = await fetch("/api/personal/knowledge/graph", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "execute", documentId: selectedDocumentId, attemptId: prepared.attemptId }),
-      });
-      if (!response.ok) throw new Error((await safeResponseError(response, "关系提取失败")).message);
-      const result = await response.json() as { suggested: number };
-      setMessage({ text: `提取完成，返回 ${result.suggested} 条候选关系。请核对原文后逐条审核。`, error: false });
-      setExtractOpen(false);
-      await load();
-    } catch (cause) { setMessage({ text: cause instanceof Error ? cause.message : "关系提取失败", error: true }); }
-    finally { setPending(false); }
-  }
-
-  async function review(id: string, status: "accepted" | "rejected") {
-    if (pending) return;
-    setPending(true); setMessage(null);
-    try {
-      const response = await fetch(`/api/personal/knowledge/graph/${encodeURIComponent(id)}`, {
-        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }),
-      });
-      if (!response.ok) throw new Error((await safeResponseError(response, "关系审核失败")).message);
-      await load();
-    } catch (cause) { setMessage({ text: cause instanceof Error ? cause.message : "关系审核失败", error: true }); }
-    finally { setPending(false); }
-  }
-
-  return <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-    <AppHeader username={username} active="personalKnowledge" isSystemAdmin={isSystemAdmin} />
-    <PersonalWorkspaceNav active="knowledge" />
-    <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
-      {dialog}
-      <Link href="/personal/knowledge" className="text-sm font-semibold text-indigo-700">← 返回知识库</Link>
-      <div className="mt-4"><h1 className="text-3xl font-semibold">知识图谱</h1><p className="mt-2 text-sm text-slate-600">同时查看你手动确认的文档关联，以及从当前知识版本提取并经你审核的实体关系。</p></div>
-      {message ? <p role={message.error ? "alert" : "status"} className={`mt-5 rounded-xl px-4 py-3 text-sm ${message.error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</p> : null}
-      {loading ? <div role="status" className="mt-8 h-72 animate-pulse rounded-3xl bg-white" /> : graph === null ? <button type="button" onClick={() => void load()} className="mt-5 text-sm font-semibold text-indigo-700">重新加载</button> : <>
-        <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
-          <h2 className="text-xl font-semibold">文档与来源关系</h2><p className="mt-2 text-xs text-slate-500">仅展示你明确建立的文档关联；虚线表示文档版本已变化。</p>
-          {documents.length === 0 ? <p className="mt-6 text-sm text-slate-500">知识库还没有文档。</p> : <>
-            <svg viewBox="0 0 100 100" className="mt-4 h-72 w-full rounded-xl bg-slate-50" role="img" aria-label="个人知识文档关系图"><title>个人知识文档关系图</title>
-              {graph.documents.edges.map((edge) => { const from = docPositions.get(edge.fromDocumentId); const to = docPositions.get(edge.toDocumentId); return from && to ? <line key={edge.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={edge.stale ? "#d97706" : "#6366f1"} strokeDasharray={edge.stale ? "2 2" : undefined} strokeWidth=".7" /> : null; })}
-              {documents.map((node) => { const point = docPositions.get(node.id)!; return <g key={node.id}><circle cx={point.x} cy={point.y} r="5" fill="#312e81" /><text x={point.x} y={point.y + 1} fill="white" textAnchor="middle" fontSize="2.5">{node.title.slice(0, 2)}</text></g>; })}
-            </svg>
-            <ul className="mt-4 grid gap-2 sm:grid-cols-2">{documents.map((node) => <li key={node.id}><Link href={`/personal/knowledge?document=${encodeURIComponent(node.id)}`} className="text-xs font-semibold text-indigo-700">{node.title} →</Link></li>)}</ul>
-            {graph.documents.edges.length === 0 ? <p className="mt-3 text-xs text-slate-500">暂无文档关联；可在我的空间中建立。</p> : null}
-          </>}
-        </section>
-
-        <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
-          <h2 className="text-xl font-semibold">人物、概念与其他实体</h2><p className="mt-2 text-xs text-slate-500">只有已审核且来源版本仍有效的关系进入图谱。下方每条关系保留原文引文。</p>
-          {accepted.length === 0 ? <p className="mt-6 text-sm text-slate-500">还没有经审核的实体关系。</p> : <>
-            <svg viewBox="0 0 100 100" className="mt-4 h-72 w-full rounded-xl bg-indigo-50/40" role="img" aria-label="已审核实体关系图"><title>已审核实体关系图</title>
-              {accepted.map((row) => { const from = entityPositions.get(`${row.subjectKind}:${row.subject}`); const to = entityPositions.get(`${row.objectKind}:${row.object}`); return from && to ? <line key={row.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#8b5cf6" strokeWidth=".7" /> : null; })}
-              {entityNodes.map((node) => { const point = entityPositions.get(node.key)!; return <g key={node.key}><circle cx={point.x} cy={point.y} r="5" fill="#6d28d9" /><text x={point.x} y={point.y + 1} fill="white" textAnchor="middle" fontSize="2.3">{node.label.slice(0, 2)}</text></g>; })}
-            </svg>
-            <ul className="mt-4 grid gap-2 sm:grid-cols-2">{accepted.map((row) => <li key={row.id} className="rounded-xl bg-slate-50 p-3 text-xs"><p className="font-semibold">{row.subject} — {row.predicate} → {row.object}</p><p className="mt-1 text-slate-500">来源：{row.documentTitle} · “{row.evidence}”</p></li>)}</ul>
-          </>}
-        </section>
-
-        <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">待审核关系</h2><p className="mt-2 text-xs text-slate-500">每条候选保留来源文档与原文证据；确认后才会显示在上方图谱。</p></div><OperationPanel title="提取知识关系候选" triggerLabel="提取候选关系" description="选择文档和个人模型。提交前会显示外发内容与费用确认，模型结果只进入待审核列表。" open={extractOpen} onOpenChange={setExtractOpen} disabled={pending || !selectedDocumentId || !selectedProviderId}>
-            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-              <label className="text-xs font-semibold text-slate-700">知识文档<select value={selectedDocumentId} onChange={(event) => setDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{documents.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
-              <label className="text-xs font-semibold text-slate-700">个人文本模型<select value={selectedProviderId} onChange={(event) => setProviderId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{providers.length === 0 ? <option value="">尚无已验证模型</option> : providers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.defaultGenerationModelId}</option>)}</select></label>
-              <button type="button" onClick={() => void extract()} disabled={pending || !selectedDocumentId || !selectedProviderId} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "开始提取"}</button>
-            </div>
-          </OperationPanel></div>
-          <h3 className="mt-7 text-sm font-semibold">待审核 · {pendingSuggestions.length}</h3>
-          {pendingSuggestions.length === 0 ? <p className="mt-2 text-xs text-slate-500">暂无待审核关系。</p> : <ul className="mt-3 space-y-3">{pendingSuggestions.map((row) => <li key={row.id} className="rounded-2xl border border-slate-200 p-4"><p className="text-sm font-semibold">{row.subject} <span className="text-xs text-slate-400">({kindLabel[row.subjectKind] ?? row.subjectKind})</span> — {row.predicate} → {row.object} <span className="text-xs text-slate-400">({kindLabel[row.objectKind] ?? row.objectKind})</span></p><p className="mt-2 text-xs leading-5 text-slate-600">来源：{row.documentTitle} · “{row.evidence}”</p>{row.stale ? <p className="mt-2 text-xs text-amber-700">来源文档已更新；此候选不能再接受，请重新提取。</p> : null}<div className="mt-3 flex gap-2"><button type="button" disabled={pending || row.stale} onClick={() => void review(row.id, "accepted")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">确认关系</button><button type="button" disabled={pending} onClick={() => void review(row.id, "rejected")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">忽略</button></div></li>)}</ul>}
-        </section>
-      </>}
-    </div>
-  </main>;
+/** All graph content comes from authenticated personal or project APIs. */
+export function PersonalKnowledgeGraphClient({username,isSystemAdmin}:{username:string;isSystemAdmin:boolean}) {
+  const query=useSearchParams();
+  const router=useRouter();
+  const [scope,setScope]=useState<Scope>(()=>query.get('scope')==='project'?'project':query.get('scope')==='personal'?'personal':'all');
+  const [projectId,setProjectId]=useState(()=>idPattern.test(query.get('projectId')||'')?query.get('projectId')!:'');
+  const [projects,setProjects]=useState<Project[]>([]),[projectError,setProjectError]=useState<string|null>(null),[projectPage,setProjectPage]=useState(1);
+  const [nodes,setNodes]=useState<KnowledgeGraphNode[]>([]),[edges,setEdges]=useState<KnowledgeGraphEdge[]>([]),[selectedId,setSelectedId]=useState('');
+  const [loading,setLoading]=useState(true),[error,setError]=useState<string|null>(null),[truncated,setTruncated]=useState(false),[refresh,setRefresh]=useState(0);
+  const [toolsOpen,setToolsOpen]=useState(false),[sourceOpen,setSourceOpen]=useState(false),[sourceBody,setSourceBody]=useState(''),[sourceLoading,setSourceLoading]=useState(false),[sourceError,setSourceError]=useState<string|null>(null);
+  const sourceRequest=useRef(0);
+  const visibleProjects=useMemo(()=>scope==='project'?projects.filter(p=>p.id===projectId):scope==='all'?projects.slice((projectPage-1)*5,projectPage*5):[],[projects,scope,projectId,projectPage]);
+  useEffect(()=>{const controller=new AbortController();void(async()=>{try{const list:Project[]=[];for(const view of ['active','archived']){let page=1,totalPages=1;do{const result=await read<{projects:Project[];pagination:{totalPages:number}}>(await fetch(`/api/projects?view=${view}&page=${page}&pageSize=50`,{cache:'no-store',signal:controller.signal}));list.push(...result.projects);totalPages=result.pagination.totalPages;page++;}while(page<=totalPages&&!controller.signal.aborted);}if(!controller.signal.aborted){setProjects(list);setProjectError(null);}}catch(cause){if(!controller.signal.aborted)setProjectError(cause instanceof Error?cause.message:'项目列表加载失败。');}})();return()=>controller.abort();},[refresh]);
+  useEffect(()=>{
+    const controller=new AbortController();
+    const timer=window.setTimeout(()=>{setLoading(true);setError(null);setNodes([]);setEdges([]);setSelectedId('');
+    void(async()=>{try{
+      const nextNodes=new Map<string,KnowledgeGraphNode>(),nextEdges:KnowledgeGraphEdge[]=[];let limited=false;
+      const add=(node:KnowledgeGraphNode)=>{if(!nextNodes.has(node.id))nextNodes.set(node.id,node);};
+      if(scope!=='project'){
+        const personal=await read<PersonalGraph>(await fetch('/api/personal/knowledge/graph',{cache:'no-store',signal:controller.signal}));
+        const documents=personal.documents.nodes.slice(0,50);limited ||= personal.documents.truncated||personal.truncated||personal.documents.nodes.length>50;
+        add({id:'personal',kind:'scope',title:'个人空间',scope:'personal'});
+        for(const document of documents){const id=`personal:${document.id}`;add({id,kind:'source',title:document.title,scope:'personal',sourceId:document.id,revision:`v${document.version}`,href:`/personal/knowledge?document=${document.id}`});nextEdges.push({id:`contains:${id}`,from:'personal',to:id,label:'归属'});}
+        for(const edge of personal.documents.edges)nextEdges.push({id:`personal-link:${edge.id}`,from:`personal:${edge.fromDocumentId}`,to:`personal:${edge.toDocumentId}`,label:'关联',stale:edge.stale});
+        for(const candidate of personal.suggestions.filter(s=>s.status==='accepted'&&!s.stale).slice(0,20)){const id=`personal-fact:${candidate.id}`;if(!nextNodes.has(`personal:${candidate.documentId}`))continue;add({id,kind:'fact',title:`${candidate.subject} ${candidate.predicate} ${candidate.object}`,scope:'personal',sourceId:candidate.documentId,excerpt:candidate.evidence,href:`/personal/knowledge?document=${candidate.documentId}`});nextEdges.push({id:`evidence:${id}`,from:`personal:${candidate.documentId}`,to:id,label:'原文依据'});}
+      }
+      for(const project of visibleProjects){
+        const [sourcePayload,world]=await Promise.all([read<{sources:Source[];pagination:{total:number}}>(await fetch(`/api/projects/${project.id}/sources?pageSize=10`,{cache:'no-store',signal:controller.signal})),read<World>(await fetch(`/api/projects/${project.id}/world`,{cache:'no-store',signal:controller.signal}))]);
+        const groupId=`project:${project.id}`;add({id:groupId,kind:'scope',title:project.name,scope:'project',projectId:project.id});
+        const addSource=(sourceId:string,title:string,excerpt?:string,revision?:string)=>{const id=`source:${project.id}:${sourceId}`;if(!nextNodes.has(id)){add({id,kind:'source',title,scope:'project',projectId:project.id,sourceId,excerpt,revision,href:`/projects/${project.id}/materials/sources/${sourceId}`});nextEdges.push({id:`contains:${id}`,from:groupId,to:id,label:'归属'});}return id;};
+        sourcePayload.sources.forEach(source=>addSource(source.id,source.preview.slice(0,52)||`${source.kind} · ${source.id.slice(0,8)}`,source.preview));
+        const facts=world.facts.filter(fact=>fact.lifecycle==='active').slice(0,10);limited ||= sourcePayload.pagination.total>sourcePayload.sources.length||world.facts.filter(fact=>fact.lifecycle==='active').length>10;
+        for(const fact of facts){const source=addSource(fact.source.id,fact.source.externalRef||`${fact.title} · 来源`,fact.sourceExcerpt||undefined,`hash ${fact.source.contentHash.slice(0,8)}`),id=`fact:${project.id}:${fact.id}`;add({id,kind:'fact',title:fact.title,scope:'project',projectId:project.id,sourceId:fact.source.id,revision:`事实 v${fact.revision.number}`,excerpt:fact.content,href:`/projects/${project.id}/materials/sources/${fact.source.id}`});nextEdges.push({id:`evidence:${id}`,from:source,to:id,label:'来源依据'});}
+        for(const relation of world.relations.filter(row=>!row.stale))nextEdges.push({id:`relation:${relation.id}`,from:`fact:${project.id}:${relation.sourceItemId}`,to:`fact:${project.id}:${relation.targetItemId}`,label:relationLabels[relation.kind]||'关联'});
+      }
+      if(!controller.signal.aborted){setNodes([...nextNodes.values()]);setEdges(nextEdges);setSelectedId([...nextNodes.values()].find(node=>node.kind==='source')?.id||'');setTruncated(limited);}
+    }catch(cause){if(!controller.signal.aborted){setNodes([]);setEdges([]);setError(cause instanceof Error?cause.message:'图谱加载失败。');}}finally{if(!controller.signal.aborted)setLoading(false);}})();
+    },0);
+    return()=>{window.clearTimeout(timer);controller.abort();};
+  },[scope,visibleProjects,refresh]);
+  const graph=useMemo(()=>layoutKnowledgeGraph(nodes,edges),[nodes,edges]);
+  function activateNode(id:string){const node=nodes.find(item=>item.id===id);setSelectedId(id);if(node?.href)router.push(node.href);}
+  const selected=nodes.find(node=>node.id===selectedId),scopeName=scope==='project'?projects.find(p=>p.id===projectId)?.name||'选择项目':scope==='personal'?'个人空间':'全量可访问内容';
+  async function openSource(){if(!selected?.sourceId)return;const version=++sourceRequest.current;setSourceOpen(true);setSourceLoading(true);setSourceError(null);setSourceBody('');try{if(selected.scope==='personal'){const payload=await read<{document:{content:string}}>(await fetch(`/api/personal/knowledge/${selected.sourceId}`,{cache:'no-store'}));if(version===sourceRequest.current)setSourceBody(payload.document.content);}else{const payload=await read<{source:{contentText:string}}>(await fetch(`/api/projects/${selected.projectId}/sources/${selected.sourceId}`,{cache:'no-store'}));if(version===sourceRequest.current)setSourceBody(payload.source.contentText);}}catch(cause){if(version===sourceRequest.current)setSourceError(cause instanceof Error?cause.message:'来源无法访问。');}finally{if(version===sourceRequest.current)setSourceLoading(false);}}
+  return <main><AppHeader username={username} active="personalKnowledge" isSystemAdmin={isSystemAdmin}/><div className={ui.page}>
+    <div className={ui.heading}><div><h1>知识图谱</h1><p>查看来源归属，以及有明确原文依据的事实关系。</p></div><div className={ui.actions}><button className={ui.button} onClick={()=>setToolsOpen(true)}>维护个人关系</button><Link className={ui.button} href={`/ask?scope=${scope}${scope==='project'&&projectId?`&projectId=${projectId}`:''}`}>在此范围提问</Link></div></div>
+    <nav className={ui.tabs} aria-label="我的知识栏目"><Link href="/personal/knowledge">全部知识</Link><Link href="/personal/knowledge?tab=memory">通用记忆</Link><Link href="/personal/knowledge/graph" aria-current="page">知识图谱</Link></nav>
+    <div className={ui.toolbar}><div className={ui.actions}><label className={ui.field}>内容范围<select aria-label="图谱内容范围" value={scope} onChange={e=>{setScope(e.target.value as Scope);setProjectPage(1);}}><option value="all">全量可访问内容</option><option value="personal">个人空间</option><option value="project">单个项目</option></select></label>{scope==='project'?<label className={ui.field}>项目<select aria-label="选择图谱项目" value={projectId} onChange={e=>setProjectId(e.target.value)}><option value="">选择项目</option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</select></label>:null}</div><div className={styles.counts}><strong>{scopeName}</strong><span>{nodes.filter(node=>node.kind==='source').length} 个来源</span><span>{nodes.filter(node=>node.kind==='fact').length} 条关联事实</span><span>{graph.edges.length} 条关系</span></div></div>
+    {projectError?<p className={ui.error} role="alert">{projectError}<button className={ui.link} onClick={()=>setRefresh(n=>n+1)}>重试</button></p>:null}
+    {scope==='all'&&projects.length>5?<div className={styles.pageSelect}>项目按页展示 <button disabled={projectPage<=1} onClick={()=>setProjectPage(p=>p-1)}>上一页</button>{projectPage} / {Math.ceil(projects.length/5)}<button disabled={projectPage>=Math.ceil(projects.length/5)} onClick={()=>setProjectPage(p=>p+1)}>下一页</button></div>:null}
+    <div className={styles.legend}><span>范围归属</span><span>来源支撑事实</span><small>只展示明确记录的关系；虚线表示版本已变化。</small></div>
+    {truncated?<p className={ui.notice}>资料较多，图谱显示有界来源与事实。可缩小到单个项目，或从来源详情进入完整资料列表。</p>:null}
+    {error?<p className={ui.error} role="alert">{error}<button className={ui.link} onClick={()=>setRefresh(n=>n+1)}>重新加载</button></p>:loading?<div className={ui.empty} role="status">正在核对来源与关系…</div>:scope==='project'&&!projectId?<div className={ui.empty}><h2>选择一个项目</h2><p>查看该项目的来源与已确认事实。</p></div>:<div className={styles.layout}><KnowledgeGraphCanvas graph={graph} selectedId={selectedId} onSelect={setSelectedId} onActivate={activateNode}/><aside className={styles.detail}>{selected?<><span className={ui.muted}>{selected.kind==='fact'?'有来源的事实':'来源内容'}</span><h2>{selected.title}</h2><span className={ui.muted}>{selected.scope==='personal'?'个人空间':projects.find(project=>project.id===selected.projectId)?.name} · {selected.revision||'活动资料'}</span><h3>内容</h3><p>{selected.excerpt||'打开来源查看当前正文、版本与来源记录。'}</p>{selected.sourceId?<button className={ui.button} onClick={()=>void openSource()}>打开来源</button>:null}{selected.href?<p><Link className={ui.link} href={selected.href}>查看完整资料 →</Link></p>:null}</>:<p>选择来源或事实，查看对应内容。</p>}</aside></div>}
+    <WorkspaceDialog title="来源内容" open={sourceOpen} onClose={()=>{sourceRequest.current++;setSourceOpen(false);}} drawer>{sourceLoading?<p role="status">正在读取来源…</p>:sourceError?<p className={ui.error} role="alert">{sourceError}</p>:<div className={ui.reading}>{sourceBody}</div>}</WorkspaceDialog>
+    <OperationPanel title="维护个人知识关系" variant="drawer" open={toolsOpen} onOpenChange={open=>{setToolsOpen(open);if(!open)setRefresh(n=>n+1);}} className={styles.hiddenTrigger}><div className={styles.tools}>{toolsOpen?<PersonalKnowledgeGraphTools/>:null}</div></OperationPanel>
+  </div></main>;
 }

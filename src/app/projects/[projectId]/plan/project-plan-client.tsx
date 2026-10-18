@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { AppHeader } from "@/components/app-header";
 import { OperationPanel } from "@/components/operation-panel";
 import { buildProjectHref, parseProjectPageState, PROJECT_PLAN_STATUS_VALUES } from "@/lib/project-navigation";
@@ -17,6 +16,7 @@ import {
   type PlanImpact,
   type PlanWorkItem,
 } from "./project-plan-operations";
+import styles from "./project-plan-client.module.css";
 
 type User = { id: string; username: string; displayName: string | null };
 type ObjectiveStatus = "draft" | "active" | "completed" | "cancelled";
@@ -28,12 +28,20 @@ type Dependency = { id: string; workItemId: string; dependsOnId: string; created
 type Recommendation = { agentRunId: string; recommendationIndex: number; text: string; citationCount: number; question: string; createdAt: string };
 type Audit = { id: string; entityType: "objective" | "workItem" | "dependency" | "evidenceLink" | "impactSuggestion"; entityId: string; event: string; details: unknown; createdAt: string; actor: User };
 type Plan = { project: { id: string; name: string; archivedAt: string | null }; objectives: Objective[]; workItems: WorkItem[]; dependencies: Dependency[]; evidenceLinks: PlanEvidenceLink[]; impactSuggestions: PlanImpact[]; members: User[]; evidenceCandidates: { projectItems: PlanEvidenceCandidate[]; projectSources: PlanEvidenceCandidate[] }; health: PlanHealth; availableRecommendations: Recommendation[]; audits: Audit[]; canEdit: boolean };
+type View = "board" | "list";
+type BoardColumn = { id: string; label: string; statuses: WorkItemStatus[] };
 
 const objectiveStatusLabels: Record<ObjectiveStatus, string> = { draft: "草稿", active: "进行中", completed: "已完成", cancelled: "已取消" };
 const workItemStatusLabels: Record<WorkItemStatus, string> = { proposed: "待采纳", planned: "已计划", inProgress: "进行中", blocked: "受阻", completed: "已完成", cancelled: "已取消" };
 const priorityLabels: Record<Priority, string> = { low: "低", medium: "中", high: "高", urgent: "紧急" };
 const objectiveTransitions: Record<ObjectiveStatus, ObjectiveStatus[]> = { draft: ["active", "cancelled"], active: ["completed", "cancelled"], completed: [], cancelled: [] };
 const workItemTransitions: Record<WorkItemStatus, WorkItemStatus[]> = { proposed: ["planned", "cancelled"], planned: ["inProgress", "blocked", "cancelled"], inProgress: ["blocked", "completed", "cancelled"], blocked: ["planned", "inProgress", "cancelled"], completed: [], cancelled: [] };
+const primaryColumns: BoardColumn[] = [
+  { id: "planned", label: "待安排", statuses: ["proposed", "planned"] },
+  { id: "inProgress", label: "进行中", statuses: ["inProgress"] },
+  { id: "blocked", label: "受阻", statuses: ["blocked"] },
+  { id: "completed", label: "已完成", statuses: ["completed"] },
+];
 
 async function responseError(response: Response, fallback: string): Promise<string> {
   return (await safeResponseError(response, fallback)).message;
@@ -48,15 +56,24 @@ function dateLabel(value: string | null): string {
 }
 
 function statusTone(status: ObjectiveStatus | WorkItemStatus): string {
-  if (status === "completed") return "bg-emerald-100 text-emerald-700";
-  if (status === "cancelled") return "bg-slate-100 text-slate-500";
-  if (status === "blocked") return "bg-rose-100 text-rose-700";
-  if (status === "active" || status === "inProgress") return "bg-indigo-100 text-indigo-700";
-  if (status === "proposed") return "bg-amber-100 text-amber-800";
-  return "bg-sky-100 text-sky-700";
+  if (status === "completed") return styles.completedTone;
+  if (status === "cancelled") return styles.cancelledTone;
+  if (status === "blocked") return styles.blockedTone;
+  if (status === "active" || status === "inProgress") return styles.activeTone;
+  if (status === "proposed") return styles.proposedTone;
+  return styles.plannedTone;
 }
 
-export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
+function currentObjective(objectives: Objective[]): Objective | null {
+  const candidates = objectives.filter((objective) => objective.status === "active" || objective.status === "draft");
+  return candidates.sort((left, right) => Number(right.status === "active") - Number(left.status === "active") || right.updatedAt.localeCompare(left.updatedAt))[0] ?? null;
+}
+
+export function ProjectPlanClient(props: { username: string; projectId: string; isSystemAdmin: boolean }) {
+  return <ProjectPlanContent key={props.projectId} {...props} />;
+}
+
+function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("plan", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -69,36 +86,85 @@ export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { user
   const [workItemForm, setWorkItemForm] = useState({ title: "", description: "", acceptanceCriteria: "", objectiveId: "", assigneeId: "", priority: "medium" as Priority, targetDate: "" });
   const [objectiveOpen, setObjectiveOpen] = useState(false);
   const [workItemOpen, setWorkItemOpen] = useState(false);
+  const [view, setView] = useState<View>("board");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [objectiveFilter, setObjectiveFilter] = useState("all");
+  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const requestSequence = useRef(0);
+  const activeController = useRef<AbortController | null>(null);
+  const currentProjectId = useRef(projectId);
 
-  const reload = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/projects/${projectId}/plan`, { cache: "no-store" });
-      if (!response.ok) throw new Error(await responseError(response, "项目计划加载失败"));
-      setPlan(await response.json() as Plan); setError(null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "项目计划加载失败"); }
-    finally { setLoading(false); }
+  useLayoutEffect(() => {
+    currentProjectId.current = projectId;
+    return () => {
+      requestSequence.current += 1;
+      activeController.current?.abort();
+    };
   }, [projectId]);
 
-  useEffect(() => { const timer = window.setTimeout(() => void reload(), 0); return () => window.clearTimeout(timer); }, [reload]);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}): Promise<void> => {
+    const sequence = ++requestSequence.current;
+    const requestedProjectId = projectId;
+    activeController.current?.abort();
+    const controller = new AbortController();
+    activeController.current = controller;
+    if (showLoading) setLoading(true);
+    try {
+      const response = await fetch(`/api/projects/${requestedProjectId}/plan`, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(await responseError(response, "项目计划加载失败"));
+      const next = await response.json() as Plan;
+      if (controller.signal.aborted || sequence !== requestSequence.current || currentProjectId.current !== requestedProjectId) return;
+      setPlan(next);
+      setError(null);
+    } catch (cause) {
+      if (controller.signal.aborted || sequence !== requestSequence.current || currentProjectId.current !== requestedProjectId) return;
+      setError(cause instanceof Error ? cause.message : "项目计划加载失败");
+    } finally {
+      if (!controller.signal.aborted && sequence === requestSequence.current && currentProjectId.current === requestedProjectId) setLoading(false);
+    }
+  }, [projectId]);
 
   useEffect(() => {
-    if (navigation.focus === null || plan === null) return;
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
+    return () => {
+      window.clearTimeout(timer);
+      requestSequence.current += 1;
+      activeController.current?.abort();
+    };
+  }, [reload]);
+
+  const currentPlan = plan?.project.id === projectId ? plan : null;
+  const pageLoading = loading || currentPlan === null && error === null;
+
+  useEffect(() => {
+    if (navigation.focus === null || currentPlan === null) return;
     const timer = window.setTimeout(() => {
       const target = document.getElementById(`work-item-${navigation.focus}`);
       target?.scrollIntoView({ block: "center" });
       if (target instanceof HTMLElement) target.focus({ preventScroll: true });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [navigation.focus, plan]);
+  }, [navigation.focus, currentPlan]);
 
   async function request(body: unknown, method: "POST" | "PATCH", key: string, success: string): Promise<boolean> {
-    setPending(key); setError(null); setMessage(null);
+    const requestedProjectId = projectId;
+    setPending(key);
+    setError(null);
+    setMessage(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/plan`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const response = await fetch(`/api/projects/${requestedProjectId}/plan`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) throw new Error(await responseError(response, "项目计划更新失败"));
-      setMessage(success); await reload(); return true;
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "项目计划更新失败"); return false; }
-    finally { setPending(null); }
+      if (currentProjectId.current !== requestedProjectId) return false;
+      setMessage(success);
+      await reload();
+      return currentProjectId.current === requestedProjectId;
+    } catch (cause) {
+      if (currentProjectId.current === requestedProjectId) setError(cause instanceof Error ? cause.message : "项目计划更新失败");
+      return false;
+    } finally {
+      if (currentProjectId.current === requestedProjectId) setPending(null);
+    }
   }
 
   async function createObjective(event: FormEvent<HTMLFormElement>) {
@@ -115,83 +181,190 @@ export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { user
     setWorkItemOpen(false);
   }
 
-  const workItemById = useMemo(() => new Map(plan?.workItems.map((item) => [item.id, item]) ?? []), [plan]);
-  const objectiveById = useMemo(() => new Map(plan?.objectives.map((item) => [item.id, item]) ?? []), [plan]);
-  const activeWorkItems = plan?.workItems.filter((item) => item.status !== "cancelled") ?? [];
-  const visibleWorkItems = plan?.workItems.filter((item) => navigation.status === null || item.status === navigation.status) ?? [];
-  const counts = {
-    objectives: plan?.objectives.filter((item) => item.status !== "cancelled").length ?? 0,
-    proposed: plan?.workItems.filter((item) => item.status === "proposed").length ?? 0,
-    active: plan?.workItems.filter((item) => item.status === "inProgress" || item.status === "blocked").length ?? 0,
-    completed: plan?.workItems.filter((item) => item.status === "completed").length ?? 0,
-  };
+  const workItemById = useMemo(() => new Map(currentPlan?.workItems.map((item) => [item.id, item]) ?? []), [currentPlan]);
+  const objectiveById = useMemo(() => new Map(currentPlan?.objectives.map((item) => [item.id, item]) ?? []), [currentPlan]);
+  const activeWorkItems = currentPlan?.workItems.filter((item) => item.status !== "cancelled") ?? [];
+  const currentUser = currentPlan?.members.find((member) => member.username === username) ?? null;
+  const visibleWorkItems = currentPlan?.workItems.filter((item) => {
+    if (navigation.status !== null && item.status !== navigation.status) return false;
+    if (ownerFilter === "me" && (currentUser === null || item.assigneeId !== currentUser.id)) return false;
+    if (ownerFilter === "unassigned" && item.assigneeId !== null) return false;
+    if (ownerFilter !== "all" && ownerFilter !== "me" && ownerFilter !== "unassigned" && item.assigneeId !== ownerFilter) return false;
+    if (objectiveFilter !== "all" && item.objectiveId !== objectiveFilter) return false;
+    return true;
+  }) ?? [];
+  const selectedWorkItem = currentPlan?.workItems.find((item) => item.id === selectedWorkItemId) ?? null;
+  const objective = currentPlan ? currentObjective(currentPlan.objectives) : null;
+  const objectiveWorkItems = objective ? currentPlan?.workItems.filter((item) => item.objectiveId === objective.id && item.status !== "cancelled") ?? [] : [];
+  const completedObjectiveItems = objectiveWorkItems.filter((item) => item.status === "completed").length;
+  const mainColumns = navigation.status === "cancelled" ? [{ id: "cancelled", label: "已取消", statuses: ["cancelled"] as WorkItemStatus[] }] : primaryColumns;
+  const cancelledItems = visibleWorkItems.filter((item) => item.status === "cancelled");
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+  function chooseWorkItem(item: WorkItem) {
+    setSelectedWorkItemId(item.id);
+    setDetailOpen(true);
+  }
+
+  function setStatusFilter(value: string) {
+    const status = value === "all" ? null : value;
+    router.replace(buildProjectHref(projectId, "plan", { status, from: navigation.from, returnTo: navigation.returnTo }), { scroll: false });
+  }
+
+  return <main className={styles.page}>
     <AppHeader username={username} active="projects" projectId={projectId} projectSection="plan" isSystemAdmin={isSystemAdmin} />
-    <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
-      <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
-        <div className="flex flex-wrap items-end justify-between gap-6">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Evidence-driven project planning</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{plan?.project.name ?? "项目计划"}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">把目标、工作项、依赖与智能体建议放到同一条可追溯计划链中。智能体只能提供带证据的建议；采纳、推进和完成始终由项目成员决定。</p></div>
-          <button type="button" onClick={() => void reload()} className="flex min-h-11 items-center justify-center rounded-xl border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white hover:bg-white/15">刷新计划</button>
-        </div>
-        <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4"><Metric label="有效目标" value={counts.objectives} /><Metric label="待采纳建议" value={counts.proposed} /><Metric label="推进中/受阻" value={counts.active} /><Metric label="已完成" value={counts.completed} /></div>
-      </section>
-
-      <ProjectFlowGuide projectId={projectId} stage="plan" archived={Boolean(plan?.project.archivedAt)} />
-      {loading ? <div className="mt-8 h-44 animate-pulse rounded-3xl bg-slate-200" aria-label="正在加载项目计划" /> : null}
-      {plan?.project.archivedAt ? <p className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">项目已归档，计划保持只读，目标、工作项和依赖不会被修改。</p> : null}
-      {message ? <p role="status" className="mt-6 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-700">{message}</p> : null}
-      {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
-      {navigation.returnTo ? <Link href={navigation.returnTo} className="mt-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
-
-      {plan ? <>
-        <ProjectOperationsSummary health={plan.health} impacts={plan.impactSuggestions} workItems={plan.workItems} canEdit={plan.canEdit} pending={pending} error={error} request={request} />
-        <div className="mt-8 flex flex-wrap gap-3">
-          <OperationPanel title="创建项目目标" triggerLabel="创建项目目标" open={objectiveOpen} onOpenChange={setObjectiveOpen} disabled={!plan.canEdit} description="目标先保存为草稿，后续由项目成员明确决定何时启动或完成。">
-          <form onSubmit={createObjective} className="max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Human objective</p><h2 className="mt-2 text-xl font-semibold">创建项目目标</h2><p className="mt-2 text-sm leading-6 text-slate-500">目标先以草稿保存，启动和完成需要明确的状态操作。</p>
-            <input required maxLength={160} value={objectiveForm.title} onChange={(event) => setObjectiveForm((value) => ({ ...value, title: event.target.value }))} placeholder="目标名称" className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
-            <textarea maxLength={20_000} rows={3} value={objectiveForm.description} onChange={(event) => setObjectiveForm((value) => ({ ...value, description: event.target.value }))} placeholder="完成标准或背景（可选）" className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
-            <div className="mt-3 flex flex-wrap items-center gap-3"><input type="date" value={objectiveForm.targetDate} onChange={(event) => setObjectiveForm((value) => ({ ...value, targetDate: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm" /><button disabled={!plan.canEdit || pending !== null || objectiveForm.title.trim().length === 0} className="flex min-h-11 flex-1 items-center justify-center rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{pending === "create-objective" ? "创建中…" : "创建目标草稿"}</button></div>
-          </form>
+    <div className={styles.content}>
+      <header className={styles.heading}>
+        <div><p className={styles.eyebrow}>PROJECT PLAN</p><h1>{currentPlan?.project.name ?? "项目计划"}</h1><p className={styles.subtitle}>维护目标、工作项、负责人、期限和验收证据。</p></div>
+        {currentPlan ? <div className={styles.headingActions}>
+          <OperationPanel title="创建项目目标" triggerLabel="新建目标" open={objectiveOpen} onOpenChange={setObjectiveOpen} disabled={!currentPlan.canEdit} description="目标先保存为草稿，后续由项目成员明确决定何时启动或完成。">
+            <form onSubmit={createObjective} className={styles.form}>
+              {error ? <p role="alert" className={styles.formError}>{error}</p> : null}
+              <label>目标名称<input required maxLength={160} value={objectiveForm.title} onChange={(event) => setObjectiveForm((value) => ({ ...value, title: event.target.value }))} placeholder="目标名称" /></label>
+              <label>完成标准或背景<textarea maxLength={20_000} rows={3} value={objectiveForm.description} onChange={(event) => setObjectiveForm((value) => ({ ...value, description: event.target.value }))} placeholder="可选" /></label>
+              <label>目标日期<input type="date" value={objectiveForm.targetDate} onChange={(event) => setObjectiveForm((value) => ({ ...value, targetDate: event.target.value }))} /></label>
+              <button disabled={!currentPlan.canEdit || pending !== null || objectiveForm.title.trim().length === 0}>{pending === "create-objective" ? "创建中…" : "创建目标草稿"}</button>
+            </form>
           </OperationPanel>
-          <OperationPanel title="添加人工工作项" triggerLabel="添加工作项" open={workItemOpen} onOpenChange={setWorkItemOpen} disabled={!plan.canEdit} description="设置负责人、优先级和可验证的验收标准后，成员可以手动推进工作项。">
-          <form onSubmit={createWorkItem} className="max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-500">Human work item</p><h2 className="mt-2 text-xl font-semibold">添加人工工作项</h2><p className="mt-2 text-sm leading-6 text-slate-500">工作项先进入“已计划”；设置负责人和可验证验收标准后，才能由成员手动开始。</p>
-            <input required maxLength={160} value={workItemForm.title} onChange={(event) => setWorkItemForm((value) => ({ ...value, title: event.target.value }))} placeholder="工作项名称" className="mt-5 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
-            <div className="mt-3 grid gap-3 sm:grid-cols-2"><textarea maxLength={20_000} rows={3} value={workItemForm.description} onChange={(event) => setWorkItemForm((value) => ({ ...value, description: event.target.value }))} placeholder="范围与背景（可选）" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" /><textarea maxLength={20_000} rows={3} value={workItemForm.acceptanceCriteria} onChange={(event) => setWorkItemForm((value) => ({ ...value, acceptanceCriteria: event.target.value }))} placeholder="可验证的验收标准" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" /></div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><select value={workItemForm.objectiveId} onChange={(event) => setWorkItemForm((value) => ({ ...value, objectiveId: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm"><option value="">不关联目标</option>{plan.objectives.filter((item) => item.status !== "cancelled" && item.status !== "completed").map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><select value={workItemForm.assigneeId} onChange={(event) => setWorkItemForm((value) => ({ ...value, assigneeId: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm"><option value="">未分配负责人</option>{plan.members.map((member) => <option key={member.id} value={member.id}>{userLabel(member)}</option>)}</select><select value={workItemForm.priority} onChange={(event) => setWorkItemForm((value) => ({ ...value, priority: event.target.value as Priority }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm">{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}优先级</option>)}</select><input type="date" value={workItemForm.targetDate} onChange={(event) => setWorkItemForm((value) => ({ ...value, targetDate: event.target.value }))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm" /></div>
-            <button disabled={!plan.canEdit || pending !== null || workItemForm.title.trim().length === 0} className="mt-3 flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{pending === "create-work-item" ? "添加中…" : "加入项目计划"}</button>
-          </form>
+          <OperationPanel title="添加人工工作项" triggerLabel="新建工作项" open={workItemOpen} onOpenChange={setWorkItemOpen} disabled={!currentPlan.canEdit} description="工作项先进入已计划状态；开始和完成仍需要成员明确操作。">
+            <form onSubmit={createWorkItem} className={styles.form}>
+              {error ? <p role="alert" className={styles.formError}>{error}</p> : null}
+              <label>工作项名称<input required maxLength={160} value={workItemForm.title} onChange={(event) => setWorkItemForm((value) => ({ ...value, title: event.target.value }))} placeholder="工作项名称" /></label>
+              <div className={styles.formGrid}><label>工作说明<textarea maxLength={20_000} rows={3} value={workItemForm.description} onChange={(event) => setWorkItemForm((value) => ({ ...value, description: event.target.value }))} placeholder="范围与背景（可选）" /></label><label>验收标准<textarea maxLength={20_000} rows={3} value={workItemForm.acceptanceCriteria} onChange={(event) => setWorkItemForm((value) => ({ ...value, acceptanceCriteria: event.target.value }))} placeholder="可验证的验收标准" /></label></div>
+              <div className={styles.formGridFour}>
+                <label>所属目标<select value={workItemForm.objectiveId} onChange={(event) => setWorkItemForm((value) => ({ ...value, objectiveId: event.target.value }))}><option value="">不关联目标</option>{currentPlan.objectives.filter((item) => item.status !== "cancelled" && item.status !== "completed").map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+                <label>负责人<select value={workItemForm.assigneeId} onChange={(event) => setWorkItemForm((value) => ({ ...value, assigneeId: event.target.value }))}><option value="">未分配负责人</option>{currentPlan.members.map((member) => <option key={member.id} value={member.id}>{userLabel(member)}</option>)}</select></label>
+                <label>优先级<select value={workItemForm.priority} onChange={(event) => setWorkItemForm((value) => ({ ...value, priority: event.target.value as Priority }))}>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}优先级</option>)}</select></label>
+                <label>目标日期<input type="date" value={workItemForm.targetDate} onChange={(event) => setWorkItemForm((value) => ({ ...value, targetDate: event.target.value }))} /></label>
+              </div>
+              <button disabled={!currentPlan.canEdit || pending !== null || workItemForm.title.trim().length === 0}>{pending === "create-work-item" ? "添加中…" : "加入项目计划"}</button>
+            </form>
           </OperationPanel>
-        </div>
+        </div> : null}
+      </header>
 
-        <section className="mt-8 rounded-3xl border border-amber-200 bg-amber-50 p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Agent recommendations</p><h2 className="mt-2 text-xl font-semibold text-amber-950">带证据的智能体建议</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-amber-900">这里仅显示尚未加入计划的建议。点击后会固定原建议、引用证据和运行指纹，并创建“待采纳”工作项；不会自动开始。</p></div><Link href={`/projects/${projectId}/intelligence`} className="flex min-h-10 items-center justify-center rounded-xl border border-amber-300 px-4 py-2 text-xs font-semibold text-amber-900">进入项目智能体</Link></div>
-          <div className="mt-5 grid gap-3 lg:grid-cols-2">{plan.availableRecommendations.map((recommendation) => <article key={`${recommendation.agentRunId}:${recommendation.recommendationIndex}`} className="rounded-2xl border border-amber-200 bg-white p-5"><p className="text-sm font-semibold leading-6 text-slate-800">{recommendation.text}</p><p className="mt-3 text-xs text-slate-500">{recommendation.citationCount} 条引用 · 来源问题：{recommendation.question}</p><button type="button" onClick={() => void request({ operation: "promoteRecommendation", agentRunId: recommendation.agentRunId, recommendationIndex: recommendation.recommendationIndex }, "POST", `promote:${recommendation.agentRunId}:${recommendation.recommendationIndex}`, "建议已保存为待采纳工作项，证据快照保持不可变。") } disabled={!plan.canEdit || pending !== null} className="mt-4 flex min-h-10 w-full items-center justify-center rounded-xl bg-amber-500 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-400 disabled:opacity-40">{pending === `promote:${recommendation.agentRunId}:${recommendation.recommendationIndex}` ? "保存中…" : "保存为待采纳工作项"}</button></article>)}{plan.availableRecommendations.length === 0 ? <div className="rounded-2xl border border-dashed border-amber-300 px-5 py-10 text-center text-sm text-amber-800 lg:col-span-2">没有尚未处理的智能体建议。可以先运行一次只读项目调查。</div> : null}</div>
+      {pageLoading ? <div className={styles.loading} role="status" aria-label="正在加载项目计划"><div /><div /><div /></div> : null}
+      {currentPlan?.project.archivedAt ? <p className={styles.archivedNotice}>项目已归档，计划保持只读，目标、工作项和依赖不会被修改。</p> : null}
+      {message ? <p role="status" className={styles.success}>{message}</p> : null}
+      {error && currentPlan ? <p role="alert" className={styles.error}>{error}</p> : null}
+      {!pageLoading && currentPlan === null ? <div className={styles.errorPanel} role="alert"><p>{error ?? "项目计划加载失败"}</p><button type="button" onClick={() => void reload({ showLoading: true })}>重试</button></div> : null}
+      {navigation.returnTo ? <Link href={navigation.returnTo} className={styles.returnLink}>← 返回来源页面</Link> : null}
+
+      {currentPlan ? <>
+        <section className={styles.goalBanner} aria-label="当前项目目标">
+          <span className={styles.targetMark} aria-hidden="true">◎</span>
+          <div className={styles.goalCopy}>
+            <p className={styles.eyebrow}>CURRENT OBJECTIVE</p>
+            <h2>{objective?.title ?? "尚未设置当前目标"}</h2>
+            <p>{objective ? `${objectiveStatusLabels[objective.status]} · ${objective.targetDate ? `目标日期 ${dateLabel(objective.targetDate)}` : "目标日期未设置"}` : "可以创建目标草稿，再由成员明确启动。"}</p>
+          </div>
+          {objectiveWorkItems.length > 0 ? <div className={styles.goalProgress}><span className={styles.progressTrack}><span style={{ width: `${Math.round(completedObjectiveItems / objectiveWorkItems.length * 100)}%` }} /></span><strong>{completedObjectiveItems}/{objectiveWorkItems.length}</strong><small>已完成</small></div> : <span className={styles.goalNotSet}>{objective ? "尚无关联工作项" : "目标未设置"}</span>}
+          <a href="#objectives" className={styles.textLink}>目标详情 →</a>
         </section>
 
-        <section className="mt-8"><div className="mb-5"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Objectives</p><h2 className="mt-2 text-2xl font-semibold">项目目标</h2></div><div className="grid gap-4 lg:grid-cols-2">{plan.objectives.map((objective) => <article key={objective.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><h3 className="text-lg font-semibold">{objective.title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{objective.description ?? "未填写完成标准"}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusTone(objective.status)}`}>{objectiveStatusLabels[objective.status]}</span></div><p className="mt-4 text-xs text-slate-400">目标日期：{dateLabel(objective.targetDate)} · 创建人：{userLabel(objective.createdBy)}</p><div className="mt-5 flex flex-wrap gap-2">{objectiveTransitions[objective.status].map((status) => <button key={status} type="button" onClick={() => void request({ entity: "objective", id: objective.id, expectedUpdatedAt: objective.updatedAt, status }, "PATCH", `objective:${objective.id}:${status}`, `目标已更新为“${objectiveStatusLabels[status]}”。`)} disabled={!plan.canEdit || pending !== null} className="flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-300 disabled:opacity-40">{objectiveStatusLabels[status]}</button>)}</div></article>)}{plan.objectives.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 px-6 py-14 text-center text-sm text-slate-500 lg:col-span-2">还没有项目目标。</div> : null}</div></section>
+        <div className={styles.summaryRow}>
+          <div className={styles.healthSummary}><span className={`${styles.healthDot} ${currentPlan.health.status === "atRisk" ? styles.healthRisk : currentPlan.health.status === "attention" ? styles.healthAttention : ""}`} /><strong>{currentPlan.health.status === "atRisk" ? "需要立即处理" : currentPlan.health.status === "attention" ? "存在待处理事项" : currentPlan.health.status === "empty" ? "尚未建立工作项" : "计划运行正常"}</strong><span>逾期 {currentPlan.health.counts.overdue} · 受阻 {currentPlan.health.counts.blocked} · 缺少证据 {currentPlan.health.counts.missingEvidence}</span></div>
+          <div className={styles.summaryCounts}><span>目标 <b>{currentPlan.objectives.filter((item) => item.status !== "cancelled").length}</b></span><span>待采纳 <b>{currentPlan.workItems.filter((item) => item.status === "proposed").length}</b></span><span>推进中 <b>{currentPlan.workItems.filter((item) => item.status === "inProgress" || item.status === "blocked").length}</b></span><span>已完成 <b>{currentPlan.workItems.filter((item) => item.status === "completed").length}</b></span></div>
+        </div>
 
-        <section className="mt-8"><div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Work items</p><h2 className="mt-2 text-2xl font-semibold">工作项与依赖</h2></div><label className="text-xs font-semibold text-slate-500">状态筛选<select value={navigation.status ?? "all"} onChange={(event) => router.replace(buildProjectHref(projectId, "plan", { status: event.target.value === "all" ? null : event.target.value, from: navigation.from, returnTo: navigation.returnTo }), { scroll: false })} className="ml-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700"><option value="all">全部状态</option>{PROJECT_PLAN_STATUS_VALUES.map((status) => <option key={status} value={status}>{workItemStatusLabels[status]}</option>)}</select></label></div><div className="space-y-4">{visibleWorkItems.map((item) => {
-          const dependencies = plan.dependencies.filter((entry) => entry.workItemId === item.id);
-          const candidates = activeWorkItems.filter((candidate) => candidate.id !== item.id && !dependencies.some((entry) => entry.dependsOnId === candidate.id));
-          return <article id={`work-item-${item.id}`} tabIndex={navigation.focus === item.id ? -1 : undefined} key={item.id} className="scroll-mt-28 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100"><div className="flex flex-wrap items-start justify-between gap-4"><div className="max-w-3xl"><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold">{item.title}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{workItemStatusLabels[item.status]}</span><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{priorityLabels[item.priority]}优先级</span></div><p className="mt-2 text-sm leading-6 text-slate-500">{item.description ?? "未填写范围与背景"}</p><p className="mt-2 text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-500">验收标准：</span>{item.acceptanceCriteria ?? "尚未设置"}</p></div><div className="text-right text-xs text-slate-400"><p>{item.objectiveId ? `目标：${objectiveById.get(item.objectiveId)?.title ?? "已移除"}` : "未关联目标"}</p><p className="mt-1">负责人：{item.assignee ? userLabel(item.assignee) : "未分配"}</p><p className="mt-1">目标日期：{dateLabel(item.targetDate)}</p></div></div>
-            {item.origin === "agentRecommendation" ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><p className="font-semibold">智能体建议 · 等待人工采纳</p><p className="mt-1 font-mono text-[10px] text-amber-700">证据指纹 {item.evidenceFingerprint?.slice(0, 16)}…</p></div> : null}
-            <WorkItemOperations key={`${item.id}:${item.updatedAt}`} item={item} objectives={plan.objectives} members={plan.members} evidenceLinks={plan.evidenceLinks.filter((link) => link.workItemId === item.id)} evidenceCandidates={[...plan.evidenceCandidates.projectItems, ...plan.evidenceCandidates.projectSources]} dependencies={dependencies.map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} dependencyCandidates={candidates} canEdit={plan.canEdit} pending={pending} error={error} request={request} />
-            <div className="mt-5"><p className="text-xs font-semibold text-slate-500">前置依赖</p><div className="mt-2 flex flex-wrap gap-2">{dependencies.map((dependency) => <span key={dependency.id} className="inline-flex min-h-9 items-center rounded-xl bg-slate-100 px-3 py-1.5 text-xs text-slate-700">{workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项"}</span>)}{dependencies.length === 0 ? <span className="text-xs text-slate-400">无前置依赖</span> : null}</div></div>
-            <div className="mt-5 flex flex-wrap justify-end gap-2">{workItemTransitions[item.status].map((status) => <button key={status} type="button" onClick={() => void request({ entity: "workItem", id: item.id, expectedUpdatedAt: item.updatedAt, status }, "PATCH", `work-item:${item.id}:${status}`, `工作项已更新为“${workItemStatusLabels[status]}”。`)} disabled={!plan.canEdit || pending !== null} className="flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-600 disabled:opacity-40">{workItemStatusLabels[status]}</button>)}</div>
-          </article>;
-        })}{visibleWorkItems.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 px-6 py-16 text-center text-sm text-slate-500">{plan.workItems.length === 0 ? "还没有工作项。可以人工创建，或把有证据的智能体建议保存为待采纳项。" : "当前筛选条件下没有工作项。"}</div> : null}</div></section>
+        <section className={styles.planSection} aria-label="项目工作项">
+          <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>WORK ITEMS</p><h2>项目计划</h2></div><span className={styles.totalCount}>{visibleWorkItems.length} 项工作</span></div>
+          <div className={styles.toolbar}>
+            <div className={styles.viewSwitch} role="group" aria-label="项目计划视图">
+              <button type="button" aria-pressed={view === "board"} className={view === "board" ? styles.activeView : ""} onClick={() => setView("board")}><span aria-hidden="true">▦</span> 看板</button>
+              <button type="button" aria-pressed={view === "list"} className={view === "list" ? styles.activeView : ""} onClick={() => setView("list")}><span aria-hidden="true">☷</span> 列表</button>
+            </div>
+            <div className={styles.filters}>
+              <label>状态<select value={navigation.status ?? "all"} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">全部工作项</option>{PROJECT_PLAN_STATUS_VALUES.map((status) => <option key={status} value={status}>{workItemStatusLabels[status]}</option>)}</select></label>
+              <label>负责人<select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}><option value="all">所有负责人</option><option value="me">我的工作</option><option value="unassigned">未分配</option>{currentPlan.members.map((member) => <option key={member.id} value={member.id}>{userLabel(member)}</option>)}</select></label>
+              <label>目标<select value={objectiveFilter} onChange={(event) => setObjectiveFilter(event.target.value)}><option value="all">所有目标</option>{currentPlan.objectives.filter((item) => item.status !== "cancelled").map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+            </div>
+          </div>
 
-        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Audit trail</p><h2 className="mt-2 text-xl font-semibold">最近计划审计</h2></div><span className="text-xs text-slate-400">最近 {Math.min(plan.audits.length, 12)} 条</span></div><div className="mt-5 divide-y divide-slate-100">{plan.audits.slice(0, 12).map((audit) => <div key={audit.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs"><span className="font-semibold text-slate-700">{audit.event}</span><span className="text-slate-400">{userLabel(audit.actor)} · {new Date(audit.createdAt).toLocaleString("zh-CN")}</span></div>)}{plan.audits.length === 0 ? <p className="py-8 text-center text-sm text-slate-400">还没有计划审计记录。</p> : null}</div></section>
+          {view === "board" ? <div className={styles.board}>
+            {mainColumns.map((column) => {
+              const items = visibleWorkItems.filter((item) => column.statuses.includes(item.status));
+              return <section key={column.id} className={styles.boardColumn} aria-label={`${column.label}工作项`}>
+                <div className={styles.columnHeading}><span className={`${styles.columnDot} ${column.id === "blocked" ? styles.healthRisk : column.id === "inProgress" ? styles.healthAttention : ""}`} /><h3>{column.label}</h3><span>{items.length}</span></div>
+                <div className={styles.boardCards}>{items.map((item) => <WorkItemCard key={item.id} item={item} objective={objectiveById.get(item.objectiveId ?? "")} evidenceCount={currentPlan.evidenceLinks.filter((link) => link.workItemId === item.id).length} onOpen={() => chooseWorkItem(item)} />)}</div>
+                {items.length === 0 ? <p className={styles.columnEmpty}>暂无工作项</p> : null}
+                {column.id === "planned" && currentPlan.canEdit && navigation.status !== "cancelled" ? <button type="button" className={styles.addWorkButton} onClick={() => setWorkItemOpen(true)}>＋ 添加工作项</button> : null}
+              </section>;
+            })}
+          </div> : <div className={styles.listView}>
+            {visibleWorkItems.map((item) => <WorkItemRow key={item.id} item={item} objective={objectiveById.get(item.objectiveId ?? "")} evidenceCount={currentPlan.evidenceLinks.filter((link) => link.workItemId === item.id).length} onOpen={() => chooseWorkItem(item)} />)}
+            {visibleWorkItems.length === 0 ? <div className={styles.emptyState}>当前筛选条件下没有工作项。</div> : null}
+          </div>}
+
+          {view === "board" && navigation.status === null && cancelledItems.length > 0 ? <details className={styles.cancelledDetails}><summary>已取消工作项 <span>{cancelledItems.length}</span></summary><div className={styles.listView}>{cancelledItems.map((item) => <WorkItemRow key={item.id} item={item} objective={objectiveById.get(item.objectiveId ?? "")} evidenceCount={currentPlan.evidenceLinks.filter((link) => link.workItemId === item.id).length} onOpen={() => chooseWorkItem(item)} />)}</div></details> : null}
+          {visibleWorkItems.length === 0 && view === "board" ? <div className={styles.emptyState}>{currentPlan.workItems.length === 0 ? "还没有工作项。可以手动创建，或保存有证据的智能体建议。" : "当前筛选条件下没有工作项。"}</div> : null}
+        </section>
+
+        <details id="objectives" className={styles.collapsibleSection}>
+          <summary>全部目标 <span>{currentPlan.objectives.filter((item) => item.status !== "cancelled").length}</span></summary>
+          <div className={styles.objectiveList}>{currentPlan.objectives.map((objectiveItem) => <article key={objectiveItem.id} className={styles.objectiveCard}>
+            <div className={styles.objectiveText}><strong>{objectiveItem.title}</strong><span>{objectiveItem.description || "未填写目标说明"}</span><small>目标日期：{dateLabel(objectiveItem.targetDate)} · 创建人：{userLabel(objectiveItem.createdBy)}</small></div>
+            <span className={`${styles.statusChip} ${statusTone(objectiveItem.status)}`}>{objectiveStatusLabels[objectiveItem.status]}</span>
+            {objectiveTransitions[objectiveItem.status].length > 0 ? <div className={styles.transitionButtons}>{objectiveTransitions[objectiveItem.status].map((status) => <button key={status} type="button" onClick={() => void request({ entity: "objective", id: objectiveItem.id, expectedUpdatedAt: objectiveItem.updatedAt, status }, "PATCH", `objective:${objectiveItem.id}:${status}`, `目标已更新为“${objectiveStatusLabels[status]}”。`)} disabled={!currentPlan.canEdit || pending !== null}>{objectiveStatusLabels[status]}</button>)}</div> : null}
+          </article>)}{currentPlan.objectives.length === 0 ? <p className={styles.emptyState}>还没有项目目标。</p> : null}</div>
+        </details>
+
+        <details className={styles.collapsibleSection}>
+          <summary>带证据的智能体建议 <span>{currentPlan.availableRecommendations.length}</span></summary>
+          <p className={styles.detailIntro}>建议只会保存为待采纳工作项；接受、推进和完成由项目成员明确操作。</p>
+          <div className={styles.recommendations}>{currentPlan.availableRecommendations.map((recommendation) => <article key={`${recommendation.agentRunId}:${recommendation.recommendationIndex}`} className={styles.recommendationCard}>
+            <strong>{recommendation.text}</strong><p>{recommendation.citationCount} 条引用 · 来源问题：{recommendation.question}</p><button type="button" onClick={() => void request({ operation: "promoteRecommendation", agentRunId: recommendation.agentRunId, recommendationIndex: recommendation.recommendationIndex }, "POST", `promote:${recommendation.agentRunId}:${recommendation.recommendationIndex}`, "建议已保存为待采纳工作项，证据快照保持不可变。")} disabled={!currentPlan.canEdit || pending !== null}>{pending === `promote:${recommendation.agentRunId}:${recommendation.recommendationIndex}` ? "保存中…" : "保存为待采纳工作项"}</button>
+          </article>)}{currentPlan.availableRecommendations.length === 0 ? <p className={styles.emptyState}>没有尚未处理的智能体建议。</p> : null}</div>
+          <Link href={`/projects/${projectId}/intelligence`} className={styles.textLink}>进入项目智能体 →</Link>
+        </details>
+
+        <details className={styles.collapsibleSection}>
+          <summary>计划健康与仓库变更 <span>受阻 {currentPlan.health.counts.blocked} · 待评估 {currentPlan.health.counts.openImpacts}</span></summary>
+          <ProjectOperationsSummary health={currentPlan.health} impacts={currentPlan.impactSuggestions} workItems={currentPlan.workItems} canEdit={currentPlan.canEdit} pending={pending} error={error} request={request} />
+        </details>
+
+        <details id="plan-history" className={styles.collapsibleSection}>
+          <summary>最近计划审计 <span>{Math.min(currentPlan.audits.length, 12)} 条</span></summary>
+          <div className={styles.auditList}>{currentPlan.audits.slice(0, 12).map((audit) => <div key={audit.id}><strong>{audit.event}</strong><span>{userLabel(audit.actor)} · {new Date(audit.createdAt).toLocaleString("zh-CN")}</span></div>)}{currentPlan.audits.length === 0 ? <p className={styles.emptyState}>还没有计划审计记录。</p> : null}</div>
+        </details>
+
+        {selectedWorkItem ? <OperationPanel title={selectedWorkItem.title} triggerLabel="打开工作项详情" open={detailOpen} onOpenChange={setDetailOpen} className={styles.hiddenOperationTrigger} description="查看范围、负责人、期限、依赖和关联证据；计划变更会经过服务器状态与证据校验。">
+          <WorkItemDetail item={selectedWorkItem} objective={objectiveById.get(selectedWorkItem.objectiveId ?? "")} dependencies={currentPlan.dependencies.filter((entry) => entry.workItemId === selectedWorkItem.id).map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} evidenceLinks={currentPlan.evidenceLinks.filter((link) => link.workItemId === selectedWorkItem.id)} />
+          <WorkItemOperations key={`${selectedWorkItem.id}:${selectedWorkItem.updatedAt}`} item={selectedWorkItem} objectives={currentPlan.objectives} members={currentPlan.members} evidenceLinks={currentPlan.evidenceLinks.filter((link) => link.workItemId === selectedWorkItem.id)} evidenceCandidates={[...currentPlan.evidenceCandidates.projectItems, ...currentPlan.evidenceCandidates.projectSources]} dependencies={currentPlan.dependencies.filter((entry) => entry.workItemId === selectedWorkItem.id).map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} dependencyCandidates={activeWorkItems.filter((candidate) => candidate.id !== selectedWorkItem.id && !currentPlan.dependencies.some((dependency) => dependency.workItemId === selectedWorkItem.id && dependency.dependsOnId === candidate.id))} canEdit={currentPlan.canEdit} pending={pending} error={error} request={request} />
+          <div className={styles.detailActions}>{workItemTransitions[selectedWorkItem.status].map((status) => <button key={status} type="button" onClick={() => void request({ entity: "workItem", id: selectedWorkItem.id, expectedUpdatedAt: selectedWorkItem.updatedAt, status }, "PATCH", `work-item:${selectedWorkItem.id}:${status}`, `工作项已更新为“${workItemStatusLabels[status]}”。`)} disabled={!currentPlan.canEdit || pending !== null}>{pending === `work-item:${selectedWorkItem.id}:${status}` ? "更新中…" : workItemStatusLabels[status]}</button>)}</div>
+        </OperationPanel> : null}
       </> : null}
     </div>
   </main>;
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-xs text-slate-300">{label}</p></div>;
+function WorkItemCard({ item, objective, evidenceCount, onOpen }: { item: WorkItem; objective: Objective | undefined; evidenceCount: number; onOpen: () => void }) {
+  return <button id={`work-item-${item.id}`} type="button" className={styles.workCard} onClick={onOpen} aria-label={`查看工作项：${item.title}`}>
+    <div className={styles.cardMeta}><span className={`${styles.statusChip} ${statusTone(item.status)}`}>{workItemStatusLabels[item.status]}</span><span className={styles.priority}>{priorityLabels[item.priority]}优先级</span></div>
+    <strong>{item.title}</strong>
+    {item.description ? <p>{item.description}</p> : null}
+    {objective ? <span className={styles.objectiveTag}>{objective.title}</span> : null}
+    <div className={styles.cardFooter}><span>{evidenceCount > 0 ? `已关联 ${evidenceCount} 条证据` : "尚未关联证据"}</span><span>{item.targetDate ? dateLabel(item.targetDate) : "未设置期限"}</span></div>
+    <div className={styles.assignee}>{item.assignee ? userLabel(item.assignee) : "未分配负责人"}</div>
+  </button>;
+}
+
+function WorkItemRow({ item, objective, evidenceCount, onOpen }: { item: WorkItem; objective: Objective | undefined; evidenceCount: number; onOpen: () => void }) {
+  return <button id={`work-item-${item.id}`} type="button" className={styles.listItem} onClick={onOpen} aria-label={`查看工作项：${item.title}`}>
+    <span className={styles.listTitle}><strong>{item.title}</strong><small>{objective?.title ?? "未关联目标"}</small></span>
+    <span className={`${styles.statusChip} ${statusTone(item.status)}`}>{workItemStatusLabels[item.status]}</span>
+    <span className={styles.listMeta}>{item.assignee ? userLabel(item.assignee) : "未分配"}</span>
+    <span className={styles.listMeta}>{item.targetDate ? dateLabel(item.targetDate) : "未设置期限"}</span>
+    <span className={styles.listMeta}>{evidenceCount > 0 ? `${evidenceCount} 条证据` : "无证据"}</span>
+    <span aria-hidden="true" className={styles.arrow}>→</span>
+  </button>;
+}
+
+function WorkItemDetail({ item, objective, dependencies, evidenceLinks }: { item: WorkItem; objective: Objective | undefined; dependencies: Array<{ id: string; dependsOnId: string; title: string }>; evidenceLinks: PlanEvidenceLink[] }) {
+  return <div className={styles.workDetail}>
+    <div className={styles.detailBadges}><span className={`${styles.statusChip} ${statusTone(item.status)}`}>{workItemStatusLabels[item.status]}</span><span className={styles.priority}>{priorityLabels[item.priority]}优先级</span>{item.origin === "agentRecommendation" ? <span className={styles.proposedBadge}>智能体建议 · 等待人工采纳</span> : null}</div>
+    <p>{item.description || "尚未填写工作说明。"}</p>
+    <div className={styles.detailGrid}><div><span>验收标准</span><strong>{item.acceptanceCriteria || "尚未设置"}</strong></div><div><span>所属目标</span><strong>{objective?.title ?? "未关联目标"}</strong></div><div><span>负责人</span><strong>{item.assignee ? userLabel(item.assignee) : "未分配"}</strong></div><div><span>目标日期</span><strong>{dateLabel(item.targetDate)}</strong></div></div>
+    <section className={styles.detailSubsection}><h3>前置依赖</h3>{dependencies.length > 0 ? <ul>{dependencies.map((dependency) => <li key={dependency.id}>{dependency.title}</li>)}</ul> : <p>无前置依赖。</p>}</section>
+    <section className={styles.detailSubsection}><h3>关联证据</h3>{evidenceLinks.length > 0 ? <ul>{evidenceLinks.map((link) => <li key={link.id}>{link.label}{link.stale ? " · 需要复核" : ""}</li>)}</ul> : <p>尚未关联完成证据。</p>}</section>
+  </div>;
 }

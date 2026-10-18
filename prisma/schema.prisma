@@ -218,6 +218,22 @@ enum PersonalKnowledgeAuditEvent {
   exported
 }
 
+/// User-visible unified Q&A confirmation lifecycle. A consumed confirmation
+/// can never be reused for another provider dispatch.
+enum UnifiedQuestionConfirmationStatus {
+  issued
+  consumed
+  expired
+}
+
+/// Append-only outcome evidence for a unified Q&A provider call.
+enum UnifiedQuestionAuditStatus {
+  running
+  succeeded
+  failed
+  unknown
+}
+
 /// A short-lived, owner-bound network proof.  The proof binds the exact
 /// connection draft (including the secret fingerprint) to one actor epoch and
 /// is consumed atomically by the subsequent create or governed update.
@@ -5341,6 +5357,10 @@ model AppUser {
   personalKnowledgeSemanticEntries                   PersonalKnowledgeSemanticEntry[]      @relation("PersonalKnowledgeSemanticEntryOwner")
   personalKnowledgeSemanticChallenges                PersonalKnowledgeSemanticChallenge[]  @relation("PersonalKnowledgeSemanticChallengeOwner")
   personalKnowledgeSemanticAudits                    PersonalKnowledgeSemanticAudit[]      @relation("PersonalKnowledgeSemanticAuditOwner")
+  unifiedQuestionConversations                       UnifiedQuestionConversation[]         @relation("UnifiedQuestionConversationOwner")
+  unifiedQuestionTurns                              UnifiedQuestionTurn[]                 @relation("UnifiedQuestionTurnOwner")
+  unifiedQuestionConfirmations                      UnifiedQuestionConfirmation[]        @relation("UnifiedQuestionConfirmationOwner")
+  unifiedQuestionAudits                             UnifiedQuestionAudit[]                @relation("UnifiedQuestionAuditOwner")
 }
 
 /// Network proof for personal Git/MCP connection setup and governed updates.
@@ -5699,6 +5719,139 @@ model PersonalKnowledgeQaAudit {
   @@unique([ownerUserId, id])
   @@index([ownerUserId, createdAt])
   @@index([ownerUserId, documentId, createdAt])
+  @@index([providerConnectionId, createdAt])
+}
+
+/// User-owned conversation head. Empty prepared conversations are persisted,
+/// but list and search endpoints omit them until their first successful turn.
+model UnifiedQuestionConversation {
+  id            String                    @id @default(uuid()) @db.Uuid
+  ownerUserId   String                    @db.Uuid
+  title         String?                   @db.Text
+  headTurnId    String?                   @db.Uuid
+  headSequence  Int                       @default(0)
+  version       Int                       @default(0)
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  owner         AppUser                   @relation("UnifiedQuestionConversationOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  turns         UnifiedQuestionTurn[]
+  confirmations UnifiedQuestionConfirmation[]
+
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, updatedAt, id])
+}
+
+/// Successful turns retain complete Q&A and exact bounded source snapshots.
+/// Citation JSON is immutable evidence and never resolves against live rows.
+model UnifiedQuestionTurn {
+  id                   String                     @id @default(uuid()) @db.Uuid
+  ownerUserId          String                     @db.Uuid
+  conversationId       String                     @db.Uuid
+  sequence             Int
+  scope                String                     @db.VarChar(16)
+  projectId            String?                    @db.Uuid
+  focusDocumentId      String?                    @db.Uuid
+  contextName          String                     @db.VarChar(240)
+  question             String                     @db.Text
+  answer               String                     @db.Text
+  modelId              String                     @db.VarChar(128)
+  providerName         String                     @db.VarChar(80)
+  providerConnectionId String                     @db.Uuid
+  citations            Json                       @db.JsonB
+  projectIds           String[]                   @default([]) @db.Uuid
+  createdAt            DateTime                   @default(now())
+  owner                AppUser                    @relation("UnifiedQuestionTurnOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  conversation         UnifiedQuestionConversation @relation(fields: [ownerUserId, conversationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([conversationId, sequence])
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, createdAt, id])
+  @@index([conversationId, createdAt, id])
+}
+
+/// One-use confirmation binds the complete prior history, selected source
+/// bodies, current access epoch and the verified platform route snapshot.
+model UnifiedQuestionConfirmation {
+  id                           String                            @id @default(uuid()) @db.Uuid
+  ownerUserId                  String                            @db.Uuid
+  conversationId               String                            @db.Uuid
+  expectedLastTurnId           String?                           @db.Uuid
+  expectedSequence             Int
+  expectedVersion              Int
+  scope                        String                            @db.VarChar(16)
+  projectId                    String?                           @db.Uuid
+  focusDocumentId              String?                           @db.Uuid
+  question                     String                            @db.Text
+  questionHash                 String                            @db.Char(64)
+  historyFingerprint           String                            @db.Char(64)
+  scopeProjectIds              String[]                          @default([]) @db.Uuid
+  evidenceManifest             Json                              @db.JsonB
+  sourceSnapshots              Json                              @db.JsonB
+  contextName                  String                            @db.VarChar(240)
+  providerConnectionId         String                            @db.Uuid
+  providerConfigurationVersion Int
+  modelId                      String                            @db.VarChar(128)
+  providerName                 String                            @db.VarChar(80)
+  credentialSecretFingerprint  String                            @db.Char(64)
+  routeId                      String                            @db.Uuid
+  routeVersion                 Int
+  routeUpdatedAt               DateTime
+  quotaMultiplierBps           Int
+  maxOutputTokens              Int
+  routeFenceFingerprint        String                            @db.Char(64)
+  actorAccountAccessVersion    Int
+  clientKeyHash                String                            @db.Char(64)
+  inputFingerprint             String                            @db.Char(64)
+  status                       UnifiedQuestionConfirmationStatus @default(issued)
+  issuedAt                     DateTime                          @default(now())
+  expiresAt                    DateTime
+  consumedAt                   DateTime?
+  owner                        AppUser                           @relation("UnifiedQuestionConfirmationOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  conversation                 UnifiedQuestionConversation       @relation(fields: [ownerUserId, conversationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection           AiProviderConnection              @relation("UnifiedQuestionConfirmationProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audit                        UnifiedQuestionAudit?
+  tokenReservation             PlatformTokenReservation?
+
+  @@unique([ownerUserId, id])
+  @@unique([ownerUserId, clientKeyHash])
+  @@index([ownerUserId, conversationId, issuedAt])
+  @@index([expiresAt, consumedAt])
+  @@index([providerConnectionId, status, issuedAt])
+  @@index([inputFingerprint])
+}
+
+/// Body-free provider outcome evidence. Durable Q&A bodies live on immutable
+/// successful turns; this row only binds status, access, route and usage.
+model UnifiedQuestionAudit {
+  id                           String                     @id @default(uuid()) @db.Uuid
+  ownerUserId                  String                     @db.Uuid
+  confirmationId               String                     @db.Uuid
+  questionHash                 String                     @db.Char(64)
+  historyFingerprint           String                     @db.Char(64)
+  evidenceManifest             Json                       @db.JsonB
+  scopeProjectIds              String[]                   @default([]) @db.Uuid
+  providerConnectionId         String                     @db.Uuid
+  providerConfigurationVersion Int
+  modelId                      String                     @db.VarChar(128)
+  credentialSecretFingerprint  String                     @db.Char(64)
+  actorAccountAccessVersion    Int
+  routeFenceFingerprint        String                     @db.Char(64)
+  status                       UnifiedQuestionAuditStatus @default(running)
+  safeErrorCode                String?                    @db.VarChar(96)
+  providerRequestId            String?                    @db.VarChar(256)
+  inputTokens                  Int                        @default(0)
+  outputTokens                 Int                        @default(0)
+  usageKnown                   Boolean                    @default(false)
+  createdAt                    DateTime                   @default(now())
+  completedAt                  DateTime?
+  owner                        AppUser                    @relation("UnifiedQuestionAuditOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  confirmation                 UnifiedQuestionConfirmation @relation(fields: [ownerUserId, confirmationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection           AiProviderConnection       @relation("UnifiedQuestionAuditProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, confirmationId])
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, createdAt])
+  @@index([ownerUserId, status, completedAt])
   @@index([providerConnectionId, createdAt])
 }
 
@@ -6176,6 +6329,7 @@ model PlatformTokenReservation {
   webAiGrantReferenceId        String?                              @db.Uuid
   webAiGrantProjectId          String?                              @db.Uuid
   personalKnowledgeQaChallengeId       String?                              @db.Uuid
+  unifiedQuestionConfirmationId        String?                              @db.Uuid
   personalKnowledgeSemanticChallengeId String? @db.Uuid
   personalKnowledgeExtractionAttemptId String? @db.Uuid
   personalKnowledgeExtractionPageIndex Int?
@@ -6207,6 +6361,7 @@ model PlatformTokenReservation {
   webAiGrant                   WebAiGrant?                          @relation("WebAiGrantReservations", fields: [webAiGrantId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   providerConnection           AiProviderConnection?                @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   personalKnowledgeQaChallenge         PersonalKnowledgeQaChallenge?        @relation(fields: [userId, personalKnowledgeQaChallengeId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_qa_challenge_fkey")
+  unifiedQuestionConfirmation         UnifiedQuestionConfirmation?         @relation(fields: [userId, unifiedQuestionConfirmationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_unified_question_confirmation_fkey")
   personalKnowledgeSemanticChallenge PersonalKnowledgeSemanticChallenge? @relation(fields: [userId, personalKnowledgeSemanticChallengeId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_semantic_challenge_fkey")
   personalKnowledgeExtractionAttempt PersonalKnowledgeExtractionAttempt? @relation(fields: [userId, personalKnowledgeExtractionAttemptId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "PlatformTokenReservation_personal_extraction_attempt_fkey")
   providerCallAudit            ProviderCallAudit?
@@ -6215,6 +6370,7 @@ model PlatformTokenReservation {
 
   @@unique([userId, callKey])
   @@unique([userId, personalKnowledgeQaChallengeId], map: "PlatformTokenReservation_personal_qa_challenge_key")
+  @@unique([userId, unifiedQuestionConfirmationId], map: "PlatformTokenReservation_unified_question_confirmation_key")
   @@unique([userId, personalKnowledgeSemanticChallengeId], map: "PlatformTokenReservation_personal_semantic_challenge_key")
   @@unique([userId, personalKnowledgeExtractionAttemptId, personalKnowledgeExtractionPageIndex], map: "PlatformTokenReservation_personal_extraction_page_key")
   @@index([userId, status, expiresAt])
@@ -7745,6 +7901,8 @@ model AiProviderConnection {
   personalKnowledgeSemanticGenerations PersonalKnowledgeSemanticGeneration[] @relation("PersonalKnowledgeSemanticGenerationProvider")
   personalKnowledgeSemanticChallenges  PersonalKnowledgeSemanticChallenge[]  @relation("PersonalKnowledgeSemanticChallengeProvider")
   personalKnowledgeSemanticAudits      PersonalKnowledgeSemanticAudit[]      @relation("PersonalKnowledgeSemanticAuditProvider")
+  unifiedQuestionConfirmations        UnifiedQuestionConfirmation[]        @relation("UnifiedQuestionConfirmationProvider")
+  unifiedQuestionAudits               UnifiedQuestionAudit[]               @relation("UnifiedQuestionAuditProvider")
 
   @@index([kind, status])
   @@index([scope, name])

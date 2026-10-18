@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyUserProjectsChanged } from "@/lib/user-navigation";
+
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -9,6 +11,7 @@ import { buildProjectHref } from "@/lib/project-navigation";
 
 /** Trusted identity and project context supplied by the protected server page. */
 type ProjectConfigurationClientProps = Readonly<{
+  embedded?: boolean;
   username: string;
   projectId: string;
   isSystemAdmin: boolean;
@@ -512,22 +515,22 @@ function SnapshotPanel({
   children: ReactNode;
 }>): React.JSX.Element {
   return (
-    <section className="flex h-full min-w-0 flex-col rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
+    <section className="flex h-full min-w-0 flex-col rounded-md border border-slate-200/80 bg-white p-5  sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p>
-          <h2 className="mt-2 text-2xl font-semibold">{title}</h2>
+          <h2 className="mt-2 text-base font-semibold">{title}</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">{description}</p>
         </div>
         <button type="button" onClick={state.refresh} disabled={state.loading} className="min-h-10 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
           {state.loading ? "读取中…" : "刷新"}
         </button>
       </div>
-      {state.loading && state.data === null ? <div className="mt-5 space-y-3" aria-label={`${title}正在加载`}><div className="h-16 animate-pulse rounded-2xl bg-slate-100" /><div className="h-16 animate-pulse rounded-2xl bg-slate-100" /></div> : null}
-      {state.error ? <div role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{state.error}</p><button type="button" onClick={state.refresh} className="mt-2 font-semibold underline">重新读取</button></div> : null}
+      {state.loading && state.data === null ? <div className="mt-5 space-y-3" aria-label={`${title}正在加载`}><div className="h-16 animate-pulse rounded-md bg-slate-100" /><div className="h-16 animate-pulse rounded-md bg-slate-100" /></div> : null}
+      {state.error ? <div role="alert" className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{state.error}</p><button type="button" onClick={state.refresh} className="mt-2 font-semibold underline">重新读取</button></div> : null}
       {state.loading && state.data !== null ? <p role="status" className="mt-4 text-xs text-slate-400">正在刷新当前读取时快照…</p> : null}
       {state.data !== null ? <div className="mt-5">{children}</div> : null}
-      {!state.loading && state.error === null && state.data === null ? <p className="mt-5 rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-500">暂时没有可展示的配置快照。</p> : null}
+      {!state.loading && state.error === null && state.data === null ? <p className="mt-5 rounded-md bg-slate-50 px-4 py-4 text-sm text-slate-500">暂时没有可展示的配置快照。</p> : null}
       <div className="mt-auto border-t border-slate-100 pt-4">
         <Link href={managementHref} className="text-xs font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">{managementLabel} →</Link>
       </div>
@@ -540,11 +543,11 @@ function AiSnapshotView({ snapshot }: { snapshot: AiSnapshot }): React.JSX.Eleme
     <div className="space-y-5">
       <div>
         <p className="text-xs font-semibold text-slate-700">当前模型路由</p>
-        {snapshot.selections.length === 0 ? <p className="mt-3 text-sm text-slate-500">当前接口没有返回模型路由选择。</p> : <div className="mt-3 space-y-3">{snapshot.selections.map((selection) => <article key={`${selection.operation}:${selection.version ?? "unknown"}`} className="rounded-2xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{operationLabel(selection.operation)}</p><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{sourceLabel(selection.source)}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">选择版本</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(selection.version)}</dd></div><div><dt className="text-slate-400">能力标签</dt><dd className="mt-1 flex flex-wrap gap-1.5">{capabilityLabels(selection.operationExecutionAvailable, selection.controlPlaneOnly).map((label) => <span key={label} className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{label}</span>)}</dd></div><div><dt className="text-slate-400">费用承担</dt><dd className="mt-1 font-semibold text-slate-700">{payerLabel(selection.source)}</dd></div></dl></article>)}</div>}
+        {snapshot.selections.length === 0 ? <p className="mt-3 text-sm text-slate-500">当前接口没有返回模型路由选择。</p> : <div className="mt-3 space-y-3">{snapshot.selections.map((selection) => <article key={`${selection.operation}:${selection.version ?? "unknown"}`} className="rounded-md border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{operationLabel(selection.operation)}</p><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{sourceLabel(selection.source)}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">选择版本</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(selection.version)}</dd></div><div><dt className="text-slate-400">能力标签</dt><dd className="mt-1 flex flex-wrap gap-1.5">{capabilityLabels(selection.operationExecutionAvailable, selection.controlPlaneOnly).map((label) => <span key={label} className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">{label}</span>)}</dd></div><div><dt className="text-slate-400">费用承担</dt><dd className="mt-1 font-semibold text-slate-700">{payerLabel(selection.source)}</dd></div></dl></article>)}</div>}
       </div>
       <div>
         <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-700">个人连接委托</p><span className="text-xs text-slate-400">{snapshot.delegations.length} 条</span></div>
-        {snapshot.delegations.length === 0 ? <p className="mt-3 text-sm text-slate-500">当前没有个人模型委托记录。</p> : <div className="mt-3 space-y-3">{snapshot.delegations.map((delegation, index) => <article key={`${delegation.operation}:${delegation.version ?? "unknown"}:${index}`} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{operationLabel(delegation.operation)}</p><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${delegation.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{statusLabel(delegation.status, aiStatusLabels)}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">委托版本</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(delegation.version)}{delegation.selected === true ? " · 当前选择" : ""}</dd></div><div><dt className="text-slate-400">选择来源</dt><dd className="mt-1 font-semibold text-slate-700">{sourceLabel(delegation.selectedSource)}</dd></div><div><dt className="text-slate-400">到期时间</dt><dd className="mt-1 font-semibold text-slate-700">{formatDate(delegation.expiresAt)}</dd></div></dl><p className="mt-3 text-xs text-slate-500">{payerLabel(delegation.selectedSource)} · {capabilityLabels(delegation.operationExecutionAvailable, delegation.controlPlaneOnly).join("、")}</p></article>)}</div>}
+        {snapshot.delegations.length === 0 ? <p className="mt-3 text-sm text-slate-500">当前没有个人模型委托记录。</p> : <div className="mt-3 space-y-3">{snapshot.delegations.map((delegation, index) => <article key={`${delegation.operation}:${delegation.version ?? "unknown"}:${index}`} className="rounded-md border border-slate-200 bg-slate-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{operationLabel(delegation.operation)}</p><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${delegation.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{statusLabel(delegation.status, aiStatusLabels)}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">委托版本</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(delegation.version)}{delegation.selected === true ? " · 当前选择" : ""}</dd></div><div><dt className="text-slate-400">选择来源</dt><dd className="mt-1 font-semibold text-slate-700">{sourceLabel(delegation.selectedSource)}</dd></div><div><dt className="text-slate-400">到期时间</dt><dd className="mt-1 font-semibold text-slate-700">{formatDate(delegation.expiresAt)}</dd></div></dl><p className="mt-3 text-xs text-slate-500">{payerLabel(delegation.selectedSource)} · {capabilityLabels(delegation.operationExecutionAvailable, delegation.controlPlaneOnly).join("、")}</p></article>)}</div>}
         <Link href="/personal/models" className="mt-4 inline-block text-xs font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">管理个人模型连接 →</Link>
       </div>
     </div>
@@ -553,16 +556,16 @@ function AiSnapshotView({ snapshot }: { snapshot: AiSnapshot }): React.JSX.Eleme
 
 function GitSnapshotView({ snapshot }: { snapshot: GitSnapshot }): React.JSX.Element {
   if (snapshot.delegations.length === 0) return <p className="text-sm text-slate-500">当前没有项目 Git 委托记录。</p>;
-  return <div className="space-y-3">{snapshot.delegations.map((delegation, index) => <article key={`${delegation.repositoryPath ?? "unknown"}:${delegation.version ?? "unknown"}:${index}`} className="rounded-2xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{delegation.repositoryPath ?? "仓库范围未知"}</p><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${delegation.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{statusLabel(delegation.status, gitStatusLabels)}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2"><div><dt className="text-slate-400">读取分支或引用</dt><dd className="mt-1 break-all font-semibold text-slate-700">{delegation.trackedRef ?? "范围未知"}</dd></div><div><dt className="text-slate-400">委托版本 / 到期</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(delegation.version)} · {formatDate(delegation.expiresAt)}</dd></div><div><dt className="text-slate-400">包含目录</dt><dd className="mt-1 break-words font-semibold text-slate-700">{delegation.includeRoots.length > 0 ? delegation.includeRoots.join("、") : "未声明"}</dd></div><div><dt className="text-slate-400">范围开关</dt><dd className="mt-1 font-semibold text-slate-700">代码 {booleanLabel(delegation.codeEnabled, "开启", "关闭")} · 元数据 {booleanLabel(delegation.metadataEnabled, "开启", "关闭")}</dd></div></dl><p className="mt-3 text-xs leading-5 text-slate-500">{booleanLabel(delegation.manualSyncAllowed, "允许手动只读读取", "手动读取未开启")} · {delegation.softExcludePatterns.length} 条排除规则 · {automationLabel(delegation.automationAllowed)}</p><p className="mt-3 rounded-xl bg-indigo-50 px-3 py-2 text-xs leading-5 text-indigo-900">即使状态为“已启用委托”，手动读取前仍会在 Git 页面由原接口重新校验连接、成员资格和仓库范围。</p></article>)}</div>;
+  return <div className="space-y-3">{snapshot.delegations.map((delegation, index) => <article key={`${delegation.repositoryPath ?? "unknown"}:${delegation.version ?? "unknown"}:${index}`} className="rounded-md border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{delegation.repositoryPath ?? "仓库范围未知"}</p><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${delegation.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{statusLabel(delegation.status, gitStatusLabels)}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2"><div><dt className="text-slate-400">读取分支或引用</dt><dd className="mt-1 break-all font-semibold text-slate-700">{delegation.trackedRef ?? "范围未知"}</dd></div><div><dt className="text-slate-400">委托版本 / 到期</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(delegation.version)} · {formatDate(delegation.expiresAt)}</dd></div><div><dt className="text-slate-400">包含目录</dt><dd className="mt-1 break-words font-semibold text-slate-700">{delegation.includeRoots.length > 0 ? delegation.includeRoots.join("、") : "未声明"}</dd></div><div><dt className="text-slate-400">范围开关</dt><dd className="mt-1 font-semibold text-slate-700">代码 {booleanLabel(delegation.codeEnabled, "开启", "关闭")} · 元数据 {booleanLabel(delegation.metadataEnabled, "开启", "关闭")}</dd></div></dl><p className="mt-3 text-xs leading-5 text-slate-500">{booleanLabel(delegation.manualSyncAllowed, "允许手动只读读取", "手动读取未开启")} · {delegation.softExcludePatterns.length} 条排除规则 · {automationLabel(delegation.automationAllowed)}</p><p className="mt-3 rounded-xl bg-indigo-50 px-3 py-2 text-xs leading-5 text-indigo-900">即使状态为“已启用委托”，手动读取前仍会在 Git 页面由原接口重新校验连接、成员资格和仓库范围。</p></article>)}</div>;
 }
 
 function McpConnectionsView({ snapshot }: { snapshot: McpSnapshot }): React.JSX.Element {
   if (snapshot.delegations.length === 0) return <p className="text-sm text-slate-500">当前没有 MCP 连接委托记录。</p>;
-  return <div className="space-y-3">{snapshot.delegations.map((delegation, index) => <article key={`${delegation.version ?? "unknown"}:${index}`} className="rounded-2xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{statusLabel(delegation.recordStatus, mcpStatusLabels)}</p><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${delegation.effectiveStatus === "eligible" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{delegation.effectiveStatus === "eligible" ? "当前有效标记" : delegation.effectiveStatus === "ineligible" ? "当前无效标记" : "有效性未知"}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">委托版本</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(delegation.version)}</dd></div><div><dt className="text-slate-400">到期时间</dt><dd className="mt-1 font-semibold text-slate-700">{formatDate(delegation.expiresAt)}</dd></div><div><dt className="text-slate-400">安全原因</dt><dd className="mt-1 font-semibold text-slate-700">{reasonLabel(delegation.effectiveReason)}</dd></div></dl><p className="mt-3 text-xs text-slate-500">证据状态：{delegation.evidenceState ?? "状态未知"}</p></article>)}</div>;
+  return <div className="space-y-3">{snapshot.delegations.map((delegation, index) => <article key={`${delegation.version ?? "unknown"}:${index}`} className="rounded-md border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{statusLabel(delegation.recordStatus, mcpStatusLabels)}</p><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${delegation.effectiveStatus === "eligible" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{delegation.effectiveStatus === "eligible" ? "当前有效标记" : delegation.effectiveStatus === "ineligible" ? "当前无效标记" : "有效性未知"}</span></div><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">委托版本</dt><dd className="mt-1 font-semibold text-slate-700">{formatVersion(delegation.version)}</dd></div><div><dt className="text-slate-400">到期时间</dt><dd className="mt-1 font-semibold text-slate-700">{formatDate(delegation.expiresAt)}</dd></div><div><dt className="text-slate-400">安全原因</dt><dd className="mt-1 font-semibold text-slate-700">{reasonLabel(delegation.effectiveReason)}</dd></div></dl><p className="mt-3 text-xs text-slate-500">证据状态：{delegation.evidenceState ?? "状态未知"}</p></article>)}</div>;
 }
 
 function McpGrantsView({ snapshot }: { snapshot: McpSnapshot }): React.JSX.Element {
-  return <div><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-700">工具授权摘要</p><span className="text-xs text-slate-400">{snapshot.grants.length} 条 · 候选 {snapshot.candidateCount} 条</span></div>{snapshot.grants.length === 0 ? <p className="mt-3 text-sm text-slate-500">当前没有工具授权记录。</p> : <div className="mt-3 space-y-3">{snapshot.grants.map((grant, index) => <article key={`${grant.toolName ?? "tool"}:${index}`} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{grant.toolName ?? "工具名称未知"}</p><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{statusLabel(grant.status, mcpStatusLabels)}</span></div><p className="mt-3 text-xs text-slate-600">{effectiveLabel(grant.effective)} · 审核 {grant.reviewRequired === true ? "仍需复核" : grant.reviewRequired === false ? "已具备审核标记" : "状态未知"}{grant.effectiveReason ? ` · ${reasonLabel(grant.effectiveReason)}` : ""}</p><p className="mt-2 text-xs text-slate-500">委托状态：{grant.delegationStatus ? statusLabel(grant.delegationStatus, mcpStatusLabels) : "状态未知"} · {formatDate(grant.expiresAt)}</p></article>)}</div>}<p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">本页只展示读取时的控制面快照，不会调用远端 MCP 工具；实际动作仍由既有工具页面和服务端重新校验。</p></div>;
+  return <div><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-700">工具授权摘要</p><span className="text-xs text-slate-400">{snapshot.grants.length} 条 · 候选 {snapshot.candidateCount} 条</span></div>{snapshot.grants.length === 0 ? <p className="mt-3 text-sm text-slate-500">当前没有工具授权记录。</p> : <div className="mt-3 space-y-3">{snapshot.grants.map((grant, index) => <article key={`${grant.toolName ?? "tool"}:${index}`} className="rounded-md border border-slate-200 bg-slate-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{grant.toolName ?? "工具名称未知"}</p><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{statusLabel(grant.status, mcpStatusLabels)}</span></div><p className="mt-3 text-xs text-slate-600">{effectiveLabel(grant.effective)} · 审核 {grant.reviewRequired === true ? "仍需复核" : grant.reviewRequired === false ? "已具备审核标记" : "状态未知"}{grant.effectiveReason ? ` · ${reasonLabel(grant.effectiveReason)}` : ""}</p><p className="mt-2 text-xs text-slate-500">委托状态：{grant.delegationStatus ? statusLabel(grant.delegationStatus, mcpStatusLabels) : "状态未知"} · {formatDate(grant.expiresAt)}</p></article>)}</div>}<p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">本页只展示读取时的控制面快照，不会调用远端 MCP 工具；实际动作仍由既有工具页面和服务端重新校验。</p></div>;
 }
 
 type ProjectManagementProject = ProjectConfigurationClientProps["project"];
@@ -602,11 +605,11 @@ function ProjectManagement({ project, onChanged }: { project: ProjectManagementP
   }
 
   return (
-    <section className="mt-7 rounded-3xl border border-indigo-100 bg-white p-5 shadow-sm sm:p-6">
+    <section className="mt-7 rounded-md border border-indigo-100 bg-white p-5  sm:p-6">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project management</p>
-          <h2 className="mt-2 text-2xl font-semibold">项目管理</h2>
+          <h2 className="mt-2 text-base font-semibold">项目管理</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">导出和项目生命周期操作集中在这里，项目卡片保持单一入口。导出会记录审计信息；归档、恢复和删除仍会要求确认。</p>
         </div>
         <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">仅项目 Owner 可操作</span>
@@ -643,6 +646,7 @@ function LifecycleDialog({ project, action, onClose, onChanged }: { project: Pro
         body: JSON.stringify(remove ? { confirmationName: confirmation, expectedUpdatedAt: project.updatedAt } : { action, expectedUpdatedAt: project.updatedAt }),
       });
       if (!response.ok) throw new Error(await readError(response, archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败"));
+      notifyUserProjectsChanged();
       onChanged(action);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败");
@@ -650,29 +654,30 @@ function LifecycleDialog({ project, action, onClose, onChanged }: { project: Pro
     }
   }
 
-  return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="project-management-dialog-title" className={`w-full max-w-lg rounded-2xl p-7 sm:p-8 ${modalSurfaceClassName}`}><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project lifecycle</p><h2 id="project-management-dialog-title" className="mt-1 text-lg font-semibold text-slate-950">{archive ? `归档「${project.name}」` : remove ? `永久删除「${project.name}」` : `恢复「${project.name}」`}</h2><p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-600"}`}>{archive ? "归档后项目将移出进行中列表，并拒绝修改和新任务。数据、历史审计和模型用量不会删除。" : remove ? "此操作不可恢复：项目资料、文件、仓库快照、候选、记忆索引、智能体记录和项目审计都会删除。建议先导出 JSON；系统仅保留不含项目名称或内容的最小删除回执。" : "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。"}</p>{archive || remove ? <label className="mt-5 block text-sm font-semibold text-slate-700">输入项目名称以确认<input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className={`mt-2 w-full rounded-lg border bg-white px-4 py-3 text-sm outline-none focus:ring-4 ${remove ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-amber-300 focus:ring-amber-100"}`} /></label> : null}{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onClose} disabled={pending} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">取消</button><button type="button" onClick={() => void submit()} disabled={!confirmed || pending} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 ${remove ? "bg-rose-600" : archive ? "bg-amber-600" : "bg-indigo-600"}`}>{pending ? "处理中…" : archive ? "确认归档" : remove ? "确认永久删除" : "恢复项目"}</button></div></section></div>;
+  return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="project-management-dialog-title" className={`w-full max-w-lg rounded-md p-7 sm:p-8 ${modalSurfaceClassName}`}><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project lifecycle</p><h2 id="project-management-dialog-title" className="mt-1 text-lg font-semibold text-slate-950">{archive ? `归档「${project.name}」` : remove ? `永久删除「${project.name}」` : `恢复「${project.name}」`}</h2><p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-600"}`}>{archive ? "归档后项目将移出进行中列表，并拒绝修改和新任务。数据、历史审计和模型用量不会删除。" : remove ? "此操作不可恢复：项目资料、文件、仓库快照、候选、记忆索引、智能体记录和项目审计都会删除。建议先导出 JSON；系统仅保留不含项目名称或内容的最小删除回执。" : "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。"}</p>{archive || remove ? <label className="mt-5 block text-sm font-semibold text-slate-700">输入项目名称以确认<input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className={`mt-2 w-full rounded-lg border bg-white px-4 py-3 text-sm outline-none focus:ring-4 ${remove ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-amber-300 focus:ring-amber-100"}`} /></label> : null}{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onClose} disabled={pending} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">取消</button><button type="button" onClick={() => void submit()} disabled={!confirmed || pending} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 ${remove ? "bg-rose-600" : archive ? "bg-amber-600" : "bg-indigo-600"}`}>{pending ? "处理中…" : archive ? "确认归档" : remove ? "确认永久删除" : "恢复项目"}</button></div></section></div>;
 }
 
-export function ProjectConfigurationClient({ username, projectId, isSystemAdmin, project }: ProjectConfigurationClientProps): React.JSX.Element {
+export function ProjectConfigurationClient({ username, projectId, isSystemAdmin, project, embedded = false }: ProjectConfigurationClientProps): React.JSX.Element {
   const router = useRouter();
   const ai = useProjectSnapshot(projectId, `/api/projects/${projectId}/ai-provider-delegations`, parseAiSnapshot, "模型路由快照加载失败");
   const git = useProjectSnapshot(projectId, `/api/projects/${projectId}/git-repository-delegations`, parseGitSnapshot, "Git 委托快照加载失败");
   const mcp = useProjectSnapshot(projectId, `/api/projects/${projectId}/mcp-connection-delegations`, parseMcpSnapshot, "MCP 委托快照加载失败");
   const mcpGrants = useProjectSnapshot(projectId, `/api/projects/${projectId}/mcp-tool-grants`, parseMcpSnapshot, "MCP 工具授权快照加载失败", "仅项目 Owner 可查看工具授权。");
+  const RootElement = embedded ? "section" : "main";
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="configuration" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
-        <section className="rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-11">
+    <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[#f5f7fb] text-slate-950"}>
+      {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="configuration" isSystemAdmin={isSystemAdmin} /> : null}
+      <div className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10"}>
+        {!embedded ? <>        <section className="rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-11">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Project configuration</p>
           <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">项目配置</h1>
               <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里汇总当前项目的模型路由、代码仓库、MCP 连接和工具授权。页面展示安全摘要；代码仓库连接与读取范围可在项目内管理。</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-xs leading-5 text-slate-300 lg:max-w-xs">四个分区独立读取；更新时间可能不同，所有实际操作仍由原接口在提交前重新校验。</div>
+            <div className="rounded-md border border-white/10 bg-white/[0.07] p-4 text-xs leading-5 text-slate-300 lg:max-w-xs">四个分区独立读取；更新时间可能不同，所有实际操作仍由原接口在提交前重新校验。</div>
           </div>
-        </section>
+        </section></> : <h3 className="text-base font-semibold">{project.name}</h3>}
 
         {project.canManage ? <ProjectManagement project={project} onChanged={(action) => {
           if (action === "delete") {
@@ -697,6 +702,6 @@ export function ProjectConfigurationClient({ username, projectId, isSystemAdmin,
           </SnapshotPanel>
         </div>
       </div>
-    </main>
+    </RootElement>
   );
 }

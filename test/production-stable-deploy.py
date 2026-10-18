@@ -559,44 +559,55 @@ class GitManifestTests(unittest.TestCase):
         ))
         return root_tree
 
+    def worktree_candidate_revision(self, repository):
+        """Exercise current, possibly uncommitted bytes without touching its index."""
+        self.git(repository, 'init', '-q')
+        self.git(repository, 'fetch', '--quiet', str(ROOT), DEPLOYER.INITIAL_SOURCE_REVISION)
+        candidate_tag = 'v' + json.loads((ROOT / 'package.json').read_text())['version']
+        paths = {
+            'package.json', 'src/lib/version.ts', 'Dockerfile',
+            f'docs/releases/{candidate_tag}.md', DEPLOYER.HELPER_SOURCE,
+            DEPLOYER.DEPLOYER_SOURCE, DEPLOYER.BACKUP_SOURCE, DEPLOYER.ARTIFACT_SOURCE,
+            DEPLOYER.GATEWAY_SOURCE, DEPLOYER.SUDOERS_SOURCE,
+            'deploy/production/nginx/ai-project-os.conf',
+        }
+        paths.update(str(path.relative_to(ROOT))
+                     for path in (ROOT / 'prisma/migrations').rglob('*') if path.is_file())
+        for relative in sorted(paths):
+            destination = repository / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((ROOT / relative).read_bytes())
+        self.git(repository, 'add', '--', *sorted(paths))
+        return self.git(repository, 'write-tree')
+
     def test_actual_source_and_candidate_git_manifests_include_lock_blob_and_exact_delta(self):
-        with patch.object(DEPLOYER, 'ROOT', ROOT), patch.object(DEPLOYER, 'HELPER', self.FixtureHelper()):
-            source = DEPLOYER.git_manifest(DEPLOYER.INITIAL_SOURCE_REVISION)
-            target = DEPLOYER.git_manifest('HEAD')
-            working_tree = DEPLOYER.source_manifest(ROOT)
-            DEPLOYER.validate_manifest_delta(source, target)
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            candidate = self.worktree_candidate_revision(repository)
+            with patch.object(DEPLOYER, 'ROOT', repository), patch.object(DEPLOYER, 'HELPER', self.FixtureHelper()):
+                source = DEPLOYER.git_manifest(DEPLOYER.INITIAL_SOURCE_REVISION)
+                target = DEPLOYER.git_manifest(candidate)
+                working_tree = DEPLOYER.source_manifest(ROOT)
+                DEPLOYER.validate_manifest_delta(source, target)
 
         self.assertEqual(len(source), 143)
-        self.assertEqual(len(target), 147)
+        self.assertEqual(len(target), 148)
         self.assertEqual(working_tree, target)
         self.assertEqual(target[:len(source)], source)
         self.assertEqual([name for name, _ in target], sorted(name for name, _ in target))
 
     def test_actual_worktree_release_identity_passes_target_preflight(self):
         candidate_tag = 'v' + json.loads((ROOT / 'package.json').read_text())['version']
-        worktree_paths = {
-            'package.json', 'src/lib/version.ts', 'Dockerfile', f'docs/releases/{candidate_tag}.md',
-            'deploy/production/ai-project-os-release-stable.py',
-            'deploy/production/ai-project-os-backup',
-            'deploy/production/ai_project_os_backup_artifact.py',
-            'deploy/production/ai-project-os-actions-gateway',
-            'deploy/production/ai-project-os-deploy.sudoers',
-        }
-        original_git_blob = DEPLOYER.git_blob
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            candidate = self.worktree_candidate_revision(repository)
+            with patch.object(DEPLOYER, 'ROOT', repository), \
+                    patch.object(DEPLOYER, 'HELPER', self.FixtureHelper()), \
+                    patch.object(DEPLOYER, 'validate_tooling_bytes'):
+                source = DEPLOYER.git_manifest(DEPLOYER.INITIAL_SOURCE_REVISION)
+                target, files = DEPLOYER.validate_target_tree(candidate, source, candidate_tag)
 
-        def candidate_blob(revision, path):
-            if revision == 'HEAD' and path in worktree_paths:
-                return (ROOT / path).read_bytes()
-            return original_git_blob(revision, path)
-
-        with patch.object(DEPLOYER, 'ROOT', ROOT), \
-                patch.object(DEPLOYER, 'HELPER', self.FixtureHelper()), \
-                patch.object(DEPLOYER, 'git_blob', side_effect=candidate_blob), \
-                patch.object(DEPLOYER, 'validate_tooling_bytes'):
-            source = DEPLOYER.git_manifest(DEPLOYER.INITIAL_SOURCE_REVISION)
-            target, files = DEPLOYER.validate_target_tree('HEAD', source, candidate_tag)
-
-        self.assertEqual(len(target), 147)
+        self.assertEqual(len(target), 148)
         self.assertIn('v[1-9][0-9]*', files['backup'].decode('utf-8'))
         self.assertIn('ai-project-os-release-stable.py', files['deployer'].decode('utf-8'))
 

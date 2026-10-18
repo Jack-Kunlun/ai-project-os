@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("project overview owns governance panels while materials and configuration stay separate", async () => {
+test("project pages use persistent navigation and keep management and materials separate", async () => {
   const [page, overview, materialsPage, materials, reviewPage, header, dashboard, world, governance, governancePage] = await Promise.all([
     readFile("src/app/projects/[projectId]/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-overview-client.tsx", "utf8"),
@@ -18,26 +18,8 @@ test("project overview owns governance panels while materials and configuration 
 
   assert.match(page, /ProjectOverviewClient/u);
   assert.match(materialsPage, /ProjectDetailClient/u);
-  assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/materials`\}/u);
-  assert.doesNotMatch(header, /href=\{`\/projects\/\$\{projectId\}#project-materials`\}/u);
-  assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/configuration`\}/u);
-  assert.doesNotMatch(header, /href=\{`\/projects\/\$\{projectId\}\/governance`\}/u);
-  assert.match(header, />\s*项目概览\s*</u);
-  assert.match(header, />\s*项目计划\s*</u);
-  assert.match(header, />\s*项目资料\s*</u);
-  assert.match(header, />\s*AI 工作台\s*</u);
-  assert.match(header, />\s*项目自动化\s*</u);
-  assert.match(header, />\s*项目配置\s*</u);
-  assert.doesNotMatch(header, />\s*项目管理\s*</u);
-  const orderedTabs = ["项目概览", "AI 工作台", "项目资料", "项目计划", "成员权限", "项目自动化", "项目配置"];
-  const tabPositions = orderedTabs.map((label) => header.indexOf(label));
-  assert.ok(tabPositions.every((position) => position >= 0));
-  assert.deepEqual([...tabPositions].sort((left, right) => left - right), tabPositions);
-  assert.match(header, /const overviewSections[^\n]*\["overview"\]/u);
-  assert.match(header, /projectSection === "plan"/u);
-  assert.doesNotMatch(header, /managementSections/u);
-  assert.doesNotMatch(header, /<details|<summary|projectGroups/u);
-  assert.doesNotMatch(header, /key: "governance",\s*label: "治理"/u);
+  assert.match(header, /isUserShellPath\(pathname\)/u);
+  assert.match(header, /<UserShell username=\{props\.username\}/u);
 
   assert.match(overview, /Project overview/u);
   assert.match(overview, /项目关键指标/u);
@@ -58,8 +40,9 @@ test("project overview owns governance panels while materials and configuration 
   assert.match(governance, /ProjectGovernanceSections/u);
   assert.match(governance, /id="ai-usage"/u);
   assert.match(governance, /<details id="task-runs"/u);
-  assert.match(governancePage, /redirect\(buildProjectHref\(projectId, "overview"/u);
-  assert.match(governancePage, /parseProjectPageState\("governance"/u);
+  assert.match(governancePage, /requirePageSession/u);
+  assert.match(governancePage, /<ProjectManagementClient/u);
+  assert.doesNotMatch(governancePage, /redirect\(/u);
 
   assert.match(materials, /projectSection="materials"/u);
   assert.match(materials, /ProjectMaterialIntake/u);
@@ -67,7 +50,8 @@ test("project overview owns governance panels while materials and configuration 
   assert.match(materials, /id="add-source-trigger"/u);
   assert.match(materials, /审核 AI 候选/u);
   assert.match(materials, /<ProjectMaterialReviewQueue[^>]*embedded/u);
-  assert.match(materials, /<ProjectQuestionWorkspace/u);
+  assert.match(materials, /buildProjectQuestionHref\(projectId\)/u);
+  assert.doesNotMatch(materials, /<ProjectQuestionWorkspace/u);
   assert.match(materials, /<ProjectProcessingTasks/u);
   assert.match(materials, /aria-label="项目资料栏目"/u);
   assert.match(materialsPage, /Suspense/u);
@@ -138,7 +122,10 @@ test("AI workbench spacing and project overview keep AI usage visible", async ()
     readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),
   ]);
 
-  assert.match(intelligence, /className="space-y-7"/u);
+  assert.match(intelligence, /className=\{styles\.tabPanel\}/u);
+  assert.match(intelligence, /项目简报/u);
+  assert.match(intelligence, /只读调查/u);
+  assert.match(intelligence, /智能问答/u);
   assert.doesNotMatch(intelligence, /id="project-brief" className="mt-8/u);
   assert.doesNotMatch(intelligence, /id="agent-investigation" className="mt-8/u);
   assert.match(governance, /AI 用量与计费/u);

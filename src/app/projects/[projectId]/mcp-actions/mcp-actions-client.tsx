@@ -6,6 +6,7 @@ import { OperationPanel } from "@/components/operation-panel";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ProjectOverviewParentLink } from "@/components/project-parent-link";
 import { connectionErrorText, readConnectionError } from "@/app/profile/connections/connection-ui";
+import supportStyles from "../project-support.module.css";
 
 type ActionStatus = "waitingApproval" | "approved" | "rejected" | "cancelled" | "dispatchReserved" | "succeeded" | "failed" | "unknown" | "expired" | "invalidated";
 type Action = Readonly<{
@@ -432,7 +433,7 @@ export function ProjectMcpActionsClient({ username, projectId, isSystemAdmin }: 
   const canDispatch = detail?.status === "approved" && !archived && pendingKey === null && !uncertainDispatchIds.has(detail.id);
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={isSystemAdmin} />
       {dialog}
       <div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">

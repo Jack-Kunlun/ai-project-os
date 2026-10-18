@@ -14,6 +14,7 @@ import type { ListPagination as ListPaginationState } from "@/lib/list-paginatio
 import { initializeReviewDrafts } from "@/lib/project-asset-review-drafts";
 import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
 import { buildProjectHref } from "@/lib/project-navigation";
+import supportStyles from "../project-support.module.css";
 
 type AssetStatus = "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed" | "deleted";
 type Segment = {
@@ -424,7 +425,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="assets" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <ProjectMaterialsParentLink projectId={projectId} />

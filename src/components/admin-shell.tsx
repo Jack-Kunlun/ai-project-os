@@ -5,17 +5,13 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { modalBackdropClassName, modalSurfaceClassName } from "./modal-styles";
 
-/**
- * Legacy section names are kept for pages which still use AdminPageFrame
- * outside the /admin layout. The shared /admin layout renders the five
- * product-level sections below.
- */
+/** Legacy section names are kept for pages which still use AdminPageFrame. */
 export type AdminSection = "overview" | "models" | "modelRoutes" | "credits" | "probes" | "sms" | "git" | "mcp" | "users" | "memberships" | "accountAccess" | "audit" | "operations" | "failures" | "guide" | "account";
 
 type PrimarySection = "overview" | "users" | "configuration" | "security" | "operations";
 
 const primaryItems: ReadonlyArray<{ key: PrimarySection; label: string; href: string }> = [
-  { key: "overview", label: "Dashboard", href: "/admin" },
+  { key: "overview", label: "平台总览", href: "/admin" },
   { key: "users", label: "用户与权益", href: "/admin/users" },
   { key: "configuration", label: "配置中心", href: "/admin/models" },
   { key: "security", label: "安全中心", href: "/admin/connectors/mcp" },
@@ -45,7 +41,7 @@ const moduleGroups: ReadonlyArray<Readonly<{
     label: "配置中心",
     matches: (pathname) => pathname.startsWith("/admin/models") || pathname.startsWith("/admin/sms") || pathname === "/admin/operations/probes",
     links: [
-      { label: "能力配置", href: "/admin/models", exact: true },
+      { label: "模型能力", href: "/admin/models", exact: true },
       { label: "短信服务", href: "/admin/sms", exact: true },
       { label: "探测预算", href: "/admin/operations/probes", exact: true },
     ],
@@ -97,66 +93,41 @@ export function getAdminNavigationState(pathname: string): { active: PrimarySect
   };
 }
 
-function NavigationLinks({ active, pathname, onNavigate }: { active: PrimarySection; pathname?: string; onNavigate?: () => void }) {
-  const currentPath = pathname ?? "";
-  const [expanded, setExpanded] = useState<Record<PrimarySection, boolean>>(() => ({
-    overview: active === "overview",
-    users: active === "users",
-    configuration: active === "configuration",
-    security: active === "security",
-    operations: active === "operations",
-  }));
-
+function NavigationLinks({ active, pathname, onNavigate }: { active: PrimarySection; pathname: string; onNavigate?: () => void }) {
   return (
-    <nav aria-label="管理工作台导航" className="grid gap-1">
+    <nav aria-label="管理工作台导航" className="admin-primary-navigation">
       {primaryItems.map((item) => {
-        const group = moduleGroups.find((candidate) => candidate.key === item.key);
-        const isActive = item.key === active;
-        const isExpanded = item.key !== "overview" && expanded[item.key];
+        const current = item.key === "overview" ? pathname === item.href : active === item.key;
         return (
-          <div key={item.key}>
-            {group ? (
-              <button
-                type="button"
-                aria-expanded={isExpanded}
-                aria-controls={`admin-nav-${item.key}`}
-                aria-label={`${isExpanded ? "收起" : "展开"}${item.label}`}
-                onClick={() => setExpanded((current) => ({ ...current, [item.key]: !current[item.key] }))}
-                className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 text-left text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${isActive ? "border border-indigo-100 bg-indigo-50/75 text-indigo-800" : "text-slate-600 hover:bg-slate-50 hover:text-indigo-700"}`}
-              >
-                <span>{item.label}</span>
-                <ChevronIcon expanded={isExpanded} />
-              </button>
-            ) : (
-              <Link
-                href={item.href}
-                aria-current={currentPath === item.href ? "page" : undefined}
-                onClick={onNavigate}
-                className={`flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${isActive ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50 hover:text-indigo-700"}`}
-              >
-                {item.label}
-              </Link>
-            )}
-            {group && isExpanded ? (
-              <div id={`admin-nav-${item.key}`} className="ml-3 mt-1 grid gap-1 border-l border-slate-200 pl-3">
-                {group.links.map((link) => {
-                  const current = isCurrentAdminNavigationLink(link, currentPath);
-                  return <Link key={link.href} href={link.href} aria-current={current ? "page" : undefined} onClick={onNavigate} className={`flex min-h-9 items-center rounded-lg px-3 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${current ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-indigo-700"}`}>{link.label}</Link>;
-                })}
-              </div>
-            ) : null}
-          </div>
+          <Link
+            key={item.key}
+            href={item.href}
+            aria-current={current ? (pathname === item.href ? "page" : "location") : undefined}
+            onClick={onNavigate}
+            className={`admin-primary-link ${current ? "is-current" : ""}`}
+          >
+            {item.label}
+          </Link>
         );
       })}
     </nav>
   );
 }
 
-function ChevronIcon({ expanded }: { expanded: boolean }) {
-  return <svg aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m5.5 7.5 4.5 4.5 4.5-4.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+function ModuleNavigation({ active, pathname }: { active: PrimarySection; pathname: string }) {
+  const group = moduleGroups.find((item) => item.key === active);
+  if (!group) return null;
+  return (
+    <nav aria-label="管理栏目" className="admin-module-navigation">
+      {group.links.map((link) => {
+        const current = isCurrentAdminNavigationLink(link, pathname);
+        return <Link key={link.href} href={link.href} aria-current={current ? "page" : undefined} className={`admin-module-link ${current ? "is-current" : ""}`}>{link.label}</Link>;
+      })}
+    </nav>
+  );
 }
 
-/** Shared fixed-header, fixed-sidebar admin chrome used by every /admin page. */
+/** Shared admin chrome: five direct destinations, with a separate section nav. */
 export function AdminAppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const active = primarySectionForPath(pathname);
@@ -206,37 +177,33 @@ export function AdminAppShell({ children }: { children: ReactNode }) {
   }, [drawerOpen]);
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden">
-      <aside className="hidden w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-3 py-5 lg:block" aria-label="管理工作台侧栏">
-        <div className="mb-5 border-b border-slate-100 px-3 pb-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Admin workspace</p>
-          <h2 className="mt-1 text-lg font-semibold text-slate-950">管理工作台</h2>
-        </div>
-        <NavigationLinks key={active} active={active} pathname={pathname} />
+    <div className="admin-workspace-shell" data-admin-workspace>
+      <aside className="admin-sidebar" aria-label="管理工作台侧栏">
+        <div className="admin-sidebar-brand"><span className="admin-sidebar-mark" aria-hidden="true">OS</span><span><strong>管理工作台</strong><small>AI Project OS</small></span></div>
+        <NavigationLinks active={active} pathname={pathname} />
       </aside>
 
-      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-2 lg:hidden">
-          <span className="text-sm font-semibold text-slate-800">{primaryItems.find((item) => item.key === active)?.label}</span>
-          <button ref={triggerRef} type="button" aria-controls="admin-mobile-navigation" aria-expanded={drawerOpen} aria-haspopup="dialog" onClick={() => setDrawerOpen(true)} className="min-h-10 shrink-0 rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">打开导航</button>
+      <div className="admin-main-column">
+        <div className="admin-mobile-toolbar">
+          <span>{primaryItems.find((item) => item.key === active)?.label ?? "管理工作台"}</span>
+          <button ref={triggerRef} type="button" aria-controls="admin-mobile-navigation" aria-expanded={drawerOpen} aria-haspopup="dialog" onClick={() => setDrawerOpen(true)}>打开导航</button>
         </div>
-        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <ModuleNavigation active={active} pathname={pathname} />
+        <main className="admin-page-scroll">
           {children}
         </main>
       </div>
 
       {drawerOpen ? (
-        <div className="fixed inset-0 z-50 lg:hidden" aria-label="移动端管理导航">
-          <button type="button" tabIndex={-1} aria-label="关闭管理导航" className={`absolute inset-0 ${modalBackdropClassName}`} onClick={() => setDrawerOpen(false)} />
-          <div ref={drawerRef} id="admin-mobile-navigation" role="dialog" aria-modal="true" aria-labelledby="admin-mobile-navigation-title" className={`absolute right-0 top-0 h-full w-full max-w-sm overflow-y-auto border-l border-slate-200 p-4 ${modalSurfaceClassName}`}>
-            <div className="flex items-center justify-between border-b border-slate-100 px-2 pb-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Admin workspace</p>
-                <h2 id="admin-mobile-navigation-title" className="mt-1 text-lg font-semibold text-slate-950">管理工作台导航</h2>
-              </div>
-              <button ref={closeRef} type="button" aria-label="关闭管理导航" onClick={() => setDrawerOpen(false)} className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
+        <div className="admin-mobile-overlay" aria-label="管理工作台导航">
+          <button type="button" tabIndex={-1} aria-label="关闭管理导航" className={`admin-mobile-backdrop ${modalBackdropClassName}`} onClick={() => setDrawerOpen(false)} />
+          <div ref={drawerRef} id="admin-mobile-navigation" role="dialog" aria-modal="true" aria-labelledby="admin-mobile-navigation-title" aria-label="管理工作台导航" className={`admin-mobile-drawer ${modalSurfaceClassName}`}>
+            <div className="admin-mobile-drawer-heading">
+              <h2 id="admin-mobile-navigation-title">管理工作台导航</h2>
+              <button ref={closeRef} type="button" aria-label="关闭管理导航" onClick={() => setDrawerOpen(false)}>关闭</button>
             </div>
-            <div className="mt-4"><NavigationLinks key={active} active={active} pathname={pathname} onNavigate={() => setDrawerOpen(false)} /></div>
+            <NavigationLinks active={active} pathname={pathname} onNavigate={() => setDrawerOpen(false)} />
+            <ModuleNavigation active={active} pathname={pathname} />
           </div>
         </div>
       ) : null}
@@ -248,11 +215,11 @@ export function AdminAppShell({ children }: { children: ReactNode }) {
 export function AdminPageFrame({ active, children, showSidebar = true }: { active: AdminSection; children: ReactNode; showSidebar?: boolean }) {
   if (!showSidebar) return <>{children}</>;
   const primary: PrimarySection = active === "overview" ? "overview" : active === "users" || active === "memberships" || active === "credits" || active === "accountAccess" ? "users" : active === "models" || active === "modelRoutes" || active === "probes" || active === "sms" ? "configuration" : active === "mcp" || active === "audit" ? "security" : "operations";
-  return <div className="w-full px-4 pb-12 pt-4 sm:px-5 lg:px-6"><div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start lg:gap-5"><aside className="sticky top-4 hidden rounded-2xl border border-indigo-100 bg-white/95 p-3 shadow-sm backdrop-blur lg:block"><NavigationLinks key={primary} active={primary} /></aside><div className="min-w-0">{children}</div></div></div>;
+  return <div className="admin-legacy-frame"><NavigationLinks active={primary} pathname="/admin" /><div>{children}</div></div>;
 }
 
 /** Compatibility export for callers that only need the sidebar. */
 export function AdminShell({ active }: { active: AdminSection }) {
   const primary: PrimarySection = active === "overview" ? "overview" : active === "users" || active === "memberships" || active === "credits" || active === "accountAccess" ? "users" : active === "models" || active === "modelRoutes" || active === "probes" || active === "sms" ? "configuration" : active === "mcp" || active === "audit" ? "security" : "operations";
-  return <NavigationLinks key={primary} active={primary} />;
+  return <NavigationLinks active={primary} pathname="/admin" />;
 }

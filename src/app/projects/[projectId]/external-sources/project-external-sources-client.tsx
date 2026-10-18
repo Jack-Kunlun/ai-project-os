@@ -7,6 +7,7 @@ import { ListPagination } from "@/components/list-pagination";
 import { OperationPanel } from "@/components/operation-panel";
 import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import { BrowserWebSourceCard, BrowserWebSourceForm, type BrowserWebSourceSummary } from "./browser-web-source-client";
+import supportStyles from "../project-support.module.css";
 
 type WebSource = {
   id: string;
@@ -96,7 +97,7 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div>

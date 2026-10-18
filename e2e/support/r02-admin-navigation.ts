@@ -30,9 +30,10 @@ export type R02RouteExpectation = Readonly<{
 }>;
 
 export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
-  { path: "/admin", heading: "管理员总览", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取就绪证据…", "正在读取默认路由状态…", "读取中…"] },
+  { path: "/admin", heading: "平台总览", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取就绪证据…", "正在读取默认路由状态…", "读取中…"] },
   { path: "/admin/models", heading: "平台模型", terminal: { kind: "heading", name: "已配置连接" }, pendingTexts: ["读取中…"] },
   { path: "/admin/models/routes", heading: "平台模型", terminal: { kind: "text", name: "平台能力配置" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/sms", heading: "短信服务", terminal: { kind: "heading", name: "供应商配置" }, pendingTexts: ["读取中…"] },
   { path: "/admin/credits", heading: "平台额度", terminal: { kind: "text", name: "平台额度治理" }, pendingTexts: ["读取中…"] },
   { path: "/admin/operations/probes", heading: "连接探测预算", terminal: { kind: "text", name: "平台连接探测预算" }, pendingTexts: ["读取中…"] },
   { path: "/admin/connectors/mcp", heading: "MCP 工具安全审核", terminal: { kind: "text", name: "当前没有候选记录" }, pendingTexts: ["正在读取安全快照…"] },
@@ -46,12 +47,7 @@ export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
 ] as const;
 
 export function expectedR02AdminNavigationLinkCount(pathname: string): number {
-  if (pathname === "/admin") return 1;
-  if (pathname === "/admin/users" || pathname.startsWith("/admin/users/") || pathname === "/admin/credits") return 4;
-  if (pathname.startsWith("/admin/models") || pathname.startsWith("/admin/sms") || pathname === "/admin/operations/probes") return 4;
-  if (pathname.startsWith("/admin/connectors/mcp") || pathname.startsWith("/admin/audit")) return 3;
-  if (pathname.startsWith("/admin/operations/")) return 3;
-  return 1;
+  return pathname.startsWith("/admin") ? 5 : 0;
 }
 
 const R02_PROJECT_PENDING_TEXTS = [
@@ -63,14 +59,15 @@ const R02_PROJECT_PENDING_TEXTS = [
 
 export function r02ProjectRoutes(projectId: string, projectName: string): readonly R02RouteExpectation[] {
   return [
-    { path: `/projects/${projectId}`, heading: projectName, terminal: { kind: "heading", name: "项目当前状态" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
-    { path: `/projects/${projectId}/plan`, heading: projectName, terminal: { kind: "heading", name: "项目目标" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
-    { path: `/projects/${projectId}/materials`, heading: `${projectName} · 项目资料`, terminal: { kind: "heading", name: "原始资料来源库" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
-    { path: `/projects/${projectId}/materials/review`, heading: "审核 AI 候选", terminal: { kind: "text", name: "当前没有待审核 AI 候选", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
-    { path: `/projects/${projectId}/intelligence`, heading: `${projectName} · AI 工作台`, terminal: { kind: "heading", name: "当前 AI 能力" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}`, heading: projectName, terminal: { kind: "heading", name: "当前目标" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/plan`, heading: projectName, terminal: { kind: "heading", name: "项目计划" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/materials`, heading: `${projectName} · 项目资料`, terminal: { kind: "heading", name: "资料来源" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/materials/review`, heading: "审核 AI 候选", terminal: { kind: "text", name: "当前没有待核对的整理结果。" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/intelligence`, heading: "简报与调查", terminal: { kind: "heading", name: "项目简报" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/governance`, heading: "项目管理", terminal: { kind: "heading", name: "当前项目事实" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/memory`, heading: projectName, terminal: { kind: "heading", name: "项目语义索引" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/memory-quality`, heading: "记忆质量与生命周期", terminal: { kind: "text", name: "当前没有待处理质量问题" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
-    { path: `/projects/${projectId}/automations`, heading: "项目自动化", terminal: { kind: "text", name: "还没有可运行的自动化规则。", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
+    { path: `/projects/${projectId}/automations`, heading: "项目自动化", terminal: { kind: "text", name: "还没有自动化规则。", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/actions`, heading: "动作与审批", terminal: { kind: "text", name: "还没有动作", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/control`, heading: projectName, terminal: { kind: "heading", name: "项目模型使用方式" }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
     { path: `/projects/${projectId}/assets`, heading: `${projectName} · 文件资料`, terminal: { kind: "text", name: "还没有文件。", exact: false }, pendingTexts: R02_PROJECT_PENDING_TEXTS },
@@ -160,15 +157,18 @@ export async function expectR02InViewport(page: Page, locator: Locator, surface:
   expect(box!.y, `${surface} must start before the vertical viewport ends`).toBeLessThan(viewport.height);
 }
 
-export async function expectR02NoAccessibilityViolations(page: Page, surface: string): Promise<void> {
+export async function readR02AccessibilityViolations(page: Page) {
   const result = await new AxeBuilder({ page }).withTags(R02_WCAG_TAGS).analyze();
-  const violations = result.violations.map((violation) => ({
+  return result.violations.map((violation) => ({
     help: violation.help,
     id: violation.id,
     impact: violation.impact,
     targets: violation.nodes.map((node) => node.target),
   }));
-  expect(violations, `${surface} must satisfy automated WCAG 2.2 A/AA checks`).toEqual([]);
+}
+
+export async function expectR02NoAccessibilityViolations(page: Page, surface: string): Promise<void> {
+  expect(await readR02AccessibilityViolations(page), `${surface} must satisfy automated WCAG 2.2 A/AA checks`).toEqual([]);
 }
 
 export async function expectR02MobileDrawer(page: Page, pathname = "/admin"): Promise<void> {
@@ -177,16 +177,17 @@ export async function expectR02MobileDrawer(page: Page, pathname = "/admin"): Pr
   await trigger.click();
   const drawer = page.getByRole("dialog", { name: "管理工作台导航" });
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole("link")).toHaveCount(expectedR02AdminNavigationLinkCount(pathname));
+  await expect(drawer.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(expectedR02AdminNavigationLinkCount(pathname));
   const close = drawer.getByRole("button", { name: "关闭管理导航", exact: true });
   await expect(close).toBeFocused();
   const focusable = drawer.locator('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+  await focusable.first().focus();
   await page.keyboard.down("Shift");
   await page.keyboard.press("Tab");
   await page.keyboard.up("Shift");
   await expect(focusable.last()).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(close).toBeFocused();
+  await expect(focusable.first()).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();

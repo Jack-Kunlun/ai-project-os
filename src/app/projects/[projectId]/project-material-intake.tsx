@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
-import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { modalBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { awaitImportedAsset } from "./imported-asset-readiness";
 import { ProjectFactImport } from "./project-fact-import";
+import styles from "./project-materials.module.css";
 import type { MaterialKind } from "./materials/materials-navigation";
 
 type UploadPolicy = { maxFiles: number };
@@ -186,6 +187,7 @@ export function ProjectMaterialIntake({
     const readySourceIds: string[] = [];
     const pendingParsing: string[] = [];
     const failures: string[] = [];
+    const failedFiles: File[] = [];
     for (const file of files) {
       try {
         const form = new FormData();
@@ -200,9 +202,10 @@ export function ProjectMaterialIntake({
         setMessage(`正在上传并解析 ${uploaded + failures.length} / ${files.length}…`);
       } catch (cause) {
         failures.push(`${selectedFileName(file)}：${cause instanceof Error ? cause.message : "上传失败"}`);
+        failedFiles.push(file);
       }
     }
-    setFiles([]);
+    setFiles(failedFiles);
     setSavedAssetCount(uploaded);
     setFactSourceIds([...new Set(readySourceIds)]);
     try {
@@ -223,36 +226,29 @@ export function ProjectMaterialIntake({
   if (!hasOpened) return null;
 
   return (
-    <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto ${modalBackdropClassName} p-4 sm:p-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`my-4 w-full max-w-5xl overflow-hidden rounded-2xl sm:my-6 ${modalSurfaceClassName}`}>
-        <div className={`flex flex-wrap items-start justify-between gap-4 px-6 py-5 sm:px-8 ${modalHeaderClassName}`}>
+    <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`${styles.drawerBackdrop} ${modalBackdropClassName}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`${styles.drawer} overflow-hidden ${modalSurfaceClassName}`}>
+        <div className={`${styles.drawerHeader} flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-7`}>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Add source</p>
-          <h2 id="add-source-dialog-title" className="mt-1 text-lg font-semibold tracking-tight text-slate-950">添加来源</h2>
-          <p id="add-source-dialog-description" className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">导入后直接衔接 AI 整理：有原文证据的内容自动形成事实，冲突与不确定内容单独待处理。涉及模型外发时会显示本次资料范围。</p>
+          <h2 id="add-source-dialog-title" className="text-lg font-semibold tracking-tight text-slate-950">添加资料</h2>
+          <p id="add-source-dialog-description" className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">资料会保留原文和来源。需要模型处理时，会先显示本次范围并等待确认。</p>
         </div>
-        <button ref={closeButtonRef} type="button" onClick={closeDrawer} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
+        <button ref={closeButtonRef} type="button" onClick={closeDrawer} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
       </div>
 
-      <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-6 py-6 sm:px-8">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+      <div className={`${styles.drawerBody} px-5 py-5 sm:px-7`}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 text-xs text-slate-500">
         <p>当前入口：<strong className="font-semibold">{kindLabels[kind]}</strong></p>
-        <Link href={`/projects/${projectId}/assets`} onClick={() => closeDrawer()} className="font-semibold text-indigo-700 underline decoration-indigo-300 underline-offset-4">管理已上传文件</Link>
+        <Link href={`/projects/${projectId}/assets`} onClick={() => closeDrawer()} className="font-semibold text-indigo-700 underline underline-offset-4">管理已上传文件</Link>
       </div>
 
       {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700">{error}</p> : null}
       {message ? <p role="status" aria-live="polite" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800">{message}</p> : null}
 
-      <ol aria-label="资料导入步骤" className="mt-5 grid gap-2 text-sm sm:grid-cols-3">
-        <li className="rounded-lg bg-slate-100 px-3 py-2">1. 保存原文并完成解析</li>
-        <li className="rounded-lg bg-slate-100 px-3 py-2">2. 在下方确认 AI 整理</li>
-        <li className="rounded-lg bg-slate-100 px-3 py-2">3. 查看事实与待处理项</li>
-      </ol>
-      <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-2">
         <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">输入文本</p>
-          <h3 className="mt-2 text-xl font-semibold text-slate-950">粘贴一段原始资料</h3>
-          <p className="mt-2 text-xs leading-5 text-slate-600">适合会议记录、项目进展、需求说明和临时笔记。系统保留原文，AI 整理后的事实可逐条追溯。</p>
+          <h3 className="text-sm font-semibold text-slate-950">手工文本</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-600">粘贴会议记录、进展或其他项目原文。</p>
           <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" />
           <details className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <summary className="cursor-pointer text-xs font-semibold text-slate-700">补充来源链接和资料时间（可选）</summary>
@@ -263,9 +259,8 @@ export function ProjectMaterialIntake({
         </form>
 
         <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">上传文件</p>
-          <h3 className="mt-2 text-xl font-semibold text-slate-950">图片、文档或整个文件夹</h3>
-          <p className="mt-2 text-xs leading-5 text-slate-500">支持常用文本、Office、PDF 与图片格式。图片和扫描件只有在你确认后才会发送给项目配置的视觉模型。</p>
+          <h3 className="text-sm font-semibold text-slate-950">图片、文档或文件夹</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-500">支持常用文本、Office、PDF 与图片格式；图片识别需经本次确认。</p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-white px-5 text-center hover:border-indigo-400 hover:bg-indigo-50">
               <input type="file" multiple accept={FILE_ACCEPT} onChange={chooseFiles} className="sr-only" />
@@ -288,8 +283,8 @@ export function ProjectMaterialIntake({
       <ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={onChanged} />
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Link href={`/projects/${projectId}/external-sources`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50">添加网页资料</Link>
-        <Link href={`/projects/${projectId}/repositories`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50">连接代码仓库</Link>
+        <Link href={`/projects/${projectId}/external-sources`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-800">添加网页资料</Link>
+        <Link href={`/projects/${projectId}/repositories`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-800">连接代码仓库</Link>
       </div>
       </div>
       </div>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AppHeader } from "@/components/app-header";
+import styles from "../support-pages.module.css";
 import { TokenActivity } from "@/components/token-activity";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
@@ -185,11 +186,11 @@ export function CreditsClient({ username, isSystemAdmin = false, initialProjectI
   }, [load, requestVersion]);
 
   const status = report?.summary.membership.status ?? "none";
-  return <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+  return <main className={styles.page}>
     <AppHeader username={username} active="profile" isSystemAdmin={isSystemAdmin} />
-    <div className="mx-auto max-w-7xl px-5 pb-16 pt-9 sm:px-8 lg:px-10">
-      <section className="flex flex-wrap items-end justify-between gap-5">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Personal billing</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">额度与账单</h1><p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">查看当前平台额度、已结算用量和额度流水。这里的账单是平台额度记录，不是支付订单或发票。</p></div>
+    <div className={styles.content}>
+      <section className={styles.pageHeader}>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Personal billing</p><h1 className={`${styles.pageTitle} mt-2`}>额度与账单</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">查看当前平台额度、已结算用量和额度流水。这里的账单是平台额度记录，不是支付订单或发票。</p></div>
         <Link href="/profile" className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700">账号与安全</Link>
       </section>
 

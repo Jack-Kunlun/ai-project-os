@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { AppHeader } from "@/components/app-header";
-import { KnowledgeLifecycle } from "@/components/knowledge-lifecycle";
 import { OperationPanel } from "@/components/operation-panel";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { parseProjectPageState } from "@/lib/project-navigation";
+import { buildProjectQuestionHref } from "../materials/materials-navigation";
+import styles from "./project-intelligence-client.module.css";
 import type {
   ProjectIntelligenceNextAction,
   ProjectIntelligenceOperationPayer,
@@ -190,20 +190,40 @@ function shortHash(value: string): string {
 
 export function ProjectIntelligenceClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
+  return <ProjectIntelligenceWorkspace key={projectId} projectId={projectId} username={username} isSystemAdmin={isSystemAdmin} />;
+}
+
+function ProjectIntelligenceWorkspace({ projectId, username, isSystemAdmin }: { projectId: string; username: string; isSystemAdmin: boolean }) {
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("intelligence", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
   const [projectName, setProjectName] = useState("项目");
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sectionSelection, setSectionSelection] = useState<{ focus: string | null; section: "brief" | "investigation" } | null>(null);
+  const activeSection = sectionSelection?.focus === navigation.focus
+    ? sectionSelection.section
+    : navigation.focus === "agent-investigation" ? "investigation" : "brief";
+  const [readinessSelection, setReadinessSelection] = useState<{ focus: string | null; open: boolean } | null>(null);
+  const readinessOpen = readinessSelection?.focus === navigation.focus
+    ? readinessSelection.open
+    : navigation.focus === "runtime-readiness";
+  const reloadSequenceRef = useRef(0);
+  const reloadControllerRef = useRef<AbortController | null>(null);
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    const sequence = ++reloadSequenceRef.current;
+    reloadControllerRef.current?.abort();
+    const controller = new AbortController();
+    reloadControllerRef.current = controller;
+    const isCurrentRequest = () => !controller.signal.aborted && reloadSequenceRef.current === sequence;
     if (showLoading) setLoading(true);
     try {
       const [projectResponse, statusResponse] = await Promise.all([
-        fetch(`/api/projects/${projectId}`, { cache: "no-store" }),
-        fetch(`/api/projects/${projectId}/intelligence/status`, { cache: "no-store" }),
+        fetch(`/api/projects/${projectId}`, { cache: "no-store", signal: controller.signal }),
+        fetch(`/api/projects/${projectId}/intelligence/status`, { cache: "no-store", signal: controller.signal }),
       ]);
+      if (!isCurrentRequest()) return;
       if (!projectResponse.ok || !statusResponse.ok) {
         const failed = !projectResponse.ok ? projectResponse : statusResponse;
         throw new Error(await readError(failed, "项目智能体加载失败"));
@@ -214,16 +234,26 @@ export function ProjectIntelligenceClient({ username, isSystemAdmin }: { usernam
       setStatus(intelligencePayload);
       setError(null);
     } catch (loadError) {
+      if (!isCurrentRequest()) return;
       setError(loadError instanceof Error ? loadError.message : "项目智能体加载失败");
     } finally {
-      if (showLoading) setLoading(false);
+      if (isCurrentRequest()) {
+        reloadControllerRef.current = null;
+        if (showLoading) setLoading(false);
+      }
     }
   }, [projectId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      reloadSequenceRef.current += 1;
+      reloadControllerRef.current?.abort();
+    };
   }, [reload]);
+
+  useEffect(() => () => reloadControllerRef.current?.abort(), []);
 
   useEffect(() => {
     if (navigation.focus === null || loading || status === null) return;
@@ -239,87 +269,34 @@ export function ProjectIntelligenceClient({ username, isSystemAdmin }: { usernam
   }, [loading, navigation.focus, status]);
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <main className={styles.page}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="intelligence" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-6xl px-6 pb-16 pt-10 sm:px-10 lg:px-12">
-        <section className="pb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project AI workspace</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName} · AI 工作台</h1>
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">在一个入口看清项目能用哪些 AI、需要什么前置条件，以及到哪里创建记忆、做查询或运行只读调查。所有生成结果都保留引用，不会自动写入已确认事实。</p>
-        </section>
+      <div className={styles.content}>
+        <header className={styles.pageHeader}>
+          <div><p className="text-xs font-semibold text-slate-400">{projectName}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">简报与调查</h1></div>
+          <div className="flex flex-wrap gap-2"><Link href={buildProjectQuestionHref(projectId)} className={styles.headerLink}>智能问答</Link><Link href={`/projects/${encodeURIComponent(projectId)}/configuration`} className={styles.headerLink}>配置 AI 路由</Link></div>
+        </header>
 
-        {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
-
-        <div className="space-y-7">
-          <ProjectFlowGuide projectId={projectId} stage="memory" indexReady={status?.readiness.indexCompatible} />
-          <CapabilityOverview projectId={projectId} readiness={status?.readiness ?? null} />
-          {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
-          {loading || status === null ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" aria-label="正在加载项目智能体" /> : (
-            <>
-              <div id="runtime-readiness" tabIndex={-1} className="scroll-mt-44 outline-none focus:ring-4 focus:ring-indigo-100"><ReadinessPanel readiness={status.readiness} latestSuccessAt={[...status.reports, ...status.agentRuns].map((entry) => entry.createdAt).sort().at(-1) ?? null} /></div>
-              <BriefPanel projectId={projectId} report={status.reports[0] ?? null} canRun={status.readiness.runtimeDecision.canRun} onReload={reload} />
-              <AgentPanel projectId={projectId} runs={status.agentRuns} tools={status.tools} canRun={status.readiness.runtimeDecision.canRun} onReload={reload} />
-            </>
-          )}
+        {navigation.returnTo ? <Link href={navigation.returnTo} className={styles.returnLink}>← 返回来源页面</Link> : null}
+        {error ? <div role="alert" className={styles.errorNotice}>{error}</div> : null}
+        {loading ? <div className={styles.loadingPanel} aria-label="正在加载项目简报与调查" /> : status === null ? <p className={styles.emptyState}>项目状态暂时无法读取，请稍后重试。</p> : <>
+          <section id="runtime-readiness" tabIndex={-1} className={styles.readinessDisclosure}>
+            <button type="button" className={styles.readinessToggle} aria-expanded={readinessOpen} onClick={() => setReadinessSelection({ focus: navigation.focus, open: !readinessOpen })}>
+              <span>运行条件与模型路由</span><span className={status.readiness.runtimeDecision.canRun ? styles.readyBadge : styles.blockedBadge}>{status.readiness.runtimeDecision.canRun ? "当前可运行" : "需要处理"}</span><span aria-hidden="true">{readinessOpen ? "−" : "+"}</span>
+            </button>
+            {readinessOpen ? <div className={styles.readinessContent}><ReadinessPanel readiness={status.readiness} latestSuccessAt={[...status.reports, ...status.agentRuns].map((entry) => entry.createdAt).sort().at(-1) ?? null} /><Link href={`/projects/${encodeURIComponent(projectId)}/configuration`} className={styles.configLink}>前往项目配置 →</Link></div> : null}
+          </section>
+          <nav className={styles.tabs} role="tablist" aria-label="简报与调查">
+            <button id="brief-tab" type="button" role="tab" aria-selected={activeSection === "brief"} aria-controls="brief-panel" className={`${styles.tab} ${activeSection === "brief" ? styles.tabActive : ""}`} onClick={() => setSectionSelection({ focus: navigation.focus, section: "brief" })}>项目简报</button>
+            <button id="investigation-tab" type="button" role="tab" aria-selected={activeSection === "investigation"} aria-controls="investigation-panel" className={`${styles.tab} ${activeSection === "investigation" ? styles.tabActive : ""}`} onClick={() => setSectionSelection({ focus: navigation.focus, section: "investigation" })}>只读调查</button>
+          </nav>
+          <div id={activeSection === "brief" ? "brief-panel" : "investigation-panel"} role="tabpanel" aria-labelledby={activeSection === "brief" ? "brief-tab" : "investigation-tab"} className={styles.tabPanel}>
+            {activeSection === "brief" ? <BriefPanel projectId={projectId} report={status.reports[0] ?? null} canRun={status.readiness.runtimeDecision.canRun} onReload={reload} /> : <AgentPanel projectId={projectId} runs={status.agentRuns} tools={status.tools} canRun={status.readiness.runtimeDecision.canRun} onReload={reload} />}
+          </div>
+        </>}
         </div>
-      </div>
     </main>
   );
-}
-
-function CapabilityOverview({ projectId, readiness }: { projectId: string; readiness: Readiness | null }) {
-  const loading = readiness === null;
-  const memoryReady = readiness?.embeddingRoute === true && readiness.indexCompatible;
-  const projectAiReady = readiness?.runtimeDecision.canRun === true;
-  const memoryRuntimeBlocked = readiness !== null && ["run_forbidden", "platform_route_blocked", "personal_route_blocked", "platform_quota_advisory_blocked"].includes(readiness.runtimeDecision.code);
-  const memoryMissing = loading ? "正在读取向量路由与索引状态。" : memoryRuntimeBlocked ? readiness.runtimeDecision.detail : !readiness.embeddingRoute ? "缺少可用的向量路由。" : !readiness.indexCompatible ? "缺少与当前路由兼容的记忆索引。" : "无缺失项。";
-  const memoryAction = loading
-    ? { label: "等待状态加载", href: null }
-    : memoryRuntimeBlocked
-      ? readiness.runtimeDecision.nextAction
-      : memoryReady
-        ? { label: "打开项目记忆", href: `/projects/${projectId}/memory` }
-        : { label: readiness.state === "indexMissing" ? "建立项目记忆" : "重建项目记忆", href: `/projects/${projectId}/memory` };
-  const projectAiMissing = loading ? "正在读取项目分析路由与索引状态。" : projectAiReady ? "无缺失项。" : readiness.runtimeDecision.detail;
-  const cards = [
-    {
-      title: "识别与抽取",
-      detail: "解析文档、识别图片和扫描件，并从资料中生成待人工审核的候选。",
-      state: loading ? "状态读取中" : "提交时校验",
-      condition: "需要原始资料，以及提交时通过 visionExtract 或 autoExtract 路由校验。",
-      missing: loading ? "正在读取项目状态。" : "当前状态接口未提供识别与抽取路由的就绪证据。",
-      href: loading ? null : `/projects/${projectId}/assets`,
-      action: loading ? "等待状态加载" : "前往资料与资源并在提交时校验",
-      tone: "border-violet-200 bg-violet-50 text-violet-800",
-      ready: false,
-    },
-    {
-      title: "记忆检索与问答",
-      detail: "建立向量索引，做语义检索，或生成只能引用本次命中证据的回答。",
-      state: loading ? "状态读取中" : memoryReady ? "已就绪" : "未就绪",
-      condition: "需要可用的向量路由，以及与当前输入和路由兼容的记忆索引。",
-      missing: memoryMissing,
-      href: memoryAction.href,
-      action: memoryAction.label,
-      tone: "border-indigo-200 bg-indigo-50 text-indigo-800",
-      ready: memoryReady,
-    },
-    {
-      title: "项目简报与调查",
-      detail: "读取项目概览、已确认事实、记忆和仓库状态，生成简报或回答项目问题。",
-      state: loading ? "状态读取中" : projectAiReady ? "已就绪" : "未就绪",
-      condition: "需要可用的项目分析路由、兼容记忆索引与项目编辑权限。",
-      missing: projectAiMissing,
-      href: loading || !projectAiReady ? readiness?.runtimeDecision.nextAction.href ?? null : "#agent-investigation",
-      action: loading ? "等待状态加载" : projectAiReady ? "开始只读调查" : readiness!.runtimeDecision.nextAction.label,
-      tone: "border-cyan-200 bg-cyan-50 text-cyan-800",
-      ready: projectAiReady,
-    },
-  ] as const;
-  return <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Available capabilities</p><h2 className="mt-2 text-xl font-semibold">当前 AI 能力</h2><p className="mt-2 text-xs leading-5 text-slate-500">每张卡都按当前项目状态说明就绪条件、缺失项和唯一下一步；不会把已实现能力误写成已配置就绪。</p></div><div className="mt-5"><KnowledgeLifecycle compact /></div><div className="mt-5 grid gap-3 md:grid-cols-3">{cards.map((card) => {
-    const body = <><div className="flex items-start justify-between gap-3"><h3 className="font-semibold">{card.title}</h3><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${card.ready ? "bg-emerald-100 text-emerald-700" : "bg-white/80 text-slate-600"}`}>{card.state}</span></div><p className="mt-2 text-xs leading-5 opacity-80">{card.detail}</p><dl className="mt-4 space-y-2 text-xs leading-5"><div><dt className="font-semibold">就绪条件</dt><dd className="opacity-80">{card.condition}</dd></div><div><dt className="font-semibold">当前缺失</dt><dd className="opacity-80">{card.missing}</dd></div></dl><span className="mt-4 block text-xs font-semibold">下一步：{card.action}{card.href ? " →" : ""}</span></>;
-    return card.href ? <Link key={card.title} href={card.href} className={`min-w-0 rounded-2xl border p-5 transition hover:-translate-y-0.5 hover:shadow-sm ${card.tone}`}>{body}</Link> : <article key={card.title} className={`min-w-0 rounded-2xl border p-5 opacity-80 ${card.tone}`}>{body}</article>;
-  })}</div></section>;
 }
 
 function routeDetail(route: ProviderRoute, error: RouteError | null): string {
@@ -429,14 +406,14 @@ function BriefPanel({ projectId, report, canRun, onReload }: { projectId: string
     return <button type="button" onClick={() => void prepare()} disabled={pending} className="rounded-xl border border-indigo-200 px-5 py-3 text-xs font-semibold text-indigo-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button>;
   }
 
-  return <section id="project-brief" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Current state brief</p><h2 className="mt-2 text-2xl font-semibold">项目当前状态</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">聚合已确认条目、当前索引和仓库状态，生成可追溯的进展、决策、问题、风险与关注事项。</p></div>{actionButton()}</div>{confirmation === null && canRun ? <p className="mt-4 text-xs leading-5 text-slate-500">先读取本次外发摘要，确认实际路由、范围和有效期后，才会创建任务。</p> : null}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{report ? <ReportView report={report} /> : <div className="mt-6 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有项目智能简报。完成上方下一步后，才可以生成并保存带证据的简报。</div>}</section>;
+  return <section id="project-brief" className={`${styles.contentSection} scroll-mt-44`}><div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-4"><div><h2 className="text-base font-semibold">项目简报</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">汇总有证据的进展、决策、问题、风险和关注事项。</p></div>{actionButton()}</div>{confirmation === null && canRun ? <p className="mt-3 text-xs leading-5 text-slate-500">先读取本次外发摘要，确认实际路由和范围后才会提交任务。</p> : null}{message ? <p role="status" className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{message}</p> : null}{report ? <ReportView report={report} /> : <div className="mt-4 rounded-lg border border-dashed border-slate-200 px-5 py-8 text-center text-sm text-slate-500">还没有项目简报。生成前会先展示本次外发摘要。</div>}</section>;
 }
 
 function ReportView({ report }: { report: Report }) {
   const citationNumbers = useMemo(() => new Map(report.citations.map((citation, index) => [citation.id, index + 1])), [report.citations]);
   const statusStyle = { on_track: "bg-emerald-100 text-emerald-700", needs_attention: "bg-amber-100 text-amber-800", at_risk: "bg-rose-100 text-rose-700", insufficient_data: "bg-slate-100 text-slate-600", unknown: "bg-slate-100 text-slate-600" }[report.report.status];
   const statusLabel = { on_track: "进展正常", needs_attention: "需要关注", at_risk: "存在风险", insufficient_data: "资料不足", unknown: "证据不足" }[report.report.status];
-  return <div className="mt-7"><div className="rounded-2xl bg-slate-950 p-6 text-white"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle}`}>{statusLabel}</span><span className="text-xs text-slate-400">{formatDate(report.createdAt)} · {report.providerConnection?.name ?? report.providerConnection?.kind ?? "个人连接"} / {report.modelId ?? "模型信息受限"}</span></div><h3 className="mt-5 text-2xl font-semibold">{report.report.headline}</h3><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{report.report.summary}</p><CitationChips ids={report.report.citations} numbers={citationNumbers} /></div><div className="mt-6 grid gap-4 lg:grid-cols-2">{reportSections.map((section) => <ObservationSection key={section.key} title={section.label} observations={report.report[section.key]} numbers={citationNumbers} />)}</div><EvidenceList citations={report.citations} /><RunMeta inputTokens={report.inputTokens} outputTokens={report.outputTokens} fingerprint={report.inputManifestFingerprint} /></div>;
+  return <div className="mt-4"><div className="rounded-lg border border-slate-200 bg-slate-50 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>{statusLabel}</span><span className="text-xs text-slate-500">{formatDate(report.createdAt)} · {report.providerConnection?.name ?? report.providerConnection?.kind ?? "个人连接"} / {report.modelId ?? "模型信息受限"}</span></div><h3 className="mt-3 text-lg font-semibold text-slate-900">{report.report.headline}</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{report.report.summary}</p><CitationChips ids={report.report.citations} numbers={citationNumbers} /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{reportSections.map((section) => <ObservationSection key={section.key} title={section.label} observations={report.report[section.key]} numbers={citationNumbers} />)}</div><EvidenceList citations={report.citations} /><RunMeta inputTokens={report.inputTokens} outputTokens={report.outputTokens} fingerprint={report.inputManifestFingerprint} /></div>;
 }
 
 function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: string; runs: AgentRun[]; tools: ToolTrace["tool"][]; canRun: boolean; onReload: () => Promise<void> }) {
@@ -530,12 +507,12 @@ function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: s
     }
   }
 
-  return <section id="agent-investigation" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Read-only investigation</p><h2 className="mt-2 text-2xl font-semibold">向项目智能体提问</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">模型只能从固定工具中规划调查；服务端逐项校验并执行只读查询，最终回答只能引用本次工具取得的证据。</p><div className="mt-4 flex flex-wrap gap-2">{tools.map((tool) => <span key={tool} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">{toolLabels[tool]}</span>)}</div></div>{canRun ? <OperationPanel title="发起项目调查" triggerLabel="发起项目调查" open={promptOpen} onOpenChange={setPromptOpen} disabled={pending} className="mt-6" description="先读取本次外发摘要；确认路由和范围后才能发送调查请求。历史记录和调查结果留在下方查看。"><form onSubmit={(event) => void prepare(event)}><label className="block text-sm font-semibold text-slate-700">你想了解什么？<textarea value={question} onChange={(event) => { setQuestion(event.target.value); resetConfirmation(); }} minLength={2} maxLength={2_000} rows={4} placeholder="例如：目前最需要关注的风险是什么？哪些关键决策仍缺少证据？" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:bg-white" /></label>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel="开始只读调查" onExecute={() => void ask()} /> : <div className="mt-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">不提供 Shell、文件系统、代码修改或 GitHub 写入工具。</p><button disabled={pending || question.trim().length < 2} className="shrink-0 rounded-xl border border-slate-300 px-5 py-3 text-xs font-semibold text-slate-800 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button></div>}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}</form></OperationPanel> : null}{message && !promptOpen ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{runs.length > 1 ? <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{runs.slice(0, 10).map((run) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${selectedRun?.id === run.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{formatDate(run.createdAt)}</button>)}</div> : null}{selectedRun ? <AgentRunView run={selectedRun} /> : <div className="mt-7 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有调查记录。完成上方下一步后，可提交一个只读问题并保存证据轨迹。</div>}</section>;
+  return <section id="agent-investigation" className={`${styles.contentSection} scroll-mt-44`}><div className="border-b border-slate-100 pb-4"><h2 className="text-base font-semibold">只读调查</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">只使用已校验的只读工具；回答保留引用，不会直接写入已确认事实。</p><div className="mt-3 flex flex-wrap gap-1.5">{tools.map((tool) => <span key={tool} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{toolLabels[tool]}</span>)}</div></div>{canRun ? <OperationPanel title="发起只读调查" triggerLabel="发起调查" open={promptOpen} onOpenChange={setPromptOpen} disabled={pending} variant="drawer" className="mt-4" description="先读取本次外发摘要；确认路由和范围后才能发送调查请求。历史记录和调查结果留在下方查看。"><form onSubmit={(event) => void prepare(event)}><label className="block text-sm font-semibold text-slate-700">你想了解什么？<textarea value={question} onChange={(event) => { setQuestion(event.target.value); resetConfirmation(); }} minLength={2} maxLength={2_000} rows={4} placeholder="例如：目前最需要关注的风险是什么？哪些决策仍缺少证据？" className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:bg-white" /></label>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel="开始只读调查" onExecute={() => void ask()} /> : <div className="mt-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">仅执行项目概览、已确认条目、记忆和仓库状态只读查询。</p><button disabled={pending || question.trim().length < 2} className="shrink-0 rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-semibold text-slate-800 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button></div>}{message ? <p role="status" className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{message}</p> : null}</form></OperationPanel> : null}{message && !promptOpen ? <p role="status" className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{message}</p> : null}{runs.length > 1 ? <div className="mt-4 flex gap-2 overflow-x-auto pb-2">{runs.slice(0, 10).map((run) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${selectedRun?.id === run.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{formatDate(run.createdAt)}</button>)}</div> : null}{selectedRun ? <AgentRunView run={selectedRun} /> : <div className="mt-4 rounded-lg border border-dashed border-slate-200 px-5 py-8 text-center text-sm text-slate-500">还没有调查记录。发起只读问题后，回答与证据轨迹会保存在这里。</div>}</section>;
 }
 
 function AgentRunView({ run }: { run: AgentRun }) {
   const citationNumbers = useMemo(() => new Map(run.citations.map((citation, index) => [citation.id, index + 1])), [run.citations]);
-  return <article className="mt-7"><div className="rounded-2xl border border-slate-200 bg-slate-50 p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Question</p><h3 className="mt-2 text-lg font-semibold">{run.question}</h3><p className="mt-2 text-xs text-slate-500">{formatDate(run.createdAt)} · {run.providerConnection?.name ?? run.providerConnection?.kind ?? "个人连接"} / {run.modelId ?? "模型信息受限"}</p></div><div className="mt-4 rounded-2xl bg-slate-950 p-6 text-white"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Grounded answer</p><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-200">{run.answer}</p><CitationChips ids={run.citations.map((citation) => citation.id)} numbers={citationNumbers} /></div>{run.recommendations.length > 0 ? <ObservationSection title="建议" observations={run.recommendations} numbers={citationNumbers} /> : null}{run.uncertainties.length > 0 ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5"><h4 className="text-sm font-semibold text-amber-900">证据不足与不确定性</h4><ul className="mt-3 space-y-2 text-sm leading-6 text-amber-900">{run.uncertainties.map((item, index) => <li key={`${index}-${item}`}>• {item}</li>)}</ul></div> : null}<ToolTraceView objective={run.plan.objective} trace={run.trace} /><EvidenceList citations={run.citations} /><RunMeta inputTokens={run.inputTokens} outputTokens={run.outputTokens} fingerprint={run.inputManifestFingerprint} /></article>;
+  return <article className="mt-4"><div className="rounded-lg border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-400">问题</p><h3 className="mt-1 text-sm font-semibold">{run.question}</h3><p className="mt-2 text-xs text-slate-500">{formatDate(run.createdAt)} · {run.providerConnection?.name ?? run.providerConnection?.kind ?? "个人连接"} / {run.modelId ?? "模型信息受限"}</p></div><div className="mt-3 rounded-lg border border-slate-200 bg-white p-4"><p className="text-xs font-semibold text-indigo-700">有依据的回答</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{run.answer}</p><CitationChips ids={run.citations.map((citation) => citation.id)} numbers={citationNumbers} /></div>{run.recommendations.length > 0 ? <ObservationSection title="建议" observations={run.recommendations} numbers={citationNumbers} /> : null}{run.uncertainties.length > 0 ? <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4"><h4 className="text-sm font-semibold text-amber-900">证据不足与不确定性</h4><ul className="mt-2 space-y-2 text-sm leading-6 text-amber-900">{run.uncertainties.map((item, index) => <li key={`${index}-${item}`}>• {item}</li>)}</ul></div> : null}<ToolTraceView objective={run.plan.objective} trace={run.trace} /><EvidenceList citations={run.citations} /><RunMeta inputTokens={run.inputTokens} outputTokens={run.outputTokens} fingerprint={run.inputManifestFingerprint} /></article>;
 }
 
 function ObservationSection({ title, observations, numbers }: { title: string; observations: Observation[]; numbers: ReadonlyMap<string, number> }) {

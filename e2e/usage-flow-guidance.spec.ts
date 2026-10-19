@@ -329,6 +329,8 @@ test("processing tasks preserve background state and only offer safe cancellatio
     { id: queuedId, kind: "autoExtract", status: "queued", stage: "worker_queued", canCancel: true, inputSummary: { sourceCount: 2, sourceLabels: ["青禾交付说明", "青禾会议记录"] }, createdAt: "2026-10-17T12:00:00Z", progressCurrent: 0, progressTotal: 2, result: null },
     { id: runningId, kind: "assetExtract", status: "running", stage: "recognizing", canCancel: false, inputSummary: { displayName: "交付草图", fileName: "交付草图.png" }, createdAt: "2026-10-17T12:01:00Z", progressCurrent: 1, progressTotal: 3, result: null },
     { id: finishedId, kind: "autoExtract", status: "succeeded", stage: "succeeded", canCancel: false, inputSummary: { sourceCount: 1, sourceLabels: ["青禾历史约定"] }, createdAt: "2026-10-17T11:00:00Z", progressCurrent: 2, progressTotal: 2, result: { confirmedCount: 1, reviewRequiredCount: 1, duplicateCount: 0 } },
+    { id: randomUUID(), kind: "autoExtract", status: "unknown", stage: "unknown", failureCode: "AI_PROVIDER_INVALID_RESPONSE", reconciliationRequired: true, canCancel: false, inputSummary: { sourceCount: 7, sourceLabels: ["未收口资料"] }, createdAt: "2026-10-17T12:02:00Z", progressCurrent: 0, progressTotal: 7, result: null },
+    { id: randomUUID(), kind: "autoExtract", status: "unknown", stage: "reconciled_unknown", failureCode: "AI_PROVIDER_INVALID_RESPONSE", reconciliationRequired: false, canCancel: false, inputSummary: { sourceCount: 7, sourceLabels: ["已收口资料"] }, createdAt: "2026-10-17T12:03:00Z", progressCurrent: 0, progressTotal: 7, result: null },
   ];
   const cancellations: string[] = [];
   // UI fixture only; queue admission, dispatch fences and cancellation are covered by PostgreSQL gates.
@@ -343,13 +345,24 @@ test("processing tasks preserve background state and only offer safe cancellatio
   await expect(page.locator("main h1")).toHaveText("项目资料");
   const tasks = page.locator('section[aria-labelledby="project-processing-tasks-title"]');
   await expect(tasks.getByRole("heading", { name: "识别任务", exact: true })).toBeVisible();
-  await expect(tasks.getByRole("article")).toHaveCount(3);
+  await expect(tasks.getByRole("article")).toHaveCount(5);
   await expect(tasks.getByRole("article").filter({ hasText: "青禾交付说明" }).getByRole("button", { name: "取消任务", exact: true })).toBeVisible();
   await expect(tasks.getByRole("article").filter({ hasText: "青禾历史约定" }).getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
-  await expect(tasks.getByText(/创建于/u)).toHaveCount(3);
+  await expect(tasks.getByText(/创建于/u)).toHaveCount(5);
   await expect(tasks.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(1);
   await expect(tasks.getByText("1/3（33%）", { exact: true })).toBeVisible();
   await expect(tasks.getByRole("link", { name: "查看整理结果", exact: true })).toHaveAttribute("href", `/projects/${projectId}/materials?view=review&from=materials`);
+  for (const name of ["未收口资料", "已收口资料"]) {
+    const abnormal = tasks.getByRole("article").filter({ hasText: name });
+    await expect(abnormal.getByText(/抽取未完成/u)).toBeVisible();
+    await expect(abnormal.getByText(/模型响应未通过校验/u)).toBeVisible();
+    await expect(abnormal.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
+    await expect(abnormal.getByRole("link", { name: "查看整理结果", exact: true })).toHaveCount(0);
+  }
+  await expect(tasks.getByRole("article").filter({ hasText: "未收口资料" }).getByText(/仍需核对/u)).toBeVisible();
+  const closed = tasks.getByRole("article").filter({ hasText: "已收口资料" });
+  await expect(closed.getByText(/已人工收口，无须再确认任务状态/u)).toBeVisible();
+  await expect(closed.getByText(/仍需核对|后台处理中/u)).toHaveCount(0);
   await tasks.getByRole("button", { name: "取消任务", exact: true }).click();
   await expect(tasks.getByText("任务已取消，尚未发送的请求不会继续执行。", { exact: true })).toBeVisible();
   expect(cancellations).toEqual([queuedId]);
@@ -361,4 +374,82 @@ test("processing tasks preserve background state and only offer safe cancellatio
   await page.setViewportSize({ width: 390, height: 844 });
   await expectR02NoHorizontalOverflow(page, "processing task queue 390px");
   await expectR02NoAccessibilityViolations(page, "processing task queue 390px");
+});
+
+
+test("invalid extraction detail separates incomplete output from open and closed call records", async ({ page }) => {
+  const { projectId, projectName } = await projectFixture(page);
+  const job = {
+    id: randomUUID(), projectId, kind: "autoExtract", status: "unknown", stage: "unknown",
+    failureCode: "AI_PROVIDER_INVALID_RESPONSE", reconciliationRequired: true,
+    result: null, progressCurrent: 0, progressTotal: 7,
+    createdAt: "2026-10-17T13:54:59Z", startedAt: "2026-10-17T13:54:59Z", completedAt: "2026-10-17T13:55:08Z",
+    attempts: [{ id: randomUUID(), attemptNumber: 1, status: "unknown", leasedAt: "2026-10-17T13:54:59Z", leaseExpiresAt: "2026-10-17T13:55:59Z", heartbeatAt: "2026-10-17T13:55:08Z", dispatchState: "dispatched", safeFailureCode: "AI_PROVIDER_INVALID_RESPONSE", completedAt: "2026-10-17T13:55:08Z" }],
+  };
+  // UI projection fixture only: no provider call, reconciliation or quota mutation is made.
+  const writes: string[] = [];
+  await page.route(`**/api/projects/${projectId}/jobs/${job.id}`, async (route) => {
+    if (route.request().method() !== "GET") writes.push(route.request().method());
+    await route.fulfill({ json: { job } });
+  });
+  await page.goto(`/projects/${projectId}/jobs/${job.id}`);
+  const state = page.locator("section").filter({ has: page.getByText("当前状态", { exact: true }) });
+  await expect(state.getByText("抽取未完成", { exact: true })).toHaveCount(2);
+  await expect(state.getByText(/模型响应未通过校验/u)).toBeVisible();
+  await expect(state.getByText(/外部调用记录仍需核对/u)).toBeVisible();
+  await expect(page.getByText(/本任务没有完整的抽取结果可供确认。可能已有部分候选保存/u)).toBeVisible();
+  await expect(page.getByText("结果待确认", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "进入候选审核 →", exact: true })).toHaveCount(0);
+  await page.screenshot({ path: "test-results/job-outcome/extraction-open-1440.png", fullPage: true });
+
+  Object.assign(job, { stage: "reconciled_unknown", reconciliationRequired: false });
+  await page.reload();
+  await expect(state.getByText("执行阶段：任务记录已收口", { exact: true })).toBeVisible();
+  await expect(state.getByText(/已人工收口，无须再确认任务状态/u)).toBeVisible();
+  await expect(state.getByText(/仍需核对|需要到/u)).toHaveCount(0);
+  await expect(state.getByText("抽取未完成", { exact: true })).toHaveCount(2);
+  await page.screenshot({ path: "test-results/job-outcome/extraction-closed-1440.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectR02NoHorizontalOverflow(page, "incomplete extraction 390px");
+  await expectR02NoAccessibilityViolations(page, "incomplete extraction 390px");
+  await page.screenshot({ path: "test-results/job-outcome/extraction-closed-390.png", fullPage: true });
+
+  Object.assign(job, { status: "failed", stage: "failed", failureCode: "AUTO_EXTRACT_OUTPUT_TRUNCATED" });
+  Object.assign(job.attempts[0]!, { status: "failed", safeFailureCode: "AUTO_EXTRACT_OUTPUT_TRUNCATED" });
+  await page.reload();
+  await expect(state.getByText("模型输出达到长度上限，未得到完整的抽取结果。", { exact: true })).toBeVisible();
+  await expect(state.getByText(/缩短资料或减少单次整理范围.*重新确认并发起整理/u)).toBeVisible();
+  await expect(state.getByText(/任务记录已人工收口/u)).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "进入候选审核 →", exact: true })).toHaveCount(0);
+  Object.assign(job, { status: "unknown", stage: "reconciled_unknown", failureCode: "AI_PROVIDER_INVALID_RESPONSE" });
+  Object.assign(job.attempts[0]!, { status: "unknown", safeFailureCode: "AI_PROVIDER_INVALID_RESPONSE" });
+
+  await page.route(`**/api/projects/${projectId}/governance/operations?*`, (route) => route.fulfill({
+    json: { items: [
+      { ...job, capability: { action: null, reason: "alreadyReconciled" }, destination: `/projects/${projectId}/jobs/${job.id}`, githubSync: null },
+      { ...job, id: randomUUID(), kind: "githubProjectSync", failureCode: "RECONCILIATION_REQUIRED", capability: { action: null, reason: "specializedReconciliationRequired" }, destination: `/projects/${projectId}/repositories`, githubSync: { id: randomUUID(), status: "partial", warnings: [], failureCode: null, counts: { added: 1, updated: 0, deleted: 0, withheld: 1 } } },
+    ], nextCursor: null },
+  }));
+  await page.goto(`/projects/${projectId}?focus=task-runs`);
+  const runs = page.locator("#task-runs");
+  await expect(runs.getByText("抽取未完成", { exact: true })).toBeVisible();
+  await expect(runs.getByText(/任务记录已人工收口，无须再确认任务状态/u)).toBeVisible();
+  await expect(runs.getByText(/reconciled_unknown/u)).toHaveCount(0);
+  await expect(runs.getByRole("button", { name: "人工收口", exact: true })).toHaveCount(0);
+  await expect(runs.getByRole("link", { name: "查看详情", exact: true })).toHaveCount(2);
+  await expect(runs.getByText("部分完成", { exact: true })).toBeVisible();
+  await expect(runs.getByText(/该旧式 GitHub 任务仍有子运行阻塞/u)).toBeVisible();
+  await expectR02NoHorizontalOverflow(page, "incomplete extraction task runs 390px");
+
+  await page.route("**/api/dashboard", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.recentJobs = [{ ...job, project: { id: projectId, name: projectName } }];
+    await route.fulfill({ response, json: payload });
+  });
+  await page.goto("/dashboard");
+  await expect(page.getByText("自动抽取 · 抽取未完成", { exact: true })).toBeVisible();
+  await expect(page.getByText("自动抽取结果待确认", { exact: true })).toHaveCount(0);
+  await expectR02NoHorizontalOverflow(page, "incomplete extraction dashboard 390px");
+  expect(writes).toEqual([]);
 });

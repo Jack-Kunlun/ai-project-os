@@ -16,6 +16,7 @@ import type { ProjectPermission } from "@/lib/access-control";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { assertPlatformConcurrency } from "@/lib/ai-entitlements";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
+import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import { persistNotification } from "@/lib/notification-service";
 
 const JOB_LOCK_NAMESPACE = 23082026;
@@ -150,15 +151,16 @@ export function projectJobNotificationContent(input: Readonly<{
   if (!NOTIFIABLE_PROJECT_JOB_KINDS.has(input.kind)) return null;
   const label = PROJECT_JOB_LABELS[input.kind];
   const failure = projectJobFailurePresentation(input.failureCode);
+  const unknownOutcome = projectJobUnknownPresentation({ ...input, stage: "unknown", reconciliationRequired: true });
   const codeSuffix = failure.code ? ` 错误代码：${failure.code}。` : "";
   return Object.freeze({
     severity: input.status === "succeeded" ? "success" as const : input.status === "failed" ? "error" as const : "warning" as const,
-    title: input.status === "succeeded" ? `${label}已完成` : input.status === "failed" ? `${label}未完成` : `${label}结果待确认`,
+    title: input.status === "succeeded" ? `${label}已完成` : input.status === "failed" || unknownOutcome?.tone === "danger" ? `${label}未完成` : `${label}结果未知`,
     body: input.status === "succeeded"
       ? "任务已经结束。点击查看结果、执行阶段和尝试记录。"
       : input.status === "failed"
         ? `${failure.summary} ${failure.action}${codeSuffix}`
-        : `任务结果无法安全确认，系统不会自动重试。${failure.action}${codeSuffix}`,
+        : `${unknownOutcome?.summary} ${unknownOutcome?.recordNotice}${codeSuffix}`,
     actionHref: `/projects/${input.projectId}/jobs/${input.jobId}`,
   });
 }

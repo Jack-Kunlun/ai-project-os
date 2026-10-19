@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("login page aligns with the workspace and preserves configured auth choices", async () => {
-  const [form, loginStyles, page, apiErrors, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
+  const [form, authStyles, authPage, page, apiErrors, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
     readFile("src/app/login/login-form.tsx", "utf8"),
-    readFile("src/app/login/login.module.css", "utf8"),
+    readFile("src/components/auth-page.module.css", "utf8"),
+    readFile("src/components/auth-page.tsx", "utf8"),
     readFile("src/app/login/page.tsx", "utf8"),
     readFile("src/lib/api-errors.ts", "utf8"),
     readFile("src/app/api/auth/login/route.ts", "utf8"),
@@ -18,9 +19,11 @@ test("login page aligns with the workspace and preserves configured auth choices
     readFile("src/components/public-info-page.tsx", "utf8"),
   ]);
 
-  assert.match(form, /让项目知识可追溯/u);
-  assert.match(form, /import styles from "\.\/login\.module\.css"/u);
-  assert.match(form, /BrandMark/u);
+  assert.match(authPage, /让项目知识可追溯/u);
+  assert.match(form, /import styles from "@\/components\/auth-page\.module\.css"/u);
+  assert.match(form, /<AuthPage sectionLabel="登录工作区">/u);
+  assert.match(authPage, /<BrandMark size=\{36\} priority/u);
+  assert.match(authPage, /children: ReactNode/u);
   assert.match(await readFile("src/components/brand-mark.tsx", "utf8"), /ai-project-os-admin-crisp\.png/u);
   assert.doesNotMatch(form, />OS<\/span>/u);
   assert.doesNotMatch(form, /记住我/u);
@@ -28,22 +31,22 @@ test("login page aligns with the workspace and preserves configured auth choices
   assert.match(form, /href="\/recover"[\s\S]*忘记账号或密码/u);
   assert.match(form, /使用 GitHub 登录/u);
   assert.match(form, /首次使用 GitHub 登录会自动创建普通用户账号/u);
-  assert.match(form, /隐私政策/u);
-  assert.match(form, /服务条款/u);
-  assert.match(form, /帮助文档/u);
-  assert.match(form, /href="\/privacy"/u);
-  assert.match(form, /href="\/terms"/u);
-  assert.match(form, /href="\/help"/u);
-  assert.match(form, /TermsIcon/u);
-  assert.match(form, /HelpIcon/u);
-  assert.match(loginStyles, /background: #f7f8fa/u);
-  assert.match(loginStyles, /#3566c9/u);
-  assert.match(loginStyles, /@media \(max-width: 760px\)/u);
-  assert.match(loginStyles, /@media \(max-width: 380px\)/u);
-  assert.match(loginStyles, /min-height: 44px/u);
-  assert.match(loginStyles, /:focus-visible/u);
+  assert.match(authPage, /隐私政策/u);
+  assert.match(authPage, /服务条款/u);
+  assert.match(authPage, /帮助文档/u);
+  assert.match(authPage, /href="\/privacy"/u);
+  assert.match(authPage, /href="\/terms"/u);
+  assert.match(authPage, /href="\/help"/u);
+  assert.match(authPage, /TermsIcon/u);
+  assert.match(authPage, /HelpIcon/u);
+  assert.match(authStyles, /background: #f7f8fa/u);
+  assert.match(authStyles, /#3566c9/u);
+  assert.match(authStyles, /@media \(max-width: 760px\)/u);
+  assert.match(authStyles, /@media \(max-width: 380px\)/u);
+  assert.match(authStyles, /min-height: 44px/u);
+  assert.match(authStyles, /:focus-visible/u);
   assert.doesNotMatch(form, /radial-gradient|linear-gradient|shadow-\[/u);
-  assert.doesNotMatch(loginStyles, /gradient/u);
+  assert.doesNotMatch(authStyles, /gradient/u);
   assert.match(form, /githubLoginAvailable/u);
   assert.match(form, /平台管理员尚未完成初始化/u);
   assert.match(page, /getGitHubOAuthAvailability/u);
@@ -73,6 +76,8 @@ test("login page aligns with the workspace and preserves configured auth choices
     readFile("src/lib/local-registration-config.ts", "utf8"),
   ]);
   assert.match(registerPage, /RegisterForm/u);
+  assert.match(registerPage, /<AuthPage sectionLabel="创建账号工作区">/u);
+  assert.match(registerForm, /styles\.registerForm/u);
   assert.match(registerPage, /isLocalRegistrationEnabled/u);
   assert.match(registerForm, /localRegistrationEnabled \?/u);
   assert.match(registerForm, /本地用户名和密码注册暂未开放/u);
@@ -106,4 +111,13 @@ test("login page aligns with the workspace and preserves configured auth choices
   assert.match(registrationBudget, /LOCAL_REGISTRATION_BUDGET_UNAVAILABLE/u);
   assert.doesNotMatch(registrationBudget, /X-Forwarded-For/u);
   assert.match(registrationConfig, /process\.env\.LOCAL_REGISTRATION_ENABLED === "true"/u);
+
+  const [recoverPage, recoveryForm] = await Promise.all([
+    readFile("src/app/recover/page.tsx", "utf8"),
+    readFile("src/app/recover/recovery-form.tsx", "utf8"),
+  ]);
+  assert.match(recoverPage, /<AuthPage sectionLabel="找回账号与密码工作区">/u);
+  assert.match(recoveryForm, /purpose="recover" availability=\{available \? "available" : "unavailable"\}/u);
+  assert.match(recoveryForm, /username !== null/u);
+  assert.match(recoveryForm, /href="\/login\?password=updated"/u);
 });

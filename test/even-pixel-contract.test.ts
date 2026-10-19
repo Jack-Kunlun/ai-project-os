@@ -13,7 +13,7 @@ const APPROVED_PROTOTYPE_STYLES = new Set([
   "src/app/admin/admin-workspace.module.css",
   "src/app/ask/ask-client.module.css",
   "src/app/dashboard/dashboard-client.module.css",
-  "src/app/login/login.module.css",
+  "src/components/auth-page.module.css",
   "src/app/personal/knowledge/graph/knowledge-graph.module.css",
   "src/app/personal/knowledge/personal-knowledge.module.css",
   "src/app/projects/[projectId]/automations/project-automations-client.module.css",

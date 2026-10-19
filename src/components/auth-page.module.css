@@ -112,7 +112,7 @@
   line-height: 1.6;
 }
 
-.loginPanel {
+.authPanel {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -126,6 +126,10 @@
   min-width: 0;
   margin: 0 auto;
   overflow-wrap: anywhere;
+}
+
+.formBody {
+  margin-top: 20px;
 }
 
 .formHeading h2 {
@@ -206,6 +210,38 @@
   line-height: 18px;
 }
 
+.fieldInput {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  margin-top: 7px;
+  padding: 0 12px;
+  border: 1px solid #d9dde4;
+  border-radius: 4px;
+  background: #fff;
+  color: #20242a;
+  font: inherit;
+  font-size: 14px;
+}
+
+.fieldInput::placeholder {
+  color: #646a73;
+  opacity: 1;
+}
+
+.fieldInput:focus-visible {
+  border-color: #3566c9;
+  outline: 2px solid rgb(53 102 201 / 30%);
+  outline-offset: 1px;
+}
+
+.fieldInput:disabled {
+  background: #f7f8fa;
+  color: #646a73;
+  cursor: not-allowed;
+}
+
 .nextFieldLabel {
   margin-top: 16px;
 }
@@ -275,6 +311,276 @@
 
 .phoneInput {
   padding: 0 10px;
+}
+
+.registerForm,
+.recoveryForm {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+}
+
+.registerFieldset,
+.recoveryFieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.registerFieldset {
+  display: grid;
+  gap: 16px;
+}
+
+.registerFields,
+.passwordFields,
+.recoveryFieldset {
+  display: grid;
+  gap: 16px;
+}
+
+.recoveryForm.formBody {
+  margin-top: 20px;
+}
+
+.registerFields .fieldLabel,
+.passwordFields .fieldLabel,
+.recoveryForm .fieldLabel {
+  margin-top: 0;
+}
+
+.fieldHint,
+.recoveryHint {
+  display: block;
+  margin: 6px 0 0;
+  color: #646a73;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.methodOptions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #f7f8fa;
+}
+
+.methodOptions legend {
+  flex: 1 0 100%;
+  padding: 0 4px;
+  color: #343a42;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.choiceLabel,
+.rememberLabel {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  color: #424851;
+  font-size: 13px;
+}
+
+.choiceInput,
+.rememberInput {
+  width: 16px;
+  height: 16px;
+  accent-color: #3566c9;
+}
+
+.verificationFields {
+  display: grid;
+  gap: 16px;
+}
+
+.registerForm .smsCodeField :global(label),
+.registerForm .emailCodeField :global(label),
+.recoveryForm .smsCodeField :global(label) {
+  display: block;
+  margin: 0 0 7px;
+  color: #343a42;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.registerForm .smsCodeField :global(input),
+.registerForm .smsCodeField :global(button),
+.registerForm .emailCodeField :global(input),
+.registerForm .emailCodeField :global(button),
+.recoveryForm .smsCodeField :global(input),
+.recoveryForm .smsCodeField :global(button) {
+  height: 44px;
+  min-height: 44px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.registerForm .smsCodeField :global(input),
+.registerForm .emailCodeField :global(input),
+.recoveryForm .smsCodeField :global(input) {
+  border-color: #d9dde4;
+  background: #fff;
+  color: #20242a;
+}
+
+.registerForm .smsCodeField :global(input:focus),
+.registerForm .emailCodeField :global(input:focus),
+.recoveryForm .smsCodeField :global(input:focus) {
+  border-color: #3566c9;
+  box-shadow: 0 0 0 2px rgb(53 102 201 / 18%);
+}
+
+.registerForm .smsCodeField :global(input:focus-visible),
+.registerForm .emailCodeField :global(input:focus-visible),
+.recoveryForm .smsCodeField :global(input:focus-visible),
+.registerForm .smsCodeField :global(button:focus-visible),
+.registerForm .emailCodeField :global(button:focus-visible),
+.recoveryForm .smsCodeField :global(button:focus-visible),
+.choiceInput:focus-visible,
+.rememberInput:focus-visible {
+  outline: 2px solid #3566c9;
+  outline-offset: 2px;
+}
+
+.registerForm .smsCodeField :global(button),
+.registerForm .emailCodeField :global(button),
+.recoveryForm .smsCodeField :global(button) {
+  border-color: #cbd5e1;
+  background: #f7f8fa;
+  color: #3566c9;
+  font-weight: 500;
+}
+
+.registerForm .smsCodeField :global(button:hover:not(:disabled)),
+.registerForm .emailCodeField :global(button:hover:not(:disabled)),
+.recoveryForm .smsCodeField :global(button:hover:not(:disabled)) {
+  background: #eef3fc;
+}
+
+.registerForm .smsCodeField :global(button:disabled),
+.registerForm .emailCodeField :global(button:disabled),
+.recoveryForm .smsCodeField :global(button:disabled) {
+  border-color: #e5e7eb;
+  background: #f7f8fa;
+  color: #646a73;
+}
+
+.registerForm .smsCodeField :global(p[id$="-message"]),
+.registerForm .emailCodeField :global(p[id$="-message"]),
+.recoveryForm .smsCodeField :global(p[id$="-message"]) {
+  color: #646a73;
+}
+
+.rememberLabel {
+  min-height: 44px;
+  cursor: pointer;
+  color: #646a73;
+}
+
+.noticeWarning {
+  border-color: #ead3ad;
+  background: #fffaf2;
+  color: #764500;
+}
+
+.actionLinkButton {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border: 1px solid #3566c9;
+  border-radius: 4px;
+  background: #3566c9;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.actionLinkButton:hover {
+  border-color: #2b57ad;
+  background: #2b57ad;
+}
+
+.formReturnLink {
+  display: block;
+  min-height: 24px;
+  color: #3566c9;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 24px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.formReturnLink:hover {
+  color: #244f9e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.formReturnLink a {
+  color: #3566c9;
+  text-decoration: none;
+}
+
+.formReturnLink a:hover {
+  color: #244f9e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.successCard {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #b8dfc9;
+  border-radius: 4px;
+  background: #f5fbf7;
+  color: #176b3b;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.successCard p {
+  margin: 0;
+}
+
+.successCard p + p {
+  margin-top: 5px;
+}
+
+.successCard + .actionLinkButton {
+  margin-top: 14px;
+}
+
+.form > .formReturnLink {
+  margin-top: 16px;
+}
+
+.registerForm .submitButton,
+.recoveryForm .submitButton {
+  margin-top: 0;
+}
+
+.recoveryForm .fieldLabel {
+  margin: 0;
+}
+
+.recoveryForm .fieldLabel > .phoneShell {
+  margin-top: 7px;
 }
 
 .smsFields {
@@ -360,7 +666,8 @@
 .notice {
   margin: 14px 0 0;
   padding: 10px 12px;
-  border: 1px solid;
+  border-width: 1px;
+  border-style: solid;
   border-radius: 4px;
   font-size: 13px;
   line-height: 1.55;
@@ -376,6 +683,11 @@
   border-color: #b8dfc9;
   background: #f5fbf7;
   color: #176b3b;
+}
+
+.registerForm > .notice,
+.recoveryForm > .notice {
+  margin: 0;
 }
 
 .submitButton {
@@ -520,10 +832,12 @@
 
 .methodTab:focus-visible,
 .submitButton:focus-visible,
+.actionLinkButton:focus-visible,
 .providerLink:focus-visible,
 .oidcLink:focus-visible,
 .recoverLink a:focus-visible,
 .registerPrompt a:focus-visible,
+.formReturnLink:focus-visible,
 .footer a:focus-visible {
   outline: 2px solid #3566c9;
   outline-offset: 2px;
@@ -566,7 +880,7 @@
     display: none;
   }
 
-  .loginPanel {
+  .authPanel {
     padding: 22px 20px 24px;
   }
 
@@ -593,7 +907,7 @@
     padding-left: 16px;
   }
 
-  .loginPanel {
+  .authPanel {
     padding: 20px 16px 22px;
   }
 

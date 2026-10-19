@@ -1058,7 +1058,13 @@ test("耗时项目任务生成可点击的完成、失败和待确认通知", ()
 
   const unknown = projectJobNotificationContent({ projectId, jobId, kind: "projectAgent", status: "unknown", failureCode: "RECONCILIATION_REQUIRED" });
   assert.equal(unknown?.severity, "warning");
+  assert.match(unknown?.title ?? "", /结果未知/u);
   assert.match(unknown?.body ?? "", /不会自动重试/u);
+  const invalidExtraction = projectJobNotificationContent({ projectId, jobId, kind: "autoExtract", status: "unknown", failureCode: "AI_PROVIDER_INVALID_RESPONSE" });
+  assert.equal(invalidExtraction?.title, "项目资料自动抽取未完成");
+  assert.match(invalidExtraction?.body ?? "", /模型响应未通过校验.*调用记录.*核对.*不会自动重试/u);
+  assert.doesNotMatch(`${invalidExtraction?.title} ${invalidExtraction?.body}`, /结果待确认|仓库|undefined/u);
+  assert.equal(invalidExtraction?.actionHref, `/projects/${projectId}/jobs/${jobId}`);
   assert.equal(projectJobNotificationContent({ projectId, jobId, kind: "semanticSearch", status: "succeeded", failureCode: null }), null);
 });
 
@@ -1071,6 +1077,19 @@ test("项目任务失败信息给出安全的中文原因、处理建议和排�
   const integrity = projectJobFailurePresentation("GITHUB_CODE_SCAN_INTEGRITY_ERROR");
   assert.match(integrity.summary, /完整性校验/u);
   assert.match(integrity.action, /管理员/u);
+
+  const truncated = projectJobFailurePresentation("AUTO_EXTRACT_OUTPUT_TRUNCATED");
+  assert.match(truncated.summary, /模型输出达到长度上限/u);
+  assert.match(truncated.action, /减少单次整理范围.*重新确认.*已保存的候选需单独核对/u);
+  const invalid = projectJobFailurePresentation("AUTO_EXTRACT_INVALID_MODEL_OUTPUT");
+  assert.match(invalid.summary, /JSON 结构不完整/u);
+  const excerpt = projectJobFailurePresentation("AUTO_EXTRACT_SOURCE_EXCERPT_MISMATCH");
+  assert.match(excerpt.summary, /无法精确回溯到原文/u);
+  const inputFailures = ["AUTO_EXTRACT_INVALID_INPUT", "AUTO_EXTRACT_SOURCE_NOT_FOUND", "AUTO_EXTRACT_SOURCE_TOO_LARGE", "AUTO_EXTRACT_CANDIDATE_CONFLICT"].map(projectJobFailurePresentation);
+  for (const failure of [truncated, invalid, excerpt, ...inputFailures]) {
+    assert.doesNotMatch(failure.summary, /系统没有可安全公开/u);
+    assert.doesNotMatch(`${failure.summary} ${failure.action}`, /仓库|自动重试/u);
+  }
 
   const unsafe = projectJobFailurePresentation("failure: secret response body");
   assert.equal(unsafe.code, null);

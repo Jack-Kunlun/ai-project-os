@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import { jobStatusLabels, type DashboardPayload, type DashboardQuota, type JobKind, type RecentJob, type WorkspaceProject } from "@/lib/workspace-summary";
 import styles from "./dashboard-client.module.css";
 
@@ -128,10 +129,11 @@ function buildAttentionItems(payload: DashboardPayload): DashboardAttention[] {
   for (const job of payload.recentJobs) {
     if (job.status !== "failed" && job.status !== "unknown" && !job.reconciliationRequired) continue;
     const projectName = job.project?.name ?? "项目任务";
+    const unknownOutcome = projectJobUnknownPresentation(job);
     add({
       id: `job:${job.id}`,
-      title: `${jobLabels[job.kind]}${job.reconciliationRequired ? "需要核对" : job.status === "failed" ? "执行失败" : "结果待确认"}`,
-      detail: `${projectName} · ${jobStatusLabels[job.status]} · ${formatDate(job.createdAt)}`,
+      title: unknownOutcome ? `${jobLabels[job.kind]} · ${unknownOutcome.label}` : `${jobLabels[job.kind]}${job.reconciliationRequired ? "调用记录需核对" : "执行失败"}`,
+      detail: `${projectName} · ${unknownOutcome?.stageLabel ?? jobStatusLabels[job.status]} · ${formatDate(job.createdAt)}`,
       href: jobHref(job),
       tone: job.status === "failed" || job.status === "unknown" ? "danger" : "warning",
     });
@@ -348,6 +350,6 @@ function RecentProjectCard({ project }: { project: WorkspaceProject }) {
     <strong className={styles.projectName}>{project.name}</strong>
     <p className={styles.projectDescription}>{project.description || "尚未填写项目说明。"}</p>
     <div className={styles.projectCounts}><span>来源 <b>{project._count.sources}</b></span><span>文件 <b>{project._count.assets}</b></span><span>条目 <b>{project._count.items}</b></span><span>仓库 <b>{project._count.repositoryLinks}</b></span></div>
-    <div className={styles.projectFooter}><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${jobStatusLabels[latestJob.status]}` : "暂无近期任务"}</span></div>
+    <div className={styles.projectFooter}><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${projectJobUnknownPresentation(latestJob)?.label ?? jobStatusLabels[latestJob.status]}` : "暂无近期任务"}</span></div>
   </Link>;
 }

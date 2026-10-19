@@ -3,9 +3,9 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BrandMark } from "@/components/brand-mark";
+import { AuthPage } from "@/components/auth-page";
 import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
-import styles from "./login.module.css";
+import styles from "@/components/auth-page.module.css";
 
 type PhoneAuthStatus = "disabled" | "unavailable" | "available";
 
@@ -117,28 +117,7 @@ export function LoginForm({
   }
 
   return (
-    <main className={styles.page}>
-      <div className={styles.layout}>
-        <section className={styles.productPanel} aria-label="产品介绍">
-          <div className={styles.brand}>
-            <BrandMark size={36} priority className={styles.brandMark} />
-            <span className={styles.brandName}>AI Project OS</span>
-          </div>
-
-          <div className={styles.productSummary}>
-            <p className={styles.eyebrow}>项目工作空间</p>
-            <h1 className={styles.headline}>让项目知识可追溯</h1>
-            <p className={styles.introText}>项目资料、计划与协作信息集中在一个工作区，帮助团队沿着可靠来源推进工作。</p>
-          </div>
-
-          <ul className={styles.capabilities} aria-label="工作区能力">
-            <li><span>01</span><p>问答按轮保留范围与资料引用</p></li>
-            <li><span>02</span><p>知识图谱连接事实和原始资料</p></li>
-            <li><span>03</span><p>项目、计划与成员协作信息集中查看</p></li>
-          </ul>
-        </section>
-
-        <section className={styles.loginPanel} aria-label="登录工作区">
+    <AuthPage sectionLabel="登录工作区">
           <form onSubmit={submit} className={styles.form}>
             <div className={styles.formHeading}>
               <p className={styles.formEyebrow}>欢迎回来</p>
@@ -246,26 +225,10 @@ export function LoginForm({
 
             {oidcProviders.length > 0 ? <div className={styles.oidcProviders}>{oidcProviders.map((provider) => <a key={provider.id} href={`/api/auth/oidc/start/${provider.id}?returnTo=${encodeURIComponent(returnTo)}`} className={styles.oidcLink}>使用 {provider.name} 登录</a>)}</div> : null}
           </form>
-        </section>
-      </div>
-
-      <footer className={styles.footer}>
-        <Link href="/privacy"><SmallShieldIcon />隐私政策</Link>
-        <span aria-hidden="true" />
-        <Link href="/terms"><TermsIcon />服务条款</Link>
-        <span aria-hidden="true" />
-        <Link href="/help"><HelpIcon />帮助文档</Link>
-        <span aria-hidden="true" />
-        <Link href="/contact"><ContactIcon />联系作者</Link>
-      </footer>
-    </main>
+    </AuthPage>
   );
 }
 
 function UserIcon() { return <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5.8 20v-2.1A4.9 4.9 0 0 1 10.7 13h2.6a4.9 4.9 0 0 1 4.9 4.9V20" /></svg>; }
 function LockIcon() { return <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="5.5" y="10" width="13" height="10" rx="2" /><path d="M8.5 10V7.2a3.5 3.5 0 0 1 7 0V10" /><path d="M12 14.4v2.3" /></svg>; }
 function GitHubIcon() { return <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .7A11.5 11.5 0 0 0 8.36 23.1c.58.1.79-.25.79-.56v-2.23c-3.23.7-3.91-1.37-3.91-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.78 1.2 1.78 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.58-.29-5.29-1.29-5.29-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.47.11-3.05 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.4-2.72 5.38-5.3 5.67.42.36.79 1.06.79 2.14v3.25c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" /></svg>; }
-function SmallShieldIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 19 6v5c0 4.6-2.8 7.7-7 10-4.2-2.3-7-5.4-7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>; }
-function TermsIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 3.5h9l3 3V20H6z" /><path d="M15 3.5V7h3M9 11h6M9 14.5h6M9 18h4" /></svg>; }
-function HelpIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="9" /><path d="M9.7 9.3a2.5 2.5 0 1 1 3.7 2.2c-.9.45-1.4 1-1.4 2" /><path d="M12 17.5h.01" /></svg>; }
-function ContactIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z" /></svg>; }

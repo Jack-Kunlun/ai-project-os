@@ -14,6 +14,34 @@ const SCAN_FILE_BYTES = `${GIT_REPOSITORY_SCAN_POLICY.maxFileBytes / 1024} KiB`;
 const SCAN_TOTAL_BYTES = `${GIT_REPOSITORY_SCAN_POLICY.maxTotalBytes / 1024 / 1024} MiB`;
 
 const FAILURE_COPY: Readonly<Record<string, FailureCopy>> = Object.freeze({
+  AUTO_EXTRACT_INVALID_INPUT: {
+    summary: "自动抽取请求或资料范围无效。",
+    action: "刷新项目资料，重新选择整理范围并确认后发起任务。",
+  },
+  AUTO_EXTRACT_SOURCE_NOT_FOUND: {
+    summary: "所选资料已不存在，或内容已经变化。",
+    action: "刷新项目资料，核对最新内容后重新选择并确认整理范围。",
+  },
+  AUTO_EXTRACT_SOURCE_TOO_LARGE: {
+    summary: "所选资料超过单次抽取上限。",
+    action: "缩短过长的资料或分批选择资料，再重新确认并发起整理。",
+  },
+  AUTO_EXTRACT_CANDIDATE_CONFLICT: {
+    summary: "候选已被其他操作更新。",
+    action: "刷新资料中的候选列表，核对最新状态后再处理。",
+  },
+  AUTO_EXTRACT_OUTPUT_TRUNCATED: {
+    summary: "模型输出达到长度上限，未得到完整的抽取结果。",
+    action: "请缩短资料或减少单次整理范围，再重新确认并发起整理；此前已保存的候选需单独核对。",
+  },
+  AUTO_EXTRACT_INVALID_MODEL_OUTPUT: {
+    summary: "模型返回的 JSON 结构不完整或无法通过校验。",
+    action: "减少单次资料量、缩短资料或更换生成模型，再重新确认并发起整理；此前已保存的候选需单独核对。",
+  },
+  AUTO_EXTRACT_SOURCE_EXCERPT_MISMATCH: {
+    summary: "模型候选无法精确回溯到原文，系统未写入这些候选。",
+    action: "核对资料原文，缩小范围或更换生成模型后，重新确认并发起整理。",
+  },
   GIT_CONNECTION_INVALID_INPUT: {
     summary: "Git 服务配置不完整或格式不正确。",
     action: "检查服务地址、认证方式和必填字段后重新验证连接。",

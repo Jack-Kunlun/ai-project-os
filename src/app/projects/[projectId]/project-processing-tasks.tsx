@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import styles from "./project-materials.module.css";
 
 type ProcessingJob = Readonly<{
@@ -42,7 +43,7 @@ function statusLabel(status: ProcessingJob["status"]): string {
     running: "处理中",
     succeeded: "已完成",
     failed: "失败",
-    unknown: "结果待核实",
+    unknown: "结果未知",
     cancelled: "已取消",
   }[status];
 }
@@ -56,7 +57,7 @@ function stageLabel(stage: string): string {
     cancelled: "已取消",
     succeeded: "处理完成",
     failed: "处理失败",
-    unknown: "结果待核实",
+    unknown: "结果未知",
   }[stage] ?? "后台处理中";
 }
 
@@ -178,7 +179,7 @@ export function ProjectProcessingTasks({ projectId, onChanged }: {
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h2 id="project-processing-tasks-title" className="text-lg font-semibold text-slate-950">识别任务</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-600">查看后台进度与保存结果。仅允许取消尚未发送的任务；未知结果需要人工核实。</p>
+        <p className="mt-1 text-xs leading-5 text-slate-600">查看后台进度与保存结果。仅允许取消尚未发送的任务；异常任务会区分抽取结果与调用记录。</p>
       </div>
       <button type="button" onClick={() => setRefreshToken((value) => value + 1)} className="min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700">刷新</button>
     </div>
@@ -189,15 +190,16 @@ export function ProjectProcessingTasks({ projectId, onChanged }: {
       const progress = job.progressTotal > 0 ? Math.min(100, Math.round(job.progressCurrent / job.progressTotal * 100)) : null;
       const canCancel = job.canCancel && canceling !== job.id;
       const inputLabel = inputSummaryLabel(job);
+      const unknownOutcome = projectJobUnknownPresentation(job);
       return <article key={job.id} className={styles.taskCard}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h3 className="font-semibold text-slate-900">{job.kind === "assetExtract" ? "文件图片识别" : "资料自动整理"}</h3>{inputLabel ? <p className="mt-1 max-w-2xl break-all text-xs text-slate-600">{inputLabel}</p> : null}<p className="mt-1 text-xs text-slate-500">{statusLabel(job.status)} · {stageLabel(job.stage)} · 创建于 {formatCreatedAt(job.createdAt)}</p></div>
+          <div><h3 className="font-semibold text-slate-900">{job.kind === "assetExtract" ? "文件图片识别" : "资料自动整理"}</h3>{inputLabel ? <p className="mt-1 max-w-2xl break-all text-xs text-slate-600">{inputLabel}</p> : null}<p className="mt-1 text-xs text-slate-500">{unknownOutcome?.label ?? statusLabel(job.status)} · {unknownOutcome?.stageLabel ?? stageLabel(job.stage)} · 创建于 {formatCreatedAt(job.createdAt)}</p></div>
           {canCancel ? <button type="button" onClick={() => void cancel(job)} className="min-h-9 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700">取消任务</button> : canceling === job.id ? <span className="text-xs text-slate-500">正在取消…</span> : null}
         </div>
         {progress !== null ? <div className="mt-3"><div className="flex justify-between text-xs text-slate-500"><span>处理进度</span><span>{job.progressCurrent}/{job.progressTotal}（{progress}%）</span></div><div className={`${styles.taskProgress} mt-1`} role="progressbar" aria-valuemin={0} aria-valuemax={job.progressTotal} aria-valuenow={job.progressCurrent} aria-label={`${job.kind === "assetExtract" ? "文件图片识别" : "资料自动整理"}进度`}><div className={styles.taskProgressFill} style={{ width: `${progress}%` }} /></div></div> : null}
         {job.status === "succeeded" ? <p className="mt-3 text-sm text-emerald-800">{resultSummary(job) ?? "任务已完成，结果已保存。"}</p> : null}
         {job.status === "failed" ? <p className="mt-3 text-sm text-rose-700">任务失败{job.failureCode ? `（${job.failureCode}）` : ""}。原始资料仍保留。</p> : null}
-        {job.status === "unknown" || job.reconciliationRequired ? <p className="mt-3 text-sm text-amber-800">模型返回状态未知，系统未自动重试；请到模型治理记录核实。</p> : null}
+        {unknownOutcome ? <div className={`mt-3 text-sm leading-6 ${unknownOutcome.tone === "danger" ? "text-rose-700" : "text-amber-800"}`}><p>{unknownOutcome.summary}{job.failureCode ? `（${job.failureCode}）` : ""}</p><p>{unknownOutcome.recordNotice}</p></div> : job.reconciliationRequired ? <p className="mt-3 text-sm text-amber-800">外部调用记录仍需核对，请查看任务详情；系统不会自动重试。</p> : null}
         {job.status === "cancelled" ? <p className="mt-3 text-sm text-slate-600">任务已取消，原始资料仍保留。</p> : null}
         <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-indigo-700"><Link href={`/projects/${projectId}/jobs/${job.id}`} className="underline">查看任务详情</Link>{job.kind === "assetExtract" && job.status === "succeeded" ? <Link href={`/projects/${projectId}/assets`} className="underline">核对识别结果</Link> : null}{job.kind === "autoExtract" && job.status === "succeeded" ? <Link href={`/projects/${projectId}/materials?view=review&from=materials`} className="underline">查看整理结果</Link> : null}</div>
       </article>;

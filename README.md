@@ -6,7 +6,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-当前源码版本为 `1.1.0`，范围见 [v1.1.0 版本说明](docs/releases/v1.1.0.md)。本次按高保真原型重做用户侧、管理平台与登录页，统一会话问答并提供可交互的三维知识图谱；新增统一问答持久化迁移，迁移清单共 148 条。开发与本地验收过程见[用户侧记录](docs/prototype-user-platform-plan.json)、[管理平台记录](docs/prototype-admin-platform-plan.json)和[本地验收快照](docs/releases/v1.1.0-local-acceptance.md)。正式部署状态以发布回执及公网健康为准，真实外部服务仍需按部署配置分别验证。
+当前源码版本为 `1.1.1`，范围见 [v1.1.1 版本说明](docs/releases/v1.1.1.md)。本次统一登录、注册和找回密码页面风格，修正资料抽取任务的状态、失败原因和通知展示；不新增迁移，迁移清单仍为 148 条。此前的平台重构、统一会话问答和三维知识图谱见 [v1.1.0 版本说明](docs/releases/v1.1.0.md)。正式部署状态以发布回执及公网健康为准，真实外部服务仍需按部署配置分别验证。
 
 维护模式只更新工具和缓存，不切换线上应用。CI 按生产源版本到候选提交的累计差异选择测试，构建并验证镜像；发布镜像后会从注册表拉回，核对运行配置、文件系统和容器镜像身份。用户手动点击「发布正式版本」后，生产复用同一摘要镜像并自动验收，不再构建。常规发布不执行备份/恢复流程，迁移清单未变则跳过迁移。验收成功后自动清理过期应用镜像和闲置构建缓存。当前实际线上版本以公网 `/api/health` 和生产回执为准；永久发布工具已安装，后续工具更新由受限 Workflow 完成。
 
@@ -58,7 +58,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 当前版本：[v1.1.0](docs/releases/v1.1.0.md)；上一正式版本：[v1.0.13](docs/releases/v1.0.13.md)；历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)。
+- 当前版本：[v1.1.1](docs/releases/v1.1.1.md)；上一正式版本：[v1.1.0](docs/releases/v1.1.0.md)；历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)。
 - V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
 - V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
@@ -92,7 +92,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前能力
 
-下表描述当前源码能力与启用条件，不表示每个外部服务或供应商都已现场验收。既有现场验收记录见 [v1.0.0 版本说明](docs/releases/v1.0.0.md)；本版本新增行为、迁移和发布验收要求见 [v1.1.0 开发版说明](docs/releases/v1.1.0.md)。历史生产记录仍保留在 [0.7.3 验收记录](docs/releases/v0.7.3-production-acceptance.md)。
+下表描述当前源码能力与启用条件，不表示每个外部服务或供应商都已现场验收。既有现场验收记录见 [v1.0.0 版本说明](docs/releases/v1.0.0.md)；本次修正与验证边界见 [v1.1.1 版本说明](docs/releases/v1.1.1.md)，平台重构与迁移见 [v1.1.0 版本说明](docs/releases/v1.1.0.md)。历史生产记录仍保留在 [0.7.3 验收记录](docs/releases/v0.7.3-production-acceptance.md)。
 
 | 能力 | 应用能力与启用边界 |
 | --- | --- |
@@ -176,7 +176,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前限制
 
-- 当前 `1.1.0` 处于开发与本地验收中，上线须以同 SHA 主分支 CI、发布回执与线上健康版本共同确认。历史发布记录见[版本记录](CHANGELOG.md)。现仅有一台云主机，独立 S1b broker 未部署，近期不新增付费服务器。平台管理员只负责平台运营和安全治理，不进入项目、团队或用户工作区；普通用户负责自己的项目和个人连接。
+- 当前源码版本为 `1.1.1`，上线须以同 SHA 主分支 CI、发布回执与线上健康版本共同确认。历史发布记录见[版本记录](CHANGELOG.md)。现仅有一台云主机，独立 S1b broker 未部署，近期不新增付费服务器。平台管理员只负责平台运营和安全治理，不进入项目、团队或用户工作区；普通用户负责自己的项目和个人连接。
 - 数据库 trigger 只约束正常应用写入的一致性，不是抵抗已取得应用数据库凭据或任意 SQL 能力的独立授权边界；生产需隔离 runtime 与 migrator 角色并限制网络访问。账号访问代次迁移不支持旧、新应用滚动并存，部署必须在维护窗口停止旧 app/worker、执行迁移，再启动新版本。
 - OIDC 不按相同邮箱自动合并账户。0.7 源码已有显式身份绑定入口；当前没有标准 OIDC 身份服务，用户已选择暂待配置，真实登录与绑定尚未验收。已登录的飞书 CLI 不能替代 OIDC 身份源。
 - 已完成单个受控仓库、独立分支与目录的 Git 自动增量现场验收，并撤销临时授权、归档验收项目；其他仓库、供应商及 GitHub Issue、PR、Release 读取仍须分别验收。

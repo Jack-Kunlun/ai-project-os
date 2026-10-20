@@ -4,7 +4,7 @@
     "sharedJavaScriptGzipBytes": 148480,
     "largestJavaScriptAssetGzipBytes": 76800,
     "globalCssGzipBytes": 15616,
-    "totalStaticClientGzipBytes": 870400
+    "totalStaticClientGzipBytes": 872448
   },
   "criticalRoutes": {
     "/setup": 158720,

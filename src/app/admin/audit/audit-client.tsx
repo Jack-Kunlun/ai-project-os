@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { AuditDetailDrawer } from "@/app/admin/audit/audit-detail-drawer";
 import { AdminPageHeader } from "@/components/admin-page-header";
+import { useAppearance } from "@/components/appearance-provider";
 import {
   AUDIT_PAGE_SIZE,
   auditActionLabel,
@@ -58,7 +59,13 @@ async function readError(response: Response, fallback: string): Promise<string> 
   }
 }
 
+function displayPrincipal(value: AuditEvent["actor"] | null, t: (text: string) => string): string {
+  const label = principalLabel(value);
+  return label === "系统流程" || label === "未记录身份" ? t(label) : label;
+}
+
 export function AdminAuditClient() {
+  const { language, t } = useAppearance();
   const [input, setInput] = useState<AuditFilterInput>(EMPTY_INPUT);
   const [appliedFilters, setAppliedFilters] = useState<FilterValues>({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -227,49 +234,49 @@ export function AdminAuditClient() {
     void loadDetail(event);
   }
 
-  const chips = auditFilterChips(appliedFilters);
+  const chips = auditFilterChips(appliedFilters, language);
   const hasActiveFilters = hasFilters(appliedFilters);
   const advancedActive = hasAdvancedFilterValues(input);
   const page = history.length + 1;
 
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
-    <AdminPageHeader title="审计中心" description="查看平台控制面变更证据；仅展示结构化状态、版本和安全引用。" meta={data ? `快照 ${dateParts(data.snapshotAt).full}` : undefined} />
+    <AdminPageHeader title="审计中心" description="查看平台控制面变更证据；仅展示结构化状态、版本和安全引用。" meta={data ? `${t("快照")} ${dateParts(data.snapshotAt, language).full}` : undefined} />
 
     <form onSubmit={applyFilters} className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="text-xs font-semibold text-slate-600">来源<select value={input.source} onChange={(event) => changeSource(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><>{sources.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</></select></label>
-        <label className="text-xs font-semibold text-slate-600">结果<select value={input.result} onChange={(event) => setFilter("result", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><>{visibleResults.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</></select></label>
-        <label className="text-xs font-semibold text-slate-600">操作者<input value={input.actor} onChange={(event) => setFilter("actor", event.target.value)} placeholder="用户 ID / 登录名" className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
-        <label className="text-xs font-semibold text-slate-600">主体<input value={input.subject} onChange={(event) => setFilter("subject", event.target.value)} placeholder="用户 ID / 登录名" className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
-        <label className="text-xs font-semibold text-slate-600">开始时间<input type="datetime-local" value={input.from} onChange={(event) => setFilter("from", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900" /></label>
-        <label className="text-xs font-semibold text-slate-600">结束时间<input type="datetime-local" value={input.to} onChange={(event) => setFilter("to", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900" /></label>
+        <label className="text-xs font-semibold text-slate-600">{t("来源")}<select aria-label={t("来源")} value={input.source} onChange={(event) => changeSource(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><>{sources.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</></select></label>
+        <label className="text-xs font-semibold text-slate-600">{t("结果")}<select aria-label={t("结果")} value={input.result} onChange={(event) => setFilter("result", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><>{visibleResults.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</></select></label>
+        <label className="text-xs font-semibold text-slate-600">{t("操作者")}<input aria-label={t("操作者")} value={input.actor} onChange={(event) => setFilter("actor", event.target.value)} placeholder={t("用户 ID / 登录名")} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
+        <label className="text-xs font-semibold text-slate-600">{t("主体")}<input aria-label={t("主体")} value={input.subject} onChange={(event) => setFilter("subject", event.target.value)} placeholder={t("用户 ID / 登录名")} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
+        <label className="text-xs font-semibold text-slate-600">{t("开始时间")}<input aria-label={t("开始时间")} type="datetime-local" value={input.from} onChange={(event) => setFilter("from", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900" /></label>
+        <label className="text-xs font-semibold text-slate-600">{t("结束时间")}<input aria-label={t("结束时间")} type="datetime-local" value={input.to} onChange={(event) => setFilter("to", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900" /></label>
       </div>
 
       <div className="mt-4 border-t border-slate-100 pt-4">
         <button type="button" aria-expanded={advancedOpen} aria-controls={advancedPanelId} onClick={() => setAdvancedOpen((open) => !open)} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
-          {advancedOpen ? "收起高级筛选" : `高级筛选${advancedActive ? "（已填写）" : ""}`}
+          {t(advancedOpen ? "收起高级筛选" : "高级筛选")}{!advancedOpen && advancedActive ? ` (${t("已填写")})` : ""}
         </button>
         <div id={advancedPanelId} hidden={!advancedOpen} className="mt-4 rounded-2xl bg-slate-50 p-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="text-xs font-semibold text-slate-600">动作<select value={input.action} onChange={(event) => setFilter("action", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><>{visibleActions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</></select></label>
-            <label className="text-xs font-semibold text-slate-600">项目 ID<input value={input.projectId} onChange={(event) => setFilter("projectId", event.target.value)} placeholder="UUID" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
-            <label className="text-xs font-semibold text-slate-600">工作区 ID<input value={input.workspaceId} onChange={(event) => setFilter("workspaceId", event.target.value)} placeholder="UUID" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
-            <label className="text-xs font-semibold text-slate-600">用户 ID<input value={input.userId} onChange={(event) => setFilter("userId", event.target.value)} placeholder="UUID" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
+            <label className="text-xs font-semibold text-slate-600">{t("动作")}<select aria-label={t("动作")} value={input.action} onChange={(event) => setFilter("action", event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><>{visibleActions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</></select></label>
+            <label className="text-xs font-semibold text-slate-600">{t("项目 ID")}<input aria-label={t("项目 ID")} value={input.projectId} onChange={(event) => setFilter("projectId", event.target.value)} placeholder="UUID" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
+            <label className="text-xs font-semibold text-slate-600">{t("工作区 ID")}<input aria-label={t("工作区 ID")} value={input.workspaceId} onChange={(event) => setFilter("workspaceId", event.target.value)} placeholder="UUID" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
+            <label className="text-xs font-semibold text-slate-600">{t("用户 ID")}<input aria-label={t("用户 ID")} value={input.userId} onChange={(event) => setFilter("userId", event.target.value)} placeholder="UUID" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900 placeholder:text-slate-400" /></label>
           </div>
-          <p className="mt-4 text-xs leading-5 text-slate-500">这两类引用只在排查特定对象时使用。列表按时间倒序，同毫秒内按来源和记录 ID 稳定排序；游标绑定当前筛选快照，修改筛选后重新从第一页开始。</p>
+          <p className="mt-4 text-xs leading-5 text-slate-500">{t("这两类引用只在排查特定对象时使用。列表按时间倒序，同毫秒内按来源和记录 ID 稳定排序；游标绑定当前筛选快照，修改筛选后重新从第一页开始。")}</p>
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
         <div className="flex flex-wrap items-center gap-2" aria-live="polite">
-          <span className="text-xs font-semibold text-slate-500">当前筛选</span>
+          <span className="text-xs font-semibold text-slate-500">{t("当前筛选")}</span>
           {hasActiveFilters ? chips.map((chip) => (
-            <span key={chip.key} title={`${chip.label}：${chip.value}`} className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{chip.label}：{chip.display}</span>
-          )) : <span className="text-xs text-slate-400">未设置，显示全部来源</span>}
+            <span key={chip.key} title={`${t(chip.label)}${language === "zh-CN" ? "：" : ": "}${chip.value}`} className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{t(chip.label)}{language === "zh-CN" ? "：" : ": "}{chip.key === "source" || chip.key === "action" || chip.key === "result" ? t(chip.display) : chip.key === "from" || chip.key === "to" ? new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }).format(new Date(chip.value)) : chip.display}</span>
+          )) : <span className="text-xs text-slate-400">{t("未设置，显示全部来源")}</span>}
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={resetFilters} disabled={!hasActiveFilters && !advancedActive} className="whitespace-nowrap rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">重置</button>
-          <button type="submit" className="whitespace-nowrap rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">应用筛选</button>
+          <button type="button" onClick={resetFilters} disabled={!hasActiveFilters && !advancedActive} className="whitespace-nowrap rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("重置")}</button>
+          <button type="submit" className="whitespace-nowrap rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("应用筛选")}</button>
         </div>
       </div>
     </form>
@@ -277,48 +284,48 @@ export function AdminAuditClient() {
     <section className="mt-6 rounded-3xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
         <div>
-          <h2 className="text-lg font-semibold text-slate-950">结构化变更记录</h2>
-          <p className="mt-1 text-xs text-slate-500">记录详情不会链接到项目内容、连接配置或动作入口。</p>
+          <h2 className="text-lg font-semibold text-slate-950">{t("结构化变更记录")}</h2>
+          <p className="mt-1 text-xs text-slate-500">{t("记录详情不会链接到项目内容、连接配置或动作入口。")}</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="whitespace-nowrap text-xs text-slate-500">第 {page} 页</span>
-          <button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">上一页</button>
-          <button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">下一页</button>
+          <span className="whitespace-nowrap text-xs text-slate-500">{t("第")} {page} {t("页")}</span>
+          <button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("上一页")}</button>
+          <button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("下一页")}</button>
         </div>
       </div>
-      {loading ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">正在读取审计快照…</div> : error ? <div role="status" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700">{error}</p><p className="mt-2 text-xs text-slate-500">请刷新页面或缩小筛选范围。</p></div> : data?.events.length === 0 ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">当前快照没有符合条件的记录。</div> : <div className="overflow-x-auto">
+      {loading ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("正在读取审计快照…")}</div> : error ? <div role="status" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700">{t(error)}</p><p className="mt-2 text-xs text-slate-500">{t("请刷新页面或缩小筛选范围。")}</p></div> : data?.events.length === 0 ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("当前快照没有符合条件的记录。")}</div> : <div className="overflow-x-auto">
         <table className="w-full min-w-[56.25rem] table-fixed text-left text-sm">
-          <caption className="sr-only">平台审计记录，按时间倒序</caption>
+          <caption className="sr-only">{t("平台审计记录，按时间倒序")}</caption>
           <colgroup>{COLUMN_WIDTHS.map((width, index) => <col key={index} className={width} />)}</colgroup>
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
-              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">时间</th>
-              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">来源 / 动作</th>
-              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">结果</th>
-              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">操作者</th>
-              <th scope="col" className="px-4 py-3 font-semibold">对象 / 引用摘要</th>
-              <th scope="col" className="sticky right-0 z-10 whitespace-nowrap border-l border-slate-100 bg-slate-50 px-4 py-3 font-semibold">操作</th>
+              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">{t("时间")}</th>
+              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">{t("来源 / 动作")}</th>
+              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">{t("结果")}</th>
+              <th scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">{t("操作者")}</th>
+              <th scope="col" className="px-4 py-3 font-semibold">{t("对象 / 引用摘要")}</th>
+              <th scope="col" className="sticky right-0 z-10 whitespace-nowrap border-l border-slate-100 bg-slate-50 px-4 py-3 font-semibold">{t("操作")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {data?.events.map((auditEvent) => {
-              const occurred = dateParts(auditEvent.occurredAt);
+              const occurred = dateParts(auditEvent.occurredAt, language);
               return <tr key={`${auditEvent.source}:${auditEvent.id}`} data-audit-source={auditEvent.source} data-audit-id={auditEvent.id} >
                 <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-500"><span className="block">{occurred.date}</span><span className="block text-slate-400">{occurred.time}</span></td>
                 <td className="px-4 py-4">
-                  <p className="whitespace-nowrap text-sm font-semibold text-slate-900">{auditSourceLabel(auditEvent.source)}</p>
-                  <p className="mt-1 text-xs text-slate-500">{auditActionLabel(auditEvent.action)}</p>
+                  <p className="whitespace-nowrap text-sm font-semibold text-slate-900">{t(auditSourceLabel(auditEvent.source))}</p>
+                  <p className="mt-1 text-xs text-slate-500">{t(auditActionLabel(auditEvent.action))}</p>
                 </td>
                 <td className="px-4 py-4">
-                  <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${resultClass(auditEvent.result)}`}>{auditResultLabel(auditEvent.result)}</span>
+                  <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${resultClass(auditEvent.result)}`}>{t(auditResultLabel(auditEvent.result))}</span>
                 </td>
-                <td className="px-4 py-4 text-xs text-slate-600"><span className="break-words">{principalLabel(auditEvent.actor)}</span></td>
+                <td className="px-4 py-4 text-xs text-slate-600"><span className="break-words">{displayPrincipal(auditEvent.actor, t)}</span></td>
                 <td className="px-4 py-4 text-xs text-slate-600">
-                  <p className="break-words text-sm text-slate-800">{principalLabel(auditEvent.subject)}</p>
-                  <p className="mt-1 text-slate-400">{auditReferenceSummary(auditEvent.references)}</p>
+                  <p className="break-words text-sm text-slate-800">{displayPrincipal(auditEvent.subject, t)}</p>
+                  <p className="mt-1 text-slate-400">{auditReferenceSummary(auditEvent.references).replace(/^(\d+) 项安全引用$/u, (_, count: string) => `${count} ${t("项安全引用")}`).replace("无安全引用", t("无安全引用")).replace("仅类别标记", t("仅类别标记"))}</p>
                 </td>
                 <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-4">
-                  <button type="button" onClick={(clickEvent) => openDetail(auditEvent, clickEvent.currentTarget)} className="w-full whitespace-nowrap rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">查看详情</button>
+                  <button type="button" onClick={(clickEvent) => openDetail(auditEvent, clickEvent.currentTarget)} className="w-full whitespace-nowrap rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("查看详情")}</button>
                 </td>
               </tr>;
             })}

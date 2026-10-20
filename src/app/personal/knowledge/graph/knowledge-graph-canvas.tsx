@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { layoutKnowledgeGraphSpace, fitKnowledgeGraphCamera, moveKnowledgeGraphPointOnScreen, projectKnowledgeGraphPoint, type KnowledgeGraphCamera, type KnowledgeGraphSpaceNode, type Point3 } from "@/lib/knowledge-graph-space";
 import type { layoutKnowledgeGraph } from "@/lib/knowledge-graph-view";
@@ -15,6 +16,7 @@ const minimumDistance=0.24,maximumDistance=2.7;
 
 /** Interactive SVG viewport with perspective-projected 3D positions. */
 export function KnowledgeGraphCanvas({graph,selectedId,onSelect,onActivate}:Props){
+  const t = useTranslate();
   const initialNodes=useMemo(()=>layoutKnowledgeGraphSpace(graph),[graph]);
   const [nodePoints,setNodePoints]=useState<Record<string,Point3>>(()=>Object.fromEntries(initialNodes.map(node=>[node.id,node.point])));
   const [camera,setCamera]=useState<KnowledgeGraphCamera>(initialCamera);
@@ -140,24 +142,24 @@ export function KnowledgeGraphCanvas({graph,selectedId,onSelect,onActivate}:Prop
     if(node.kind==="source"||node.kind==="fact")onActivate(node.id);
   }
 
-  return <section className={styles.spaceShell} aria-label="三维知识图谱">
-    <div className={styles.spaceToolbar} role="toolbar" aria-label="图谱视角控制">
-      <div className={styles.spaceControlGroup} role="group" aria-label="缩放、适应与重置">
-        <button type="button" className={styles.spaceControl} aria-label="放大图谱" title="放大图谱" onClick={()=>zoomBy(1.18)}>＋</button>
-        <button type="button" className={styles.spaceControl} aria-label="缩小图谱" title="缩小图谱" onClick={()=>zoomBy(1/1.18)}>−</button>
-        <button type="button" className={styles.spaceControlText} onClick={()=>fitCamera()}>适应全图</button>
-        <button type="button" className={styles.spaceControlText} onClick={resetLayout}>重置布局</button>
+  return <section className={styles.spaceShell} aria-label={t("三维知识图谱")}>
+    <div className={styles.spaceToolbar} role="toolbar" aria-label={t("图谱视角控制")}>
+      <div className={styles.spaceControlGroup} role="group" aria-label={t("缩放、适应与重置")}>
+        <button type="button" className={styles.spaceControl} aria-label={t("放大图谱")} title={t("放大图谱")} onClick={()=>zoomBy(1.18)}>＋</button>
+        <button type="button" className={styles.spaceControl} aria-label={t("缩小图谱")} title={t("缩小图谱")} onClick={()=>zoomBy(1/1.18)}>−</button>
+        <button type="button" className={styles.spaceControlText} onClick={()=>fitCamera()}><UiText text={"适应全图"} /></button>
+        <button type="button" className={styles.spaceControlText} onClick={resetLayout}><UiText text={"重置布局"} /></button>
       </div>
-      <div className={styles.spaceControlGroup} role="group" aria-label="旋转图谱">
-        <button type="button" className={styles.spaceControlText} aria-label="向左旋转图谱" onClick={()=>turnCamera(-15,0)}>向左旋转</button>
-        <button type="button" className={styles.spaceControlText} aria-label="向右旋转图谱" onClick={()=>turnCamera(15,0)}>向右旋转</button>
-        <button type="button" className={styles.spaceControlText} aria-label="向上旋转图谱" onClick={()=>turnCamera(0,-12)}>向上旋转</button>
-        <button type="button" className={styles.spaceControlText} aria-label="向下旋转图谱" onClick={()=>turnCamera(0,12)}>向下旋转</button>
+      <div className={styles.spaceControlGroup} role="group" aria-label={t("旋转图谱")}>
+        <button type="button" className={styles.spaceControlText} aria-label={t("向左旋转图谱")} onClick={()=>turnCamera(-15,0)}><UiText text={"向左旋转"} /></button>
+        <button type="button" className={styles.spaceControlText} aria-label={t("向右旋转图谱")} onClick={()=>turnCamera(15,0)}><UiText text={"向右旋转"} /></button>
+        <button type="button" className={styles.spaceControlText} aria-label={t("向上旋转图谱")} onClick={()=>turnCamera(0,-12)}><UiText text={"向上旋转"} /></button>
+        <button type="button" className={styles.spaceControlText} aria-label={t("向下旋转图谱")} onClick={()=>turnCamera(0,12)}><UiText text={"向下旋转"} /></button>
       </div>
     </div>
-    <div ref={viewportRef} className={`${styles.canvas} ${styles.spaceViewport}`} data-dragging={dragging} role="region" aria-label="知识关系图">
-      <svg ref={svgRef} className={styles.spaceSvg} width={viewport.width} height={viewport.height} viewBox={`0 0 ${viewport.width} ${viewport.height}`} role="group" aria-label="来源归属与事实引用关系图" aria-describedby="knowledge-graph-help" tabIndex={0} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown Home + -" data-testid="knowledge-graph-space" data-yaw={camera.yaw.toFixed(2)} data-pitch={camera.pitch.toFixed(2)} data-pan-x={camera.panX.toFixed(2)} data-pan-y={camera.panY.toFixed(2)} data-distance={camera.distance.toFixed(3)} onPointerDown={event=>startPointer(event,event.shiftKey||event.button===1?"pan":"rotate")} onPointerMove={updatePointer} onPointerUp={finishPointer} onPointerCancel={finishPointer} onKeyDown={handleKeyDown}>
-        <title>来源归属与事实引用关系图</title>
+    <div ref={viewportRef} className={`${styles.canvas} ${styles.spaceViewport}`} data-dragging={dragging} role="region" aria-label={t("知识关系图")}>
+      <svg ref={svgRef} className={styles.spaceSvg} width={viewport.width} height={viewport.height} viewBox={`0 0 ${viewport.width} ${viewport.height}`} role="group" aria-label={t("来源归属与事实引用关系图")} aria-describedby="knowledge-graph-help" tabIndex={0} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown Home + -" data-testid="knowledge-graph-space" data-yaw={camera.yaw.toFixed(2)} data-pitch={camera.pitch.toFixed(2)} data-pan-x={camera.panX.toFixed(2)} data-pan-y={camera.panY.toFixed(2)} data-distance={camera.distance.toFixed(3)} onPointerDown={event=>startPointer(event,event.shiftKey||event.button===1?"pan":"rotate")} onPointerMove={updatePointer} onPointerUp={finishPointer} onPointerCancel={finishPointer} onKeyDown={handleKeyDown}>
+        <title><UiText text={"来源归属与事实引用关系图"} /></title>
 
         <g className={styles.spaceEdges} aria-hidden="true" pointerEvents="none">{graph.edges.map(edge=>{
           const from=projectedById.get(edge.from),to=projectedById.get(edge.to);
@@ -173,17 +175,17 @@ export function KnowledgeGraphCanvas({graph,selectedId,onSelect,onActivate}:Prop
           const visualScale=Math.min(1.36,Math.max(0.68,position.scale));
           const projectedWidth=width*visualScale,projectedHeight=height*visualScale;
           return <foreignObject key={node.id} x={position.x-projectedWidth/2} y={position.y-projectedHeight/2} width={projectedWidth} height={projectedHeight} data-node-position={node.id} data-x={position.x.toFixed(2)} data-y={position.y.toFixed(2)} data-depth={position.depth.toFixed(2)} data-scale={position.scale.toFixed(3)}>
-            <button type="button" className={`${styles.node} ${styles.spaceNode} ${node.kind==="scope"?styles.scope:""} ${node.kind==="fact"?styles.fact:""}`} aria-pressed={selectedId===node.id} aria-label={`${node.kind==="fact"?"事实":node.kind==="scope"?"范围":"来源"}：${node.title}`} data-node-id={node.id} style={{width:(node.kind==="scope"?30:node.kind==="fact"?18:22)*visualScale,height:(node.kind==="scope"?30:node.kind==="fact"?18:22)*visualScale}} onPointerDown={event=>{event.stopPropagation();startPointer(event,"node",node.id);}} onClick={()=>activateNode(node)} onFocus={()=>{if(!pointerFocusedRef.current)focusNode(node.id);}}>
-              <strong>{node.title}</strong><small>{node.kind==="scope"?"内容归属":node.kind==="fact"?"事实 · 原文依据":node.scope==="personal"?"个人知识":"项目资料"} {node.revision||""}</small>
+            <button type="button" className={`${styles.node} ${styles.spaceNode} ${node.kind==="scope"?styles.scope:""} ${node.kind==="fact"?styles.fact:""}`} aria-pressed={selectedId===node.id} aria-label={`${t(node.kind==="fact"?"事实":node.kind==="scope"?"范围":"来源")}：${node.title}`} data-node-id={node.id} style={{width:(node.kind==="scope"?30:node.kind==="fact"?18:22)*visualScale,height:(node.kind==="scope"?30:node.kind==="fact"?18:22)*visualScale}} onPointerDown={event=>{event.stopPropagation();startPointer(event,"node",node.id);}} onClick={()=>activateNode(node)} onFocus={()=>{if(!pointerFocusedRef.current)focusNode(node.id);}}>
+              <strong>{node.title}</strong><small>{t(node.kind==="scope"?"内容归属":node.kind==="fact"?"事实 · 原文依据":node.scope==="personal"?"个人知识":"项目资料")} {node.revision||""}</small>
             </button>
           </foreignObject>;
         })}
-        {nodes.length===0?<text className={styles.spaceEmpty} x={viewport.width/2} y={viewport.height/2} textAnchor="middle">当前范围没有可展示的来源或事实</text>:null}
+        {nodes.length===0?<text className={styles.spaceEmpty} x={viewport.width/2} y={viewport.height/2} textAnchor="middle"><UiText text={"当前范围没有可展示的来源或事实"} /></text>:null}
       </svg>
     </div>
     <div className={styles.spaceFooter}>
-      <div className={styles.spaceLegend}><span className={styles.scopeKey}>内容范围</span><span className={styles.sourceKey}>资料来源</span><span className={styles.factKey}>有来源事实</span></div>
-      <p id="knowledge-graph-help">左键拖动画布旋转 · Shift 拖动平移 · 拖动节点调整位置 · 滚轮缩放。点击来源或事实打开资料详情；键盘方向键旋转，Shift + 方向键平移或移动节点，Home 适应全图。</p>
+      <div className={styles.spaceLegend}><span className={styles.scopeKey}><UiText text={"内容范围"} /></span><span className={styles.sourceKey}><UiText text={"资料来源"} /></span><span className={styles.factKey}><UiText text={"有来源事实"} /></span></div>
+      <p id="knowledge-graph-help"><UiText text={"左键拖动画布旋转 · Shift 拖动平移 · 拖动节点调整位置 · 滚轮缩放。点击来源或事实打开资料详情；键盘方向键旋转，Shift + 方向键平移或移动节点，Home 适应全图。"} /></p>
     </div>
   </section>;
 }

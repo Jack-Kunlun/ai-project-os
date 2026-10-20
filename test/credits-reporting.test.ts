@@ -56,8 +56,8 @@ test("credit report keeps settled usage separate from balance delta and keeps pr
   assert.match(route, /SET TRANSACTION READ ONLY/u);
   assert.match(route, /requireApiSessionReadOnly/u);
   assert.ok(client.includes("/api/credits"));
-  assert.match(client, /已结算使用来自 reservation allocation 的 settledTokens/u);
-  assert.match(client, /后续版本/u);
+  assert.match(client, /平台额度与模型原始 Token 分开统计/u);
+  assert.doesNotMatch(client, /reservation allocation|settledTokens|后续版本/u);
   assert.match(client, /个人用量/u);
   assert.match(client, /项目用量/u);
   assert.match(client, /collected\[0\]\?\.id/u);
@@ -65,7 +65,7 @@ test("credit report keeps settled usage separate from balance delta and keeps pr
   assert.match(client, /fetch\(`\/api\/credits\?\$\{params\.toString\(\)\}`,[^\n]+signal/u);
   assert.match(client, /controller\.abort\(\)/u);
   assert.doesNotMatch(client, /输入项目 UUID/u);
-  assert.doesNotMatch(profile, /PlatformCreditPanel|平台额度|额度总量|预留中/u);
+  assert.doesNotMatch(profile, /PlatformCreditPanel|额度总量|预留中|availableCredits|availableTokens|platformTokenReservation|platformTokenGrant/u);
 });
 
 test("credit report aggregates settled allocation credits while preserving a zero settle balance delta", async () => {

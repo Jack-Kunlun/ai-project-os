@@ -79,7 +79,6 @@ test("personal connection forms keep project automation boundary visible", async
     readFile("src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "utf8"),
     readFile("src/app/personal/configuration/page.tsx", "utf8"),
   ]);
-  assert.match(git, /Git 授权管理/u);
   assert.match(git, /项目代码仓库从项目配置发起连接和范围提案/u);
   assert.match(git, /项目页支持一次性手动只读委托和单独的自动读取双确认授权/u);
   assert.match(git, /写入\/提交和旧 PAT 路径保持关闭/u);
@@ -99,10 +98,14 @@ test("personal connection forms keep project automation boundary visible", async
   assert.match(guide, /每轮提交前需确认范围/u);
   assert.match(guide, /历史记录会保留该轮引用来源/u);
   assert.match(guide, /href="\/ask\?history=1"/u);
-  assert.match(guide, /服务端仍在开发接入和验收/u);
+  assert.match(git, /api\/me\/git-connections/u);
+  assert.match(mcp, /api\/me\/mcp-connections/u);
+  assert.match(guide, /项目 Git 支持双确认后的一次性手动只读读取，以及单独双确认后的计划只读读取/u);
+  assert.match(guide, /MCP 连接委托与只读动作在受控环境支持逐次审批和结果人工导入，生产开放仍需验收/u);
+  assert.doesNotMatch(guide, /服务端仍在开发接入和验收/u);
   assert.doesNotMatch(guide, /“问项目”|问项目直接提问/u);
   assert.doesNotMatch(guide, /普通用户不需要也不能配置平台凭据/u);
-  assert.match(personalConfiguration, /title="Git 授权管理"/u);
+  assert.match(personalConfiguration, /<ResourceCard href="\/personal\/connections\/git" kind="git" title="Git 授权"/u);
   assert.match(personalConfiguration, /项目绑定从项目的代码仓库配置发起/u);
   assert.match(repositories, /添加并验证 Git 服务/u);
   assert.match(repositories, /GitCreateForm catalog=\{catalog\} requireCredential/u);

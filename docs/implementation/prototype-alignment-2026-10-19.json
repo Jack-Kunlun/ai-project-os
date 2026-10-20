@@ -1,0 +1,233 @@
+{
+  "objective": "按 2026-10-19 确认原型更新实际页面，先用户侧后管理端，同时落地中英文与浅色/深色/系统主题",
+  "baseline": "a5f69b45261d458c97232556b29dcfa0fed1e20f",
+  "prototype": "../../prototypes/project-os-rethink/prototype.html",
+  "classification": {
+    "task": "S4",
+    "risk": "high",
+    "reason": "全站共享呈现与问答跨页面状态，保留认证、RBAC、逐次外发确认与来源快照"
+  },
+  "constraints": [
+    "真实接口与持久化，不搬运原型 fixture/localStorage 业务数据",
+    "不改认证、权限、计费、外发审批合同",
+    "无提交、推送、部署或发布",
+    "原始资料、用户内容、问题回答及引用不翻译"
+  ],
+  "slices": [
+    {
+      "name": "用户侧共享框架与外观",
+      "observable": "原型导航、账户/帮助/外观头部入口及真实工作空间切换可用",
+      "status": "accepted_local"
+    },
+    {
+      "name": "用户侧页面与跨页问答",
+      "observable": "认证、列表、详情、操作层按原型呈现；问答独立页与浮窗共享真实会话并保留范围/引用",
+      "status": "accepted_local"
+    },
+    {
+      "name": "管理端",
+      "observable": "用户侧验证后，14 类管理页及操作层对齐同一视觉/语言/主题体系",
+      "status": "accepted_local"
+    },
+    {
+      "name": "集成验收",
+      "observable": "受影响行为、默认覆盖率、生成/校验、lint/type/build/performance、隔离认证后浏览器与一次独立审查",
+      "status": "accepted_local"
+    }
+  ],
+  "verification_budget": {
+    "independent_review_max": 1,
+    "baseline": "定向检查后执行仓库强制检查",
+    "expand_on": "定向失败、API/Schema/构建/依赖变化、新的跨模块证据",
+    "environment": "隔离 PostgreSQL：56442 页面预览与 56432 业务门禁，实际应用预览 3120；不连接生产数据或真实模型"
+  },
+  "evidence": {
+    "targeted_unit": "appearance, dictionary, UI/navigation/Token and focused auth/CAPTCHA/knowledge checks passed; build contracts 19/19",
+    "default_test": "remaining-ui-fix-coverage.log:1633 total,1461 passed,172 isolated skips,0 failed; predates final copy/color-only follow-ups.",
+    "coverage": "62.81% lines /79.65% branches /68.10% functions. Final copy/color deltas additionally checked with focused9+6 tests, ESLint, fresh image TypeScript/build and final-image browser.",
+    "postgres": "All 91 registered groups passed across the AI diagnostic, first 32 and serial remaining 58 logs. New unified conversation PostgreSQL tests passed 2/2. Backend unchanged by Credits UI slice.",
+    "specialized_auth": "Current 149 migrations: OID10 passed; phone/email authentication 11/11 passed.",
+    "lint": "Full source lint with --ignore-pattern .data/** passed; only local compiled-image exports caused the unfiltered command failure. Latest changed TSX and E2E focused lint passed.",
+    "typecheck": "User immutable image TypeScript passed; root admin shell standalone tsc passed.",
+    "build": "Final app sha256:a7f7b0e811a6ba3678bcd9092f1306f45be1a154b9a894152dd77686fb1e36ac;1037 build inputs match43f1e5e3fecf808fd5a696098862e86604451a808194ec9894e0007f4932aaf0. Worker/migration reused.",
+    "performance": "Final image all budgets passed;850.5/852KiB total static client; only earlier user-approved total allowance retained.",
+    "browser": "concentrated-ui-acceptance-browser.log:13/13 passed;4 combinations x55 route patterns plus operation/responsive checks.37 individually passing unchanged behavior cases from earlier42-test diagnostic reused; final13 replaces its5 failed cases.",
+    "compose": "Reused passing unchanged-backend149-migration Compose/persistence evidence; fresh final-image browser startup and preview health passed.",
+    "review": "Existing independent read-only review retained for unchanged reviewed logic/build config, no establishedP1/P2; final follow-up18 UI modules only, no new reviewer claim."
+  },
+  "runtime_notes": [
+    "Local preview3120 now runs accepted final app a7f7 with existing example database/key/uploads and unchanged worker.",
+    "No real external provider/backup-recovery execution claimed by UI acceptance.",
+    "No commit, push, release, production deployment or production data mutation.",
+    "Temporary task containers0, superseded candidate images absent; scoped build cache cleanup2.55GB; all data volumes and unrelated services preserved."
+  ],
+  "latest_followup": {
+    "date": "2026-10-20",
+    "scope": "History pin/rename/session usage, nonblocking cross-page Ask and Credits page parity",
+    "prototype": "60 prototype tests passed; static history/rename visually inspected in Chinese/English, light/dark and narrow English with enabled CUA. No whole-prototype re-audit claim.",
+    "prototype_evidence": "../../prototypes/project-os-rethink/previews/history-row-refinement-audit.json",
+    "actual_runtime_fingerprint": "evidence/prototype-alignment/source-fingerprint-user-polish-accepted.json",
+    "browser_status": "Final13/13 passed across user/admin/public/secondary four-combination matrices; earlier37 unchanged behavior passes reused.",
+    "admin": "accepted_local",
+    "round4": "28/29 passed. History hover matrix and native Tab loop passed; expanded account details failed definition-list semantics and were corrected. Narrow English scope label was made nonshrinking.",
+    "remaining_visual_checks": [],
+    "cache_environment_fix": {
+      "cause": "Host UID 501 differed from image node UID; image optimization could not mkdir /app/.next/cache, causing page load waits",
+      "change": "Only the app test container gets private 128MiB noexec/nosuid tmpfs owned by host UID/GID",
+      "checks": "3 browser contract checks, focused lint, non-root write/read probe uid=501 mode=700 passed",
+      "scope": "Host verification script only; current application image reused because runtime sources match",
+      "independent_review": "Existing reviewer unavailable due to account usage limit; no release approval claimed"
+    },
+    "pendingParity": [],
+    "actual_validation": "Final exact-image browser acceptance and performance passed;3120 replaced and healthy.",
+    "runtime_screenshots": [
+      "evidence/prototype-alignment/history-final-zh-dark.png",
+      "evidence/prototype-alignment/history-final-en-dark-narrow.png"
+    ],
+    "latest_request": "Enabled browser tools used for live prototype and actual local user UI inspection; prototype Credits metric views updated before application.",
+    "browser_result": "accepted_local; see final-local-ui-acceptance.json"
+  },
+  "conversation_history_followup": {
+    "date": "2026-10-20",
+    "classification": "S4 / high: persisted metadata API, additive schema and permission-aware usage projections",
+    "scope": [
+      "Append-only user display revisions; pin sorting; rename dialog; optimistic revision conflict",
+      "Session usage from auditable attempts; exclude proven non-dispatch; preserve unknowns and current permissions",
+      "Owned modal Escape/Alt+J hierarchy and translated conflict recovery"
+    ],
+    "non_goals": [
+      "No immutable title/head/turn/citation rewrites",
+      "No external provider call, deployment, commit, push or admin redesign"
+    ],
+    "verification_plan": [
+      "Focused contract and PostgreSQL tests",
+      "Repository mandatory default/coverage, Prisma, lint/type/build/performance",
+      "Full PostgreSQL business gates for schema change, OID10/auth, isolated browser and same-image Compose candidate"
+    ],
+    "prototype": "Live Chinese/English, light/dark history inspected; 390px English light inspected; shared singular turn copy fixed; 60 prototype tests pass",
+    "independent_review": {
+      "status": "Static final review no remaining proven P1/P2; runtime gates pending",
+      "service_sha256": "dd10d642c3576025bdbdfdf9225137008ad7eda78392b12f2c6c5f3dd41a4fc9"
+    },
+    "validation": {
+      "coverage": "1623 total: 1451 passed, 172 isolated skips, 0 failed (full coverage command). 62.55% lines /79.59% branches /68.00% functions; thresholds passed.",
+      "type_and_lint": "Latest full host typecheck and final image TypeScript passed. Full pnpm lint passed; latest focused source/E2E lint passed.",
+      "database": "All 91 registered groups passed across the AI diagnostic, first 32 and serial remaining 58 logs. New unified conversation PostgreSQL tests passed 2/2. Backend unchanged by Credits UI slice.",
+      "preview": "149 migration local preview restored on final image with same example database/key/uploads.",
+      "build": "Final immutable local Webpack images built; same source fingerprint matches 1033 files."
+    },
+    "remaining": [],
+    "background_inquiry": {
+      "scope": "Keep explicit consent, then run without blocking other page operations. Share one request/confirmation lock across full page and floating view.",
+      "fixes": [
+        "Preserve immutable per-confirmation history snapshot; confirmation holds its prepare lock until dismissal or atomic execute transition",
+        "Close confirmation immediately on execution; late completion updates shared conversation without redirecting a different route/query",
+        "Use account epoch and shared read revision to reject stale GET/PATCH/prepare/execute callbacks",
+        "Unmount old floating client on public routes, remount local state by epoch and clear shared state on sign-out",
+        "Retry URL-directed history reads after the shared request finishes; explicit new conversation and typing invalidate previous reads"
+      ],
+      "tests": "Three store tests plus controlled browser scenarios added. Browser completion pending.",
+      "review": "Independent read-only review found asynchronous privacy/ordering issues; root applied fixes and added regression scenarios. Browser evidence is required before acceptance."
+    }
+  },
+  "historical_baseline_evidence": {
+    "targeted_unit": "appearance, dictionary, UI/navigation/Token and focused auth/CAPTCHA/knowledge checks passed; build contracts 19/19",
+    "default_test": "latest: 1618 tests, 1446 passed, 172 isolated gates skipped, 0 failed",
+    "coverage": "latest: lines 62.57%, branches 79.55%, functions 67.97%; thresholds passed",
+    "postgres": "all 91 registered business gates passed across resumed logs; additional unified-question cancelled filter regression passed 1/1",
+    "specialized_auth": "phone/email auth and OID10 successful, 148 migrations",
+    "lint": "exit 0; one ignored local fixture unused variable warning",
+    "typecheck": "8192MiB standalone check passed; latest complete production build also type checked successfully",
+    "build": "Final webpack production image build and TypeScript passed; app image 3aa9998136d40a8697bbeefd65185c309c9b69edb2cd1f5ed17cfde7a4c18fed",
+    "performance": "latest final-image export: all unchanged budgets passed; 848.1/850KiB total static client, 129.0/145KiB shared JS, 14.8/15.3KiB global CSS",
+    "browser": "Final cache-fixed serial run: all 29 tests passed in 3.5m, including four primary-route appearance matrices, conversation history hover matrices, narrow English history, native modal focus, real authentication/RBAC and client-only Q&A route fixtures.",
+    "compose": "Final same-image isolated candidate passed --allow-dirty: 148 migrations, health, worker restart, 6-entity persistence snapshot unchanged, cleanup verified. releaseEligible=false.",
+    "review": "independent read-only review found three focus/modal issues; root fixed and added focused browser regression; no remaining proven P1/P2 in access/data/outbound code; final browser evidence pending"
+  },
+  "credits_followup": {
+    "date": "2026-10-20",
+    "scope": "Prototype-first three summary cards and aligned chart/rules, platform-credit trend separate from raw-token activity, explicit membership dialog",
+    "server_contract": "No API, schema, calculation or authorization change in this slice",
+    "review_fixes": [
+      "Read account-wide membership independent from usage filters and keep last known account summary",
+      "Add English keys and retain not-a-payment/invoice wording",
+      "Explicit stale/expired preview or cancellation rotates key and preserves reason; uncertain execution retry keeps original key"
+    ],
+    "targeted": "14 focused contracts/store/layout checks passed; four appearance cases and isolated confirmation-key fixture passed in user-polish-browser-accepted.log.",
+    "build": "Final image built. WorkspaceDialog and its style map extracted from six duplicate page bundles; 853.7KiB diagnostic reduced to848.4KiB, without budget changes.",
+    "review": "All four draft review findings and two bounded followup findings corrected; review of actual split group and stable preview codes complete.",
+    "remaining": "No remaining local UI blocking checks; user/admin integrated acceptance recorded in final-local-ui-acceptance.json."
+  },
+  "user_interaction_checkpoint": {
+    "date": "2026-10-20",
+    "runtimeHash": "31ee95d27efbb7d6fa223de03bfc7b15d3c182d15513226de96e86cb3cf18619",
+    "manifest": "evidence/prototype-alignment/release-images-readiness-resumed-final.json",
+    "browser": "32/32 passed in 3.4m; real isolated authentication plus declared client route fixtures; four 22-route appearance sweeps.",
+    "compose": "149 migrations; health, worker restart and six-entity pre/post business-data snapshots passed; cleanup verified; releaseEligible=false.",
+    "performance": "848.8/850 KiB total static client, unchanged budgets passed.",
+    "logs": [
+      "evidence/prototype-alignment/readiness-resumed-final-browser.log",
+      "evidence/prototype-alignment/readiness-resumed-final-compose.log"
+    ],
+    "scope": "Accepted interaction checkpoint before CSS-only visual followup; this is local evidence, not production release proof."
+  },
+  "visual_parity_followup": {
+    "scope": "User-side only; no server/API/Schema/permission/billing/model-send changes.",
+    "changes": [
+      "Remove redundant dashboard eyebrows, align page action, compact section titles and outline the guide action",
+      "Use shared theme tokens for MCP list/form primary actions",
+      "Use active-theme gradients for dashboard, project list, overview and plan loading surfaces",
+      "Wait for saved project/knowledge, graph and ledger content before screenshots"
+    ],
+    "verification": "Fresh frozen image build, unchanged performance budgets, full existing 32-case browser and same-image local candidate; no further source edits during this run.",
+    "state": "accepted_local",
+    "status": "accepted_local",
+    "evidence": "evidence/prototype-alignment/user-polish-acceptance.json"
+  },
+  "user_polish_checkpoint": {
+    "status": "accepted_local",
+    "runtimeHash": "17a3b4e36d5e4457e2cccac32b481c18b53c9880f472145222ed14ec71a8f7f3",
+    "images": {
+      "app": {
+        "ref": "ai-project-os-ci/app:a5f69b45261d458c97232556b29dcfa0fed1e20f",
+        "id": "sha256:0ae543bc199ec30d7d1095c3ca1560fd007ecbbc4507b926f0d37775d7cdd8d5"
+      },
+      "worker": {
+        "ref": "ai-project-os-ci/worker:a5f69b45261d458c97232556b29dcfa0fed1e20f",
+        "id": "sha256:a807947a262a33d1e59768bc9eb2228bdca1b97777d22077aa3a5d20711c9a48"
+      },
+      "migrate": {
+        "ref": "ai-project-os-ci/migrate:a5f69b45261d458c97232556b29dcfa0fed1e20f",
+        "id": "sha256:cd5f4f5951929ba24fa620434d12b4abc290fbb4a8dbe7be6b2a8f96d7ed6a0f"
+      }
+    },
+    "runtimeSourceMatches": true,
+    "coverage": "1624 total;1452 passed;172 isolated skips;0 failed;62.55/79.57/68.00",
+    "browser": "32/32 passed with data-ready four-by-22-route matrix; real isolated auth plus explicitly declared client route fixtures",
+    "compose": "149 migrations; health/worker restart/business-data persistence and cleanup passed; releaseEligible=false",
+    "staticClientKiB": 849.23,
+    "manual": [
+      "History static prototype and actual route-fixture matrices",
+      "Actual Credits membership dialog and narrow MCP page",
+      "Actual dashboard at 1680x960; date-to-panel gap24px and horizontal overflow0px"
+    ],
+    "boundary": "Local UI and isolated persistence evidence; no production release or real external provider execution."
+  },
+  "status": "accepted_local",
+  "historical_pre_final_evidence": {
+    "targeted_unit": "appearance, dictionary, UI/navigation/Token and focused auth/CAPTCHA/knowledge checks passed; build contracts 19/19",
+    "default_test": "user-polish-coverage.log: 1624 total,1452 passed,172 isolated skips,0 failed.",
+    "coverage": "User checkpoint: 62.55% lines /79.57% branches /68.00% functions. Admin delta will be checked before combined acceptance.",
+    "postgres": "All 91 registered groups passed across the AI diagnostic, first 32 and serial remaining 58 logs. New unified conversation PostgreSQL tests passed 2/2. Backend unchanged by Credits UI slice.",
+    "specialized_auth": "Current 149 migrations: OID10 passed; phone/email authentication 11/11 passed.",
+    "lint": "Full source lint with --ignore-pattern .data/** passed; only local compiled-image exports caused the unfiltered command failure. Latest changed TSX and E2E focused lint passed.",
+    "typecheck": "User immutable image TypeScript passed; root admin shell standalone tsc passed.",
+    "build": "Accepted user image sha256:0ae543bc199ec30d7d1095c3ca1560fd007ecbbc4507b926f0d37775d7cdd8d5, matched1033 runtime files. Admin UI implementation in progress.",
+    "performance": "Accepted user checkpoint849.23/850KiB, no budget increase.",
+    "browser": "user-polish-browser-accepted.log:32/32 passed including4x22 data-ready user routes. Admin matrix added and pending.",
+    "compose": "user-polish-compose-accepted.log:149 migrations, health/worker restart/persistence/cleanup passed, releaseEligible=false.",
+    "review": "Final bounded read-only review found no remaining proven P1/P2 in reviewed logic/config. Two additional findings were corrected: safe preview codes and account snapshot timestamps. Safe-code regression 4/4 passed."
+  },
+  "localAcceptance": "evidence/prototype-alignment/final-local-ui-acceptance.json",
+  "releaseProof": false
+}

@@ -10,15 +10,16 @@ export const USER_GLOBAL_NAVIGATION = [
   { key: "ask", label: "智能问答", href: "/ask" },
   { key: "projects", label: "我的项目", href: "/personal/projects" },
   { key: "knowledge", label: "我的知识", href: "/personal/knowledge" },
+  { key: "graph", label: "知识图谱", href: "/personal/knowledge/graph" },
 ] as const;
 
 export type UserGlobalNavigationKey = (typeof USER_GLOBAL_NAVIGATION)[number]["key"];
 
 /** The six project destinations that remain visible in the shell. */
 export const USER_PROJECT_NAVIGATION = [
+  { key: "overview", label: "项目概览", segment: "" },
   { key: "plan", label: "项目计划", segment: "plan" },
   { key: "materials", label: "项目资料", segment: "materials" },
-  { key: "overview", label: "项目概览", segment: "" },
   { key: "intelligence", label: "简报与调查", segment: "intelligence" },
   { key: "automations", label: "项目自动化", segment: "automations" },
   { key: "governance", label: "项目管理", segment: "governance" },
@@ -93,6 +94,7 @@ export function getActiveGlobalNavigation(pathname: string): UserGlobalNavigatio
   if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) return "dashboard";
   if (pathname === "/ask" || pathname.startsWith("/ask/")) return "ask";
   if (pathname === "/projects" || pathname === "/personal/projects" || pathname.startsWith("/personal/projects/")) return "projects";
+  if (pathname === "/personal/knowledge/graph" || pathname.startsWith("/personal/knowledge/graph/")) return "graph";
   if (pathname === "/personal/knowledge" || pathname.startsWith("/personal/knowledge/")) return "knowledge";
   return null;
 }
@@ -103,7 +105,7 @@ export function isUserShellPath(pathname: string): boolean {
 }
 
 export function getUserPageLabel(pathname: string): string {
-  const globalItem = USER_GLOBAL_NAVIGATION.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+  const globalItem = [...USER_GLOBAL_NAVIGATION].reverse().find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
   if (globalItem) return globalItem.label;
   if (pathname === "/projects") return "我的项目";
 
@@ -113,14 +115,15 @@ export function getUserPageLabel(pathname: string): string {
   }
 
   if (pathname === "/personal") return "个人空间";
-  if (pathname === "/personal/configuration") return "个人配置";
+  if (pathname === "/personal/configuration") return "资源配置";
+  if (pathname === "/personal/usage") return "用量记录";
   if (pathname === "/personal/models") return "个人模型";
   if (pathname === "/personal/connections/git" || pathname === "/personal/connections/mcp") return "个人连接";
-  if (pathname === "/team" || pathname.startsWith("/team/")) return "空间与团队";
+  if (pathname === "/team" || pathname.startsWith("/team/")) return "我的团队";
   if (pathname === "/profile" || pathname.startsWith("/profile/")) return "账户设置";
   if (pathname === "/guide" || pathname.startsWith("/guide/")) return "帮助";
   if (pathname === "/notifications" || pathname.startsWith("/notifications/")) return "通知中心";
-  if (pathname === "/credits" || pathname.startsWith("/credits/")) return "用量与额度";
+  if (pathname === "/credits" || pathname.startsWith("/credits/")) return "额度与账单";
   if (pathname === "/connections" || pathname.startsWith("/connections/")) return "连接管理";
   return "AI Project OS";
 }

@@ -1,4 +1,4 @@
-import { AdminOverviewClient } from "@/components/admin-overview-client";
+import { AdminOverviewClient } from "@/components/admin-overview-loader";
 import { requireSystemAdminPage } from "@/lib/system-admin";
 
 export default async function AdminPage() {

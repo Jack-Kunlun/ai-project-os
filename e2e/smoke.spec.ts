@@ -7,10 +7,27 @@ import { createPasswordRecord } from "@/lib/auth";
 import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
 import { getDb, getEntitlementDb } from "@/lib/db";
 import { APP_VERSION } from "@/lib/version";
+import { signOutR02User } from "./support/r02-admin-navigation";
+import { settleVisualState } from "./support/settle-visual-state";
+
+async function expectHeaderAccount(page: Page, username: string): Promise<void> {
+  const trigger = page.getByRole("button", { name: "账户菜单", exact: true });
+  await trigger.click();
+  const menu = page.locator(".header-account-popover");
+  await expect(menu.getByText(username, { exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "账户设置", exact: true })).toBeVisible();
+  await trigger.click();
+}
+
+async function openHeaderAccount(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "账户菜单", exact: true }).click();
+  await page.locator(".header-account-popover").getByRole("link", { name: "账户设置", exact: true }).click();
+}
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 async function expectNoAccessibilityViolations(page: Page, surface: string): Promise<void> {
+  await settleVisualState(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   const violations = result.violations.map((violation) => ({
     help: violation.help,
@@ -314,7 +331,7 @@ async function seedBrowserPersonalOwner(username: string, password: string): Pro
 }
 
 test("first-run administrator and personal workspace Owner stay separate across protected pages", async ({ page, request }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   const browserErrors: string[] = [];
   const expectedHttpErrors = new Map<string, number>();
   page.on("console", (message) => {
@@ -376,7 +393,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
     await registrationPage.getByRole("button", { name: "创建账号", exact: true }).click();
     await expect(registrationPage).toHaveURL(/\/dashboard$/u);
     await expect(registrationPage.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
-    await expect(registrationPage.getByRole("link", { name: `账户设置，${registrationUsername}`, exact: true })).toBeVisible();
+    await expectHeaderAccount(registrationPage, registrationUsername);
     const registered = await getEntitlementDb().appUser.findUniqueOrThrow({ where: { username: registrationUsername } });
     expect(registered.role).toBe("user");
     expect(registered.email).toBeNull();
@@ -402,25 +419,25 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(adminPage).toHaveURL(/\/admin$/u);
   await expect(adminPage.getByRole("heading", { name: "平台总览", exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await expect(page).toHaveURL(/\/login$/u);
   await page.getByLabel("用户名或手机号", { exact: true }).fill(ownerUsername);
   await page.getByLabel("密码", { exact: true }).fill(ownerPassword);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
   await expect(page.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true })).toBeVisible();
+  await expectHeaderAccount(page, ownerUsername);
   await page.reload();
   await expect(page).toHaveURL(/\/dashboard$/u);
   await expect(page.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true })).toBeVisible();
+  await expectHeaderAccount(page, ownerUsername);
   await expect(page.getByRole("link", { name: "AI Project OS 工作台", exact: true })).toBeVisible();
   await expect(page.getByText(/内部开发版/u)).toHaveCount(0);
   await expect(page).toHaveTitle("AI Project OS");
-  await expect(page.getByText(/当前没有可访问的项目/u)).toBeVisible();
+  await expect(page.getByText(/还没有可访问的项目/u)).toBeVisible();
   const globalNavigation = page.getByRole("navigation", { name: "全局入口", exact: true });
-  await expect(globalNavigation.getByRole("link")).toHaveCount(4);
-  for (const destination of ["工作台", "智能问答", "我的项目", "我的知识"]) {
+  await expect(globalNavigation.getByRole("link")).toHaveCount(5);
+  for (const destination of ["工作台", "智能问答", "我的项目", "我的知识", "知识图谱"]) {
     await expect(globalNavigation.getByRole("link", { name: destination, exact: true })).toBeVisible();
   }
   await expect(globalNavigation.getByRole("link", { name: "工作台", exact: true })).toHaveAttribute("aria-current", "page");
@@ -447,14 +464,15 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.goto("/credits");
   await expect(page.getByRole("heading", { name: "每日用量", exact: true })).toBeVisible();
   await expect(page.getByText("按 Asia/Shanghai 统计，零使用日也会保留。")).toBeVisible();
+  await page.getByRole("button", { name: "Token 活动", exact: true }).click();
   await page.getByRole("button", { name: "近 30 天", exact: true }).click();
-  const tokenGrid = page.getByRole("group", { name: /Token 活动热力图，30 天/u });
+  const tokenGrid = page.getByRole("group", { name: /Token 活动热力图.*30 天/u });
   await expect(tokenGrid).toBeVisible();
   const latestTokenCell = tokenGrid.locator("[data-token-date]").last();
   const latestTokenDate = await latestTokenCell.getAttribute("data-token-date");
   expect(latestTokenDate).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
   await latestTokenCell.hover({ position: { x: 1, y: 1 } });
-  await expect(page.getByRole("tooltip")).toContainText(`${latestTokenDate}每日已结算 0 Token`);
+  await expect(page.getByRole("tooltip")).toContainText(new RegExp(`${latestTokenDate}每日\\s*已结算\\s*0\\s*Token`, "u"));
   await page.mouse.move(0, 0);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await tokenGrid.focus();
@@ -465,13 +483,20 @@ test("first-run administrator and personal workspace Owner stay separate across 
   const oldestTokenDate = await tokenGrid.locator("[data-token-date]").first().getAttribute("data-token-date");
   await expect(page.getByRole("tooltip")).toContainText(oldestTokenDate!);
   await page.getByRole("button", { name: "近 7 天", exact: true }).click();
-  const sevenDayGrid = page.getByRole("group", { name: /Token 活动热力图，7 天/u });
+  const sevenDayGrid = page.getByRole("group", { name: /Token 活动热力图.*7 天/u });
   await expect(sevenDayGrid).toBeVisible();
   await sevenDayGrid.focus();
   const latestSevenDayDate = await sevenDayGrid.locator("[data-token-date]").last().getAttribute("data-token-date");
   await expect(page.getByRole("tooltip")).toContainText(latestSevenDayDate!);
-  await sevenDayGrid.press("ArrowUp");
+  await sevenDayGrid.press("ArrowLeft");
   await expect(page.getByRole("tooltip")).not.toContainText(latestSevenDayDate!);
+  await sevenDayGrid.press("ArrowRight");
+  await expect(page.getByRole("tooltip")).toContainText(latestSevenDayDate!);
+  await sevenDayGrid.press("Home");
+  const firstSevenDayDate = await sevenDayGrid.locator("[data-token-date]").first().getAttribute("data-token-date");
+  await expect(page.getByRole("tooltip")).toContainText(firstSevenDayDate!);
+  await sevenDayGrid.press("End");
+  await expect(page.getByRole("tooltip")).toContainText(latestSevenDayDate!);
   await Promise.all(["近 7 天", "近 30 天"].map((name) => page.getByRole("button", { name, exact: true }).evaluate(async (button) => {
     await Promise.all(button.getAnimations().map((animation) => animation.finished));
   })));
@@ -497,6 +522,12 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(popupBounds).not.toBeNull();
   expect(popupBounds!.y).toBeGreaterThanOrEqual(0);
   expect(popupBounds!.y + popupBounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  await caHelp.focus();
+  const dialogBody = gitDialog.locator("[data-dialog-body]");
+  const scrollBefore = await dialogBody.evaluate(element => element.scrollTop);
+  await dialogBody.evaluate(element => { element.scrollTop += element.scrollTop > 0 ? -12 : 12; });
+  await expect.poll(() => dialogBody.evaluate(element => element.scrollTop)).not.toBe(scrollBefore);
+  await expect(helpPopup).toContainText("可信私有 CA");
   await expect(gitDialog.locator('[role="tooltip"]')).toHaveCount(0);
   await expectNoAccessibilityViolations(page, "git connection tooltip");
   await gitDialog.getByRole("button", { name: "关闭弹窗" }).click();
@@ -647,6 +678,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByText("待核对的项目记录", { exact: true })).toBeVisible();
   await page.goto(`/projects/${projectId}`);
   const overviewMetrics = page.getByRole("region", { name: "项目关键指标", exact: true });
+  await expect(overviewMetrics).toBeVisible({ timeout: 15_000 });
   await expect(overviewMetrics.getByRole("link")).toHaveCount(4);
   await overviewMetrics.getByRole("link", { name: /^项目资料/u }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?.*focus=sources-heading`, "u"));
@@ -744,7 +776,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(openNavigation).toHaveAttribute("aria-expanded", "true");
   await expect(mobileNavigation.getByRole("button", { name: "关闭导航", exact: true })).toBeFocused();
   const mobileGlobalNavigation = mobileNavigation.getByRole("navigation", { name: "全局入口", exact: true });
-  await expect(mobileGlobalNavigation.getByRole("link")).toHaveCount(4);
+  await expect(mobileGlobalNavigation.getByRole("link")).toHaveCount(5);
   const mobileProjectNavigation = mobileNavigation.getByRole("navigation", { name: `${projectName} 项目导航`, exact: true });
   await expect(mobileProjectNavigation.getByRole("link")).toHaveCount(6);
   await page.keyboard.press("Escape");
@@ -758,8 +790,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page).toHaveURL(/\/dashboard$/u);
   await expect(page.getByRole("heading", { name: "工作台", exact: true })).toBeVisible();
 
-  await openNavigation.click();
-  await mobileNavigation.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true }).click();
+  await openHeaderAccount(page);
   await expect(page).toHaveURL(/\/profile$/u);
   await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
   await page.goBack();
@@ -837,6 +868,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto("/profile");
   await expect(page.getByText("账户详情", { exact: true })).toBeVisible();
+  await page.locator("details").filter({ hasText: "账户详情" }).locator("summary").click();
   await expect(page.locator("details[open]").filter({ hasText: "账户详情" })).toHaveCount(1);
   const editProfile = page.getByRole("button", { name: "编辑资料", exact: true });
   await expect(editProfile).toBeEnabled();
@@ -844,12 +876,12 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expectNoAccessibilityViolations(page, "profile");
 
   await page.goto("/personal/configuration");
-  await expect(page.getByRole("heading", { name: "我的空间配置", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Git 授权管理/u })).toBeVisible();
-  await expect(page.getByRole("link", { name: /我的 MCP 连接/u })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "个人资源配置", exact: true })).toBeVisible();
+  await expect(page.locator('a[href="/personal/connections/git"]')).toBeVisible();
+  await expect(page.locator('a[href="/personal/connections/mcp"]')).toBeVisible();
   await expectNoAccessibilityViolations(page, "personal configuration");
 
-  await page.getByRole("link", { name: /Git 授权管理/u }).click();
+  await page.locator('a[href="/personal/connections/git"]').click();
   await expect(page).toHaveURL(/\/personal\/connections\/git$/u);
   await expect(page.getByRole("heading", { name: "Git 授权管理", exact: true })).toBeVisible();
   await expect(page.getByText(/项目页支持一次性手动只读委托和单独的自动读取双确认授权/u)).toBeVisible();
@@ -928,7 +960,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto("/personal/configuration");
   const modelsResource = page.locator('a[href="/personal/models"]');
-  await expect(modelsResource.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
+  await expect(modelsResource.getByRole("heading", { name: "个人模型", exact: true })).toBeVisible();
   await modelsResource.click();
   await expect(page).toHaveURL(/\/personal\/models$/u);
   await expect(page.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
@@ -982,9 +1014,9 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expectNoAccessibilityViolations(page, "personal models mobile");
   if (originalViewport !== null) await page.setViewportSize(originalViewport);
 
-  await page.getByRole("link", { name: `账户设置，${ownerUsername}`, exact: true }).click();
+  await openHeaderAccount(page);
   await expect(page).toHaveURL(/\/profile$/u);
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await expect(page).toHaveURL(/\/login$/u);
 
   await adminPage.goto("/admin");

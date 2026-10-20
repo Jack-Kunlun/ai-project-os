@@ -1,13 +1,13 @@
 .supportPage,
 .exportWorkspace {
-  color: #27313d;
+  color: var(--app-text);
   font-size: 13px;
   line-height: 1.6;
 }
 
 .supportPage {
   min-height: 100vh;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .exportWorkspace {
@@ -43,11 +43,11 @@
 
 .supportPage :global(section[class*="bg-gradient-to-br"]),
 .supportPage :global(section[class*="bg-gradient-to-r"]) {
-  border: 1px solid #e3e7ed;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--app-surface);
   background-image: none;
-  color: #27313d;
+  color: var(--app-text);
   padding: 20px;
   box-shadow: none;
 }
@@ -55,44 +55,44 @@
 .supportPage :global(section[class*="bg-gradient-to-br"] h1),
 .supportPage :global(section[class*="bg-gradient-to-r"] h1) {
   margin-top: 0;
-  color: #27313d;
+  color: var(--app-text);
 }
 
 .supportPage :global(section[class*="bg-gradient-to-br"] p),
 .supportPage :global(section[class*="bg-gradient-to-r"] p) {
   margin-top: 8px;
-  color: #627086;
+  color: var(--app-muted);
   line-height: 1.7;
 }
 
 .supportPage :global(section[class*="bg-gradient-to-br"] [class~="text-white"]),
 .supportPage :global(section[class*="bg-gradient-to-r"] [class~="text-white"]) {
-  color: #27313d;
+  color: var(--app-text);
 }
 
 .supportPage :global(section[class*="bg-gradient-to-br"] [class~="text-slate-300"]),
 .supportPage :global(section[class*="bg-gradient-to-r"] [class~="text-slate-300"]) {
-  color: #627086;
+  color: var(--app-muted);
 }
 
 .supportPage :global(section[class*="bg-gradient-to-br"] [class*="border-white/"]),
 .supportPage :global(section[class*="bg-gradient-to-r"] [class*="border-white/"]) {
-  border-color: #dfe4eb;
+  border-color: var(--app-border);
 }
 
 .supportPage :global(section[class*="bg-gradient-to-br"] [class*="bg-white/"]),
 .supportPage :global(section[class*="bg-gradient-to-r"] [class*="bg-white/"]) {
-  background-color: #f7f8fa;
+  background-color: var(--app-surface-soft);
 }
 
 .supportPage :global(section[class*="bg-gradient-to-br"] [class*="focus-visible:outline-white"]),
 .supportPage :global(section[class*="bg-gradient-to-r"] [class*="focus-visible:outline-white"]) {
-  outline-color: #3566c9;
+  outline-color: var(--app-accent);
 }
 
 .supportPage :global([class~="text-slate-400"]:not(pre):not(code)),
 .exportWorkspace :global([class~="text-slate-400"]:not(pre):not(code)) {
-  color: #627086;
+  color: var(--app-muted);
 }
 
 .supportPage :global([class~="rounded-3xl"]),
@@ -137,30 +137,30 @@
 .supportPage :global(a[class~="bg-slate-950"]),
 .exportWorkspace :global(button[class~="bg-slate-950"]),
 .exportWorkspace :global(a[class~="bg-slate-950"]) {
-  border-color: #3566c9;
-  background-color: #3566c9;
-  color: #fff;
+  border-color: var(--app-accent);
+  background-color: var(--app-accent);
+  color: var(--app-on-accent);
 }
 
 .supportPage :global([class*="text-cyan-"]),
 .supportPage :global([class*="text-violet-"]),
 .exportWorkspace :global([class*="text-cyan-"]),
 .exportWorkspace :global([class*="text-violet-"]) {
-  color: #3566c9;
+  color: var(--app-link);
 }
 
 .supportPage :global([class*="bg-cyan-"]),
 .supportPage :global([class*="bg-violet-"]),
 .exportWorkspace :global([class*="bg-cyan-"]),
 .exportWorkspace :global([class*="bg-violet-"]) {
-  background-color: #edf3ff;
+  background-color: var(--app-accent-soft);
 }
 
 .supportPage :global([class*="border-cyan-"]),
 .supportPage :global([class*="border-violet-"]),
 .exportWorkspace :global([class*="border-cyan-"]),
 .exportWorkspace :global([class*="border-violet-"]) {
-  border-color: #dbe6fb;
+  border-color: var(--app-border);
 }
 
 .supportPage :global(input:not([type="checkbox"]):not([type="radio"])),

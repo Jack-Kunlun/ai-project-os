@@ -60,6 +60,29 @@ const nextConfig: NextConfig = {
       const splitChunks = config.optimization.splitChunks;
       splitChunks.cacheGroups = {
         ...splitChunks.cacheGroups,
+        appearance: {
+          test: /[\\/]src[\\/](?:components[\\/](?:appearance-provider|appearance-controls)\.tsx|lib[\\/]ui-core-messages\.json)$/,
+          name: "appearance",
+          chunks: "all",
+          minChunks: 2,
+          enforce: true,
+          reuseExistingChunk: true,
+          priority: 50,
+        },
+        userNavigation: {
+          test: /[\\/]src[\\/](?:components[\\/](?:(?:user-shell|workspace-scope|notification-bell|app-header)\.tsx|user-shell\.module\.css)|lib[\\/]user-navigation\.ts)$/,
+          name: "user-navigation",
+          chunks: "all",
+          minChunks: 2,
+          enforce: true,
+          reuseExistingChunk: true,
+          priority: 40,
+        },
+        accountMenu: {
+          test: /[\\/]src[\\/]components[\\/]header-account\.tsx$/,
+          name: "account-menu",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
         operationPanel: {
           test: /[\\/]src[\\/]components[\\/]operation-panel\.tsx$/,
           name: "operation-panel",
@@ -69,6 +92,11 @@ const nextConfig: NextConfig = {
           reuseExistingChunk: true,
           priority: 40,
         },
+        workspacePresentation: {
+          test: /[\\/]src[\\/]components[\\/](?:workspace-dialog\.tsx|workspace-ui\.module\.css)$/,
+          name: "workspace-presentation",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
         safeErrorPresentation: {
           test: /[\\/]src[\\/]lib[\\/]safe-error-presentation\.ts$/,
           name: "safe-error-presentation",
@@ -77,6 +105,62 @@ const nextConfig: NextConfig = {
           enforce: true,
           reuseExistingChunk: true,
           priority: 40,
+        },
+        branding: {
+          test: /(?:[\\/]src[\\/]components[\\/]brand-mark\.tsx|[\\/]node_modules[\\/]next[\\/](?:image\.js|dist[\\/]shared[\\/]lib[\\/]image-external\.js))$/,
+          name: "branding",
+          chunks: "all",
+          minChunks: 2,
+          enforce: true,
+          reuseExistingChunk: true,
+          priority: 40,
+        },
+        confirmDialog: {
+          test: /[\\/]src[\\/]components[\\/](?:app-confirm-dialog|inquiry-operation)\.tsx$/,
+          name: "confirm-dialog",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        modalStyles: {
+          test: /[\\/]src[\\/]components[\\/]modal-styles\.ts$/,
+          name: "modal-style-tokens",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        projectNavigation: {
+          test: /[\\/]src[\\/]lib[\\/]project-navigation\.ts$/,
+          name: "project-navigation",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        jobFailure: {
+          test: /[\\/]src[\\/]lib[\\/]project-job-failure\.ts$/,
+          name: "job-failure",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        accountActions: {
+          test: /[\\/]src[\\/]app[\\/]logout-button\.tsx$/,
+          name: "account-actions",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        inquirySession: {
+          test: /[\\/]src[\\/]lib[\\/]inquiry-session\.ts$/,
+          name: "inquiry-session",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        adminFrame: {
+          test: /[\\/]src[\\/](?:components[\\/](?:admin-shell|admin-header)\.tsx|lib[\\/]admin-navigation\.ts)$/,
+          name: "admin-frame",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        sharedPresentation: {
+          test: /[\\/]src[\\/]components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)$/,
+          name(module: { resource?: string }) {
+            return `ui-${(module.resource?.split(/[\\/]/).pop() ?? "common").replace(/\.(?:tsx|ts|module\.css)$/u, "")}`;
+          },
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
+        graphicCaptcha: {
+          test: /[\\/]src[\\/]components[\\/]graphic-captcha-dialog\.tsx$/,
+          name: "graphic-captcha",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
         },
       };
     }

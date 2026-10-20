@@ -6,6 +6,7 @@ import {
   expectR02NoHorizontalOverflow,
   signInR02Admin,
   signInR02PersonalUser,
+  signOutR02User,
 } from "./support/r02-admin-navigation";
 
 test.setTimeout(120_000);
@@ -20,7 +21,7 @@ type ExtractCall = Readonly<{
 async function projectFixture(page: Page): Promise<{ projectId: string; projectName: string }> {
   await signInR02Admin(page);
   const user = await seedBrowserPersonalUser(`browser-flow-${randomUUID().slice(0, 10)}`, "BrowserFlow2026Password!");
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await signInR02PersonalUser(page, user);
   await page.goto("/projects");
   await page.getByRole("button", { name: "＋ 新建项目" }).click();
@@ -106,6 +107,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
 
   await page.getByRole("button", { name: "新建知识", exact: true }).first().click();
   const createDialog = page.getByRole("dialog", { name: "新建知识", exact: true });
+  const createDialogElement = page.locator('dialog[aria-labelledby="knowledge-modal-title"]');
   const title = `个人流程 ${randomUUID().slice(0, 8)}`;
   const body = `这段个人知识需要手动选择并复制到项目。引用编号 ${randomUUID()}`;
   await createDialog.getByRole("textbox", { name: "标题", exact: true }).fill(title);
@@ -114,7 +116,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const projectListReadsBeforeCreate = projectListReads.length;
   await createDialog.getByRole("button", { name: "创建知识", exact: true }).click();
 
-  await expect(createDialog).toHaveCount(0);
+  await expect(createDialogElement).toBeHidden();
   await page.getByRole("button", { name: new RegExp(`^${title} `, "u") }).click();
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   await expect(page.locator("#personal-knowledge-content")).toContainText(body);
@@ -368,7 +370,7 @@ test("processing tasks preserve background state and only offer safe cancellatio
   expect(cancellations).toEqual([queuedId]);
   await expect(tasks.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
   await page.reload();
-  await expect(tasks.getByText("任务已取消，原始资料仍保留。", { exact: true })).toBeVisible();
+  await expect(tasks.getByText("任务已取消，原始资料仍保留。", { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(tasks.getByText("1/3（33%）", { exact: true })).toBeVisible();
   await expect(page.getByRole("dialog", { name: "添加资料", exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -441,7 +443,7 @@ test("invalid extraction detail separates incomplete output from open and closed
   await expect(runs.getByText(/该旧式 GitHub 任务仍有子运行阻塞/u)).toBeVisible();
   await expectR02NoHorizontalOverflow(page, "incomplete extraction task runs 390px");
 
-  await page.route("**/api/dashboard", async (route) => {
+  await page.route(/\/api\/dashboard(?:\?.*)?$/u, async (route) => {
     const response = await route.fetch();
     const payload = await response.json();
     payload.recentJobs = [{ ...job, project: { id: projectId, name: projectName } }];

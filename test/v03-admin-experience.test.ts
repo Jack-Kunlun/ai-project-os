@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { adminNavigationItems } from "../src/lib/admin-navigation";
 
 test("admin shell is independent from the user workspace and uses the supplied brand asset", async () => {
   const [header, shell, gitPage, accountPage, accountApi] = await Promise.all([
@@ -10,17 +11,15 @@ test("admin shell is independent from the user workspace and uses the supplied b
     readFile("src/app/admin/account/page.tsx", "utf8"),
     readFile("src/app/api/admin/account/route.ts", "utf8"),
   ]);
-  assert.match(header, /BrandMark/u);
-  assert.match(header, /平台运营管理/u);
+  assert.match(shell, /BrandMark/u);
+  assert.match(header, /平台管理/u);
   assert.doesNotMatch(header, /\/dashboard|\/projects|\/team/u);
   assert.doesNotMatch(shell, /key: "git"|href: "\/dashboard"/u);
-  const primarySource = shell.split("const primaryItems", 2)[1]?.split("];", 1)[0] ?? "";
-  assert.equal([...primarySource.matchAll(/key:\s*"[A-Za-z]+"/gu)].length, 5);
-  for (const href of ["/admin", "/admin/users", "/admin/models", "/admin/connectors/mcp", "/admin/operations/failures"]) {
-    assert.match(primarySource, new RegExp(`href: "${href.replaceAll("/", "\\/")}"`, "u"));
+  assert.equal(adminNavigationItems.length, 13);
+  for (const href of ["/admin", "/admin/users", "/admin/models", "/admin/connectors/mcp", "/admin/operations/failures", "/admin/account"]) {
+    assert.ok(adminNavigationItems.some(item => item.href === href));
   }
-  assert.match(header, /href="\/admin\/account"/u);
-  assert.doesNotMatch(shell, /href: "\/admin\/account"|href="\/admin\/account"/u);
+  assert.match(header, /accountHref="\/admin\/account"/u);
   assert.match(gitPage, /redirect\("\/admin"\)/u);
   assert.match(accountPage, /AdminAccountClient/u);
   assert.match(accountApi, /requireApiSession\(request\)[\s\S]*actor\.role !== "admin"/u);
@@ -46,10 +45,11 @@ test("platform model responsibilities are split into independent admin surfaces"
   assert.doesNotMatch(client, /<h1 className=.*>平台模型<\/h1>/u);
   assert.match(client, /ProviderCreateForm/u);
   assert.doesNotMatch(client, /PlatformProviderProbeBudgetPanel|PlatformDefaultRoutesPanel|PlatformGrantOfferPolicyPanel|PlatformCreditGovernancePanel|adminView/u);
-  assert.match(shell, /label: "模型能力"/u);
+  const navigation = await readFile("src/lib/admin-navigation.ts", "utf8");
+  assert.match(navigation, /label: "模型与能力"/u);
   assert.doesNotMatch(shell, /href: "\/admin\/models\/routes"/u);
-  assert.match(shell, /href: "\/admin\/credits"/u);
-  assert.match(shell, /href: "\/admin\/operations\/probes"/u);
+  assert.match(navigation, /href: "\/admin\/credits"/u);
+  assert.match(navigation, /href: "\/admin\/operations\/probes"/u);
   assert.doesNotMatch(shell, /modelGovernance|href: "\/admin\/models\/governance"/u);
   assert.match(legacyGovernance, /requireSystemAdminPage/u);
   assert.match(legacyGovernance, /redirect\("\/admin\/models"\)/u);
@@ -68,8 +68,10 @@ test("platform model responsibilities are split into independent admin surfaces"
 
 test("provider probe refreshes the stored provider state after every completed test", async () => {
   const client = await readFile("src/app/settings/settings-client.tsx", "utf8");
-  assert.match(client, /const payload = await response\.json\(\) as ProviderCheck;[\s\S]*await onProbeFinished\(\);[\s\S]*setMessage\(describeProviderCheck\(payload\)\)/u);
+  assert.match(client, /const payload = await response\.json\(\) as ProviderCheck;[\s\S]*await onProbeFinished\(\);[\s\S]*setCheckResult\(payload\)/u);
   assert.match(client, /onProbeFinished=\{reload\}/u);
+  assert.match(client, /checkResult \? describeProviderCheck\(checkResult, t\)/u);
+  assert.match(client, /setTesting\(true\);[\s\S]*setCheckResult\(null\)/u);
 });
 
 test("successful sign-in routes platform admins directly to the admin surface", async () => {

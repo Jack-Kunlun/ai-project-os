@@ -29,58 +29,6 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* The persistent user shell owns the left rail and offsets its page content. */
-body:has([data-user-shell-root]) {
-  display: block;
-  min-height: 100vh;
-  padding-left: 218px;
-  background: #fff;
-}
-
-body:has([data-user-shell-root]) main:has(> [data-user-shell-root]) {
-  background: #fff;
-}
-
-@media (max-width: 760px) {
-  body:has([data-user-shell-root]) {
-    padding-left: 0;
-  }
-}
-
-/* Match user operation surfaces to the compact workspace design. */
-body:has([data-user-shell-root]) [data-operation-trigger] {
-  min-height: 33px;
-  border-color: #d7dce4;
-  border-radius: 4px;
-  padding: 7px 12px;
-  color: #3566c9;
-  font-size: 12px;
-  font-weight: 500;
-}
-body:has([data-user-shell-root]) [data-operation-surface="modal"] {
-  max-width: 920px;
-  border-radius: 6px;
-}
-body:has([data-user-shell-root]) [data-operation-surface="drawer"] {
-  border-radius: 0;
-}
-body:has([data-user-shell-root]) [data-operation-header] {
-  padding: 20px 24px 17px;
-}
-body:has([data-user-shell-root]) [data-operation-header] h2 {
-  font-size: 17px;
-  font-weight: 600;
-}
-body:has([data-user-shell-root]) [data-operation-header] button {
-  border-radius: 4px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 500;
-}
-body:has([data-user-shell-root]) [data-operation-content] {
-  padding: 20px 24px;
-}
-
 /* Tables use a shared vertical baseline; individual columns can still opt out. */
 table th,
 table td {

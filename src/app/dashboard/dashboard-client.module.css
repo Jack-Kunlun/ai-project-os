@@ -1,13 +1,13 @@
 .page {
   min-height: 100vh;
-  color: #282d29;
-  background: #fff;
+  color: var(--app-text);
+  background: var(--app-surface);
 }
 
 .content {
   width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 34px 42px 48px;
+  padding: 32px;
 }
 
 .heading,
@@ -19,6 +19,7 @@
 }
 
 .heading {
+  align-items: flex-start;
   margin-bottom: 24px;
 }
 
@@ -26,7 +27,7 @@
 .sectionHeading h2,
 .commonPanel h2 {
   margin: 0;
-  color: #292f2a;
+  color: var(--app-text);
   font-weight: 560;
   letter-spacing: -0.035em;
 }
@@ -38,17 +39,13 @@
 .subtitle,
 .commonIntro {
   margin: 8px 0 0;
-  color: #5f6b7a;
+  color: var(--app-muted);
   font-size: 13px;
   line-height: 1.7;
 }
 
 .eyebrow {
-  margin: 0 0 7px;
-  color: #6a7066;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
+  display: none;
 }
 
 .primaryButton {
@@ -57,11 +54,11 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid #3566c9;
-  border-radius: 7px;
+  border: 1px solid var(--app-accent);
+  border-radius: 6px;
   padding: 8px 14px;
-  color: #fff;
-  background: #3566c9;
+  color: var(--app-on-accent);
+  background: var(--app-accent);
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
@@ -69,11 +66,12 @@
 }
 
 .primaryButton:hover {
-  background: #2b58b3;
+  background: var(--app-accent);
 }
 
 .featureGrid {
   display: grid;
+  margin-top: 24px;
   grid-template-columns: minmax(0, 1.1fr) minmax(300px, 1fr);
   gap: 22px;
   align-items: stretch;
@@ -84,9 +82,9 @@
 .projectCard,
 .emptyCard {
   min-width: 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
 }
 
 .panel {
@@ -95,8 +93,8 @@
 
 .commonPanel {
   padding: 24px;
-  background: #edf3ff;
-  border-color: #e5e7eb;
+  background: var(--app-surface-soft);
+  border-color: var(--app-border);
 }
 
 .sectionHeading {
@@ -105,7 +103,9 @@
 
 .sectionHeading h2,
 .commonPanel h2 {
-  font-size: 19px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .count {
@@ -113,17 +113,17 @@
   min-width: 27px;
   height: 27px;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 6px;
   padding: 0 7px;
-  color: #66715f;
-  background: #edf3ff;
+  color: var(--app-muted);
+  background: var(--app-accent-soft);
   font-size: 11px;
   font-weight: 650;
 }
 
 .attentionList {
   margin-top: 17px;
-  border-top: 1px solid #edf0f5;
+  border-top: 1px solid var(--app-border);
 }
 
 .attentionItem {
@@ -131,7 +131,7 @@
   min-width: 0;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid #edf0f5;
+  border-bottom: 1px solid var(--app-border);
   padding: 14px 2px;
   color: inherit;
   text-decoration: none;
@@ -151,17 +151,17 @@
 }
 
 .danger {
-  color: #9a5c4c;
-  background: #c97864;
+  color: var(--app-muted);
+  background: var(--app-danger-ink);
 }
 
 .warning {
-  color: #866945;
-  background: #c69a59;
+  color: var(--app-muted);
+  background: var(--app-warning-ink);
 }
 
 .neutral {
-  color: #647261;
+  color: var(--app-muted);
   background: #98a58e;
 }
 
@@ -174,7 +174,7 @@
 
 .itemCopy strong {
   overflow: hidden;
-  color: #424a42;
+  color: var(--app-text);
   font-size: 12px;
   font-weight: 570;
   text-overflow: ellipsis;
@@ -183,21 +183,21 @@
 
 .itemCopy small,
 .projectFooter {
-  color: #6d7069;
+  color: var(--app-muted);
   font-size: 10px;
   line-height: 1.6;
 }
 
 .arrow {
   flex: 0 0 auto;
-  color: #6c7166;
+  color: var(--app-muted);
   font-size: 14px;
   transition: transform 140ms ease;
 }
 
 .empty,
 .emptyCard {
-  color: #6a7066;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.8;
 }
@@ -208,11 +208,11 @@
 
 .emptyCard {
   margin-top: 16px;
-  border: 1px dashed #d9dcd4;
+  border: 1px dashed var(--app-border);
   border-radius: 9px;
   padding: 35px 20px;
   text-align: center;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .emptyCard h3,
@@ -221,7 +221,7 @@
 }
 
 .emptyCard h3 {
-  color: #4d564c;
+  color: var(--app-muted);
   font-size: 14px;
   font-weight: 600;
 }
@@ -234,19 +234,30 @@
   display: inline-flex;
   min-height: 31px;
   align-items: center;
-  color: #64745d;
+  color: var(--app-muted);
   font-size: 11px;
   font-weight: 600;
   text-decoration: none;
 }
 
 .textLink:hover {
-  color: #3e563f;
+  color: var(--app-link);
 }
 
 .commonPanel {
   display: flex;
   flex-direction: column;
+}
+
+.commonPanel > .textLink {
+  align-self: flex-start;
+  min-height: 34px;
+  gap: 10px;
+  margin-top: 18px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  padding: 0 12px;
+  color: var(--app-text);
 }
 
 .commonIntro {
@@ -260,23 +271,23 @@
   flex-direction: column;
   gap: 6px;
   margin-top: 17px;
-  border: 1px solid #dde2d6;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 14px;
   color: inherit;
-  background: #fafbfc;
+  background: var(--app-surface-soft);
   text-decoration: none;
 }
 
 .nextStep > span,
 .nextStep small {
-  color: #6a7166;
+  color: var(--app-muted);
   font-size: 10px;
   line-height: 1.65;
 }
 
 .nextStep strong {
-  color: #3c493c;
+  color: var(--app-text);
   font-size: 13px;
   font-weight: 620;
 }
@@ -287,7 +298,7 @@
   margin-top: 2px;
   border: 0;
   padding: 0;
-  color: #61735c;
+  color: var(--app-muted);
   background: transparent;
   font-size: 11px;
   font-weight: 650;
@@ -304,9 +315,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--app-border);
   padding: 11px 1px;
-  color: #687163;
+  color: var(--app-muted);
   text-decoration: none;
 }
 
@@ -321,21 +332,21 @@
 }
 
 .quickLink strong {
-  color: #505b4f;
+  color: var(--app-muted);
   font-size: 11px;
   font-weight: 580;
 }
 
 .quickLink small {
   overflow-wrap: anywhere;
-  color: #6b7167;
+  color: var(--app-muted);
   font-size: 10px;
   line-height: 1.55;
 }
 
 .quickLink > span:last-child {
   flex: 0 0 auto;
-  color: #6a7163;
+  color: var(--app-muted);
   transition: transform 140ms ease;
 }
 
@@ -361,7 +372,7 @@
 }
 
 .projectCard:hover {
-  border-color: #c9d2c1;
+  border-color: var(--app-border);
   box-shadow: 0 7px 20px rgb(38 48 38 / 6%);
 }
 
@@ -379,25 +390,25 @@
   width: 30px;
   height: 30px;
   place-items: center;
-  border-radius: 7px;
-  color: #63725b;
-  background: #edf3ff;
+  border-radius: 6px;
+  color: var(--app-muted);
+  background: var(--app-accent-soft);
   font-size: 12px;
   font-weight: 650;
 }
 
 .projectStatus {
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 4px 7px;
-  color: #67725f;
-  background: #f4f6f9;
+  color: var(--app-muted);
+  background: var(--app-surface-soft);
   font-size: 9px;
 }
 
 .projectName {
   overflow: hidden;
   margin-top: 13px;
-  color: #333b34;
+  color: var(--app-text);
   font-size: 14px;
   font-weight: 620;
   text-overflow: ellipsis;
@@ -409,7 +420,7 @@
   min-height: 34px;
   overflow: hidden;
   margin: 6px 0 13px;
-  color: #6a7168;
+  color: var(--app-muted);
   font-size: 11px;
   line-height: 1.65;
   -webkit-box-orient: vertical;
@@ -420,19 +431,19 @@
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 7px 13px;
-  color: #6a6f68;
+  color: var(--app-muted);
   font-size: 9px;
 }
 
 .projectCounts b {
-  color: #677265;
+  color: var(--app-muted);
   font-weight: 600;
 }
 
 .projectFooter {
   align-items: flex-start;
   margin-top: auto;
-  border-top: 1px solid #edf0f5;
+  border-top: 1px solid var(--app-border);
   padding-top: 11px;
   font-size: 9px;
 }
@@ -449,7 +460,7 @@
 .loadingRows span {
   overflow: hidden;
   border-radius: 8px;
-  background: linear-gradient(100deg, #f4f6f9 20%, #f5f6f2 40%, #f4f6f9 60%);
+  background: linear-gradient(100deg, var(--app-surface-soft) 20%, var(--app-border) 40%, var(--app-surface-soft) 60%);
   background-size: 200% 100%;
   animation: shimmer 1.25s linear infinite;
 }
@@ -474,17 +485,17 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 17px;
-  border: 1px solid #ead5ce;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 11px 14px;
-  color: #975d50;
-  background: #fbf3ef;
+  color: var(--app-muted);
+  background: var(--app-warning-soft);
   font-size: 12px;
 }
 
 .error button {
   border: 0;
-  color: #7e5147;
+  color: var(--app-muted);
   background: transparent;
   font-size: 11px;
   font-weight: 650;
@@ -529,3 +540,4 @@
   .projectSkeleton,
   .loadingRows span { animation: none; }
 }
+.greeting{display:flex;align-items:center;gap:12px;margin:-8px 0 24px;color:var(--app-muted);font-size:12px;line-height:1.6}.greeting span+span{border-left:1px solid var(--app-border);padding-left:12px}.featureGrid{gap:24px}.commonPanel{background:var(--app-surface-soft)}

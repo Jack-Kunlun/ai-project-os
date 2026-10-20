@@ -1,0 +1,95 @@
+/* The persistent user shell owns the left rail and offsets its page content. */
+body:has([data-user-shell-root]) {
+  display: block;
+  min-height: 100vh;
+  padding-left: 218px;
+  background: #fff;
+}
+
+body:has([data-user-shell-root]) main:has(> [data-user-shell-root]) {
+  background: #fff;
+}
+
+@media (max-width: 760px) {
+  body:has([data-user-shell-root]) {
+    padding-left: 0;
+  }
+}
+
+/* Match user operation surfaces to the compact workspace design. */
+body:has([data-user-shell-root]) [data-operation-trigger] {
+  min-height: 33px;
+  border-color: #d7dce4;
+  border-radius: 4px;
+  padding: 7px 12px;
+  color: #3566c9;
+  font-size: 12px;
+  font-weight: 500;
+}
+body:has([data-user-shell-root]) [data-operation-surface="modal"] {
+  max-width: 920px;
+  border-radius: 6px;
+}
+body:has([data-user-shell-root]) [data-operation-surface="drawer"] {
+  border-radius: 0;
+}
+body:has([data-user-shell-root]) [data-operation-header] {
+  padding: 20px 24px 17px;
+}
+body:has([data-user-shell-root]) [data-operation-header] h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+body:has([data-user-shell-root]) [data-operation-header] button {
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+body:has([data-user-shell-root]) [data-operation-content] {
+  padding: 20px 24px;
+}
+
+/* Shared geometry from the approved product prototype. */
+body:has([data-user-shell-root]),body:has([data-user-shell-root]) main:has(> [data-user-shell-root]){background:var(--app-bg)}
+.workspace-switcher{margin-bottom:16px}.workspace-switcher>label{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--app-border);border-radius:6px;background:var(--app-surface)}.workspace-initial{display:grid;place-items:center;width:24px;height:24px;flex-shrink:0;background:var(--app-accent-soft);border-radius:4px;font-size:11px}.workspace-switcher select{width:100%;min-width:0;border:0!important;background:transparent!important;padding:0!important;font-size:12px!important;min-height:24px!important;height:24px!important}.workspace-retry{font-size:11px;color:var(--app-accent);padding:8px}
+.header-account{position:relative}.header-avatar{display:grid;place-items:center;flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--app-surface-soft);border:1px solid var(--app-border);font-size:11px}.header-account-popover{position:absolute;right:0;top:calc(100% + 10px);width:210px;padding:8px;background:var(--app-surface);border:1px solid var(--app-border);border-radius:6px;box-shadow:0 12px 40px #15274020;z-index:100;display:flex;flex-direction:column;gap:4px}.header-account-popover strong{padding:10px;font-size:12px;overflow-wrap:anywhere}.header-account-popover a,.header-account-popover button{display:block;width:100%;text-align:left;padding:9px 10px;font-size:12px;border-radius:4px}.header-account-popover a:hover,.header-account-popover button:hover{background:var(--app-surface-soft)}.account-signout{border-top:1px solid var(--app-border);color:var(--app-danger,#bc514f)}
+
+/* Shared surface geometry follows the reviewed prototype. */
+body:has([data-user-shell-root]) main:has(> [data-user-shell-root]){background:var(--app-bg)}
+body:has([data-user-shell-root]) [data-operation-trigger]{min-height:40px;padding:9px 12px}
+body:has([data-user-shell-root]) [data-operation-surface="drawer"]{max-width:720px}
+body:has([data-user-shell-root]) [data-operation-content]{padding:24px}
+body:has([data-user-shell-root]) [data-operation-header]{min-height:76px;padding:20px 24px}
+body:has([data-user-shell-root]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){padding-left:12px;padding-right:12px;min-height:40px}
+body:has([data-user-shell-root]) :is(input[type=checkbox],input[type=radio]){flex-shrink:0}
+body:has([data-user-shell-root]) :is(.rounded-3xl,.rounded-2xl){border-radius:8px}
+body:has([data-user-shell-root]) .rounded-xl{border-radius:6px}
+body:has([data-user-shell-root]) :is(.shadow-sm,.shadow-xl){box-shadow:none}
+.inquiry-docked [data-user-shell-root] header{right:420px}
+@media(max-width:700px){body:has([data-user-shell-root]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){min-height:44px}}
+
+/* Connection forms already have a dialog heading and padded reading area. */
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-header]{min-height:76px}
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>p:first-of-type{margin-top:0}
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-header],
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body],
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-footer]{padding-left:24px;padding-right:24px}
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]{padding-top:24px;padding-bottom:24px}
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section{border:0;padding:0;background:transparent}
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>h2,
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>div:first-child>p.uppercase{display:none}
+body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>div:first-child{float:right;margin-left:8px}
+@media(max-width:700px){body:has([data-user-shell-root]) [data-connection-dialog] :is([data-dialog-header],[data-dialog-body],[data-dialog-footer]){padding-left:20px;padding-right:20px}}
+
+/* Filled actions and form fields follow the approved workspace controls. */
+:root body:has([data-user-shell-root]) :is(button,a):is(.bg-slate-950,.bg-slate-900,.bg-indigo-600,.bg-indigo-700) {
+  background: var(--app-accent) !important;
+  color: var(--app-on-accent) !important;
+}
+:root body:has([data-user-shell-root]) :is(button,a):is(.bg-slate-950,.bg-slate-900,.bg-indigo-600,.bg-indigo-700):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--app-accent) 88%, #000) !important;
+}
+body:has([data-user-shell-root]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea) {
+  border-radius: 4px;
+}

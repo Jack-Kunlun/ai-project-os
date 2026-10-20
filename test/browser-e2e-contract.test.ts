@@ -47,6 +47,7 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(runner, /prepareReleaseImagesForCheck\(packageVersion, revision\)/u);
   assert.match(runner, /startImageContainer\(appName, manifest\.images\.app\.id/u);
   assert.match(runner, /startImageContainer\(workerName, manifest\.images\.worker\.id/u);
+  assert.match(runner, /if \(hostPort !== undefined\) \{[\s\S]*?"--tmpfs", `\/app\/\.next\/cache:rw,noexec,nosuid,size=128m,mode=0700,uid=\$\{uid\},gid=\$\{gid\}`/u);
   assert.doesNotMatch(runner, /pnpm[^\n]*(?:build|next start)|\.next\/standalone\/server\.js/u);
   const appEnvironment = runner.split("const appEnvironment = {", 2)[1]?.split("const workerEnvironment =", 1)[0] ?? "";
   const workerEnvironment = runner.split("const workerEnvironment = {", 2)[1]?.split("appContainer =", 1)[0] ?? "";
@@ -100,8 +101,8 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(systemAudit, /getByText\(fixture\.auditId, \{ exact: true \}\)/u);
   assert.match(systemAudit, /assertForbiddenAuditApis/u);
   assert.match(systemAudit, /page\.route\(detailRoute/u);
-  assert.match(gitConnections, /role="status" aria-label="正在加载项目委托安全记录"/u);
-  assert.match(gitConnections, /role="status" aria-label="正在加载 Git 连接"/u);
+  assert.match(gitConnections, /role="status" aria-label=\{t\("正在加载项目委托安全记录"\)\}/u);
+  assert.match(gitConnections, /role="status" aria-label=\{t\("正在加载 Git 连接"\)\}/u);
   assert.match(failureInbox, /\/admin\/operations\/failures/u);
   assert.match(failureInbox, /失败与待对账收件箱/u);
   assert.match(failureInbox, /requires_owner_review/u);

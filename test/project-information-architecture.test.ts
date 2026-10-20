@@ -3,13 +3,15 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("project pages use persistent navigation and keep management and materials separate", async () => {
-  const [page, overview, materialsPage, materials, reviewPage, header, dashboard, world, governance, governancePage] = await Promise.all([
+  const [page, overview, materialsPage, materials, reviewPage, header, shell, userNavigation, dashboard, world, governance, governancePage] = await Promise.all([
     readFile("src/app/projects/[projectId]/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-overview-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/materials/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/materials/review/page.tsx", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/components/user-shell.tsx", "utf8"),
+    readFile("src/lib/user-navigation.ts", "utf8"),
     readFile("src/app/dashboard/dashboard-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/world/project-world-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),
@@ -18,10 +20,11 @@ test("project pages use persistent navigation and keep management and materials 
 
   assert.match(page, /ProjectOverviewClient/u);
   assert.match(materialsPage, /ProjectDetailClient/u);
-  assert.match(header, /isUserShellPath\(pathname\)/u);
-  assert.match(header, /<UserShell username=\{props\.username\}/u);
+  assert.match(header, /<UserShell username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
+  assert.match(shell, /getProjectRouteContext\(pathname\)/u);
+  assert.match(userNavigation, /\{ key: "overview", label: "项目概览", segment: "" \}/u);
 
-  assert.match(overview, /Project overview/u);
+  assert.match(overview, /<UiText text=\{"PROJECT OVERVIEW"\} \/>/u);
   assert.match(overview, /项目关键指标/u);
   assert.match(overview, /推荐下一步/u);
   assert.match(overview, /项目当前状态/u);
@@ -35,7 +38,7 @@ test("project pages use persistent navigation and keep management and materials 
 
   assert.match(dashboard, /\/projects\/\$\{entry\.project\.id\}#current-state/u);
   assert.doesNotMatch(dashboard, /href=\{`\/projects\/\$\{entry\.project\.id\}\/world`\}/u);
-  assert.match(world, /Advanced state governance/u);
+  assert.match(world, /项目状态治理/u);
   assert.match(world, /<ProjectOverviewParentLink projectId=\{projectId\}/u);
   assert.match(governance, /ProjectGovernanceSections/u);
   assert.match(governance, /id="ai-usage"/u);
@@ -53,7 +56,7 @@ test("project pages use persistent navigation and keep management and materials 
   assert.match(materials, /buildProjectQuestionHref\(projectId\)/u);
   assert.doesNotMatch(materials, /<ProjectQuestionWorkspace/u);
   assert.match(materials, /<ProjectProcessingTasks/u);
-  assert.match(materials, /aria-label="项目资料栏目"/u);
+  assert.match(materials, /aria-label=\{translateUi\("项目资料栏目"\)\}/u);
   assert.match(materialsPage, /Suspense/u);
   assert.match(materials, /materials\/sources/u);
   assert.doesNotMatch(materials, /<details|查看原文/u);
@@ -73,7 +76,7 @@ test("platform provider form keeps GLM embedding-only defaults optional", async 
   assert.match(settings, /label="生成模型（可选）"/u);
   assert.doesNotMatch(settings, /label="图片识别模型（可选）"><input[^>]*required/u);
   assert.doesNotMatch(settings, /label="生成模型（可选）"><input[^>]*required/u);
-  assert.match(settings, /defaultGenerationModelId \?\? "未配置"/u);
+  assert.match(settings, /defaultGenerationModelId \?\? t\("未配置"\)/u);
   assert.match(settings, /check\.attempt\.capabilities\.generation === "passed"/u);
   assert.match(settings, /check\.attempt\.embeddingDimensions === null \? "" :/u);
   assert.match(settings, /check\.attempt\.capabilities\.vision === "passed"/u);
@@ -91,10 +94,10 @@ test("grounded extraction uses bounded scrolling and explicit batch operations",
   assert.match(memory, /反选/u);
   assert.match(memory, /批量确认/u);
   assert.match(memory, /批量驳回/u);
-  assert.match(memory, /<OperationPanel title="整理已有项目资料"/u);
-  assert.match(memory, /<OperationPanel title="处理不确定内容"/u);
-  assert.match(memory, /aria-label="可选项目资料"/u);
-  assert.match(memory, /aria-label="待处理内容列表"/u);
+  assert.match(memory, /<OperationPanel title=\{translateUi\("整理已有项目资料"\)\}/u);
+  assert.match(memory, /<OperationPanel title=\{translateUi\("处理不确定内容"\)\}/u);
+  assert.match(memory, /aria-label=\{translateUi\("可选项目资料"\)\}/u);
+  assert.match(memory, /aria-label=\{translateUi\("待处理内容列表"\)\}/u);
   assert.match(memory, /overflow-y-auto/u);
   assert.match(memory, /expectedItemUpdatedAt: candidate\.projectItem\.updatedAt/u);
   assert.match(memory, /for \(const candidate of batch\)/u);

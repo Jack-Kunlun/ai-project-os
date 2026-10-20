@@ -1,3 +1,4 @@
+import { UiText } from "@/components/appearance-provider";
 import { requireSystemAdminPage } from "@/lib/system-admin";
 import { AdminPageHeader } from "@/components/admin-page-header";
 
@@ -18,16 +19,16 @@ export default async function AdminGuidePage() {
 
 function GuideCard({ title, summary, steps, success, blockers, href, linkLabel }: { title: string; summary: string; steps: readonly string[]; success: string; blockers: string; href: string; linkLabel: string }) {
   return <article className="flex flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
-    <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-    <p className="mt-2 text-sm leading-6 text-slate-600">{summary}</p>
+    <h2 className="text-lg font-semibold text-slate-900"><UiText text={title} /></h2>
+    <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={summary} /></p>
     <div className="mt-4 space-y-3 text-xs leading-5 text-slate-600">
       <div>
-        <h3 className="font-semibold text-slate-800">操作步骤</h3>
-        <ol className="mt-1 list-decimal space-y-1 pl-5">{steps.map((step) => <li key={step}>{step}</li>)}</ol>
+        <h3 className="font-semibold text-slate-800"><UiText text={"操作步骤"} /></h3>
+        <ol className="mt-1 list-decimal space-y-1 pl-5">{steps.map((step) => <li key={step}><UiText text={step} /></li>)}</ol>
       </div>
-      <p><span className="font-semibold text-emerald-700">成功条件：</span>{success}</p>
-      <p><span className="font-semibold text-amber-700">常见阻塞：</span>{blockers}</p>
+      <p><span className="font-semibold text-emerald-700"><UiText text={"成功条件："} /></span><UiText text={success} /></p>
+      <p><span className="font-semibold text-amber-700"><UiText text={"常见阻塞："} /></span><UiText text={blockers} /></p>
     </div>
-    <a href={href} className="mt-5 inline-flex w-fit items-center rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500">{linkLabel} <span aria-hidden="true" className="ml-2">→</span></a>
+    <a href={href} className="mt-5 inline-flex w-fit items-center rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"><UiText text={linkLabel} /> <span aria-hidden="true" className="ml-2">→</span></a>
   </article>;
 }

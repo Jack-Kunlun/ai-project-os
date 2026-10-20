@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
@@ -31,6 +32,7 @@ function positions<T>(items: readonly T[], key: (item: T) => string) {
 }
 
 export function PersonalKnowledgeGraphTools() {
+  const t = useTranslate();
   const [graph, setGraph] = useState<GraphPayload | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [documentId, setDocumentId] = useState("");
@@ -47,13 +49,13 @@ export function PersonalKnowledgeGraphTools() {
         fetch("/api/personal/knowledge/graph", { cache: "no-store" }),
         fetch("/api/me/ai-providers", { cache: "no-store" }),
       ]);
-      if (!graphResponse.ok) throw new Error((await safeResponseError(graphResponse, "知识图谱加载失败")).message);
+      if (!graphResponse.ok) throw new Error((await safeResponseError(graphResponse, t("知识图谱加载失败"))).message);
       setGraph(await graphResponse.json() as GraphPayload);
       if (providerResponse.ok) setProviders((await providerResponse.json() as { providers: Provider[] }).providers.filter((provider) => provider.status === "verified" && provider.defaultGenerationModelId));
     } catch (cause) {
-      setMessage({ text: cause instanceof Error ? cause.message : "知识图谱加载失败", error: true });
+      setMessage({ text: cause instanceof Error ? cause.message : t("知识图谱加载失败"), error: true });
     } finally { setLoading(false); }
-  }, []);
+  }, [t]);
 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
 
@@ -78,24 +80,26 @@ export function PersonalKnowledgeGraphTools() {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "prepare", documentId: selectedDocumentId, providerId: selectedProviderId }),
       });
-      if (!preparedResponse.ok) throw new Error((await safeResponseError(preparedResponse, "无法准备关系提取")).message);
+      if (!preparedResponse.ok) throw new Error((await safeResponseError(preparedResponse, t("无法准备关系提取"))).message);
       const prepared = await preparedResponse.json() as { attemptId: string; providerName: string; modelId: string };
       const decision = await confirm({
-        eyebrow: "知识关系提取", title: "发送文档给个人模型提取候选关系？",
-        description: `当前文档正文会发送给 ${prepared.providerName || provider?.name || "所选服务"}（${prepared.modelId}），可能产生服务商费用。结果只进入待审核列表，逐条确认后才显示为实体关系。`,
-        confirmLabel: "确认提取", cancelLabel: "返回",
+        eyebrow: t("知识关系提取"), title: t("发送文档给个人模型提取候选关系？"),
+        description: t("当前文档正文会发送给 {provider}（{model}），可能产生服务商费用。结果只进入待审核列表，逐条确认后才显示为实体关系。")
+          .replace("{provider}", prepared.providerName || provider?.name || t("所选服务"))
+          .replace("{model}", prepared.modelId),
+        confirmLabel: t("确认提取"), cancelLabel: t("返回"),
       });
       if (!decision.confirmed) return;
       const response = await fetch("/api/personal/knowledge/graph", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "execute", documentId: selectedDocumentId, attemptId: prepared.attemptId }),
       });
-      if (!response.ok) throw new Error((await safeResponseError(response, "关系提取失败")).message);
+      if (!response.ok) throw new Error((await safeResponseError(response, t("关系提取失败"))).message);
       const result = await response.json() as { suggested: number };
-      setMessage({ text: `提取完成，返回 ${result.suggested} 条候选关系。请核对原文后逐条审核。`, error: false });
+      setMessage({ text: t("提取完成，返回 {count} 条候选关系。请核对原文后逐条审核。").replace("{count}", String(result.suggested)), error: false });
       setExtractOpen(false);
       await load();
-    } catch (cause) { setMessage({ text: cause instanceof Error ? cause.message : "关系提取失败", error: true }); }
+    } catch (cause) { setMessage({ text: cause instanceof Error ? cause.message : t("关系提取失败"), error: true }); }
     finally { setPending(false); }
   }
 
@@ -106,51 +110,51 @@ export function PersonalKnowledgeGraphTools() {
       const response = await fetch(`/api/personal/knowledge/graph/${encodeURIComponent(id)}`, {
         method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }),
       });
-      if (!response.ok) throw new Error((await safeResponseError(response, "关系审核失败")).message);
+      if (!response.ok) throw new Error((await safeResponseError(response, t("关系审核失败"))).message);
       await load();
-    } catch (cause) { setMessage({ text: cause instanceof Error ? cause.message : "关系审核失败", error: true }); }
+    } catch (cause) { setMessage({ text: cause instanceof Error ? cause.message : t("关系审核失败"), error: true }); }
     finally { setPending(false); }
   }
 
   return <section className="text-slate-950">
     <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
       {dialog}
-      <div className="mt-4"><h2 className="text-lg font-semibold">个人知识关系维护</h2><p className="mt-2 text-sm text-slate-600">同时查看你手动确认的文档关联，以及从当前知识版本提取并经你审核的实体关系。</p></div>
-      {message ? <p role={message.error ? "alert" : "status"} className={`mt-5 rounded-xl px-4 py-3 text-sm ${message.error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</p> : null}
-      {loading ? <div role="status" className="mt-8 h-72 animate-pulse rounded-3xl bg-white" /> : graph === null ? <button type="button" onClick={() => void load()} className="mt-5 text-sm font-semibold text-indigo-700">重新加载</button> : <>
+      <div className="mt-4"><h2 className="text-lg font-semibold"><UiText text={"个人知识关系维护"} /></h2><p className="mt-2 text-sm text-slate-600"><UiText text={"同时查看你手动确认的文档关联，以及从当前知识版本提取并经你审核的实体关系。"} /></p></div>
+      {message ? <p role={message.error ? "alert" : "status"} className={`mt-5 rounded-xl px-4 py-3 text-sm ${message.error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{t(message.text)}</p> : null}
+      {loading ? <div role="status" className="mt-8 h-72 animate-pulse rounded-3xl bg-white" /> : graph === null ? <button type="button" onClick={() => void load()} className="mt-5 text-sm font-semibold text-indigo-700"><UiText text={"重新加载"} /></button> : <>
         <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
-          <h2 className="text-xl font-semibold">文档与来源关系</h2><p className="mt-2 text-xs text-slate-500">仅展示你明确建立的文档关联；虚线表示文档版本已变化。</p>
-          {documents.length === 0 ? <p className="mt-6 text-sm text-slate-500">知识库还没有文档。</p> : <>
-            <svg viewBox="0 0 100 100" className="mt-4 h-72 w-full rounded-xl bg-slate-50" role="img" aria-label="个人知识文档关系图"><title>个人知识文档关系图</title>
+          <h2 className="text-xl font-semibold"><UiText text={"文档与来源关系"} /></h2><p className="mt-2 text-xs text-slate-500"><UiText text={"仅展示你明确建立的文档关联；虚线表示文档版本已变化。"} /></p>
+          {documents.length === 0 ? <p className="mt-6 text-sm text-slate-500"><UiText text={"知识库还没有文档。"} /></p> : <>
+            <svg viewBox="0 0 100 100" className="mt-4 h-72 w-full rounded-xl bg-slate-50" role="img" aria-label={t("个人知识文档关系图")}><title><UiText text={"个人知识文档关系图"} /></title>
               {graph.documents.edges.map((edge) => { const from = docPositions.get(edge.fromDocumentId); const to = docPositions.get(edge.toDocumentId); return from && to ? <line key={edge.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={edge.stale ? "#d97706" : "#6366f1"} strokeDasharray={edge.stale ? "2 2" : undefined} strokeWidth=".7" /> : null; })}
               {documents.map((node) => { const point = docPositions.get(node.id)!; return <g key={node.id}><circle cx={point.x} cy={point.y} r="5" fill="#312e81" /><text x={point.x} y={point.y + 1} fill="white" textAnchor="middle" fontSize="2.5">{node.title.slice(0, 2)}</text></g>; })}
             </svg>
             <ul className="mt-4 grid gap-2 sm:grid-cols-2">{documents.map((node) => <li key={node.id}><Link href={`/personal/knowledge?document=${encodeURIComponent(node.id)}`} className="text-xs font-semibold text-indigo-700">{node.title} →</Link></li>)}</ul>
-            {graph.documents.edges.length === 0 ? <p className="mt-3 text-xs text-slate-500">暂无文档关联；可在我的空间中建立。</p> : null}
+            {graph.documents.edges.length === 0 ? <p className="mt-3 text-xs text-slate-500"><UiText text={"暂无文档关联；可在我的空间中建立。"} /></p> : null}
           </>}
         </section>
 
         <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
-          <h2 className="text-xl font-semibold">人物、概念与其他实体</h2><p className="mt-2 text-xs text-slate-500">只有已审核且来源版本仍有效的关系进入图谱。下方每条关系保留原文引文。</p>
-          {accepted.length === 0 ? <p className="mt-6 text-sm text-slate-500">还没有经审核的实体关系。</p> : <>
-            <svg viewBox="0 0 100 100" className="mt-4 h-72 w-full rounded-xl bg-indigo-50/40" role="img" aria-label="已审核实体关系图"><title>已审核实体关系图</title>
+          <h2 className="text-xl font-semibold"><UiText text={"人物、概念与其他实体"} /></h2><p className="mt-2 text-xs text-slate-500"><UiText text={"只有已审核且来源版本仍有效的关系进入图谱。下方每条关系保留原文引文。"} /></p>
+          {accepted.length === 0 ? <p className="mt-6 text-sm text-slate-500"><UiText text={"还没有经审核的实体关系。"} /></p> : <>
+            <svg viewBox="0 0 100 100" className="mt-4 h-72 w-full rounded-xl bg-indigo-50/40" role="img" aria-label={t("已审核实体关系图")}><title><UiText text={"已审核实体关系图"} /></title>
               {accepted.map((row) => { const from = entityPositions.get(`${row.subjectKind}:${row.subject}`); const to = entityPositions.get(`${row.objectKind}:${row.object}`); return from && to ? <line key={row.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#8b5cf6" strokeWidth=".7" /> : null; })}
               {entityNodes.map((node) => { const point = entityPositions.get(node.key)!; return <g key={node.key}><circle cx={point.x} cy={point.y} r="5" fill="#6d28d9" /><text x={point.x} y={point.y + 1} fill="white" textAnchor="middle" fontSize="2.3">{node.label.slice(0, 2)}</text></g>; })}
             </svg>
-            <ul className="mt-4 grid gap-2 sm:grid-cols-2">{accepted.map((row) => <li key={row.id} className="rounded-xl bg-slate-50 p-3 text-xs"><p className="font-semibold">{row.subject} — {row.predicate} → {row.object}</p><p className="mt-1 text-slate-500">来源：{row.documentTitle} · “{row.evidence}”</p></li>)}</ul>
+            <ul className="mt-4 grid gap-2 sm:grid-cols-2">{accepted.map((row) => <li key={row.id} className="rounded-xl bg-slate-50 p-3 text-xs"><p className="font-semibold">{row.subject} — {row.predicate} → {row.object}</p><p className="mt-1 text-slate-500"><UiText text={"来源："} />{row.documentTitle} · “{row.evidence}”</p></li>)}</ul>
           </>}
         </section>
 
         <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">待审核关系</h2><p className="mt-2 text-xs text-slate-500">每条候选保留来源文档与原文证据；确认后才会显示在上方图谱。</p></div><OperationPanel title="提取知识关系候选" triggerLabel="提取候选关系" description="选择文档和个人模型。提交前会显示外发内容与费用确认，模型结果只进入待审核列表。" open={extractOpen} onOpenChange={setExtractOpen} disabled={pending || !selectedDocumentId || !selectedProviderId}>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold"><UiText text={"待审核关系"} /></h2><p className="mt-2 text-xs text-slate-500"><UiText text={"每条候选保留来源文档与原文证据；确认后才会显示在上方图谱。"} /></p></div><OperationPanel title={t("提取知识关系候选")} triggerLabel={t("提取候选关系")} description={t("选择文档和个人模型。提交前会显示外发内容与费用确认，模型结果只进入待审核列表。") } open={extractOpen} onOpenChange={setExtractOpen} disabled={pending || !selectedDocumentId || !selectedProviderId}>
             <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-              <label className="text-xs font-semibold text-slate-700">知识文档<select value={selectedDocumentId} onChange={(event) => setDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{documents.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
-              <label className="text-xs font-semibold text-slate-700">个人文本模型<select value={selectedProviderId} onChange={(event) => setProviderId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{providers.length === 0 ? <option value="">尚无已验证模型</option> : providers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.defaultGenerationModelId}</option>)}</select></label>
-              <button type="button" onClick={() => void extract()} disabled={pending || !selectedDocumentId || !selectedProviderId} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "开始提取"}</button>
+              <label className="text-xs font-semibold text-slate-700"><UiText text={"知识文档"} /><select value={selectedDocumentId} onChange={(event) => setDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{documents.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
+              <label className="text-xs font-semibold text-slate-700"><UiText text={"个人文本模型"} /><select value={selectedProviderId} onChange={(event) => setProviderId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{providers.length === 0 ? <option value=""><UiText text={"尚无已验证模型"} /></option> : providers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.defaultGenerationModelId}</option>)}</select></label>
+              <button type="button" onClick={() => void extract()} disabled={pending || !selectedDocumentId || !selectedProviderId} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("开始提取")}</button>
             </div>
           </OperationPanel></div>
-          <h3 className="mt-7 text-sm font-semibold">待审核 · {pendingSuggestions.length}</h3>
-          {pendingSuggestions.length === 0 ? <p className="mt-2 text-xs text-slate-500">暂无待审核关系。</p> : <ul className="mt-3 space-y-3">{pendingSuggestions.map((row) => <li key={row.id} className="rounded-2xl border border-slate-200 p-4"><p className="text-sm font-semibold">{row.subject} <span className="text-xs text-slate-400">({kindLabel[row.subjectKind] ?? row.subjectKind})</span> — {row.predicate} → {row.object} <span className="text-xs text-slate-400">({kindLabel[row.objectKind] ?? row.objectKind})</span></p><p className="mt-2 text-xs leading-5 text-slate-600">来源：{row.documentTitle} · “{row.evidence}”</p>{row.stale ? <p className="mt-2 text-xs text-amber-700">来源文档已更新；此候选不能再接受，请重新提取。</p> : null}<div className="mt-3 flex gap-2"><button type="button" disabled={pending || row.stale} onClick={() => void review(row.id, "accepted")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">确认关系</button><button type="button" disabled={pending} onClick={() => void review(row.id, "rejected")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">忽略</button></div></li>)}</ul>}
+          <h3 className="mt-7 text-sm font-semibold"><UiText text={"待审核 ·"} />{" "}{pendingSuggestions.length}</h3>
+          {pendingSuggestions.length === 0 ? <p className="mt-2 text-xs text-slate-500"><UiText text={"暂无待审核关系。"} /></p> : <ul className="mt-3 space-y-3">{pendingSuggestions.map((row) => <li key={row.id} className="rounded-2xl border border-slate-200 p-4"><p className="text-sm font-semibold">{row.subject} <span className="text-xs text-slate-400">({t(kindLabel[row.subjectKind] ?? row.subjectKind)})</span> — {row.predicate} → {row.object} <span className="text-xs text-slate-400">({t(kindLabel[row.objectKind] ?? row.objectKind)})</span></p><p className="mt-2 text-xs leading-5 text-slate-600"><UiText text={"来源："} />{row.documentTitle} · “{row.evidence}”</p>{row.stale ? <p className="mt-2 text-xs text-amber-700"><UiText text={"来源文档已更新；此候选不能再接受，请重新提取。"} /></p> : null}<div className="mt-3 flex gap-2"><button type="button" disabled={pending || row.stale} onClick={() => void review(row.id, "accepted")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"确认关系"} /></button><button type="button" disabled={pending} onClick={() => void review(row.id, "rejected")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"><UiText text={"忽略"} /></button></div></li>)}</ul>}
         </section>
       </>}
     </div>

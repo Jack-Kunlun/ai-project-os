@@ -51,8 +51,8 @@ test("剪贴板失败保持失败状态并给出手动复制方式", async () =>
 
   await assert.rejects(copyPersonalKnowledgeBody(body, { writeText: async () => { throw new Error("clipboard denied"); } }), /clipboard denied/u);
   assert.match(handoffSource, /catch \{\s*setCopyState\("fallback"\);\s*\}/u);
-  assert.match(handoffSource, /copyState === "copied" \? <p[^>]*role="status">正文已复制/u);
+  assert.match(handoffSource, /copyState === "copied" \? <p[^>]*role="status"><UiText text=\{"正文已复制。前往项目后，在“文本资料”中粘贴并保存。"\} \/><\/p>/u);
   assert.match(handoffSource, /copyState === "fallback" \? \([\s\S]*?自动复制失败/u);
-  assert.match(handoffSource, /aria-label="待手动复制的个人知识正文"/u);
+  assert.match(handoffSource, /aria-label=\{translateUi\("待手动复制的个人知识正文"\)\}/u);
   assert.doesNotMatch(buildProjectMaterialsAddHref(accessibleProjectId), new RegExp(body, "u"));
 });

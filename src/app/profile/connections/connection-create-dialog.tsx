@@ -3,6 +3,8 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { useInquiryOperation } from "@/components/inquiry-operation";
+import { UiText, useAppearance } from "@/components/appearance-provider";
 
 const DialogFooterContext = createContext<HTMLElement | null>(null);
 
@@ -17,6 +19,8 @@ export function ConnectionCreateDialog({ title, onClose, children }: { title: st
   const panelRef = useRef<HTMLDivElement>(null);
   const [footer, setFooter] = useState<HTMLElement | null>(null);
   const titleId = useId();
+  const { t } = useAppearance();
+  const owned = useInquiryOperation(true, panelRef);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -41,10 +45,10 @@ export function ConnectionCreateDialog({ title, onClose, children }: { title: st
   }, [onClose]);
 
   return <div className={`fixed inset-0 z-50 flex items-center justify-center ${modalBackdropClassName} px-3 py-5 sm:px-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`flex max-h-[calc(100dvh-2.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
-      <header className={`${modalHeaderClassName} flex items-center justify-between gap-4 px-4 py-4 sm:px-6`}><h2 id={titleId} className="text-lg font-semibold text-slate-900">{title}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="关闭弹窗" className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">关闭</button></header>
-      <DialogFooterContext.Provider value={footer}><div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">{children}</div></DialogFooterContext.Provider>
-      <footer ref={setFooter} className={`${modalFooterClassName} flex flex-wrap gap-2 px-4 py-4 sm:px-6`} />
+    <div data-connection-dialog ref={panelRef} data-inquiry-owned={String(owned)} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`flex max-h-[calc(100dvh-2.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
+      <header data-dialog-header className={`${modalHeaderClassName} flex items-center justify-between gap-4 px-4 py-4 sm:px-6`}><h2 id={titleId} className="text-lg font-semibold text-slate-900"><UiText text={title} /></h2><button data-dialog-close ref={closeRef} type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"><UiText text="关闭" /></button></header>
+      <DialogFooterContext.Provider value={footer}><div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">{children}</div></DialogFooterContext.Provider>
+      <footer data-dialog-footer ref={setFooter} className={`${modalFooterClassName} flex flex-wrap gap-2 px-4 py-4 sm:px-6`} />
     </div>
   </div>;
 }

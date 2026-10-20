@@ -409,3 +409,48 @@ test("team activity read lock linearizes before project grant revoke", { skip: !
   const afterRevoke = await getTeamActivity(fixture.actor, fixture.workspaceId, 50, db);
   assert.equal(afterRevoke.activity.some((entry) => entry.project?.id === fixture.visibleProjectId), false);
 });
+
+test("workspace view APIs narrow access and retry Chinese-name slugs in fresh transactions", { skip: !shouldRun ? "TEAM_EXPERIENCE_POSTGRES_GATE=1 is required" : false }, async () => {
+  assertDisposableGateDatabase();
+  const db=getDb();
+  const {createPasswordRecord,createSession,sessionCookie}=await import("../src/lib/auth");
+  const {closeOwnAccount}=await import("../src/lib/account-closure-service");
+  const {GET:getProjects,POST:createProject}=await import("../src/app/api/projects/route");
+  const {GET:getDashboard}=await import("../src/app/api/dashboard/route");
+  const {GET:getWorkspace}=await import("../src/app/api/workspaces/current/route");
+  try {
+    const closurePassword="WorkspaceClosure_2026";
+    const closurePasswordRecord=await createPasswordRecord(closurePassword);
+    const own=await createPostgresWorkspaceFixture(db),foreign=await createPostgresWorkspaceFixture(db,{passwordRecord:closurePasswordRecord});
+    await db.workspace.update({where:{id:own.workspaceId},data:{slug:`user-${own.ownerId}`}});
+    const owner=await db.appUser.findUniqueOrThrow({where:{id:own.ownerId}});
+    const session=await createSession(db,owner);
+    const headers={cookie:sessionCookie(session.token,session.expiresAt).split(";")[0],host:"workspace-view.invalid",origin:"http://workspace-view.invalid","content-type":"application/json"};
+    const request=(path:string,body?:unknown)=>new Request(`http://workspace-view.invalid${path}`,{headers,...(body?{method:"POST",body:JSON.stringify(body)}:{})});
+    const first=await createProject(request("/api/projects",{name:"中文项目",workspaceId:own.workspaceId}));
+    const second=await createProject(request("/api/projects",{name:"中文项目",workspaceId:own.workspaceId}));
+    assert.equal(first.status,201);assert.equal(second.status,201);
+    const a=await first.json(),b=await second.json();assert.notEqual(a.project.slug,b.project.slug);
+    for(const id of [a.project.id,b.project.id])assert.equal(await db.projectMembership.count({where:{projectId:id,userId:own.ownerId,role:"owner",accessState:"confirmed"}}),1);
+    const denied=await createProject(request("/api/projects",{name:"Other workspace",workspaceId:foreign.workspaceId}));assert.equal(denied.status,403);
+    const mine=await getProjects(request(`/api/projects?workspaceId=${own.workspaceId}`));assert.equal(mine.status,200);
+    const visible=await mine.json();assert.equal(visible.projects.length,2);assert.ok(visible.projects.every((project:{workspaceId:string})=>project.workspaceId===own.workspaceId));
+    const hidden=await getProjects(request(`/api/projects?workspaceId=${foreign.workspaceId}`));assert.equal(hidden.status,200);
+    const inaccessible=await hidden.json();assert.deepEqual(inaccessible.projects,[]);assert.equal(inaccessible.pagination.total,0);assert.equal(inaccessible.canCreateProject,false);
+    const dashboard=await getDashboard(request(`/api/dashboard?workspaceId=${foreign.workspaceId}`));assert.equal(dashboard.status,200);assert.deepEqual((await dashboard.json()).projects,[]);
+    const directory=await getWorkspace(request("/api/workspaces/current"));assert.equal(directory.status,200);const directoryData=await directory.json();assert.ok(directoryData.availableWorkspaces.some((space:{id:string})=>space.id===own.workspaceId));assert.ok(!directoryData.availableWorkspaces.some((space:{id:string})=>space.id===foreign.workspaceId));
+    // Close an exclusive personal workspace through the account lifecycle service.
+    // The database deliberately rejects direct closedAt writes and shared-workspace closure.
+    await db.workspace.update({where:{id:foreign.workspaceId},data:{slug:`user-${foreign.ownerId}`}});
+    const foreignOwner=await db.appUser.findUniqueOrThrow({where:{id:foreign.ownerId}});
+    const foreignSession=await createSession(db,foreignOwner);
+    await closeOwnAccount({method:"password",password:closurePassword,confirmation:"注销账号"},foreignSession.user,db);
+    const closedView=await getProjects(request(`/api/projects?workspaceId=${foreign.workspaceId}`));const closedData=await closedView.json();
+    assert.deepEqual(closedData.projects,[]);assert.equal(closedData.canCreateProject,false);
+    assert.equal((await createProject(request("/api/projects",{name:"Closed workspace",workspaceId:foreign.workspaceId}))).status,403);
+    const closedDashboard=await getDashboard(request(`/api/dashboard?workspaceId=${foreign.workspaceId}`));assert.equal(closedDashboard.status,200);assert.deepEqual((await closedDashboard.json()).projects,[]);
+    const afterClosureDirectory=await getWorkspace(request("/api/workspaces/current"));assert.equal(afterClosureDirectory.status,200);assert.ok(!(await afterClosureDirectory.json()).availableWorkspaces.some((space:{id:string})=>space.id===foreign.workspaceId));
+    assert.equal((await getProjects(request("/api/projects?workspaceId=invalid"))).status,400);
+    assert.equal((await getDashboard(request(`/api/dashboard?workspaceId=${own.workspaceId}&workspaceId=${foreign.workspaceId}`))).status,400);
+  }finally{await db.$disconnect();}
+});

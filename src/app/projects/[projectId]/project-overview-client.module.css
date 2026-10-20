@@ -1,7 +1,7 @@
 .page {
   min-height: 100vh;
-  color: #292e2a;
-  background: #fff;
+  color: var(--app-text);
+  background: var(--app-surface);
 }
 
 .content {
@@ -30,7 +30,7 @@
 .heading h1,
 .panelHeading h2 {
   margin: 0;
-  color: #2e352f;
+  color: var(--app-text);
   font-weight: 560;
   letter-spacing: -0.03em;
 }
@@ -41,12 +41,12 @@
   font-size: 25px;
   font-weight: 600;
   letter-spacing: 0;
-  color: #20242a;
+  color: var(--app-text);
 }
 
 .eyebrow {
   margin: 0 0 7px;
-  color: #697066;
+  color: var(--app-muted);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 1.3px;
@@ -55,7 +55,7 @@
 .subtitle {
   max-width: 720px;
   margin: 8px 0 0;
-  color: #6a7168;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.7;
 }
@@ -70,17 +70,17 @@
   font-weight: 600;
 }
 
-.statusGood { color: #61745d; background: #e8eee5; }
-.statusWarning { color: #846b48; background: #f2eddf; }
-.statusRisk { color: #965c4d; background: #f5e9e5; }
-.statusNeutral { color: #697165; background: #f4f6f9; }
+.statusGood { color: var(--app-muted); background: var(--app-surface-soft); }
+.statusWarning { color: var(--app-muted); background: var(--app-warning-soft); }
+.statusRisk { color: var(--app-muted); background: var(--app-danger-soft); }
+.statusNeutral { color: var(--app-muted); background: var(--app-surface-soft); }
 
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0 0 20px;
-  border-top: 1px solid #e5e7eb;
-  border-bottom: 1px solid #e5e7eb;
+  border-top: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
   padding: 15px 0;
 }
 
@@ -92,7 +92,7 @@
   flex-direction: column;
   justify-content: center;
   gap: 6px;
-  border-right: 1px solid #e5e7eb;
+  border-right: 1px solid var(--app-border);
   padding: 0 19px;
   color: inherit;
   text-decoration: none;
@@ -109,13 +109,13 @@
 
 .metricCard p {
   margin: 0;
-  color: #687165;
+  color: var(--app-muted);
   font-size: 11px;
   font-weight: 560;
 }
 
 .metricCard strong {
-  color: #343c34;
+  color: var(--app-text);
   font-size: 21px;
   font-weight: 580;
   letter-spacing: -0.03em;
@@ -123,7 +123,7 @@
 
 .metricCard > span {
   overflow: hidden;
-  color: #6a6f67;
+  color: var(--app-muted);
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -133,7 +133,7 @@
   position: absolute;
   top: 7px;
   right: 14px;
-  color: #6b6f67;
+  color: var(--app-muted);
   font-size: 12px;
   font-weight: 400;
   opacity: 0;
@@ -148,11 +148,11 @@
   align-items: center;
   gap: 11px;
   margin-bottom: 20px;
-  border: 1px solid #e9dfcf;
+  border: 1px solid var(--app-warning-border);
   border-radius: 8px;
   padding: 11px 14px;
-  color: #7d6b50;
-  background: #f6f0e7;
+  color: var(--app-muted);
+  background: var(--app-warning-soft);
   text-decoration: none;
 }
 
@@ -162,7 +162,7 @@
   height: 18px;
   flex: 0 0 18px;
   place-items: center;
-  border: 1px solid #d9c9ad;
+  border: 1px solid var(--app-warning-border);
   border-radius: 50%;
   font-size: 11px;
   font-weight: 700;
@@ -182,7 +182,7 @@
 
 .attentionBar small {
   overflow: hidden;
-  color: #66553d;
+  color: var(--app-muted);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -212,10 +212,10 @@
 .activityPanel,
 .continuePanel {
   min-width: 0;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
   padding: 20px;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .panelHeading {
@@ -230,24 +230,24 @@
   display: inline-flex;
   min-height: 28px;
   align-items: center;
-  color: #64735c;
+  color: var(--app-muted);
   font-size: 10px;
   font-weight: 620;
   text-decoration: none;
 }
 
-.textLink:hover { color: #3d563e; }
+.textLink:hover { color: var(--app-text); }
 
 .goalMeta {
   margin-top: 19px;
-  color: #6a7067;
+  color: var(--app-muted);
   font-size: 9px;
   letter-spacing: 0.2px;
 }
 
 .goalTitle {
   margin: 7px 0 0;
-  color: #364037;
+  color: var(--app-text);
   font-size: 17px;
   font-weight: 580;
   line-height: 1.55;
@@ -255,7 +255,7 @@
 
 .goalDescription {
   margin: 6px 0 0;
-  color: #6a7168;
+  color: var(--app-muted);
   font-size: 11px;
   line-height: 1.7;
 }
@@ -265,7 +265,7 @@
   align-items: center;
   gap: 12px;
   margin-top: 20px;
-  color: #6a7168;
+  color: var(--app-muted);
   font-size: 9px;
 }
 
@@ -274,7 +274,7 @@
   overflow: hidden;
   flex: 1;
   border-radius: 99px;
-  background: #f4f6f9;
+  background: var(--app-surface-soft);
 }
 
 .progressTrack span {
@@ -290,19 +290,19 @@
   align-items: center;
   gap: 10px;
   margin-top: 19px;
-  border-top: 1px solid #edf0f5;
+  border-top: 1px solid var(--app-border);
   padding-top: 14px;
 }
 
 .worldSummary p {
   margin: 0;
-  color: #6a7168;
+  color: var(--app-muted);
   font-size: 9px;
   line-height: 1.55;
 }
 
 .worldSummary a {
-  color: #64735c;
+  color: var(--app-muted);
   font-size: 9px;
   font-weight: 620;
   text-decoration: none;
@@ -310,23 +310,23 @@
 
 .emptyGoal,
 .panelEmpty {
-  color: #6a7067;
+  color: var(--app-muted);
   font-size: 11px;
   line-height: 1.75;
 }
 
 .emptyGoal {
   margin-top: 20px;
-  border-radius: 7px;
+  border-radius: 6px;
   padding: 14px;
-  background: #fafbfc;
+  background: var(--app-surface-soft);
 }
 
 .emptyGoal h3,
 .emptyGoal p { margin: 0; }
-.emptyGoal h3 { color: #505a4f; font-size: 12px; font-weight: 600; }
+.emptyGoal h3 { color: var(--app-muted); font-size: 12px; font-weight: 600; }
 .emptyGoal p { margin-top: 5px; }
-.emptyGoal a { display: inline-block; margin-top: 8px; color: #64735c; font-size: 10px; font-weight: 620; text-decoration: none; }
+.emptyGoal a { display: inline-block; margin-top: 8px; color: var(--app-muted); font-size: 10px; font-weight: 620; text-decoration: none; }
 
 .nextTasks,
 .factsPanel { margin-top: 19px; }
@@ -340,7 +340,7 @@
   min-width: 0;
   align-items: center;
   gap: 11px;
-  border-top: 1px solid #edf0f5;
+  border-top: 1px solid var(--app-border);
   padding: 12px 1px;
   color: inherit;
   text-decoration: none;
@@ -359,7 +359,7 @@
 }
 
 .workActive { background: #879b82; }
-.workBlocked { background: #c47b68; }
+.workBlocked { background: var(--app-danger-ink); }
 
 .workCopy,
 .factText {
@@ -372,7 +372,7 @@
 .workCopy strong,
 .factText strong {
   overflow: hidden;
-  color: #485246;
+  color: var(--app-muted);
   font-size: 11px;
   font-weight: 580;
   text-overflow: ellipsis;
@@ -383,7 +383,7 @@
 .factText small {
   display: -webkit-box;
   overflow: hidden;
-  color: #6a6f67;
+  color: var(--app-muted);
   font-size: 9px;
   line-height: 1.55;
   -webkit-box-orient: vertical;
@@ -391,7 +391,7 @@
 }
 
 .arrow {
-  color: #6b6f67;
+  color: var(--app-muted);
   font-size: 13px;
 }
 
@@ -404,7 +404,7 @@
 .factSource {
   flex: 0 0 auto;
   max-width: 145px;
-  color: #6b6f68;
+  color: var(--app-muted);
   font-size: 9px;
   text-align: right;
 }
@@ -419,7 +419,7 @@
 
 .activityList {
   margin: 17px 0 5px 4px;
-  border-left: 1px solid #e5e7eb;
+  border-left: 1px solid var(--app-border);
 }
 
 .activityItem {
@@ -441,7 +441,7 @@
   left: 0;
   width: 7px;
   height: 7px;
-  border: 1px solid #fff;
+  border: 1px solid var(--app-border);
   box-sizing: content-box;
 }
 
@@ -452,7 +452,7 @@
 }
 
 .activityItem strong {
-  color: #536052;
+  color: var(--app-muted);
   font-size: 10px;
   font-weight: 600;
 }
@@ -460,7 +460,7 @@
 .activityItem small,
 .activityItem time {
   overflow: hidden;
-  color: #6a6f68;
+  color: var(--app-muted);
   font-size: 9px;
   line-height: 1.55;
   text-overflow: ellipsis;
@@ -475,34 +475,34 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border-top: 1px solid #edf0f5;
-  color: #687262;
+  border-top: 1px solid var(--app-border);
+  color: var(--app-muted);
   font-size: 10px;
   text-decoration: none;
 }
 
-.quickLink:hover { color: #3d563e; }
+.quickLink:hover { color: var(--app-text); }
 
 .recommendedStep {
   display: grid;
   gap: 5px;
   margin-top: 12px;
-  border-radius: 7px;
+  border-radius: 6px;
   padding: 12px;
   color: inherit;
-  background: #fafbfc;
+  background: var(--app-surface-soft);
   text-decoration: none;
 }
 
 .recommendedStep span,
-.recommendedStep small { color: #697066; font-size: 9px; line-height: 1.55; }
-.recommendedStep strong { color: #4b5848; font-size: 10px; font-weight: 620; }
+.recommendedStep small { color: var(--app-muted); font-size: 9px; line-height: 1.55; }
+.recommendedStep strong { color: var(--app-muted); font-size: 10px; font-weight: 620; }
 
 .governanceDetails {
   margin-top: 19px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .governanceDetails > summary {
@@ -512,7 +512,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 14px;
-  color: #65705f;
+  color: var(--app-muted);
   cursor: pointer;
   font-size: 10px;
   font-weight: 600;
@@ -520,7 +520,7 @@
 }
 
 .governanceDetails > summary span {
-  color: #6b6f68;
+  color: var(--app-muted);
   font-size: 9px;
   font-weight: 400;
 }
@@ -533,16 +533,16 @@
   justify-content: space-between;
   gap: 12px;
   margin-top: 15px;
-  color: #6b6f68;
+  color: var(--app-muted);
   font-size: 9px;
 }
 
 .snapshotFooter button {
-  border: 1px solid #dedfd8;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
   padding: 6px 9px;
-  color: #64725d;
-  background: #fff;
+  color: var(--app-muted);
+  background: var(--app-surface);
   font-size: 9px;
   font-weight: 600;
 }
@@ -553,16 +553,16 @@
 .inlineError,
 .inlineSuccess,
 .error {
-  border-radius: 7px;
+  border-radius: 6px;
   padding: 10px 13px;
   font-size: 11px;
   line-height: 1.65;
 }
 
-.archiveNotice { color: #836a46; background: #f5efdf; }
+.archiveNotice { color: var(--app-muted); background: var(--app-warning-soft); }
 .inlineError,
-.error { color: #985d50; background: #fbf2ef; }
-.inlineSuccess { color: #61745b; background: #edf3e9; }
+.error { color: var(--app-muted); background: var(--app-danger-soft); }
+.inlineSuccess { color: var(--app-muted); background: var(--app-success-soft); }
 
 .error {
   display: flex;
@@ -573,7 +573,7 @@
 
 .error button {
   border: 0;
-  color: #7e5147;
+  color: var(--app-muted);
   background: transparent;
   font-size: 10px;
   font-weight: 650;
@@ -586,7 +586,7 @@
 .skeletonMetrics > div,
 .skeletonMain > div {
   border-radius: 8px;
-  background: linear-gradient(100deg, #f4f6f9 20%, #f5f6f2 40%, #f4f6f9 60%);
+  background: linear-gradient(100deg, var(--app-surface-soft) 20%, var(--app-border) 40%, var(--app-surface-soft) 60%);
   background-size: 200% 100%;
   animation: shimmer 1.25s linear infinite;
 }

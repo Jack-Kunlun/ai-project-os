@@ -1,5 +1,5 @@
 .pageHeader {
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--app-border);
   padding-bottom: 1.25rem;
 }
 
@@ -25,7 +25,7 @@
   min-height: 2.5rem;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 0.625rem 1rem;
   font-size: 0.8125rem;
   font-weight: 500;
@@ -33,14 +33,14 @@
 }
 
 .primaryAction {
-  border: 1px solid #3566c9;
-  background: #3566c9;
-  color: #fff;
+  border: 1px solid var(--app-accent);
+  background: var(--app-accent);
+  color: var(--app-on-accent);
 }
 
 .primaryAction:hover {
-  border-color: #1d4ed8;
-  background: #1d4ed8;
+  border-color: var(--app-accent);
+  background: var(--app-accent);
 }
 
 .primaryAction:disabled {
@@ -49,22 +49,22 @@
 }
 
 .secondaryAction {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #334155;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text);
   text-decoration: none;
 }
 
 .secondaryAction:hover {
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  border-color: var(--app-border);
+  color: var(--app-link);
 }
 
 .tabs {
   display: flex;
   gap: 0.25rem;
   overflow-x: auto;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--app-border);
   margin-top: 1.25rem;
   scrollbar-width: thin;
 }
@@ -77,44 +77,44 @@
   gap: 0.5rem;
   border-bottom: 2px solid transparent;
   padding: 0.625rem 0.9rem;
-  color: #606f85;
+  color: var(--app-muted);
   font-size: 0.8125rem;
   font-weight: 600;
   text-decoration: none;
 }
 
 .tab:hover {
-  color: #334155;
+  color: var(--app-text);
 }
 
 .tab:focus-visible,
 .categoryButton:focus-visible,
 .primaryAction:focus-visible,
 .secondaryAction:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
 
 .tabActive {
-  border-bottom-color: #2563eb;
-  color: #1d4ed8;
+  border-bottom-color: var(--app-accent);
+  color: var(--app-link);
 }
 
 .countBadge {
   min-width: 1.25rem;
   border-radius: 999px;
-  background: #fef3c7;
+  background: var(--app-warning-soft);
   padding: 0.125rem 0.4rem;
-  color: #92400e;
+  color: var(--app-warning-ink);
   text-align: center;
   font-size: 0.6875rem;
 }
 
 .sourceSection {
   margin-top: 1rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 5px;
-  background: #fff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
   padding: 1.25rem;
   scroll-margin-top: 5.5rem;
 }
@@ -124,7 +124,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--app-border);
   padding-bottom: 0.875rem;
 }
 
@@ -134,15 +134,15 @@
 
 .totalCount {
   flex: 0 0 auto;
-  color: #606f85;
+  color: var(--app-muted);
   font-size: 0.75rem;
 }
 
 .safetyNote {
   margin-top: 0.875rem;
-  border-left: 2px solid #cbd5e1;
+  border-left: 2px solid var(--app-border);
   padding: 0.15rem 0 0.15rem 0.625rem;
-  color: #606f85;
+  color: var(--app-muted);
   font-size: 0.6875rem;
   line-height: 1.45;
 }
@@ -157,15 +157,15 @@
 }
 
 .errorNotice {
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
+  border: 1px solid var(--app-danger-border);
+  background: var(--app-danger-soft);
+  color: var(--app-danger-ink);
 }
 
 .successNotice {
-  border: 1px solid #bbf7d0;
-  background: #f0fdf4;
-  color: #166534;
+  border: 1px solid var(--app-success-border);
+  background: var(--app-success-soft);
+  color: var(--app-success-ink);
 }
 
 .sourceLayout {
@@ -179,7 +179,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  border-right: 1px solid #f1f5f9;
+  border-right: 1px solid var(--app-border);
   padding-right: 0.75rem;
 }
 
@@ -189,20 +189,20 @@
   border-radius: 0.375rem;
   background: transparent;
   padding: 0.5rem 0.625rem;
-  color: #606f85;
+  color: var(--app-muted);
   text-align: left;
   font-size: 0.75rem;
   cursor: pointer;
 }
 
 .categoryButton:hover {
-  background: #f8fafc;
-  color: #334155;
+  background: var(--app-surface-soft);
+  color: var(--app-text);
 }
 
 .categoryButtonActive {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--app-accent-soft);
+  color: var(--app-link);
   font-weight: 650;
 }
 
@@ -215,24 +215,24 @@
   min-height: 2.5rem;
   align-items: center;
   gap: 0.75rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--app-border);
   padding-bottom: 0.75rem;
 }
 
 .searchInput {
   width: 100%;
   min-height: 2.375rem;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--app-border);
   border-radius: 0.5rem;
-  background: #fff;
+  background: var(--app-surface);
   padding: 0.5rem 0.75rem;
-  color: #0f172a;
+  color: var(--app-link);
   font-size: 0.8125rem;
   outline: none;
 }
 
 .searchInput:focus {
-  border-color: #93c5fd;
+  border-color: var(--app-border);
   box-shadow: 0 0 0 3px rgb(219 234 254 / 70%);
 }
 
@@ -248,7 +248,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--app-border);
   padding: 0.875rem 0.125rem;
 }
 
@@ -263,15 +263,15 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  color: #656f7d;
+  color: var(--app-muted);
   font-size: 0.6875rem;
 }
 
 .kindBadge {
   border-radius: 999px;
-  background: #f1f5f9;
+  background: var(--app-surface-soft);
   padding: 0.15rem 0.5rem;
-  color: #475569;
+  color: var(--app-muted);
   font-weight: 650;
 }
 
@@ -279,7 +279,7 @@
   display: -webkit-box;
   overflow: hidden;
   margin-top: 0.4rem;
-  color: #1e293b;
+  color: var(--app-text);
   font-size: 0.8125rem;
   font-weight: 550;
   line-height: 1.45;
@@ -300,29 +300,29 @@
   min-height: 2rem;
   align-items: center;
   justify-content: center;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border);
   border-radius: 0.375rem;
-  background: #fff;
+  background: var(--app-surface);
   padding: 0.375rem 0.625rem;
-  color: #475569;
+  color: var(--app-muted);
   font-size: 0.6875rem;
   font-weight: 600;
   text-decoration: none;
 }
 
 .detailAction:hover {
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  border-color: var(--app-border);
+  color: var(--app-link);
 }
 
 .deleteAction {
-  color: #b91c1c;
+  color: var(--app-danger-ink);
   cursor: pointer;
 }
 
 .deleteAction:hover {
-  border-color: #fecaca;
-  background: #fef2f2;
+  border-color: var(--app-danger-border);
+  background: var(--app-danger-soft);
 }
 
 .deleteAction:disabled {
@@ -331,7 +331,7 @@
 }
 
 .emptyState {
-  border: 1px dashed #cbd5e1;
+  border: 1px dashed var(--app-border);
   border-radius: 0.5rem;
   margin-top: 0.875rem;
   padding: 2rem 1rem;
@@ -346,7 +346,7 @@
 .loadingRow {
   height: 4.25rem;
   border-radius: 0.375rem;
-  background: #f1f5f9;
+  background: var(--app-surface-soft);
   animation: pulse 1.7s ease-in-out infinite;
 }
 
@@ -388,36 +388,36 @@
 .reviewSection,
 .tasksSection {
   margin-top: 1rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border);
   border-radius: 0.75rem;
-  background: #fff;
+  background: var(--app-surface);
   padding: 1.25rem;
   scroll-margin-top: 5.5rem;
 }
 
 .reviewCard,
 .taskCard {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border);
   border-radius: 0.625rem;
-  background: #fff;
+  background: var(--app-surface);
   padding: 1rem;
 }
 
 .taskCard {
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .taskProgress {
   height: 0.375rem;
   overflow: hidden;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--app-surface-soft);
 }
 
 .taskProgressFill {
   height: 100%;
   border-radius: inherit;
-  background: #2563eb;
+  background: var(--app-accent);
   transition: width 180ms ease;
 }
 
@@ -441,7 +441,7 @@
     flex-direction: row;
     overflow-x: auto;
     border-right: 0;
-    border-bottom: 1px solid #f1f5f9;
+    border-bottom: 1px solid var(--app-border);
     padding: 0 0 0.5rem;
   }
 

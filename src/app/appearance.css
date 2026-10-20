@@ -1,0 +1,296 @@
+:root {
+  color-scheme: light;
+  --app-bg: #ffffff;
+  --app-surface: #ffffff;
+  --app-surface-soft: #f7f8fa;
+  --app-text: #20242a;
+  --app-muted: #646a73;
+  --app-border: #e5e7eb;
+  --app-accent: #3566c9;
+  --app-accent-soft: #edf3ff;
+  --app-on-accent: #ffffff;
+  --app-input: #ffffff;
+  --app-link: #3566c9;
+  --app-danger-ink: #9f2d2d;
+  --app-danger-soft: #fff1f0;
+  --app-danger-border: #e6b8b3;
+  --app-warning-ink: #854d0e;
+  --app-warning-soft: #fff7e8;
+  --app-warning-border: #e6cd9c;
+  --app-success-ink: #166534;
+  --app-success-soft: #edf8f0;
+  --app-success-border: #b7d9c1;
+  --background: var(--app-bg);
+  --foreground: var(--app-text);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --app-bg: #111820;
+  --app-surface: #1b2531;
+  --app-surface-soft: #202c39;
+  --app-text: #e6edf6;
+  --app-muted: #aab6c7;
+  --app-border: #303d4d;
+  --app-accent: #4774c6;
+  --app-accent-soft: #26354a;
+  --app-on-accent: #ffffff;
+  --app-input: #151e28;
+  --app-link: #a7c3fa;
+  --app-danger-ink: #ffb4ab;
+  --app-danger-soft: #42272b;
+  --app-danger-border: #81434b;
+  --app-warning-ink: #f3d18a;
+  --app-warning-soft: #3c3322;
+  --app-warning-border: #806a33;
+  --app-success-ink: #94e0b1;
+  --app-success-soft: #1e382c;
+  --app-success-border: #3e7657;
+  --background: var(--app-bg);
+  --foreground: var(--app-text);
+  --scrollbar-track: #202c39;
+  --scrollbar-thumb: #607087;
+  --scrollbar-thumb-hover: #7c8da5;
+}
+
+html,
+body {
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+/* Compact language/theme popover used by both workspace headers. */
+.appearance-controls {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.appearance-controls-trigger {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
+  padding: 0 10px;
+  color: var(--app-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.appearance-controls-trigger:hover {
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.appearance-controls-trigger:focus-visible,
+.appearance-controls-popover select:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.appearance-controls-trigger > svg:first-child {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.appearance-controls-chevron {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.appearance-controls-popover {
+  position: absolute;
+  z-index: 1000;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: 222px;
+  gap: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  padding: 15px;
+  color: var(--app-text);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 14%);
+}
+
+.appearance-controls-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 65px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+}
+
+.appearance-controls-row select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-input);
+  padding: 8px 28px 8px 12px;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.appearance-feedback { margin: 0; color: var(--app-muted); font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 700px) {
+  .appearance-controls-trigger {
+    min-height: 32px;
+    gap: 5px;
+    padding: 0 8px;
+  }
+
+  .appearance-controls-popover {
+    width: min(222px, calc(100vw - 24px));
+  }
+}
+
+/* Dark mode surface and type adaptation for existing Tailwind utility markup. */
+:root[data-theme="dark"] :is(
+  [class~="bg-white"], [class~="bg-white/50"], [class~="bg-white/60"], [class~="bg-white/70"], [class~="bg-white/75"], [class~="bg-white/80"], [class~="bg-white/90"], [class~="bg-white/95"],
+  [class~="bg-slate-50"], [class~="bg-slate-50/50"], [class~="bg-slate-50/60"], [class~="bg-slate-50/70"], [class~="bg-slate-50/80"], [class~="bg-slate-50/90"], [class~="bg-slate-50/95"],
+  [class~="bg-slate-100"], [class~="bg-slate-100/80"]
+) {
+  background-color: var(--app-surface) !important;
+}
+
+:root[data-theme="dark"] :is([class~="bg-slate-200"], [class~="bg-slate-300"], [class~="bg-slate-400"], [class~="bg-slate-500"]) {
+  background-color: #344357 !important;
+}
+
+:root[data-theme="dark"] :is([class~="bg-slate-700"], [class~="bg-slate-800"], [class~="bg-slate-900"], [class~="bg-slate-950"]) {
+  background-color: #101720 !important;
+}
+
+:root[data-theme="dark"] :is([class~="bg-[#f4f6fb]"], [class~="bg-[#f5f7fb]"]) {
+  background-color: var(--app-bg) !important;
+}
+
+:root[data-theme="dark"] :is([class~="text-slate-50"], [class~="text-slate-100"], [class~="text-slate-200"], [class~="text-slate-300"]) {
+  color: #dce5f0 !important;
+}
+
+:root[data-theme="dark"] [class~="text-slate-400"] { color: #a3b1c4 !important; }
+:root[data-theme="dark"] [class~="text-slate-500"] { color: #aab6c7 !important; }
+:root[data-theme="dark"] [class~="text-slate-600"] { color: #b6c2d2 !important; }
+:root[data-theme="dark"] [class~="text-slate-700"] { color: #c9d3e0 !important; }
+:root[data-theme="dark"] [class~="text-slate-800"] { color: #d7e0eb !important; }
+:root[data-theme="dark"] :is([class~="text-slate-900"], [class~="text-slate-950"]) { color: #edf2f8 !important; }
+
+:root[data-theme="dark"] :is(
+  [class~="border-slate-100"], [class~="border-slate-200"], [class~="border-slate-200/70"], [class~="border-slate-200/80"], [class~="border-slate-300"],
+  [class~="border-white"], [class~="border-white/50"], [class~="border-white/70"], [class~="border-white/80"]
+) {
+  border-color: var(--app-border) !important;
+}
+
+:root[data-theme="dark"] :is(
+  [class~="bg-indigo-50"], [class~="bg-indigo-50/40"], [class~="bg-indigo-50/50"], [class~="bg-indigo-50/60"], [class~="bg-indigo-50/70"], [class~="bg-indigo-100"], [class~="bg-indigo-200"]
+) {
+  background-color: var(--app-accent-soft) !important;
+}
+
+:root[data-theme="dark"] :is([class~="bg-indigo-500"], [class~="bg-indigo-600"], [class~="bg-indigo-700"], [class~="bg-blue-600"]) {
+  background-color: #355ba7 !important;
+}
+
+:root[data-theme="dark"] :is([class~="hover:bg-indigo-500"], [class~="hover:bg-indigo-600"], [class~="hover:bg-indigo-700"]):hover {
+  background-color: #416bb8 !important;
+}
+
+:root[data-theme="dark"] :is([class~="text-indigo-500"], [class~="text-indigo-600"], [class~="text-indigo-700"], [class~="text-indigo-800"], [class~="text-indigo-900"], [class~="text-indigo-950"]) {
+  color: #a7c3fa !important;
+}
+
+:root[data-theme="dark"] :is([class~="hover:text-indigo-700"], [class~="hover:text-indigo-800"], [class~="hover:text-indigo-900"]):hover {
+  color: #c1d5ff !important;
+}
+
+:root[data-theme="dark"] :is([class~="bg-emerald-50"], [class~="bg-emerald-100"]) { background-color: #20392f !important; }
+:root[data-theme="dark"] :is([class~="bg-amber-50"], [class~="bg-amber-50/60"], [class~="bg-amber-50/70"], [class~="bg-amber-100"]) { background-color: #3a3020 !important; }
+:root[data-theme="dark"] :is([class~="bg-rose-50"], [class~="bg-rose-50/50"], [class~="bg-rose-100"]) { background-color: #3d292f !important; }
+:root[data-theme="dark"] :is([class~="bg-violet-50"], [class~="bg-violet-50/40"], [class~="bg-violet-50/60"], [class~="bg-violet-100"]) { background-color: #302a42 !important; }
+:root[data-theme="dark"] :is([class~="bg-blue-50"], [class~="bg-blue-100"]) { background-color: #263b58 !important; }
+
+:root[data-theme="dark"] :is([class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"]) { background-color: #256547 !important; }
+:root[data-theme="dark"] :is([class~="bg-amber-500"], [class~="bg-amber-600"], [class~="bg-amber-700"], [class~="bg-amber-800"], [class~="bg-amber-900"]) { background-color: #76531a !important; }
+:root[data-theme="dark"] :is([class~="bg-rose-500"], [class~="bg-rose-600"], [class~="bg-rose-700"]) { background-color: #93354a !important; }
+
+:root[data-theme="dark"] :is([class~="text-emerald-600"], [class~="text-emerald-700"], [class~="text-emerald-800"], [class~="text-emerald-900"], [class~="text-emerald-950"]) { color: #8fe1b2 !important; }
+:root[data-theme="dark"] :is([class~="text-amber-600"], [class~="text-amber-700"], [class~="text-amber-800"], [class~="text-amber-900"], [class~="text-amber-950"]) { color: #f1cf8c !important; }
+:root[data-theme="dark"] :is([class~="text-rose-600"], [class~="text-rose-700"], [class~="text-rose-800"], [class~="text-rose-900"], [class~="text-rose-950"]) { color: #f4b3bd !important; }
+:root[data-theme="dark"] :is([class~="text-violet-600"], [class~="text-violet-700"], [class~="text-violet-800"], [class~="text-violet-900"]) { color: #cfb8ff !important; }
+:root[data-theme="dark"] :is([class~="text-blue-600"], [class~="text-blue-700"], [class~="text-blue-800"], [class~="text-blue-900"]) { color: #a5c8ff !important; }
+
+:root[data-theme="dark"] :is(input, select, textarea) {
+  background-color: var(--app-input);
+  border-color: var(--app-border);
+  color: var(--app-text);
+}
+
+:root[data-theme="dark"] :is(input, select, textarea)::placeholder { color: #8797ab; opacity: 1; }
+:root[data-theme="dark"] :is(input:disabled, select:disabled, textarea:disabled) { background-color: #202a37; color: #8c9cb2; }
+
+/* The existing CSS-module shells use local color literals; adapt their frame separately. */
+:root[data-theme="dark"] [data-user-shell-root] {
+  --shell-ink: var(--app-text);
+  --shell-secondary: var(--app-muted);
+  --shell-line: var(--app-border);
+  --shell-sidebar: #151e28;
+  --shell-accent: #8db2f4;
+  --shell-accent-bg: #26354a;
+}
+
+:root[data-theme="dark"] [data-user-shell-root] aside { background: var(--app-surface-soft); border-color: var(--app-border); }
+:root[data-theme="dark"] [data-user-shell-root] header { background: rgb(27 37 49 / 96%); border-color: var(--app-border); }
+:root[data-theme="dark"] [data-user-shell-root] a { color: #b6c5d9; }
+:root[data-theme="dark"] [data-user-shell-root] a[aria-current="page"] { background: #26384f; color: #c6d9ff; }
+:root[data-theme="dark"] [data-user-shell-root] button { color: #b6c5d9; }
+:root[data-theme="dark"] [data-user-shell-root] select,
+:root[data-theme="dark"] [data-user-shell-root] input { background: var(--app-input); border-color: var(--app-border); color: var(--app-text); }
+:root[data-theme="dark"] [data-user-shell-root] [role="dialog"] { background: var(--app-surface); border-color: var(--app-border); color: var(--app-text); }
+
+:root[data-theme="dark"] [data-admin-workspace] {
+  --admin-ink: #e3ebf6;
+  --admin-muted: #a5b4c9;
+  --admin-line: #303d4d;
+  --admin-blue: #8db2f4;
+  --admin-blue-soft: #26354a;
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+:root[data-theme="dark"] [data-admin-workspace] :is(.admin-global-header, .admin-sidebar, .admin-mobile-drawer) {
+  background-color: var(--app-surface);
+  border-color: var(--app-border);
+  color: var(--app-text);
+}
+
+:root[data-theme="dark"] [data-admin-workspace] .admin-page-scroll { background: var(--app-bg); color: var(--app-text); }
+:root[data-theme="dark"] [data-admin-workspace] :is(.admin-primary-link, .admin-module-link, .admin-header-utility, .admin-account-link, .admin-logout-button) {
+  color: #b6c5d9;
+}
+:root[data-theme="dark"] [data-admin-workspace] :is(.admin-primary-link.is-current, .admin-module-link.is-current) {
+  background: var(--app-accent-soft);
+  color: #c6d9ff;
+}
+:root[data-theme="dark"] [data-admin-workspace] :is(.admin-header-utility, .admin-account-link, .admin-logout-button) {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+}

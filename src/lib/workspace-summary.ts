@@ -35,6 +35,7 @@ export type WorkspaceProject = {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  pendingReviewCount: number;
   _count: {
     sources: number;
     assets: number;

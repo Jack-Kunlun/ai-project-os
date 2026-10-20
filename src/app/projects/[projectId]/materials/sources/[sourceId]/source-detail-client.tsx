@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -39,6 +40,7 @@ async function getSource(projectId: string, sourceId: string, contentHash: strin
 }
 
 export function ProjectSourceDetailClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
+  const translateUi = useTranslate();
   const { projectId, sourceId } = useParams<{ projectId: string; sourceId: string }>();
   const searchParams = useSearchParams();
   const citationContentHash = searchParams.get("contentHash");
@@ -76,20 +78,20 @@ export function ProjectSourceDetailClient({ username, isSystemAdmin }: { usernam
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-5xl px-6 py-8 sm:px-10 lg:px-12">
-        <div className="mb-6">{fromNotifications ? <ParentPageLink href="/notifications" label="返回通知中心" /> : safeReturnTo ? <ParentPageLink href={safeReturnTo} label="返回原始资料" scroll={false} /> : <ProjectMaterialsParentLink projectId={projectId} />}</div>
+        <div className="mb-6">{fromNotifications ? <ParentPageLink href="/notifications" label={translateUi("返回通知中心")} /> : safeReturnTo ? <ParentPageLink href={safeReturnTo} label={translateUi("返回原始资料")} scroll={false} /> : <ProjectMaterialsParentLink projectId={projectId} />}</div>
         <section className="pb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source detail</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目资料详情</h1>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Source detail"} /></p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]"><UiText text={"项目资料详情"} /></h1>
           <p className="mt-3 font-mono text-xs text-slate-400 [overflow-wrap:anywhere]">{sourceId}</p>
         </section>
-        {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><p>{error}</p><button type="button" onClick={() => void load()} className="mt-3 font-semibold underline underline-offset-4">重试</button></div> : null}
-        {loading && !source ? <div className="h-72 animate-pulse rounded-3xl bg-slate-200" aria-label="正在加载资料详情" /> : source ? <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 p-6 sm:p-7"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-semibold text-slate-600">原始资料</span></div><h2 className="mt-4 text-xl font-semibold">原始资料内容</h2></div><span className="text-xs text-slate-400">接入于 {formatDate(source.ingestedAt)}</span></div><dl className="grid gap-4 border-b border-slate-100 p-6 text-sm sm:grid-cols-2 sm:p-7"><div><dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">资料时间</dt><dd className="mt-1 text-slate-700">{formatDate(source.capturedAt)}</dd></div><div><dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">外部来源</dt><dd className="mt-1 break-all text-slate-700">{source.externalRef ?? "未提供外部来源"}</dd></div></dl><div className="p-6 sm:p-7"><pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-slate-950 p-5 text-sm leading-7 text-slate-200">{source.contentText}</pre><div className="mt-6 rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">SHA-256</p><code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code></div></div></section> : null}
-        {source ? <section aria-label="资料下一步" className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5">
-          <h2 className="text-lg font-semibold">资料已保存，接下来做什么？</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">可直接整理这份资料；有原文依据且符合条件的内容形成事实，其余结果待核对。想查资料时，再单独确认更新问答索引。</p>
+        {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><p>{error}</p><button type="button" onClick={() => void load()} className="mt-3 font-semibold underline underline-offset-4"><UiText text={"重试"} /></button></div> : null}
+        {loading && !source ? <div className="h-72 animate-pulse rounded-3xl bg-slate-200" aria-label={translateUi("正在加载资料详情")} /> : source ? <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 p-6 sm:p-7"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-semibold text-slate-600"><UiText text={"原始资料"} /></span></div><h2 className="mt-4 text-xl font-semibold"><UiText text={"原始资料内容"} /></h2></div><span className="text-xs text-slate-400"><UiText text={"接入于"} />{" "}{formatDate(source.ingestedAt)}</span></div><dl className="grid gap-4 border-b border-slate-100 p-6 text-sm sm:grid-cols-2 sm:p-7"><div><dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"资料时间"} /></dt><dd className="mt-1 text-slate-700">{formatDate(source.capturedAt)}</dd></div><div><dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"外部来源"} /></dt><dd className="mt-1 break-all text-slate-700">{source.externalRef ?? <UiText text={"未提供外部来源"} />}</dd></div></dl><div className="p-6 sm:p-7"><pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-slate-950 p-5 text-sm leading-7 text-slate-200">{source.contentText}</pre><div className="mt-6 rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"SHA-256"} /></p><code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code></div></div></section> : null}
+        {source ? <section aria-label={translateUi("资料下一步")} className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5">
+          <h2 className="text-lg font-semibold"><UiText text={"资料已保存，接下来做什么？"} /></h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={"可直接整理这份资料；有原文依据且符合条件的内容形成事实，其余结果待核对。想查资料时，再单独确认更新问答索引。"} /></p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <OperationPanel title="整理这份资料" triggerLabel="继续 AI 整理"><ProjectFactImport projectId={projectId} sourceIds={[source.id]} onChanged={async () => undefined} /></OperationPanel>
-            <Link href={buildProjectQuestionHref(projectId)} className="text-sm font-semibold text-indigo-700 underline">智能问答 →</Link>
+            <OperationPanel title={translateUi("整理这份资料")} triggerLabel="继续 AI 整理"><ProjectFactImport projectId={projectId} sourceIds={[source.id]} onChanged={async () => undefined} /></OperationPanel>
+            <Link href={buildProjectQuestionHref(projectId)} className="text-sm font-semibold text-indigo-700 underline"><UiText text={"智能问答 →"} /></Link>
           </div>
         </section> : null}
       </div>

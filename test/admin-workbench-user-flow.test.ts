@@ -167,7 +167,7 @@ test("Git project repository routes pass the session actor to the service author
 });
 
 test("admin workbench and overview are server protected and dashboard has no global provider count", async () => {
-  const [layout, page, overviewRoute, overviewService, shell, workspaceCss, header, profile, dashboardRoute, settings, connections, connectionsMcp, operations] = await Promise.all([
+  const [layout, page, overviewRoute, overviewService, shell, workspaceCss, header, account, profile, dashboardRoute, settings, connections, connectionsMcp, operations] = await Promise.all([
     readFile("src/app/admin/layout.tsx", "utf8"),
     readFile("src/app/admin/page.tsx", "utf8"),
     readFile("src/app/api/system/overview/route.ts", "utf8"),
@@ -175,6 +175,7 @@ test("admin workbench and overview are server protected and dashboard has no glo
     readFile("src/components/admin-shell.tsx", "utf8"),
     readFile("src/app/admin/admin-workspace.module.css", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/components/header-account.tsx", "utf8"),
     readFile("src/app/profile/profile-client.tsx", "utf8"),
     readFile("src/app/api/dashboard/route.ts", "utf8"),
     readFile("src/app/settings/page.tsx", "utf8"),
@@ -192,19 +193,21 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.match(overviewService, /platformTokenReservation\.aggregate/u);
   assert.match(overviewService, /status: \{ in: \["reserved", "held"\] \}/u);
   assert.doesNotMatch(overviewService, /project\.count|first-project/u);
-  for (const label of ["平台总览", "用户与权益", "配置中心", "安全中心", "运维中心"]) assert.match(shell, new RegExp(label, "u"));
+  const navigation = await readFile("src/lib/admin-navigation.ts", "utf8");
+  for (const label of ["平台总览", "用户列表", "会员资格", "平台额度", "模型与能力", "MCP 审核", "资源与备份"]) assert.match(navigation, new RegExp(label, "u"));
   assert.doesNotMatch(shell, /Git 连接|MCP 连接|用户与会员|\/admin\/connectors\/git/u);
-  assert.match(shell, /label: "模型能力"/u);
-  assert.match(shell, /aria-label="管理栏目"/u);
-  assert.match(workspaceCss, /\.workspace :global\(\.admin-module-navigation\)/u);
+  assert.match(navigation, /label: "模型与能力"/u);
+  assert.doesNotMatch(shell, /admin-module-navigation/u);
+  assert.match(workspaceCss, /\.workspace :global\(\.admin-navigation-group\)/u);
   assert.match(workspaceCss, /\.workspace :global\(a:focus-visible\)/u);
   assert.doesNotMatch(shell, /\/admin\/models\/routes/u);
-  assert.match(shell, /\/admin\/credits/u);
-  assert.match(shell, /\/admin\/operations\/probes/u);
-  assert.match(shell, /\/admin\/operations\/backups/u);
+  assert.match(navigation, /\/admin\/credits/u);
+  assert.match(navigation, /\/admin\/operations\/probes/u);
+  assert.match(navigation, /\/admin\/operations\/backups/u);
   assert.doesNotMatch(header, /label: "模型设置"/u);
   assert.doesNotMatch(header, /label: "连接器"/u);
-  assert.match(header, /isSystemAdmin \? <Link href="\/admin"/u);
+  assert.match(header, /<UserShell username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
+  assert.match(account, /isSystemAdmin\?<Link href="\/admin"/u);
   assert.doesNotMatch(profile, /系统管理员操作|系统运维|平台模型|Git \/ MCP 连接/u);
   assert.doesNotMatch(dashboardRoute, /aiProviderConnection/u);
   assert.match(settings, /redirect\(user\.role === "admin" \? "\/admin\/models" : "\/dashboard"\)/u);
@@ -554,38 +557,21 @@ test("admin overview rejects an unverified actor before reading operational aggr
   assert.equal(operationalRead, false);
 });
 
-test("admin navigation exposes five direct destinations, a module section, and a focus-contained mobile drawer", async () => {
-  const [shell, workspaceCss] = await Promise.all([
+test("admin chrome reuses the shared modal and does not recreate a second module bar", async () => {
+  const [shell, workspaceCss, header] = await Promise.all([
     readFile("src/components/admin-shell.tsx", "utf8"),
     readFile("src/app/admin/admin-workspace.module.css", "utf8"),
+    readFile("src/components/admin-header.tsx", "utf8"),
   ]);
   assert.match(shell, /^"use client";/u);
-  const primaryItems = shell.match(/const primaryItems:[\s\S]*?\];/u)?.[0] ?? "";
-  assert.ok(primaryItems.length > 0);
-  assert.equal([...primaryItems.matchAll(/\{ key: "(?:overview|users|configuration|security|operations)"/gu)].length, 5);
-  for (const label of ["平台总览", "用户与权益", "配置中心", "安全中心", "运维中心"]) {
-    assert.match(primaryItems, new RegExp(`label: "${label}"`, "u"));
-  }
-  assert.match(shell, /aria-label="管理工作台导航"/u);
-  assert.match(shell, /aria-label="管理栏目"/u);
-  assert.match(shell, /const moduleGroups: ReadonlyArray/u);
-  assert.match(shell, /aria-controls="admin-mobile-navigation"/u);
-  assert.match(shell, /aria-expanded=\{drawerOpen\}/u);
-  assert.match(shell, /role="dialog"/u);
-  assert.match(shell, /aria-modal="true"/u);
-  assert.match(shell, /event\.key === "Escape"/u);
-  assert.match(shell, /querySelectorAll<HTMLElement>\(focusableSelector\)/u);
-  assert.match(shell, /previousFocus\?\.focus\(\)/u);
-  assert.match(shell, /tabIndex=\{-1\}/u);
-  assert.match(shell, /originalBodyOverflow/u);
-  assert.match(shell, /addEventListener\("focusin"/u);
-  assert.match(shell, /drawerRef\.current\?\.contains/u);
+  assert.match(shell, /adminNavigationGroups\.map/u);
+  assert.doesNotMatch(shell, /moduleGroups|admin-module-navigation/u);
+  assert.match(shell, /<WorkspaceDialog title="管理工作台导航"/u);
+  assert.match(header, /<AppearanceControls \/>/u);
+  assert.match(header, /accountHref="\/admin\/account"/u);
   assert.match(workspaceCss, /\.workspace :global\(\.admin-primary-navigation\)/u);
-  assert.match(workspaceCss, /\.workspace :global\(\.admin-module-navigation\)/u);
   assert.match(workspaceCss, /\.workspace :global\(a:focus-visible\)/u);
   assert.match(workspaceCss, /@media \(max-width: 900px\)/u);
-  assert.doesNotMatch(shell, /平台管理员不进入项目、团队和用户工作区/u);
-  assert.doesNotMatch(shell, /不展示用户项目、团队或个人连接/u);
 });
 
 test("user guide and project surfaces keep admin controls out of the ordinary flow", async () => {

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
 import { EmailCodeInput } from "@/components/email-code-input";
 import styles from "@/components/auth-page.module.css";
+import { useTranslate } from "@/components/appearance-provider";
 
 type PhoneAuthStatus = "disabled" | "unavailable" | "available";
 type EmailAuthStatus = "disabled" | "unavailable" | "available";
@@ -17,6 +18,7 @@ type RegisterFormProps = {
 
 export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disabled", emailAuthStatus = "disabled" }: RegisterFormProps) {
   const router = useRouter();
+  const t = useTranslate();
   const [username, setUsername] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -91,7 +93,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
       <fieldset disabled={pending} className={styles.registerFieldset}>
       <div className={styles.registerFields}>
         <div>
-      <label htmlFor="register-username" className={styles.fieldLabel}>用户名</label>
+      <label htmlFor="register-username" className={styles.fieldLabel}>{t("用户名")}</label>
       <input
         id="register-username"
         value={username}
@@ -100,21 +102,21 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
         minLength={3}
         maxLength={64}
         required
-        pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,63}"
-        title="3 至 64 个字符，以字母或数字开头，只能使用字母、数字、点、下划线和连字符。"
-        placeholder="例如 project.owner"
+        pattern={"[A-Za-z0-9][A-Za-z0-9._\\-]{2,63}"}
+        title={t("3 至 64 个字符，以字母或数字开头，只能使用字母、数字、点、下划线和连字符。")}
+        placeholder={t("例如 project.owner")}
         className={styles.fieldInput}
       />
-      <p className={styles.fieldHint}>3–64 位，支持字母、数字和 . _ -；统一为小写。</p>
+      <p className={styles.fieldHint}>{t("3–64 位，支持字母、数字和 . _ -；统一为小写。")}</p>
 
         </div>
-      {emailAvailable && phoneAvailable ? <fieldset className={styles.methodOptions}><legend>注册验证方式</legend><label className={styles.choiceLabel}><input type="radio" name="registration-method" checked={method === "email"} onChange={() => { setMethod("email"); setEmailCode(""); setEmailChallengeId(null); setSmsCode(""); setSmsChallengeId(null); }} className={styles.choiceInput} /> 邮箱</label><label className={styles.choiceLabel}><input type="radio" name="registration-method" checked={method === "phone"} onChange={() => { setMethod("phone"); setEmailCode(""); setEmailChallengeId(null); setSmsCode(""); setSmsChallengeId(null); }} className={styles.choiceInput} /> 手机号</label></fieldset> : null}
+      {emailAvailable && phoneAvailable ? <fieldset className={styles.methodOptions}><legend>{t("注册验证方式")}</legend><label className={styles.choiceLabel}><input type="radio" name="registration-method" checked={method === "email"} onChange={() => { setMethod("email"); setEmailCode(""); setEmailChallengeId(null); setSmsCode(""); setSmsChallengeId(null); }} className={styles.choiceInput} /> {t("邮箱")}</label><label className={styles.choiceLabel}><input type="radio" name="registration-method" checked={method === "phone"} onChange={() => { setMethod("phone"); setEmailCode(""); setEmailChallengeId(null); setSmsCode(""); setSmsChallengeId(null); }} className={styles.choiceInput} /> {t("手机号")}</label></fieldset> : null}
       {emailVerificationRequired ? (
         <div className={styles.verificationFields}>
           <div>
-            <label htmlFor="register-email" className={styles.fieldLabel}>邮箱</label>
-            <input id="register-email" type="email" value={email} onChange={(event) => { setEmail(event.target.value); setEmailCode(""); setEmailChallengeId(null); }} autoComplete="email" maxLength={320} required placeholder="输入常用邮箱" className={styles.fieldInput} />
-            <p className={styles.fieldHint}>验证码用于验证邮箱；系统不会提供邮件找回密码。</p>
+            <label htmlFor="register-email" className={styles.fieldLabel}>{t("邮箱")}</label>
+            <input id="register-email" type="email" value={email} onChange={(event) => { setEmail(event.target.value); setEmailCode(""); setEmailChallengeId(null); }} autoComplete="email" maxLength={320} required placeholder={t("输入常用邮箱")} className={styles.fieldInput} />
+            <p className={styles.fieldHint}>{t("验证码用于验证邮箱；系统不会提供邮件找回密码。")}</p>
           </div>
           <div className={styles.emailCodeField}><EmailCodeInput key={email} id="register-email-code" email={email} purpose="register" availability={emailAuthStatus === "available" ? "available" : "unavailable"} code={emailCode} onCodeChange={setEmailCode} onChallengeIdChange={setEmailChallengeId} /></div>
         </div>
@@ -122,7 +124,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
       {phoneVerificationRequired ? (
         <div className={styles.verificationFields}>
           <div>
-            <label htmlFor="register-phone" className={styles.fieldLabel}>手机号</label>
+            <label htmlFor="register-phone" className={styles.fieldLabel}>{t("手机号")}</label>
             <div className={styles.phoneShell}>
               <span aria-hidden="true" className={styles.phonePrefix}>+86</span>
               <input
@@ -140,11 +142,11 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
                 maxLength={11}
                 required
                 pattern="1[3-9][0-9]{9}"
-                placeholder="输入 11 位手机号"
+                placeholder={t("输入 11 位手机号")}
                 className={styles.phoneInput}
               />
             </div>
-            <p className={styles.fieldHint}>仅支持中国大陆手机号。</p>
+            <p className={styles.fieldHint}>{t("仅支持中国大陆手机号。")}</p>
           </div>
           <div className={styles.smsCodeField}><SmsCodeInput
             key={phone}
@@ -162,7 +164,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
 
       <div className={styles.passwordFields}>
         <div>
-          <label htmlFor="register-password" className={styles.fieldLabel}>密码</label>
+          <label htmlFor="register-password" className={styles.fieldLabel}>{t("密码")}</label>
           <input
             id="register-password"
             type="password"
@@ -174,11 +176,11 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
             required
             className={styles.fieldInput}
           />
-          <p className={styles.fieldHint}>8–128 位，并同时包含英文字母和数字。</p>
+          <p className={styles.fieldHint}>{t("8–128 位，并同时包含英文字母和数字。")}</p>
 
         </div>
         <div>
-          <label htmlFor="register-confirm-password" className={styles.fieldLabel}>确认密码</label>
+          <label htmlFor="register-confirm-password" className={styles.fieldLabel}>{t("确认密码")}</label>
           <input
             id="register-confirm-password"
             type="password"
@@ -196,16 +198,16 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
 
       <label className={styles.rememberLabel}>
         <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className={styles.rememberInput} />
-        <span>保持登录</span>
+        <span>{t("保持登录")}</span>
       </label>
 
       </fieldset>
 
-      <p className={`${styles.notice} ${styles.noticeWarning}`}>{emailVerificationRequired ? "注册邮箱将作为验证邮箱；验证后的邮箱可用于密码登录，修改密码时需要验证当前邮箱。" : phoneVerificationRequired ? "注册手机号验证后可用于账号安全操作。" : "请妥善保管用户名和密码；当前没有可用的邮箱或手机号验证通道。"}</p>
-      {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{error}</p> : null}
+      <p className={`${styles.notice} ${styles.noticeWarning}`}>{t(emailVerificationRequired ? "注册邮箱将作为验证邮箱；验证后的邮箱可用于密码登录，修改密码时需要验证当前邮箱。" : phoneVerificationRequired ? "注册手机号验证后可用于账号安全操作。" : "请妥善保管用户名和密码；当前没有可用的邮箱或手机号验证通道。")}</p>
+      {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{t(error)}</p> : null}
 
-      <button type="submit" disabled={pending || (emailVerificationRequired && emailAuthStatus !== "available") || (phoneVerificationRequired && phoneAuthStatus !== "available")} className={styles.submitButton}>{pending ? "正在创建账号…" : "创建账号"}</button>
-      </form> : <p className={`${styles.notice} ${styles.noticeWarning}`}>本地用户名和密码注册暂未开放。请返回登录页使用其他可用方式，或联系管理员。</p>}
+      <button type="submit" disabled={pending || (emailVerificationRequired && emailAuthStatus !== "available") || (phoneVerificationRequired && phoneAuthStatus !== "available")} className={styles.submitButton}>{pending ? t("正在创建账号…") : t("创建账号")}</button>
+      </form> : <p className={`${styles.notice} ${styles.noticeWarning}`}>{t("本地用户名和密码注册暂未开放。请返回登录页使用其他可用方式，或联系管理员。")}</p>}
     </div>
   );
 }

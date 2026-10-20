@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { UiText, useAppearance } from "@/components/appearance-provider";
+import token from "./token-activity.module.css";
 
 type DailyPoint = Readonly<{ date: string; settledRawTokens: number; rawTokenCoverageComplete: boolean }>;
 type Mode = "daily" | "weekly" | "cumulative";
@@ -11,10 +13,12 @@ function utcDay(date: string): Date { return new Date(`${date}T00:00:00Z`); }
 function dateKey(date: Date): string { return date.toISOString().slice(0, 10); }
 
 export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
+  const { language, t } = useAppearance();
   const [mode, setMode] = useState<Mode>("daily");
+  const compact=daily.length<=7;
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
   const [focusedDate, setFocusedDate] = useState<string | null>(null);
-  const modeLabel = modes.find(([value]) => value === mode)?.[1] ?? "每日";
+  const modeLabel = t(modes.find(([value]) => value === mode)?.[1] ?? "每日");
   const currentFocusedDate = focusedDate && daily.some((point) => point.date === focusedDate) ? focusedDate : daily.at(-1)?.date;
   const { weeks, maxValue } = useMemo(() => {
     if (daily.length === 0) return { weeks: [], maxValue: 0 };
@@ -45,9 +49,9 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
   const visibleActiveCell = activeCell && activePoint?.point ? { ...activeCell, value: activePoint.value, complete: activePoint.point.rawTokenCoverageComplete } : null;
 
   function tone(value: number): string {
-    if (value <= 0 || maxValue <= 0) return "bg-white/15";
+    if (value <= 0 || maxValue <= 0) return token.level0;
     const fraction = value / maxValue;
-    return fraction < 0.25 ? "bg-sky-200/70" : fraction < 0.5 ? "bg-indigo-200" : fraction < 0.75 ? "bg-violet-200" : "bg-fuchsia-100";
+    return fraction < 0.25 ? token.level1 : fraction < 0.5 ? token.level2 : fraction < 0.75 ? token.level3 : token.level4;
   }
 
   function showCell(cell: { date: string; point: DailyPoint | null; value: number }, element: HTMLElement): void {
@@ -71,7 +75,7 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
   }
 
   function moveFocus(event: React.KeyboardEvent<HTMLDivElement>): void {
-    const offset = event.key === "ArrowLeft" ? -7 : event.key === "ArrowRight" ? 7 : event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : null;
+    const offset = event.key === "ArrowLeft" ? (compact?-1:-7) : event.key === "ArrowRight" ? (compact?1:7) : event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : null;
     if (offset === null && event.key !== "Home" && event.key !== "End") {
       if (event.key === "Escape") setActiveCell(null);
       return;
@@ -85,21 +89,21 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
     showFocusedDate(next.date, event.currentTarget);
   }
 
-  return <div className="rounded-2xl px-5 py-5 text-white shadow-sm sm:px-6" style={{ backgroundImage: "radial-gradient(circle at 88% 8%, rgba(198, 165, 255, .18), transparent 42%), linear-gradient(120deg, #354d86 0%, #50438d 52%, #60418a 100%)" }}>
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h3 className="text-sm font-semibold">Token 活动</h3>
-      <div className="flex items-center gap-1 rounded-lg bg-white/10 p-1" aria-label="Token 活动统计方式">{modes.map(([value, label]) => <button key={value} type="button" onClick={() => { setActiveCell(null); setMode(value); }} aria-pressed={mode === value} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${mode === value ? "bg-white text-slate-900" : "text-indigo-100 hover:bg-white/10 hover:text-white"}`}>{label}</button>)}</div>
+  return <div className={token.root}>
+    <div className={token.heading}>
+      <h3 className="text-sm font-semibold"><UiText text="Token 活动" /></h3>
+      <div className={token.modes} aria-label={t("Token 活动统计方式")}>{modes.map(([value, label]) => <button key={value} type="button" onClick={() => { setActiveCell(null); setMode(value); }} aria-pressed={mode === value} className={token.mode}><UiText text={label} /></button>)}</div>
     </div>
-    <div className="mt-4 overflow-x-auto pb-1 app-scrollbar-dark" onScroll={() => setActiveCell(null)}>
-      <div data-token-grid className="mx-auto grid w-full focus-visible:outline-2 focus-visible:outline-white" style={{ gridTemplateColumns: weeks.length ? `repeat(${weeks.length}, minmax(18px, 1fr))` : undefined, minWidth: weeks.length * 18, maxWidth: weeks.length < 26 ? weeks.length * 24 : undefined }} role="group" tabIndex={daily.length ? 0 : -1} aria-label={`Token 活动热力图，${daily.length} 天，${modeLabel}统计。方向键切换日期${daily.some((point) => !point.rawTokenCoverageComplete) ? "，部分历史用量未核实" : ""}`} onPointerLeave={() => setActiveCell(null)} onFocus={(event) => { if (currentFocusedDate) { setFocusedDate(currentFocusedDate); showFocusedDate(currentFocusedDate, event.currentTarget); } }} onBlur={() => setActiveCell(null)} onKeyDown={moveFocus}>
-        {weeks.map((week, index) => <div key={week[0].date} className="flex min-w-0 flex-col">
-          {week.map((cell) => cell.point ? <span key={cell.date} data-token-date={cell.date} aria-hidden="true" className="aspect-square w-full p-0.5" onPointerEnter={(event) => showCell(cell, event.currentTarget)}><span className={`block h-full w-full rounded-[3px] ${tone(cell.value)}`} /></span> : <span key={cell.date} aria-hidden="true" className="aspect-square w-full" />)}
-          <span aria-hidden="true" className="h-4 w-full whitespace-nowrap pt-1 text-[10px] text-indigo-100">{index === 0 || week.some((cell) => cell.point?.date.endsWith("-01")) ? `${Number(week.find((cell) => cell.point?.date.endsWith("-01"))?.date.slice(5, 7) ?? week.find((cell) => cell.point)?.date.slice(5, 7) ?? "")}月` : ""}</span>
+    <div className={token.scroll} onScroll={() => setActiveCell(null)}>
+      <div data-token-grid className={`${token.grid} ${compact?token.compact:""}`} style={{ gridTemplateColumns: compact&&daily.length?`repeat(${daily.length}, minmax(0, 1fr))`:weeks.length ? `repeat(${weeks.length}, minmax(18px, 1fr))` : undefined, minWidth: compact?0:weeks.length * 18, maxWidth: compact?undefined:weeks.length < 26 ? weeks.length * 24 : undefined }} role="group" tabIndex={daily.length ? 0 : -1} aria-label={`${t("Token 活动热力图")} · ${daily.length} ${t("天")} · ${modeLabel} ${t("统计")} · ${t("方向键切换日期")}${daily.some((point) => !point.rawTokenCoverageComplete) ? ` · ${t("部分历史用量未核实")}` : ""}`} onPointerLeave={() => setActiveCell(null)} onFocus={(event) => { if (currentFocusedDate) { setFocusedDate(currentFocusedDate); showFocusedDate(currentFocusedDate, event.currentTarget); } }} onBlur={() => setActiveCell(null)} onKeyDown={moveFocus}>
+        {weeks.map((week, index) => <div key={week[0].date} className={token.week}>
+          {week.map((cell) => cell.point ? <span key={cell.date} data-token-date={cell.date} aria-hidden="true" className={token.cell} data-active={visibleActiveCell?.date===cell.date||undefined} onPointerEnter={(event) => showCell(cell, event.currentTarget)}><span className={`${token.square} ${tone(cell.value)}`} />{compact?<small>{cell.date.slice(5).replace("-","/")}</small>:null}</span> : <span key={cell.date} aria-hidden="true" className={token.blank} />)}
+          <span aria-hidden="true" className={token.month}>{index === 0 || week.some((cell) => cell.point?.date.endsWith("-01")) ? new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { month: "short", timeZone: "UTC" }).format(utcDay(week.find((cell) => cell.point?.date.endsWith("-01"))?.date ?? week.find((cell) => cell.point)?.date ?? "2026-01-01")) : ""}</span>
         </div>)}
       </div>
     </div>
-    {visibleActiveCell ? <div role="tooltip" className="pointer-events-none fixed z-50 w-[220px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 shadow-xl" style={{ left: visibleActiveCell.x, top: visibleActiveCell.y, transform: `translate(-50%, ${visibleActiveCell.below ? "0" : "-100%"})` }}><span className="block font-semibold">{visibleActiveCell.date}</span><span className="mt-1 block">{modeLabel}已结算 {visibleActiveCell.value.toLocaleString("zh-CN")} Token</span>{visibleActiveCell.complete ? null : <span className="mt-1 block text-amber-700">部分历史原始 Token 未核实</span>}</div> : null}
-    <span className="sr-only" aria-live="polite">{focusedDate && visibleActiveCell?.date === focusedDate ? `${focusedDate}，${modeLabel}已结算 ${visibleActiveCell.value.toLocaleString("zh-CN")} Token${visibleActiveCell.complete ? "" : "，部分历史原始 Token 未核实"}` : ""}</span>
-    <p className="mt-3 text-xs text-indigo-100">按已结算且核实的模型原始 Token 数着色；移入日期格立即查看数值，键盘聚焦热图后可用方向键切换日期。{daily.some((point) => !point.rawTokenCoverageComplete) ? "部分历史记录缺少原始 Token，图中数值不含这部分用量。" : ""}</p>
+    {visibleActiveCell ? <div role="tooltip" className={token.tooltip} style={{ left: visibleActiveCell.x, top: visibleActiveCell.y, transform: `translate(-50%, ${visibleActiveCell.below ? "0" : "-100%"})` }}><span className="block font-semibold">{visibleActiveCell.date}</span><span className="mt-1 block">{modeLabel} {t("已结算")} {visibleActiveCell.value.toLocaleString(language === "en" ? "en-US" : "zh-CN")} Token</span>{visibleActiveCell.complete ? null : <span className="mt-1 block">{t("部分历史原始 Token 未核实")}</span>}</div> : null}
+    <span className="sr-only" aria-live="polite">{focusedDate && visibleActiveCell?.date === focusedDate ? `${focusedDate} · ${modeLabel} ${t("已结算")} ${visibleActiveCell.value.toLocaleString(language === "en" ? "en-US" : "zh-CN")} Token${visibleActiveCell.complete ? "" : ` · ${t("部分历史原始 Token 未核实")}`}` : ""}</span>
+    <p className={token.hint}>{t("按已结算且核实的模型原始 Token 数着色；移入日期格立即查看数值，键盘聚焦热图后可用方向键切换日期。")}{daily.some((point) => !point.rawTokenCoverageComplete) ? ` ${t("部分历史记录缺少原始 Token，图中数值不含这部分用量。")}` : ""}</p>
   </div>;
 }

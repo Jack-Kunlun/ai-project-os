@@ -19,6 +19,12 @@ const MODEL_CITATION_IDS = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"] as c
 export const unifiedQuestionScopeSchema = z.enum(["all", "personal", "project"]);
 export type UnifiedQuestionScope = z.infer<typeof unifiedQuestionScopeSchema>;
 
+export const unifiedQuestionPresentationSchema = z.object({
+  expectedRevision: z.number().int().min(0).max(2_147_483_646),
+  title: z.string().trim().min(1).max(120).regex(/^[^\u0000-\u001f\u007f-\u009f]+$/u).optional(),
+  pinned: z.boolean().optional(),
+}).strict().refine(value => value.title !== undefined || value.pinned !== undefined);
+
 export const unifiedQuestionQuestionSchema = z.string()
   .trim()
   .min(2)

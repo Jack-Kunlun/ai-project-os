@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useTranslate } from "./appearance-provider";
+import { useInquiryOperation } from "./inquiry-operation";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
 
 type ConfirmTone = "primary" | "warning" | "danger";
@@ -35,6 +37,9 @@ export function useAppConfirmDialog() {
   const dialogRef = useRef<HTMLElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
+  const t = useTranslate();
+  const backdropStarted=useRef(false);
+  const owned=useInquiryOperation(request!==null,dialogRef);
   const descriptionId = useId();
 
   const close = useCallback((confirmed: boolean) => {
@@ -64,7 +69,7 @@ export function useAppConfirmDialog() {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") close(false);
       if (event.key !== "Tab" || dialogRef.current === null) return;
-      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>("button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])")].filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>("button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])")].filter((element) => !element.hasAttribute("disabled") && element.getClientRects().length > 0 && !element.closest("[hidden], [inert], [aria-hidden='true']") && getComputedStyle(element).visibility !== "hidden");
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -97,24 +102,24 @@ export function useAppConfirmDialog() {
   const descriptionClass = tone === "danger" ? "text-rose-700" : "text-slate-600";
 
   const dialog = request === null || options === undefined ? null : (
-    <div className={`fixed inset-0 z-[80] flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(false); }}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
-        <header className={`${modalHeaderClassName} px-7 py-5 sm:px-8`}>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{options.eyebrow ?? "Confirm action"}</p>
-          <h2 id={titleId} className="mt-2 text-lg font-semibold tracking-tight text-slate-950">{options.title}</h2>
+    <div className={`fixed inset-0 z-[80] flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onPointerDown={event=>{backdropStarted.current=event.target===event.currentTarget;}} onClick={(event) => { if (backdropStarted.current&&event.target === event.currentTarget) close(false); }}>
+      <section data-inquiry-owned={String(owned)} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
+        <header data-dialog-header className={`${modalHeaderClassName} px-7 py-5 sm:px-8`}>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{t(options.eyebrow ?? "确认操作")}</p>
+          <h2 id={titleId} className="mt-2 text-lg font-semibold tracking-tight text-slate-950">{t(options.title)}</h2>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
-          <p id={descriptionId} className={`whitespace-pre-wrap break-words text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
+        <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
+          <p id={descriptionId} className={`whitespace-pre-wrap break-words text-sm leading-6 ${descriptionClass}`}>{t(options.description)}</p>
           {hasInput ? (
             <label className="mt-5 block text-sm font-semibold text-slate-700">
-              {options.inputLabel}
-              <input autoFocus value={value} onChange={(event) => { valueRef.current = event.target.value; setValue(event.target.value); }} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${tone === "danger" ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-indigo-300 focus:ring-indigo-100"}`} />
+              {t(options.inputLabel ?? "")}
+              <input autoFocus value={value} onChange={(event) => { valueRef.current = event.target.value; setValue(event.target.value); }} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder?t(options.inputPlaceholder):undefined} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${tone === "danger" ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-indigo-300 focus:ring-indigo-100"}`} />
             </label>
           ) : null}
         </div>
-        <footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
-          <button type="button" onClick={() => close(false)} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">{options.cancelLabel ?? "取消"}</button>
-          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{options.confirmLabel ?? "确认"}</button>
+        <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
+          <button type="button" onClick={() => close(false)} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">{t(options.cancelLabel ?? "取消")}</button>
+          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{t(options.confirmLabel ?? "确认")}</button>
         </footer>
       </section>
     </div>

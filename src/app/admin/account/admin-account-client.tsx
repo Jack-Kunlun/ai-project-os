@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { AccountPhonePanel } from "@/components/account-phone-panel";
 import { OperationPanel } from "@/components/operation-panel";
+import { useAppearance } from "@/components/appearance-provider";
 
 type AdminProfile = Readonly<{
   username: string;
@@ -27,11 +28,12 @@ async function responseMessage(response: Response, fallback: string): Promise<st
   }
 }
 
-function dateTime(value: string | null): string {
-  return value === null ? "暂无记录" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function dateTime(value: string | null, language: "zh-CN" | "en"): string {
+  return value === null ? "暂无记录" : new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 export function AdminAccountClient({ initialUsername }: { initialUsername: string }) {
+  const { language, t } = useAppearance();
   const router = useRouter();
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -78,34 +80,34 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader title="管理员账户" description="维护平台管理员的登录资料与密码；这里不显示项目、团队、工作区角色、个人连接或业务额度。" />
     <section className="mt-6 grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-3">
-      <div><p className="text-xs font-semibold text-slate-400">登录名</p><p className="mt-2 font-semibold">{profile?.username ?? initialUsername}</p></div>
-      <div><p className="text-xs font-semibold text-slate-400">活动会话</p><p className="mt-2 font-semibold">{profile ? `${profile.activeSessionCount} 个` : "读取中…"}</p></div>
-      <div><p className="text-xs font-semibold text-slate-400">最近活动</p><p className="mt-2 text-sm font-semibold">{profile ? dateTime(profile.lastSeenAt) : "读取中…"}</p></div>
+      <div><p className="text-xs font-semibold text-slate-400">{t("登录名")}</p><p className="mt-2 font-semibold">{profile?.username ?? initialUsername}</p></div>
+      <div><p className="text-xs font-semibold text-slate-400">{t("活动会话")}</p><p className="mt-2 font-semibold">{profile ? `${profile.activeSessionCount} ${t("个")}` : t("读取中…")}</p></div>
+      <div><p className="text-xs font-semibold text-slate-400">{t("最近活动")}</p><p className="mt-2 text-sm font-semibold">{profile ? dateTime(profile.lastSeenAt, language) : t("读取中…")}</p></div>
     </section>
-    {message && openOperation === null ? <p role="status" className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}
+    {message && openOperation === null ? <p role="status" className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{t(message)}</p> : null}
     <div className="mt-6 grid gap-6 lg:grid-cols-2">
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">基本资料</h2>
-        <dl className="mt-4 space-y-3 text-sm"><div><dt className="text-xs text-slate-400">显示名称</dt><dd className="mt-1 font-medium text-slate-700">{profile?.displayName ?? "未设置"}</dd></div><div><dt className="text-xs text-slate-400">邮箱</dt><dd className="mt-1 font-medium text-slate-700">{profile?.email ?? "未设置"}{profile?.emailVerifiedAt ? " · 已验证" : ""}</dd></div></dl>
-        <OperationPanel title="编辑管理员账户资料" triggerLabel="编辑资料" description="更新显示名称或邮箱。" open={openOperation === "profile"} onOpenChange={(open) => { setOpenOperation(open ? "profile" : null); if (open) setMessage(null); }}>
+        <h2 className="text-lg font-semibold">{t("基本资料")}</h2>
+        <dl className="mt-4 space-y-3 text-sm"><div><dt className="text-xs text-slate-400">{t("显示名称")}</dt><dd className="mt-1 font-medium text-slate-700">{profile?.displayName ?? t("未设置")}</dd></div><div><dt className="text-xs text-slate-400">{t("邮箱")}</dt><dd className="mt-1 font-medium text-slate-700">{profile?.email ?? t("未设置")}{profile?.emailVerifiedAt ? ` · ${t("已验证")}` : ""}</dd></div></dl>
+        <OperationPanel title={t("编辑管理员账户资料")} triggerLabel={t("编辑资料")} description={t("更新显示名称或邮箱。")} open={openOperation === "profile"} onOpenChange={(open) => { setOpenOperation(open ? "profile" : null); if (open) setMessage(null); }}>
           <form onSubmit={updateProfile} className="max-w-2xl space-y-4">
-            <label className="block text-sm font-medium text-slate-700">显示名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={160} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
-            <label className="block text-sm font-medium text-slate-700">邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
-            {message && openOperation === "profile" ? <p role="status" className="text-sm text-rose-700">{message}</p> : null}
-            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "保存中…" : "保存资料"}</button>
+            <label className="block text-sm font-medium text-slate-700">{t("显示名称")}<input aria-label={t("显示名称")} value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={160} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
+            <label className="block text-sm font-medium text-slate-700">{t("邮箱")}<input aria-label={t("邮箱")} type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
+            {message && openOperation === "profile" ? <p role="status" className="text-sm text-rose-700">{t(message)}</p> : null}
+            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "保存中…" : "保存资料")}</button>
           </form>
         </OperationPanel>
       </section>
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">登录密码</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">{profile?.hasLocalPassword ? "更新密码后需要重新登录。" : "当前尚未设置本地密码。"}</p>
-        <OperationPanel title={profile?.hasLocalPassword ? "修改管理员登录密码" : "设置管理员登录密码"} triggerLabel={profile?.hasLocalPassword ? "修改密码" : "设置密码"} description="更新后需要重新登录。" open={openOperation === "password"} onOpenChange={(open) => { setOpenOperation(open ? "password" : null); if (open) setMessage(null); }}>
+        <h2 className="text-lg font-semibold">{t("登录密码")}</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">{t(profile?.hasLocalPassword ? "更新密码后需要重新登录。" : "当前尚未设置本地密码。")}</p>
+        <OperationPanel title={t(profile?.hasLocalPassword ? "修改管理员登录密码" : "设置管理员登录密码")} triggerLabel={t(profile?.hasLocalPassword ? "修改密码" : "设置密码")} description={t("更新后需要重新登录。")} open={openOperation === "password"} onOpenChange={(open) => { setOpenOperation(open ? "password" : null); if (open) setMessage(null); }}>
           <form onSubmit={changePassword} className="max-w-2xl space-y-4">
-            {profile?.hasLocalPassword ? <label className="block text-sm font-medium text-slate-700">当前密码<input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label> : null}
-            <label className="block text-sm font-medium text-slate-700">新密码<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
-            <p className="text-xs leading-5 text-slate-500">8–128 位，同时包含字母和数字。更新后需要重新登录。</p>
-            {message && openOperation === "password" ? <p role="alert" className="text-sm text-rose-700">{message}</p> : null}
-            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "更新中…" : "更新密码"}</button>
+            {profile?.hasLocalPassword ? <label className="block text-sm font-medium text-slate-700">{t("当前密码")}<input aria-label={t("当前密码")} type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label> : null}
+            <label className="block text-sm font-medium text-slate-700">{t("新密码")}<input aria-label={t("新密码")} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
+            <p className="text-xs leading-5 text-slate-500">{t("8–128 位，同时包含字母和数字。更新后需要重新登录。")}</p>
+            {message && openOperation === "password" ? <p role="alert" className="text-sm text-rose-700">{t(message)}</p> : null}
+            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "更新中…" : "更新密码")}</button>
           </form>
         </OperationPanel>
       </section>

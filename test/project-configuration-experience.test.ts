@@ -5,10 +5,11 @@ import { buildProjectHref, parseProjectHref } from "../src/lib/project-navigatio
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 
-test("项目配置是受保护的一级项目导航路由", async () => {
-  const [navigation, header, page] = await Promise.all([
+test("项目配置是受保护的项目路由并归入项目管理入口", async () => {
+  const [navigation, header, userNavigation, page] = await Promise.all([
     readFile("src/lib/project-navigation.ts", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/lib/user-navigation.ts", "utf8"),
     readFile("src/app/projects/[projectId]/configuration/page.tsx", "utf8"),
   ]);
 
@@ -17,10 +18,10 @@ test("项目配置是受保护的一级项目导航路由", async () => {
   assert.equal(parseProjectHref(projectId, href)?.route, "configuration");
   assert.match(navigation, /"configuration"/u);
   assert.match(navigation, /configuration: \{ suffix: "\/configuration"/u);
-  assert.match(header, /configurationSections: readonly ProjectSection\[\] = \["configuration", "repositories"\]/u);
-  assert.match(header, /configurationSections\.includes\(projectSection\)/u);
-  assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/configuration`\}/u);
-  assert.match(header, /项目配置/u);
+  assert.match(userNavigation, /configuration: "governance"/u);
+  assert.match(userNavigation, /repositories: "governance"/u);
+  assert.match(userNavigation, /\{ key: "governance", label: "项目管理", segment: "governance" \}/u);
+  assert.doesNotMatch(header, /configurationSections|\/configuration/u);
   assert.match(page, /requirePageSession()/u);
   assert.match(page, /withWebAiProjectAccessTransaction/u);
   assert.match(page, /allowArchived: true/u);

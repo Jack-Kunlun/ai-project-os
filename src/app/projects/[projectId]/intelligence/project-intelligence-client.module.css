@@ -1,7 +1,7 @@
 .page {
   min-height: 100vh;
-  background: #f8fafc;
-  color: #0f172a;
+  background: var(--app-surface-soft);
+  color: var(--app-link);
 }
 
 .content {
@@ -15,7 +15,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 1.25rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--app-border);
   padding-bottom: 1rem;
 }
 
@@ -24,11 +24,11 @@
   display: inline-flex;
   min-height: 2.25rem;
   align-items: center;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--app-border);
   border-radius: 0.5rem;
-  background: #fff;
+  background: var(--app-surface);
   padding: 0.5rem 0.75rem;
-  color: #475569;
+  color: var(--app-muted);
   font-size: 0.75rem;
   font-weight: 600;
   text-decoration: none;
@@ -36,14 +36,14 @@
 
 .headerLink:hover,
 .configLink:hover {
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  border-color: var(--app-border);
+  color: var(--app-link);
 }
 
 .returnLink {
   display: inline-flex;
   margin-top: 1rem;
-  color: #1d4ed8;
+  color: var(--app-link);
   font-size: 0.75rem;
   font-weight: 600;
   text-decoration: none;
@@ -51,11 +51,11 @@
 
 .errorNotice {
   margin-top: 1rem;
-  border: 1px solid #fecaca;
+  border: 1px solid var(--app-danger-border);
   border-radius: 0.5rem;
-  background: #fef2f2;
+  background: var(--app-danger-soft);
   padding: 0.75rem 1rem;
-  color: #b91c1c;
+  color: var(--app-danger-ink);
   font-size: 0.8125rem;
 }
 
@@ -63,26 +63,26 @@
   height: 8rem;
   margin-top: 1rem;
   border-radius: 0.625rem;
-  background: #e2e8f0;
+  background: var(--app-surface-soft);
   animation: pulse 1.7s ease-in-out infinite;
 }
 
 .emptyState {
   margin-top: 1rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border);
   border-radius: 0.625rem;
-  background: #fff;
+  background: var(--app-surface);
   padding: 2rem 1rem;
-  color: #606f85;
+  color: var(--app-muted);
   text-align: center;
   font-size: 0.8125rem;
 }
 
 .readinessDisclosure {
   margin-top: 1rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border);
   border-radius: 0.625rem;
-  background: #fff;
+  background: var(--app-surface);
   scroll-margin-top: 5.5rem;
 }
 
@@ -95,9 +95,9 @@
   gap: 0.75rem;
   border: 0;
   border-radius: inherit;
-  background: #fff;
+  background: var(--app-surface);
   padding: 0.625rem 0.875rem;
-  color: #334155;
+  color: var(--app-text);
   text-align: left;
   font-size: 0.75rem;
   font-weight: 650;
@@ -105,14 +105,14 @@
 }
 
 .readinessToggle:hover {
-  background: #f8fafc;
+  background: var(--app-surface-soft);
 }
 
 .readinessToggle:focus-visible,
 .tab:focus-visible,
 .headerLink:focus-visible,
 .configLink:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
 
@@ -125,19 +125,19 @@
 }
 
 .readyBadge {
-  background: #ecfdf5;
-  color: #047857;
+  background: var(--app-success-soft);
+  color: var(--app-success-ink);
 }
 
 .blockedBadge {
-  background: #fffbeb;
-  color: #9e6007;
+  background: var(--app-warning-soft);
+  color: var(--app-warning-ink);
 }
 
 .readinessContent {
   display: grid;
   gap: 0.75rem;
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--app-border);
   padding: 0.875rem;
 }
 
@@ -149,7 +149,7 @@
   display: flex;
   gap: 0.25rem;
   overflow-x: auto;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--app-border);
   margin-top: 1rem;
 }
 
@@ -162,19 +162,19 @@
   border-bottom: 2px solid transparent;
   background: transparent;
   padding: 0.625rem 0.9rem;
-  color: #606f85;
+  color: var(--app-muted);
   font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
 }
 
 .tab:hover {
-  color: #334155;
+  color: var(--app-text);
 }
 
 .tabActive {
-  border-bottom-color: #2563eb;
-  color: #1d4ed8;
+  border-bottom-color: var(--app-accent);
+  color: var(--app-link);
 }
 
 .tabPanel {
@@ -183,9 +183,9 @@
 
 .contentSection {
   margin-top: 0.75rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border);
   border-radius: 0.75rem;
-  background: #fff;
+  background: var(--app-surface);
   padding: 1.25rem;
   scroll-margin-top: 5.5rem;
 }

@@ -10,6 +10,7 @@ import { createSecureMasterKeyFixture } from "./secure-master-key-fixture";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import { createBootstrapSignupOfferPolicy } from "../src/lib/platform-grant-offer-policy-service";
+import { getUserTokenUsagePage, parseUserTokenUsageFilter } from "../src/lib/user-token-usage";
 import { readSystemOverviewAnalytics } from "../src/lib/system-overview";
 import {
   activatePlatformDefaultAiRoute,
@@ -21,6 +22,7 @@ import {
   executeUnifiedQuestion,
   getUnifiedQuestionConversation,
   listUnifiedQuestionConversations,
+  updateUnifiedQuestionPresentation,
   prepareUnifiedQuestion,
   UnifiedQuestionError,
 } from "../src/lib/unified-question-service";
@@ -160,6 +162,52 @@ test("unified question migration installs guards and hides entire histories afte
     assert.equal(visibleSearch.pagination.total, 1);
     assert.equal(visibleSearch.conversations[0]?.id, conversationId);
 
+    const original = await db.unifiedQuestionConversation.findUniqueOrThrow({ where: { id: conversationId } });
+    const renamed = await updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 0, title: `已核对的会话 ${suffix}` }, owner, db);
+    assert.equal(renamed.presentation.presentationRevision, 1);
+    assert.equal(renamed.presentation.pinned, false);
+    assert.deepEqual(await db.unifiedQuestionConversation.findUniqueOrThrow({ where: { id: conversationId } }), original,
+      "display changes never rewrite the immutable title, head, version or last-question timestamp");
+    const displaySearch = await listUnifiedQuestionConversations({ search: `已核对的会话 ${suffix}` }, owner, db) as {
+      conversations: Array<{ id: string; title: string; usage: { status: string; requestCount: number; totalTokens: number | null } }>;
+    };
+    assert.equal(displaySearch.conversations[0]?.title, `已核对的会话 ${suffix}`);
+    assert.equal(displaySearch.conversations[0]?.usage.status, "unknown");
+    assert.equal(displaySearch.conversations[0]?.usage.requestCount, 2, "legacy turns remain explicitly unknown");
+    assert.equal(displaySearch.conversations[0]?.usage.totalTokens, null);
+    const pinned = await updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 1, pinned: true }, owner, db);
+    assert.equal(pinned.presentation.pinned, true);
+    assert.equal(pinned.presentation.title, `已核对的会话 ${suffix}`);
+    await assert.rejects(() => updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 1, title: "旧窗口的修改" }, owner, db),
+      (error: unknown) => unifiedCode(error) === "UNIFIED_QUESTION_CONFLICT");
+    const competing = await Promise.allSettled([
+      updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 2, pinned: false }, owner, db),
+      updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 2, title: "另一个窗口" }, owner, db),
+    ]);
+    assert.equal(competing.filter(row => row.status === "fulfilled").length, 1);
+    assert.equal(competing.filter(row => row.status === "rejected" && unifiedCode(row.reason) === "UNIFIED_QUESTION_CONFLICT").length, 1);
+    await assert.rejects(() => db.unifiedQuestionPresentationRevision.updateMany({ where: { conversationId }, data: { pinned: false } }));
+    const otherId = randomUUID();
+    await db.appUser.create({ data: { id: otherId, username: `uq_other_${suffix}`, role: "user" } });
+    await assert.rejects(() => updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 3, pinned: true },
+      { id: otherId, role: "user", accountAccessVersion: 1 }, db), (error: unknown) => unifiedCode(error) === "UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    const reopened = await getUnifiedQuestionConversation(conversationId, owner, db) as { conversation: { presentationRevision: number; turns: unknown[] } };
+    assert.equal(reopened.conversation.presentationRevision, 3);
+    assert.deepEqual(reopened.conversation.turns, beforeRevocation.conversation.turns, "renaming preserves complete questions, answers and citation snapshots");
+
+    const newerId = randomUUID(), newerTurn = randomUUID();
+    await db.$transaction(async tx => {
+      await tx.$executeRaw`SELECT set_config('app.unified_question_mutation_context', 'service-v1', true)`;
+      await tx.unifiedQuestionConversation.create({ data: { id: newerId, ownerUserId: ownerId } });
+      await tx.unifiedQuestionTurn.create({ data: { id: newerTurn, ownerUserId: ownerId, conversationId: newerId, sequence: 1,
+        scope: "project", projectId, projectIds: [projectId], contextName: "稍新的项目会话", question: "稍新的会话", answer: "保留原始依据",
+        modelId: provider.defaultGenerationModelId!, providerName: provider.name, providerConnectionId: provider.id, citations: [] } });
+      await tx.unifiedQuestionConversation.update({ where: { id: newerId }, data: { title: "稍新的会话", headTurnId: newerTurn, headSequence: 1, version: 1 } });
+    });
+    await updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 3, pinned: true }, owner, db);
+    const pinnedList = await listUnifiedQuestionConversations({}, owner, db) as { conversations: Array<{ id: string }> };
+    assert.equal(pinnedList.conversations[0]?.id, conversationId, "pinned histories precede newer unpinned histories");
+
     await db.$transaction((tx) => revokeProjectMembership(tx, projectId, ownerId, workspaceId, {
       actorId: adminId, reason: "unified_question_postgres_gate_revocation",
     }));
@@ -176,6 +224,8 @@ test("unified question migration installs guards and hides entire histories afte
     };
     assert.equal(hiddenList.pagination.total, 0);
     assert.deepEqual(hiddenList.conversations, []);
+    await assert.rejects(() => updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 3, pinned: true }, owner, db),
+      (error: unknown) => unifiedCode(error) === "UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
     await assert.rejects(() => getUnifiedQuestionConversation(conversationId, owner, db), (error: unknown) =>
       error instanceof UnifiedQuestionError && error.code === "UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
     await assert.rejects(() => prepareUnifiedQuestion({
@@ -446,6 +496,10 @@ test(
       assert.equal(firstSuccessAudit.inputTokens, 32);
       assert.equal(firstSuccessAudit.outputTokens, 12);
       assert.equal(firstSuccessAudit.usageKnown, true);
+      const sessionUsage = await listUnifiedQuestionConversations({}, owner, db) as { conversations: Array<{ id: string; usage: { status: string; totalTokens: number; requestCount: number } }> };
+      assert.deepEqual(sessionUsage.conversations.find(row => row.id === firstConfirmation.conversationId)?.usage, {
+        status: "known", requestCount: 1, knownRequestCount: 1, unknownRequestCount: 0, inputTokens: 32, outputTokens: 12, totalTokens: 44,
+      });
       assert.ok(firstSuccessAudit.completedAt);
       assert.ok(firstSuccessAudit.completedAt < analyticsWindowEnd, "audit completion is inside the queried end boundary");
       assert.ok(firstSuccessAudit.completedAt >= new Date(analyticsWindowEnd.getTime() - 30 * 24 * 60 * 60 * 1_000),
@@ -590,6 +644,23 @@ test(
       }, owner, db) as Conversation;
       assert.equal(allResult.conversation.turns.length, 4);
       assert.equal(allResult.conversation.turns[3]?.scope, "all");
+      const usageNow=new Date();
+      const usageFilter=parseUserTokenUsageFilter(new URLSearchParams({kind:"unifiedQuestion",status:"succeeded",from:new Date(usageNow.getTime()-2*86400000).toISOString().slice(0,10),to:usageNow.toISOString().slice(0,10),pageSize:"50"}),usageNow);
+      const beforeRevokedUsage=await getUserTokenUsagePage(owner,usageFilter,db);
+      const mixedUsageAudit=await db.unifiedQuestionAudit.findFirstOrThrow({where:{ownerUserId:owner.id,confirmationId:allPrepared.confirmationId},select:{id:true,inputTokens:true,outputTokens:true}});
+      assert.ok(beforeRevokedUsage.entries.some(entry=>entry.id===mixedUsageAudit.id));
+      assert.equal(beforeRevokedUsage.summary.requestCount,beforeRevokedUsage.entries.length);
+      const otherOwnerUsage=await getUserTokenUsagePage(admin,usageFilter,db);
+      assert.equal(otherOwnerUsage.entries.length,0,"usage feed never crosses account ownership");
+      assert.equal(otherOwnerUsage.summary.requestCount,0);
+      for (const kind of ["all", "personalQuestion", "semantic"] as const) {
+        const cancelledUsage = await getUserTokenUsagePage(owner, { ...usageFilter, kind, status: "cancelled" }, db);
+        assert.equal(cancelledUsage.entries.length, 0, `${kind} accepts a cancelled filter without sending an invalid personal-ledger enum`);
+        assert.equal(cancelledUsage.summary.requestCount, 0);
+      }
+      for(const entry of beforeRevokedUsage.entries){
+        assert.ok(!("confirmationId" in entry));assert.ok(!("question" in entry));assert.ok(!("credentialSecretFingerprint" in entry));
+      }
       const allCitations = allResult.conversation.turns[3]?.citations as Array<{ projectId?: string }>;
       assert.deepEqual(allCitations.map((citation) => citation.projectId), [firstProjectId],
         "the fake model cites only project A although evidence from both projects was sent");
@@ -645,6 +716,13 @@ test(
       await db.$transaction((tx) => revokeProjectMembership(tx, secondProjectId, owner.id, workspaceId, {
         actorId: admin.id, reason: "unified_question_uncited_project_revocation_gate",
       }));
+      const afterRevokedUsage=await getUserTokenUsagePage(owner,usageFilter,db);
+      assert.ok(!afterRevokedUsage.entries.some(entry=>entry.id===mixedUsageAudit.id),"mixed project usage is hidden when any scope loses access");
+      assert.equal(afterRevokedUsage.summary.requestCount,beforeRevokedUsage.summary.requestCount-1);
+      assert.equal(afterRevokedUsage.summary.totalTokens,beforeRevokedUsage.summary.totalTokens!-mixedUsageAudit.inputTokens-mixedUsageAudit.outputTokens);
+      assert.equal(afterRevokedUsage.summary.requestCount,afterRevokedUsage.entries.length,"page and summary use identical access predicates");
+      assert.ok(afterRevokedUsage.entries.some(entry=>entry.scope==="personal"),"personal usage remains visible");
+      assert.ok(afterRevokedUsage.entries.some(entry=>entry.project?.id===firstProjectId),"the remaining authorized project usage stays visible");
       const dispatchesBeforeRevokedHistory = dispatches;
       await assert.rejects(() => executeUnifiedQuestion({
         phase: "execute", conversationId: firstConversationId,
@@ -754,14 +832,88 @@ test(
       assert.equal(await db.platformTokenReservation.count({
         where: { userId: owner.id, unifiedQuestionConfirmationId: unknownPrepared.confirmationId },
       }), 1);
+      const finalClientKey = `uq-after-unknown-new-${randomUUID()}`;
       const newConversation = (await prepareUnifiedQuestion({
         phase: "prepare", expectedLastTurnId: null,
         scope: "personal", focusDocumentId: personalDocument.id,
-        question: unknownQuestion, clientKey: `uq-after-unknown-new-${randomUUID()}`,
+        question: unknownQuestion, clientKey: finalClientKey,
       }, owner, db) as Prepared).confirmation;
       assert.notEqual(newConversation.conversationId, unknownPrepared.conversationId);
       assert.equal(newConversation.expectedLastTurnId, null);
       assert.equal(dispatches, dispatchesAfterUnknown, "preparing a new conversation does not dispatch");
+      // A failed project request has no successful Turn. Its usage must still
+      // obey its own scope permissions, without hiding unrelated personal Q&A.
+      providerOutcome = "success";
+      const personalSuccess = await executeUnifiedQuestion({ phase: "execute", conversationId: newConversation.conversationId,
+        expectedLastTurnId: null, scope: "personal", focusDocumentId: personalDocument.id, question: unknownQuestion,
+        clientKey: finalClientKey, confirmationId: newConversation.confirmationId,
+      }, owner, db) as Conversation;
+      // Admission commits an audit before token reservation. A concurrent read
+      // must retain that in-flight uncertainty; a terminal unreserved failure is
+      // a proven non-dispatch and does not add a model call to the total.
+      const unreservedPrepared = (await prepareUnifiedQuestion({ phase: "prepare", conversationId: newConversation.conversationId,
+        expectedLastTurnId: personalSuccess.conversation.lastTurnId, scope: "project", projectId: firstProjectId,
+        question: projectQuestion, clientKey: `uq-unreserved-${randomUUID()}` }, owner, db) as Prepared).confirmation;
+      const proof = await db.unifiedQuestionConfirmation.findUniqueOrThrow({ where: { id: unreservedPrepared.confirmationId } });
+      const pendingAuditId = randomUUID();
+      await db.$transaction(async tx => {
+        await tx.$executeRaw`SELECT set_config('app.unified_question_mutation_context', 'service-v1', true)`;
+        await tx.unifiedQuestionConfirmation.update({ where: { id: proof.id }, data: { status: "consumed", consumedAt: new Date() } });
+        await tx.unifiedQuestionAudit.create({ data: { id: pendingAuditId, ownerUserId: owner.id, confirmationId: proof.id,
+          questionHash: proof.questionHash, historyFingerprint: proof.historyFingerprint, evidenceManifest: proof.evidenceManifest!,
+          scopeProjectIds: proof.scopeProjectIds, providerConnectionId: proof.providerConnectionId, providerConfigurationVersion: proof.providerConfigurationVersion,
+          modelId: proof.modelId, credentialSecretFingerprint: proof.credentialSecretFingerprint, actorAccountAccessVersion: proof.actorAccountAccessVersion,
+          routeFenceFingerprint: proof.routeFenceFingerprint, status: "running" } });
+      });
+      const duringAdmission = await getUnifiedQuestionConversation(newConversation.conversationId, owner, db) as { conversation: { usage: { status: string; requestCount: number } } };
+      assert.equal(duringAdmission.conversation.usage.status, "partial");
+      assert.equal(duringAdmission.conversation.usage.requestCount, 2);
+      await db.$transaction(async tx => {
+        await tx.$executeRaw`SELECT set_config('app.unified_question_mutation_context', 'service-v1', true)`;
+        await tx.unifiedQuestionAudit.update({ where: { id: pendingAuditId }, data: { status: "failed", safeErrorCode: "AI_PLATFORM_QUOTA_EXHAUSTED", completedAt: new Date() } });
+      });
+      const noDispatch = await getUnifiedQuestionConversation(newConversation.conversationId, owner, db) as { conversation: { usage: { status: string; requestCount: number; totalTokens: number } } };
+      assert.equal(noDispatch.conversation.usage.status, "known");
+      assert.equal(noDispatch.conversation.usage.requestCount, 1);
+      assert.equal(noDispatch.conversation.usage.totalTokens, 44);
+      const originalFirstMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId: firstProjectId, userId: owner.id } });
+      await db.$transaction(tx => revokeProjectMembership(tx, firstProjectId, owner.id, workspaceId, { actorId: admin.id, reason: "unreserved_attempt_scope_gate" }));
+      const revokedUnreserved = await getUnifiedQuestionConversation(newConversation.conversationId, owner, db) as { conversation: { usage: { status: string; totalTokens: number } } };
+      assert.equal(revokedUnreserved.conversation.usage.status, "known", "a proven non-dispatch cannot restrict an unrelated personal total");
+      assert.equal(revokedUnreserved.conversation.usage.totalTokens, 44);
+      await db.$transaction(tx => grantProjectMembership(tx, { projectId: firstProjectId, workspaceId, userId: owner.id,
+        role: originalFirstMembership.role, actorId: admin.id, reason: "unreserved_attempt_scope_restore_gate" }));
+      const allPersonalKey = `uq-all-personal-only-${randomUUID()}`;
+      const allPersonalInput = { phase: "prepare" as const, conversationId: newConversation.conversationId,
+        expectedLastTurnId: personalSuccess.conversation.lastTurnId, scope: "all" as const, question: unknownQuestion, clientKey: allPersonalKey };
+      const allPersonalPrepared = (await prepareUnifiedQuestion(allPersonalInput, owner, db) as Prepared).confirmation;
+      assert.ok(allPersonalPrepared.sources.every(source => source.scope === "personal"));
+      const allPersonalSuccess = await executeUnifiedQuestion({ ...allPersonalInput, phase: "execute", confirmationId: allPersonalPrepared.confirmationId }, owner, db) as Conversation;
+      const failedProjectClientKey = `uq-failed-project-${randomUUID()}`;
+      const failedInput = { phase: "prepare" as const, conversationId: newConversation.conversationId,
+        expectedLastTurnId: allPersonalSuccess.conversation.lastTurnId, scope: "project" as const, projectId: firstProjectId,
+        question: projectQuestion, clientKey: failedProjectClientKey };
+      const failedPrepared = (await prepareUnifiedQuestion(failedInput, owner, db) as Prepared).confirmation;
+      providerOutcome = "unknown";
+      await assert.rejects(() => executeUnifiedQuestion({ ...failedInput, phase: "execute", confirmationId: failedPrepared.confirmationId }, owner, db),
+        (error: unknown) => unifiedCode(error) === "UNIFIED_QUESTION_PROVIDER_UNCERTAIN");
+      const partial = await getUnifiedQuestionConversation(newConversation.conversationId, owner, db) as { conversation: { usage: { status: string; totalTokens: number | null; requestCount: number } } };
+      assert.equal(partial.conversation.usage.status, "partial");
+      assert.equal(partial.conversation.usage.totalTokens, 88);
+      assert.equal(partial.conversation.usage.requestCount, 3);
+      await db.$transaction(tx => revokeProjectMembership(tx, firstProjectId, owner.id, workspaceId, {
+        actorId: admin.id, reason: "failed_attempt_usage_scope_revocation_gate",
+      }));
+      const redacted = await getUnifiedQuestionConversation(newConversation.conversationId, owner, db) as { conversation: { turns: Array<{ usage: { status: string; totalTokens: number | null } }>; usage: { status: string; totalTokens: number | null; requestCount: number } } };
+      assert.equal(redacted.conversation.turns.length, 2);
+      assert.equal(redacted.conversation.turns[0]?.usage.totalTokens, 44, "personal round usage remains accessible");
+      assert.equal(redacted.conversation.turns[1]?.usage.status, "unknown", "broad-scope audit is protected even when all selected sources were personal");
+      assert.equal(redacted.conversation.turns[1]?.usage.totalTokens, null);
+      assert.equal(redacted.conversation.usage.status, "unknown");
+      assert.equal(redacted.conversation.usage.totalTokens, null);
+      assert.equal(redacted.conversation.usage.requestCount, 0, "hidden request counts are not returned");
+      const redactedList = await listUnifiedQuestionConversations({}, owner, db) as { conversations: Array<{ id: string; usage: unknown }> };
+      assert.deepEqual(redactedList.conversations.find(row => row.id === newConversation.conversationId)?.usage, redacted.conversation.usage);
     } finally {
       globalThis.fetch = originalFetch;
       if (originalMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

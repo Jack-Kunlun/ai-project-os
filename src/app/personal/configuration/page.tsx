@@ -1,8 +1,10 @@
+import { UiText } from "@/components/appearance-provider";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { requirePageSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { ResourceCardStatus } from "./resource-card-status";
 import styles from "../../support-pages.module.css";
 
 export const dynamic = "force-dynamic";
@@ -39,22 +41,23 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
       <div className={styles.content}>
         <section className={styles.pageHeader}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Personal configuration</p>
-            <h1 className={styles.pageTitle}>我的空间配置</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里管理你拥有的模型、Git 和 MCP 连接。项目配置会展示该项目当前的资源来源，并按项目自己的委托与选择使用；保存个人资源不会自动成为任何项目的默认配置。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text="个人资源配置" /></p>
+            <h1 className={styles.pageTitle}><UiText text={"个人资源配置"} /></h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600"><UiText text={"先查看已有资源，再为具体项目分配授权。"} /></p>
           </div>
         </section>
 
-        <section className={styles.resourceList} aria-label="个人资源">
-          <ResourceCard href="/personal/models" eyebrow="AI resources" title="我的模型" description="维护个人模型连接、会员能力和连接状态。" status={modelStatus} verificationLabel="最近测试" />
-          <ResourceCard href="/personal/connections/git" eyebrow="Git authorization" title="Git 授权管理" description="维护个人 Git 连接，查看关联项目并撤销项目授权。项目绑定从项目的代码仓库配置发起。" status={gitStatus} verificationLabel="最近测试" />
-          <ResourceCard href="/personal/connections/mcp" eyebrow="Tool access" title="我的 MCP 连接" description="维护个人 MCP 连接与安全状态；项目授权仍在项目侧处理。" status={mcpStatus} verificationLabel="最近发现" />
+        <section className={styles.resourceCards}>
+          <ResourceCard href="/personal/models" kind="model" title="个人模型" description="个人模型调用条件以账户权限为准。" status={modelStatus} verificationLabel="最近测试" />
+          <ResourceCard href="/personal/connections/git" kind="git" title="Git 授权" description="项目绑定从项目的代码仓库配置发起，每次读取受项目与路径范围约束。" status={gitStatus} verificationLabel="最近测试" />
+          <ResourceCard href="/personal/connections/mcp" kind="mcp" title="MCP 连接" description="工具调用前仍需项目授权。" status={mcpStatus} verificationLabel="最近发现" />
         </section>
 
         <section className={styles.note}>
-          <h2>个人资源与项目使用</h2>
-          <p>我的空间负责个人资源的所有权和维护，项目配置负责读取当前有效来源并完成项目范围内的委托或选择。两者职责不同，项目状态变化不会删除你的个人连接。</p>
-          <Link href="/projects">查看项目并进入项目配置 →</Link>
+          <p><UiText text={"个人资源的保存与项目授权分开。撤销授权后，项目不能继续使用该连接。"} /></p>
+          <p><UiText text="保存个人资源不会自动成为任何项目的默认配置。" /></p>
+          <Link href="/projects"><UiText text={"查看项目并进入项目配置 →"} /></Link>
+          <Link href="/personal/usage" className="mt-3 inline-flex"><UiText text="查看模型 Token 记录 →" /></Link>
         </section>
       </div>
     </main>
@@ -79,18 +82,24 @@ function resourceStatus<T extends { status: string; ownerAccountAccessVersion: n
   };
 }
 
-function ResourceCard({ href, eyebrow, title, description, status, verificationLabel }: Readonly<{ href: string; eyebrow: string; title: string; description: string; status: ResourceStatus; verificationLabel: string }>): React.JSX.Element {
-  const latestLabel = status.latest === null ? "暂无记录" : new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  }).format(status.latest);
+function ResourceCard({ href, kind, title, description, status, verificationLabel }: Readonly<{ href: string; kind: "model" | "git" | "mcp"; title: string; description: string; status: ResourceStatus; verificationLabel: string }>): React.JSX.Element {
   return (
-    <Link href={href} className={styles.resourceRow}>
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p>
-      <h2 className="mt-3 text-xl font-semibold text-slate-900">{title}</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
-      <p className="mt-4 text-xs font-medium text-slate-600">{status.total === 0 ? "尚未添加" : `共 ${status.total} 个 · 当前已验证 ${status.verified} 个`}</p>
-      <p className="mt-1 text-xs text-slate-500">{verificationLabel}：{latestLabel}</p>
-      <span className="mt-auto inline-flex pt-5 text-sm font-semibold text-indigo-700 group-hover:underline">进入管理 →</span>
+    <Link href={href} className={`${styles.resourceCard} group`}>
+      <span className={styles.resourceCardIcon} aria-hidden="true"><ResourceIcon kind={kind} /></span>
+      <h2 className={styles.resourceCardTitle}><UiText text={title} /></h2>
+      <ResourceCardStatus total={status.total} verified={status.verified} latest={status.latest?.toISOString() ?? null} verificationLabel={verificationLabel} />
+      <p className={styles.resourceCardDescription}><UiText text={description} /></p>
+      <span className={styles.resourceCardAction}><UiText text={"查看与配置"} /> →</span>
     </Link>
   );
+}
+
+function ResourceIcon({ kind }: Readonly<{ kind: "model" | "git" | "mcp" }>): React.JSX.Element {
+  if (kind === "model") {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="6" rx="1.5" /><rect x="3.5" y="13.5" width="17" height="6" rx="1.5" /><path d="M7 7.5h.01M7 16.5h.01M11 7.5h5M11 16.5h5" /></svg>;
+  }
+  if (kind === "git") {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="7" cy="5" r="2" /><circle cx="17" cy="7" r="2" /><circle cx="7" cy="19" r="2" /><path d="M7 7v10M9 6.5c4.5 0 3.5 6 6 6" /><circle cx="17" cy="17" r="2" /><path d="M15 17c-3 0-3-4.5-6-4.5" /></svg>;
+  }
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="2" /><circle cx="19" cy="5" r="2" /><circle cx="19" cy="19" r="2" /><path d="m7 11 10-5M7 13l10 5" /></svg>;
 }

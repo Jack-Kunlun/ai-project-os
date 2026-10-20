@@ -144,7 +144,7 @@ test("account access lifecycle is a separate preview and detail PATCH surface", 
     readFile("src/app/api/system/account-access/route.ts", "utf8"),
     readFile("src/app/api/system/account-access/[userId]/preview/route.ts", "utf8"),
     readFile("src/app/api/system/account-access/[userId]/route.ts", "utf8"),
-    readFile("src/components/admin-shell.tsx", "utf8"),
+    readFile("src/lib/admin-navigation.ts", "utf8"),
     readFile("src/app/system/account-access/page.tsx", "utf8"),
   ]);
   assert.match(schema, /accountAccessVersion\s+Int\s+@default\(1\)/u);

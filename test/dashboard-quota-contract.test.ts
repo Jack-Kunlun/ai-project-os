@@ -44,12 +44,13 @@ test("dashboard reads the current caller advisory independently and keeps client
   assert.match(summary, /status: "available"/u);
   assert.match(summary, /status: "unavailable"/u);
   assert.match(summary, /availableCredits: number/u);
-  assert.match(client, /正在读取额度/u);
-  assert.match(client, /availableCredits === 0/u);
-  assert.match(client, /暂时无法读取当前额度/u);
-  assert.match(client, /实际执行前会再次核验额度/u);
-  assert.match(client, /href="\/credits"/u);
-  assert.match(client, /我的工作[\s\S]*项目动态/u);
-  assert.match(client, /\/api\/personal\/knowledge\/overview/u);
-  assert.match(client, /\/api\/me\/git-connections/u);
+  assert.doesNotMatch(client, /正在读取额度|availableCredits === 0|暂时无法读取当前额度|实际执行前会再次核验额度/u);
+  assert.match(client, /aria-label=\{t\("工作台常用信息"\)\}/u);
+  assert.match(client, /项目动态/u);
+  assert.match(client, /需要你关注/u);
+  // The dashboard route already returns the needed workspace summary, so the
+  // client should not fan out to unrelated personal-resource endpoints.
+  assert.match(client, /fetch\(`\/api\/dashboard\?workspaceId=/u);
+  assert.match(client, /fetch\("\/api\/workspaces\/current"/u);
+  assert.doesNotMatch(client, /\/api\/personal\/knowledge\/overview|\/api\/me\/git-connections/u);
 });

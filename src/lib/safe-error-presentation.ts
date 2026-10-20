@@ -6,6 +6,10 @@ export type SafeErrorPresentation = Readonly<{
 }>;
 
 const EXACT_PRESENTATIONS: Readonly<Record<string, Readonly<{ summary: string; nextStep: string }>>> = Object.freeze({
+  UNIFIED_QUESTION_CONFLICT: { summary: "会话已被其他窗口更新。", nextStep: "读取最新状态，保留名称输入后再保存。" },
+  UNIFIED_QUESTION_INVALID_INPUT: { summary: "会话名称或操作参数无效。", nextStep: "请填写不超过 120 个字符的单行名称。" },
+  UNIFIED_QUESTION_HISTORY_UNAVAILABLE: { summary: "会话不存在或当前不可访问。", nextStep: "关闭弹窗并刷新会话列表。" },
+  UNIFIED_QUESTION_FORBIDDEN: { summary: "当前账号不能修改该会话。", nextStep: "请使用创建会话的账号操作。" },
   ACCESS_FORBIDDEN: { summary: "当前账号没有执行此操作的权限。", nextStep: "返回项目并请项目 Owner 或管理员核对你的访问权限。" },
   ACCOUNT_DISABLED: { summary: "当前账号已停用，不能继续操作。", nextStep: "联系管理员恢复账号后重新登录。" },
   PROJECT_NOT_FOUND: { summary: "未找到该项目，或你已不能访问它。", nextStep: "返回项目列表，确认项目仍存在且你仍有权限。" },
@@ -50,6 +54,8 @@ const EXACT_PRESENTATIONS: Readonly<Record<string, Readonly<{ summary: string; n
 
 const SAFE_PRESENTATION_CODES = new Set([
   ...Object.keys(EXACT_PRESENTATIONS),
+  "MEMBERSHIP_APPLICATION_PREVIEW_EXPIRED",
+  "MEMBERSHIP_APPLICATION_PREVIEW_STALE",
   "AI_CANDIDATE_INVALID_INPUT",
   "ASSET_FILE_REQUIRED",
   "ASSET_UPLOAD_CONTENT_TYPE_INVALID",

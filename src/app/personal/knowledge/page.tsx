@@ -1,5 +1,5 @@
 import { requirePageSession } from "@/lib/auth";
-import { KnowledgeClient } from "./knowledge-client";
+import { KnowledgeClient } from "./knowledge-loader";
 
 export const dynamic = "force-dynamic";
 

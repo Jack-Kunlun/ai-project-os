@@ -4,7 +4,7 @@
 
 ## 1. 管理工作台与权限边界
 
-1.1.0 管理侧栏保留五个直接入口：“平台总览、用户与权益、配置中心、安全中心、运维中心”。用户与权益下提供用户、会员、额度；配置中心提供模型能力、短信服务、探测预算；安全中心提供 MCP 审核和审计记录；运维中心提供失败收件箱和资源与备份。组内栏目横向显示，指南和管理员账户从顶部进入。具体页面与权限如下：
+当前本地候选按已确认的原型使用分组直达侧栏：概览；用户与用量（用户列表、会员资格、平台额度）；服务与接入（模型与能力、MCP 审核、短信服务、审计记录）；运行维护（资源与备份、失败收件箱、探测预算）；设置（管理员账户、管理员指南）。顶部提供功能页面搜索、通知与任务入口、帮助、语言与外观、账户菜单及退出登录；窄屏使用导航抽屉。此项为本地界面更新，不代表已部署。具体页面与权限如下：
 
 | 页面 | 用途 | 权限 |
 | --- | --- | --- |
@@ -24,7 +24,7 @@
 
 平台总览按上海自然日展示真实聚合。平台调用用量和失败分类包含统一智能问答，以及额度预留能够证明为平台托管的旧个人知识问答；个人 BYOK 不进入平台用量。这里只提供日期、数量、Token 和安全错误分类，不提供他人的问题、回答、引用或凭据。查询失败显示“未取得”，不会当作零；运行中的调用不计作已完成或结果未知。
 
-`/settings` 与 `/system/*` 只保留受守卫的兼容跳转，不是当前管理导航。`/admin/connectors/git` 和 `/system/account-access` 已退出正常入口；访问时分别回到平台总览或用户运营页面。`/admin/users/memberships` 是用户与权益下的会员二级页面；`/system/memberships` 对 system admin 兼容跳转 `/admin/users/memberships`，普通用户返回用户工作台；`/system/operations` 仅 initial super admin 可用并兼容跳转 `/admin/operations/backups`，其他 system admin 按现有安全行为返回不可见页面，普通用户返回用户工作台。`/connections` 与 `/connections/mcp` 属于普通用户个人连接流程，不是管理员连接器页面。
+`/settings` 与 `/system/*` 只保留受守卫的兼容跳转，不是当前管理导航。`/admin/connectors/git` 和 `/system/account-access` 已退出正常入口；访问时分别回到平台总览或用户运营页面。`/admin/users/memberships` 是用户与用量分组中的会员页面；`/system/memberships` 对 system admin 兼容跳转 `/admin/users/memberships`，普通用户返回用户工作台；`/system/operations` 仅 initial super admin 可用并兼容跳转 `/admin/operations/backups`，其他 system admin 按现有安全行为返回不可见页面，普通用户返回用户工作台。`/connections` 与 `/connections/mcp` 属于普通用户个人连接流程，不是管理员连接器页面。
 
 账号停用/恢复现在归 `/admin/users` 的用户详情页管理。管理员可以查看安全摘要和必要的有效访问结果，但不通过旧的账号矩阵入口管理项目关系；停用账号仍可审计，所有有效结果均为 `effective=false`。system admin 角色只代表平台管理权限，不隐含任何工作区或项目 Owner 权限。
 

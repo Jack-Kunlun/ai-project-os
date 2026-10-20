@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("login page aligns with the workspace and preserves configured auth choices", async () => {
-  const [form, authStyles, authPage, page, apiErrors, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
+  const [form, authStyles, appearanceStyles, authPage, page, apiErrors, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
     readFile("src/app/login/login-form.tsx", "utf8"),
     readFile("src/components/auth-page.module.css", "utf8"),
+    readFile("src/app/appearance.css", "utf8"),
     readFile("src/components/auth-page.tsx", "utf8"),
     readFile("src/app/login/page.tsx", "utf8"),
     readFile("src/lib/api-errors.ts", "utf8"),
@@ -19,10 +20,10 @@ test("login page aligns with the workspace and preserves configured auth choices
     readFile("src/components/public-info-page.tsx", "utf8"),
   ]);
 
-  assert.match(authPage, /让项目知识可追溯/u);
+  assert.match(authPage, /让项目的每一步，[\s\S]*都有据可循/u);
   assert.match(form, /import styles from "@\/components\/auth-page\.module\.css"/u);
-  assert.match(form, /<AuthPage sectionLabel="登录工作区">/u);
-  assert.match(authPage, /<BrandMark size=\{36\} priority/u);
+  assert.match(page, /<AuthPage sectionLabel="登录工作区">/u);
+  assert.match(authPage, /<BrandMark size=\{40\} priority/u);
   assert.match(authPage, /children: ReactNode/u);
   assert.match(await readFile("src/components/brand-mark.tsx", "utf8"), /ai-project-os-admin-crisp\.png/u);
   assert.doesNotMatch(form, />OS<\/span>/u);
@@ -33,16 +34,15 @@ test("login page aligns with the workspace and preserves configured auth choices
   assert.match(form, /首次使用 GitHub 登录会自动创建普通用户账号/u);
   assert.match(authPage, /隐私政策/u);
   assert.match(authPage, /服务条款/u);
-  assert.match(authPage, /帮助文档/u);
+  assert.match(authPage, /帮助与支持/u);
   assert.match(authPage, /href="\/privacy"/u);
   assert.match(authPage, /href="\/terms"/u);
   assert.match(authPage, /href="\/help"/u);
-  assert.match(authPage, /TermsIcon/u);
-  assert.match(authPage, /HelpIcon/u);
-  assert.match(authStyles, /background: #f7f8fa/u);
-  assert.match(authStyles, /#3566c9/u);
-  assert.match(authStyles, /@media \(max-width: 760px\)/u);
-  assert.match(authStyles, /@media \(max-width: 380px\)/u);
+  assert.match(authStyles, /background: var\(--app-bg\)/u);
+  assert.match(authStyles, /var\(--app-accent\)/u);
+  assert.match(appearanceStyles, /--app-accent:\s*#3566c9/u);
+  assert.match(authStyles, /@media \(max-width: 900px\)/u);
+  assert.match(authStyles, /@media \(max-width: 360px\)/u);
   assert.match(authStyles, /min-height: 44px/u);
   assert.match(authStyles, /:focus-visible/u);
   assert.doesNotMatch(form, /radial-gradient|linear-gradient|shadow-\[/u);
@@ -120,4 +120,13 @@ test("login page aligns with the workspace and preserves configured auth choices
   assert.match(recoveryForm, /purpose="recover" availability=\{available \? "available" : "unavailable"\}/u);
   assert.match(recoveryForm, /username !== null/u);
   assert.match(recoveryForm, /href="\/login\?password=updated"/u);
+});
+
+test("registration native username pattern is valid with Unicode sets and retains the server character rules", async () => {
+  const source = await readFile("src/app/register/register-form.tsx", "utf8");
+  const literal = source.match(/pattern=\{("(?:[^"\\]|\\.)*")\}/u)?.[1];
+  assert.ok(literal);
+  const pattern = new RegExp(`^(?:${JSON.parse(literal)})$`, "v");
+  for (const value of ["project.owner", "team-owner", "user_01", "A12"]) assert.equal(pattern.test(value), true, value);
+  for (const value of ["ab", "_owner", "bad!name", "name with spaces", "a".repeat(65)]) assert.equal(pattern.test(value), false, value);
 });

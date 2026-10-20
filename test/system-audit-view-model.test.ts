@@ -113,3 +113,11 @@ test("short status labels used by the audit table stay stable", () => {
   assert.equal(auditActionLabel("created"), "创建");
   assert.equal(auditActionLabel("unknownActionToken"), "unknownActionToken");
 });
+
+test("audit date filter chips use the selected display locale without changing query values", () => {
+  const value = "2026-10-20T08:30:00.000Z";
+  const english = auditFilterChips({ from: value }, "en")[0];
+  assert.equal(english.value, value);
+  assert.equal(english.display, new Intl.DateTimeFormat("en", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)));
+  assert.equal(auditFilterChips({ from: "not-a-date" }, "en")[0].display, "not-a-date");
+});

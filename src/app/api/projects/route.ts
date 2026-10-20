@@ -10,6 +10,7 @@ import { createProjectSchema, slugifyProjectName } from "@/lib/validation";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { accessibleProjectWhere, resolveProjectCreationWorkspace } from "@/lib/access-control";
 import { AccessControlError } from "@/lib/access-control";
+import { assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { lockActorsAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { appendProjectMembershipAudit, findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 import { DEFAULT_LIST_PAGE_SIZE, listPagination, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
@@ -23,6 +24,7 @@ export const dynamic = "force-dynamic";
 
 const projectSummarySelect = {
   id: true,
+  workspaceId: true,
   name: true,
   slug: true,
   description: true,
@@ -56,6 +58,7 @@ const projectSummarySelect = {
 } as const;
 
 const listProjectsQuerySchema = z.object({
+  workspaceId: z.uuid().optional(),
   view: z.enum(["active", "archived"]).default("active"),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
@@ -72,7 +75,9 @@ export async function GET(request: Request) {
     }
     const query = listProjectsQuerySchema.parse(Object.fromEntries(searchParams));
     const archived = query.view === "archived";
-    const accessWhere = accessibleProjectWhere(user);
+    const accessWhere = {
+      AND: [accessibleProjectWhere(user), { workspace: { closedAt: null } }, ...(query.workspaceId ? [{ workspaceId: query.workspaceId }] : [])],
+    };
     const where: Prisma.ProjectWhereInput = {
       AND: [
         accessWhere,
@@ -98,7 +103,13 @@ export async function GET(request: Request) {
       db.project.count({ where: { AND: [accessWhere, { archivedAt: null }] } }),
       db.project.count({ where: { AND: [accessWhere, { archivedAt: { not: null } }] } }),
       db.workspaceMembership.count({
-        where: { userId: user.id, accessState: "confirmed", role: { in: ["owner", "admin"] } },
+        where: {
+          userId: user.id,
+          accessState: "confirmed",
+          workspace: { closedAt: null },
+          role: { in: ["owner", "admin"] },
+          ...(query.workspaceId ? { workspaceId: query.workspaceId } : {}),
+        },
       }),
     ]);
 
@@ -122,35 +133,32 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const db = getDb();
-    const workspaceId = await resolveProjectCreationWorkspace(user, db);
     const input = createProjectSchema.parse(await readJsonBody(request));
-    const project = await db.$transaction(async (tx) => {
-      await lockActorsAccess(tx, [user.id]);
-      await lockWorkspaceAccess(tx, workspaceId);
-      const currentMembership = await findConfirmedWorkspaceMembership(tx, workspaceId, user.id);
-      if (currentMembership === null || (currentMembership.role !== "owner" && currentMembership.role !== "admin")) {
-        throw new AccessControlError("ACCESS_FORBIDDEN");
-      }
-      return createWithAvailableSlug({
-        requestedSlug: input.slug,
-        baseSlug: slugifyProjectName(input.name),
-        create: async (slug) => {
-          const createdProject = await tx.project.create({
-            data: {
-              name: input.name,
-              slug,
-              description: input.description || null,
-              workspaceId,
-              membershipInheritanceMode: "workspaceInherited",
-            },
-            select: projectSummarySelect,
-          });
-          const ownerMembership = await tx.projectMembership.create({ data: { projectId: createdProject.id, userId: user.id, role: "owner", accessState: "confirmed" } });
-          await appendProjectMembershipAudit(tx, { ...ownerMembership, workspaceId }, { action: "confirmed", previousState: null, actorId: user.id, reason: "project_owner_created" });
-          return createdProject;
-        },
-      });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    const workspaceId = input.workspaceId ?? await resolveProjectCreationWorkspace(user, db);
+    // Each unique-slug retry needs a fresh transaction: PostgreSQL aborts the
+    // previous transaction after a unique constraint violation.
+    const project = await createWithAvailableSlug({
+      requestedSlug: input.slug,
+      baseSlug: slugifyProjectName(input.name),
+      create: (slug) => db.$transaction(async (tx) => {
+        await lockActorsAccess(tx, [user.id]);
+        await assertAccountAccessForActor(tx, user);
+        await lockWorkspaceAccess(tx, workspaceId);
+        const workspace = await tx.workspace.findFirst({ where: { id: workspaceId, closedAt: null }, select: { id: true } });
+        if (workspace === null) throw new AccessControlError("ACCESS_FORBIDDEN");
+        const currentMembership = await findConfirmedWorkspaceMembership(tx, workspaceId, user.id);
+        if (currentMembership === null || (currentMembership.role !== "owner" && currentMembership.role !== "admin")) {
+          throw new AccessControlError("ACCESS_FORBIDDEN");
+        }
+        const createdProject = await tx.project.create({
+          data: { name: input.name, slug, description: input.description || null, workspaceId, membershipInheritanceMode: "workspaceInherited" },
+          select: projectSummarySelect,
+        });
+        const ownerMembership = await tx.projectMembership.create({ data: { projectId: createdProject.id, userId: user.id, role: "owner", accessState: "confirmed" } });
+        await appendProjectMembershipAudit(tx, { ...ownerMembership, workspaceId }, { action: "confirmed", previousState: null, actorId: user.id, reason: "project_owner_created" });
+        return createdProject;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }),
+    });
 
     return NextResponse.json({
       project: {

@@ -1,7 +1,7 @@
 .page {
   min-height: 100dvh;
-  background: #fff;
-  color: #20242a;
+  background: var(--app-surface);
+  color: var(--app-text);
 }
 
 .content {
@@ -9,11 +9,11 @@
   width: min(100%, 1500px);
   margin-inline: auto;
   padding: 28px 32px 48px;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .pageTitle {
-  color: #303d51;
+  color: var(--app-text);
   font-size: 25px;
   font-weight: 600;
   letter-spacing: 0;
@@ -38,24 +38,24 @@
 
 .pageHeader > :global(div:first-child) > :global(p:last-child),
 .pageHeader > :global(p:last-child) {
-  color: #627086;
+  color: var(--app-muted);
 }
 
 .safetyNote {
   max-width: 360px;
-  border-left: 2px solid #dce6f4;
+  border-left: 2px solid var(--app-border);
   padding: 2px 0 2px 14px;
-  color: #56677f;
+  color: var(--app-muted);
 }
 
 .asideNote {
   max-width: 390px;
-  border-left: 2px solid #dce6f4;
+  border-left: 2px solid var(--app-border);
   padding: 2px 0 2px 14px;
 }
 
 .resourceList {
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--app-border);
 }
 
 .resourceRow {
@@ -64,13 +64,13 @@
   align-items: center;
   gap: 10px 18px;
   padding: 16px 8px;
-  border-bottom: 1px solid #edf0f4;
-  color: #39475b;
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-muted);
   transition: background-color 140ms ease;
 }
 
 .resourceRow:hover {
-  background: #f8faff;
+  background: var(--app-surface);
 }
 
 .resourceRow > :global(p:first-child) {
@@ -81,7 +81,7 @@
   grid-column: 1;
   grid-row: 1 / span 2;
   margin: 0;
-  color: #3a495f;
+  color: var(--app-muted);
   font-size: 14px;
   font-weight: 500;
 }
@@ -90,7 +90,7 @@
   grid-column: 2;
   grid-row: 1 / span 2;
   margin: 0;
-  color: #627086;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.8;
 }
@@ -100,7 +100,7 @@
   grid-column: 3;
   margin: 0;
   font-size: 11px;
-  color: #627086;
+  color: var(--app-muted);
 }
 
 .resourceRow > :global(p:nth-child(4)) {
@@ -114,23 +114,122 @@
 .resourceRow > :global(span:last-child) {
   grid-column: 4;
   grid-row: 1 / span 2;
-  color: #3566c9;
+  color: var(--app-link);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
 }
 
+.resourceCards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 20px;
+}
+
+.resourceCard {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  padding: 24px;
+  color: var(--app-text);
+  text-decoration: none;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.resourceCard:hover {
+  border-color: var(--app-accent);
+  background: var(--app-surface-soft);
+}
+
+.resourceCard:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 3px;
+}
+
+.resourceCardIcon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  margin-bottom: 18px;
+  border-radius: 8px;
+  background: var(--app-accent-soft);
+  color: var(--app-link);
+}
+
+.resourceCardIcon :global(svg) {
+  width: 24px;
+  height: 24px;
+}
+
+.resourceCardTitle {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.resourceCardStatus {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  color: var(--app-muted);
+}
+
+.resourceCardMetric {
+  margin: 0 0 2px;
+  color: var(--app-text);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.resourceCardMetric :global(strong) {
+  font-weight: 600;
+}
+
+.resourceCardStatus > :global(p) {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.resourceCardDescription {
+  margin: 14px 0 0;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.resourceCardAction {
+  display: inline-flex;
+  margin-top: auto;
+  padding-top: 18px;
+  color: var(--app-link);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .note {
   margin-top: 26px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--app-border);
   padding: 18px 0 0;
-  color: #5f6d80;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.9;
 }
 
 .note :global(h2) {
-  color: #3e4b60;
+  color: var(--app-muted);
   font-size: 14px;
   font-weight: 500;
 }
@@ -140,12 +239,12 @@
 }
 
 .note :global(a) {
-  color: #3566c9;
+  color: var(--app-link);
   font-weight: 500;
 }
 
 .content :global(h1) {
-  color: #303d51;
+  color: var(--app-text);
   font-size: 25px;
   font-weight: 600;
   letter-spacing: 0;
@@ -221,3 +320,44 @@
     grid-row: 1;
   }
 }
+
+@media (max-width: 1100px) {
+  .resourceCards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .resourceCards {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .resourceCard {
+    padding: 20px;
+  }
+}
+
+/* Secondary resource pages use the same action colors and heading hierarchy. */
+.primaryAction {
+  background: var(--app-accent);
+  color: var(--app-on-accent);
+}
+.primaryAction:hover {
+  background: color-mix(in srgb, var(--app-accent) 88%, #000);
+}
+.secondaryAction:hover {
+  background: var(--app-accent-soft);
+}
+.content :global(button.bg-indigo-600),
+.content :global(button.bg-indigo-700) {
+  background: var(--app-accent);
+  color: var(--app-on-accent);
+}
+.content :global(button.bg-indigo-600:hover),
+.content :global(button.bg-indigo-700:hover) {
+  background: color-mix(in srgb, var(--app-accent) 88%, #000);
+}
+.content :global(.text-indigo-600),
+.content :global(.text-indigo-700) { color: var(--app-link); }
+.content :global(p.uppercase) { display: none; }

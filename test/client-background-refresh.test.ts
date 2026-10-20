@@ -24,7 +24,12 @@ test("mutation-triggered data reloads keep mounted UI after the initial page loa
     const source = readFileSync(join(root, path), "utf8");
     assert.match(source, /showLoading = false/u, `${path} must default to a background reload`);
     assert.match(source, /if \(showLoading\) setLoading\(true\);/u, `${path} must only show a blocking loader explicitly`);
-    assert.match(source, /if \((?:sequence === requestSequence\.current && )?showLoading\) setLoading\(false\);/u, `${path} must preserve the mounted page after background reloads and guard sequenced completion`);
+    if (path.endsWith("/memory/project-memory-client.tsx")) {
+      assert.match(source, /if \(current\(\)\) setLoading\(false\);/u, `${path} must only settle its latest active read`);
+      assert.match(source, /activeProject\.current === projectId && !controller\.signal\.aborted && version === readVersion\.current/u);
+    } else {
+      assert.match(source, /if \((?:sequence === requestSequence\.current && )?showLoading\) setLoading\(false\);/u, `${path} must preserve the mounted page after background reloads and guard sequenced completion`);
+    }
     assert.match(
       source,
       new RegExp(`${functionName}\\(\\{ showLoading: true \\}\\)`, "u"),

@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { AdminPageFrame } from "@/components/admin-shell";
@@ -46,6 +47,7 @@ const statusStyles = {
 } as const;
 
 export function ConnectionsClient({ username, adminMode = false }: { username: string; adminMode?: boolean }) {
+  const translateUi = useTranslate();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,12 +80,12 @@ export function ConnectionsClient({ username, adminMode = false }: { username: s
       <AdminPageFrame active="git" showSidebar={adminMode}><div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
         <section className="grid gap-8 rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 lg:grid-cols-[1.2fr_.8fr] lg:px-10">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Source connections</p>
-            <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">代码来源连接器</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">统一配置 GitHub、Gitee、GitLab、自建 Gitea / Forgejo 和通用 Git 服务。凭据只在服务端解密；仓库扫描固定提交、禁止交互式提示和本地钩子，并在发布前完成整批校验。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300"><UiText text={"Source connections"} /></p>
+            <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]"><UiText text={"代码来源连接器"} /></h1>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300"><UiText text={"统一配置 GitHub、Gitee、GitLab、自建 Gitea / Forgejo 和通用 Git 服务。凭据只在服务端解密；仓库扫描固定提交、禁止交互式提示和本地钩子，并在发布前完成整批校验。"} /></p>
           </div>
           <div className="grid grid-cols-2 gap-3 text-xs">
-            {["HTTPS Token / Basic", "SSH Deploy Key", "自定义 CA", "内网服务显式授权"].map((item) => <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-slate-200">{item}</div>)}
+            {["HTTPS Token / Basic", "SSH Deploy Key", "自定义 CA", "内网服务显式授权"].map((item) => <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-slate-200">{translateUi(item)}</div>)}
           </div>
         </section>
 
@@ -97,11 +99,11 @@ export function ConnectionsClient({ username, adminMode = false }: { username: s
           <ConnectionForm catalog={catalog} onCreated={(connection) => setConnections((current) => [...current, connection])} />
           <section>
             <div className="mb-4 flex items-end justify-between px-1">
-              <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Configured</p><h2 className="mt-2 text-2xl font-semibold">已配置服务</h2></div>
-              <span className="text-xs text-slate-400">{loading ? "读取中…" : `${connections.length} 个`}</span>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"Configured"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"已配置服务"} /></h2></div>
+              <span className="text-xs text-slate-400">{loading ? <UiText text={"读取中…"} /> : `${connections.length} 个`}</span>
             </div>
             <div className="space-y-4">
-              {!loading && connections.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">先添加一个 Git 服务，再到项目的“代码仓库”页关联仓库。</div> : null}
+              {!loading && connections.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500"><UiText text={"先添加一个 Git 服务，再到项目的“代码仓库”页关联仓库。"} /></div> : null}
               {connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} onChanged={(next) => setConnections((current) => current.map((item) => item.id === next.id ? next : item))} onRemoved={(connectionId) => setConnections((current) => current.filter((item) => item.id !== connectionId))} />)}
             </div>
           </section>
@@ -112,6 +114,7 @@ export function ConnectionsClient({ username, adminMode = false }: { username: s
 }
 
 function ConnectionForm({ catalog, onCreated }: { catalog: CatalogEntry[]; onCreated: (connection: Connection) => void }) {
+  const translateUi = useTranslate();
   const [providerKind, setProviderKind] = useState<ProviderKind>("github");
   const [transport, setTransport] = useState<Transport>("https");
   const [name, setName] = useState("GitHub");
@@ -173,24 +176,24 @@ function ConnectionForm({ catalog, onCreated }: { catalog: CatalogEntry[]; onCre
 
   return (
     <form onSubmit={submit} className="h-fit rounded-3xl border border-slate-200 bg-white p-6 shadow-sm lg:p-7">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">New connection</p>
-      <h2 className="mt-2 text-2xl font-semibold">添加 Git 服务</h2>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"New connection"} /></p>
+      <h2 className="mt-2 text-2xl font-semibold"><UiText text={"添加 Git 服务"} /></h2>
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <Field label="服务类型"><select value={providerKind} onChange={(event) => chooseProvider(event.target.value as ProviderKind)} className="field">{catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{entry.label}</option>)}</select></Field>
-        <Field label="传输协议"><select value={transport} onChange={(event) => chooseTransport(event.target.value as Transport)} className="field"><option value="https">HTTPS</option><option value="ssh">SSH</option></select></Field>
+        <Field label={translateUi("服务类型")}><select value={providerKind} onChange={(event) => chooseProvider(event.target.value as ProviderKind)} className="field">{catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{entry.label}</option>)}</select></Field>
+        <Field label={translateUi("传输协议")}><select value={transport} onChange={(event) => chooseTransport(event.target.value as Transport)} className="field"><option value="https"><UiText text={"HTTPS"} /></option><option value="ssh"><UiText text={"SSH"} /></option></select></Field>
       </div>
-      <Field label="连接名称"><input className="field" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required /></Field>
-      <Field label="服务根地址"><input className="field" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={transport === "https" ? "https://git.company.com" : "ssh://git@git.company.com:22"} required /></Field>
+      <Field label={translateUi("连接名称")}><input className="field" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required /></Field>
+      <Field label={translateUi("服务根地址")}><input className="field" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={transport === "https" ? "https://git.company.com" : "ssh://git@git.company.com:22"} required /></Field>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <Field label="认证方式"><select value={authKind} onChange={(event) => setAuthKind(event.target.value as AuthKind)} className="field" disabled={transport === "ssh"}>{transport === "https" ? <><option value="token">Access Token</option><option value="basic">用户名 / 密码</option><option value="none">公开仓库，无凭据</option></> : <option value="sshKey">SSH Deploy Key</option>}</select></Field>
-        {authKind !== "none" ? <Field label="用户名（可选）"><input className="field" value={username} onChange={(event) => setUsername(event.target.value)} placeholder={authKind === "token" ? "留空使用平台默认值" : "git"} /></Field> : <div />}
+        <Field label={translateUi("认证方式")}><select value={authKind} onChange={(event) => setAuthKind(event.target.value as AuthKind)} className="field" disabled={transport === "ssh"}>{transport === "https" ? <><option value="token"><UiText text={"Access Token"} /></option><option value="basic"><UiText text={"用户名 / 密码"} /></option><option value="none"><UiText text={"公开仓库，无凭据"} /></option></> : <option value="sshKey"><UiText text={"SSH Deploy Key"} /></option>}</select></Field>
+        {authKind !== "none" ? <Field label={translateUi("用户名（可选）")}><input className="field" value={username} onChange={(event) => setUsername(event.target.value)} placeholder={authKind === "token" ? translateUi("留空使用平台默认值") : "git"} /></Field> : <div />}
       </div>
-      {authKind !== "none" ? <Field label={authKind === "sshKey" ? "SSH 私钥（只读 Deploy Key，不能带口令）" : authKind === "token" ? "Access Token" : "密码"}>{authKind === "sshKey" ? <textarea className="field min-h-36 font-mono text-xs" value={secret} onChange={(event) => setSecret(event.target.value)} required /> : <input type="password" autoComplete="new-password" className="field" value={secret} onChange={(event) => setSecret(event.target.value)} required />}</Field> : null}
-      {transport === "ssh" ? <Field label="SSH known_hosts 公钥记录"><textarea className="field min-h-24 font-mono text-xs" value={sshKnownHost} onChange={(event) => setSshKnownHost(event.target.value)} placeholder="git.company.com ssh-ed25519 AAAA…" required /></Field> : null}
-      <button type="button" onClick={() => setAdvanced((value) => !value)} className="mt-5 text-xs font-semibold text-indigo-600">{advanced ? "收起安全选项" : "展开自建服务安全选项"}</button>
-      {advanced ? <div className="mt-4 rounded-2xl bg-slate-50 p-4"><label className="flex items-start gap-3 text-sm text-slate-700"><input type="checkbox" checked={allowPrivateNetwork} onChange={(event) => setAllowPrivateNetwork(event.target.checked)} className="mt-1" /><span><strong className="block">允许访问内网地址</strong><span className="mt-1 block text-xs leading-5 text-slate-500">仅用于明确受信的公司内网 Git 服务；云元数据地址始终禁止。</span></span></label>{transport === "https" ? <Field label="自定义 CA 证书（可选）"><textarea className="field min-h-28 font-mono text-xs" value={tlsCaCertificate} onChange={(event) => setTlsCaCertificate(event.target.value)} placeholder="-----BEGIN CERTIFICATE-----" /></Field> : null}</div> : null}
+      {authKind !== "none" ? <Field label={authKind === "sshKey" ? translateUi("SSH 私钥（只读 Deploy Key，不能带口令）") : authKind === "token" ? "Access Token" : translateUi("密码")}>{authKind === "sshKey" ? <textarea className="field min-h-36 font-mono text-xs" value={secret} onChange={(event) => setSecret(event.target.value)} required /> : <input type="password" autoComplete="new-password" className="field" value={secret} onChange={(event) => setSecret(event.target.value)} required />}</Field> : null}
+      {transport === "ssh" ? <Field label={translateUi("SSH known_hosts 公钥记录")}><textarea className="field min-h-24 font-mono text-xs" value={sshKnownHost} onChange={(event) => setSshKnownHost(event.target.value)} placeholder="git.company.com ssh-ed25519 AAAA…" required /></Field> : null}
+      <button type="button" onClick={() => setAdvanced((value) => !value)} className="mt-5 text-xs font-semibold text-indigo-600">{advanced ? <UiText text={"收起安全选项"} /> : <UiText text={"展开自建服务安全选项"} />}</button>
+      {advanced ? <div className="mt-4 rounded-2xl bg-slate-50 p-4"><label className="flex items-start gap-3 text-sm text-slate-700"><input type="checkbox" checked={allowPrivateNetwork} onChange={(event) => setAllowPrivateNetwork(event.target.checked)} className="mt-1" /><span><strong className="block"><UiText text={"允许访问内网地址"} /></strong><span className="mt-1 block text-xs leading-5 text-slate-500"><UiText text={"仅用于明确受信的公司内网 Git 服务；云元数据地址始终禁止。"} /></span></span></label>{transport === "https" ? <Field label={translateUi("自定义 CA 证书（可选）")}><textarea className="field min-h-28 font-mono text-xs" value={tlsCaCertificate} onChange={(event) => setTlsCaCertificate(event.target.value)} placeholder="-----BEGIN CERTIFICATE-----" /></Field> : null}</div> : null}
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
-      <button disabled={pending || catalog.length === 0} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50">{pending ? "加密保存中…" : "加密保存连接"}</button>
+      <button disabled={pending || catalog.length === 0} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50">{pending ? <UiText text={"加密保存中…"} /> : <UiText text={"加密保存连接"} />}</button>
       <style jsx>{`.field{margin-top:.5rem;width:100%;border-radius:.75rem;border:1px solid #cbd5e1;background:white;padding:.72rem .9rem;font-size:.875rem;color:#0f172a;outline:none}.field:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.14)}.field:disabled{background:#f1f5f9;color:#64748b}`}</style>
     </form>
   );
@@ -199,19 +202,19 @@ function ConnectionForm({ catalog, onCreated }: { catalog: CatalogEntry[]; onCre
 function GitConfigurationGuide() {
   return (
     <details className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
-      <summary className="cursor-pointer text-sm font-semibold text-indigo-950">配置示例与流程（示例不含任何秘密）</summary>
+      <summary className="cursor-pointer text-sm font-semibold text-indigo-950"><UiText text={"配置示例与流程（示例不含任何秘密）"} /></summary>
       <div className="mt-4 space-y-4 text-xs leading-5 text-indigo-950">
         <ol className="list-decimal space-y-1 pl-5">
-          <li>先选择服务类型和传输协议，再填写服务根地址与只读认证信息。</li>
-          <li>点击“加密保存连接”后，在右侧填写仓库路径和跟踪分支，执行一次只读验证。</li>
-          <li>验证通过后，进入项目“代码仓库”关联仓库；项目内不重复录入凭据。</li>
+          <li><UiText text={"先选择服务类型和传输协议，再填写服务根地址与只读认证信息。"} /></li>
+          <li><UiText text={"点击“加密保存连接”后，在右侧填写仓库路径和跟踪分支，执行一次只读验证。"} /></li>
+          <li><UiText text={"验证通过后，进入项目“代码仓库”关联仓库；项目内不重复录入凭据。"} /></li>
         </ol>
         <div className="grid gap-3 md:grid-cols-3">
-          <div className="min-w-0 rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold">公网 HTTPS</p><pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] text-slate-600">{`地址: https://github.com\n认证: Access Token（只读）`}</pre><p className="mt-2 text-slate-500">Token 只填入密码字段，不要拼进 URL。</p></div>
-          <div className="min-w-0 rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold">自建 HTTPS / CA</p><pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] text-slate-600">{`地址: https://git.example.com\n认证: Access Token\nCA: -----BEGIN CERTIFICATE-----`}</pre><p className="mt-2 text-slate-500">自签服务粘贴可信 CA；内网地址还需显式允许。</p></div>
-          <div className="min-w-0 rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold">SSH Deploy Key</p><pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] text-slate-600">{`地址: ssh://git@git.example.com:22\n认证: SSH Deploy Key\nknown_hosts: git.example.com ssh-ed25519 AAAA…`}</pre><p className="mt-2 text-slate-500">必须粘贴完整单行“主机 算法 base64 公钥”；示例公钥仅占位，生产请使用管理员核验的精确记录。</p></div>
+          <div className="min-w-0 rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold"><UiText text={"公网 HTTPS"} /></p><pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] text-slate-600">{`地址: https://github.com\n认证: Access Token（只读）`}</pre><p className="mt-2 text-slate-500"><UiText text={"Token 只填入密码字段，不要拼进 URL。"} /></p></div>
+          <div className="min-w-0 rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold"><UiText text={"自建 HTTPS / CA"} /></p><pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] text-slate-600">{`地址: https://git.example.com\n认证: Access Token\nCA: -----BEGIN CERTIFICATE-----`}</pre><p className="mt-2 text-slate-500"><UiText text={"自签服务粘贴可信 CA；内网地址还需显式允许。"} /></p></div>
+          <div className="min-w-0 rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold"><UiText text={"SSH Deploy Key"} /></p><pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] text-slate-600">{`地址: ssh://git@git.example.com:22\n认证: SSH Deploy Key\nknown_hosts: git.example.com ssh-ed25519 AAAA…`}</pre><p className="mt-2 text-slate-500"><UiText text={"必须粘贴完整单行“主机 算法 base64 公钥”；示例公钥仅占位，生产请使用管理员核验的精确记录。"} /></p></div>
         </div>
-        <p className="text-slate-600">以上占位值仅用于说明字段位置，不会自动填入或提交；真实 Token、私钥和 CA 只能通过认证后的连接表单发送到服务端加密保存。</p>
+        <p className="text-slate-600"><UiText text={"以上占位值仅用于说明字段位置，不会自动填入或提交；真实 Token、私钥和 CA 只能通过认证后的连接表单发送到服务端加密保存。"} /></p>
       </div>
     </details>
   );
@@ -222,6 +225,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Connection; onChanged: (connection: Connection) => void; onRemoved: (connectionId: string) => void }) {
+  const translateUi = useTranslate();
   const [repositoryPath, setRepositoryPath] = useState("");
   const [trackedRef, setTrackedRef] = useState("main");
   const [testing, setTesting] = useState(false);
@@ -282,13 +286,13 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
   return (
     <><article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{statusLabels[connection.status]}</span></div><p className="mt-2 text-xs text-slate-500">{connection.providerKind.toUpperCase()} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div>
-        <div className="text-right text-xs text-slate-400"><p>{connection._count.repositories} 个仓库身份</p><p className="mt-1">凭据 ····{connection.credential?.maskedSuffix ?? "无"}</p></div>
+        <div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{translateUi(statusLabels[connection.status])}</span></div><p className="mt-2 text-xs text-slate-500">{connection.providerKind.toUpperCase()} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div>
+        <div className="text-right text-xs text-slate-400"><p>{connection._count.repositories} {" "}<UiText text={"个仓库身份"} /></p><p className="mt-1"><UiText text={"凭据 ····"} />{connection.credential?.maskedSuffix ?? <UiText text={"无"} />}</p></div>
       </div>
-      <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p>内网访问：{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</p><p>最近验证：{connection.lastTestedAt ? new Date(connection.lastTestedAt).toLocaleString("zh-CN") : "尚未验证"}</p>{connection.lastErrorCode ? <p className="sm:col-span-2 text-rose-600">最近错误：{connection.lastErrorCode}</p> : null}</div>
-      {connection.status !== "disabled" ? <form onSubmit={test} className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[1fr_8rem_auto]"><input value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="组织/仓库" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><input value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><button disabled={testing} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{testing ? "验证中…" : "只读验证"}</button></form> : null}
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void toggleEnabled()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? "停用中…" : "停用连接"}</button> : <div className="flex flex-wrap items-center gap-2"><button onClick={() => void toggleEnabled()} disabled={disabling} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">重新启用</button><button onClick={() => void removeConnection()} disabled={disabling} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">永久删除</button></div>}</div>
-      {connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">只有未被任何项目仓库关联的连接可以永久删除；仍有历史关联时系统会拒绝删除。</p> : null}
+      <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p><UiText text={"内网访问："} />{connection.allowPrivateNetwork ? <UiText text={"已显式允许"} /> : <UiText text={"禁止"} />}</p><p><UiText text={"最近验证："} />{connection.lastTestedAt ? new Date(connection.lastTestedAt).toLocaleString("zh-CN") : <UiText text={"尚未验证"} />}</p>{connection.lastErrorCode ? <p className="sm:col-span-2 text-rose-600"><UiText text={"最近错误："} />{connection.lastErrorCode}</p> : null}</div>
+      {connection.status !== "disabled" ? <form onSubmit={test} className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[1fr_8rem_auto]"><input value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder={translateUi("组织/仓库")} required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><input value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><button disabled={testing} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{testing ? <UiText text={"验证中…"} /> : <UiText text={"只读验证"} />}</button></form> : null}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void toggleEnabled()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? <UiText text={"停用中…"} /> : <UiText text={"停用连接"} />}</button> : <div className="flex flex-wrap items-center gap-2"><button onClick={() => void toggleEnabled()} disabled={disabling} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text={"重新启用"} /></button><button onClick={() => void removeConnection()} disabled={disabling} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"永久删除"} /></button></div>}</div>
+      {connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiText text={"只有未被任何项目仓库关联的连接可以永久删除；仍有历史关联时系统会拒绝删除。"} /></p> : null}
     </article>{dialog}</>
   );
 }

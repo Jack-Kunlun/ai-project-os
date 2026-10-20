@@ -67,6 +67,13 @@ export const gitProviderLabels: Record<GitProviderKind, string> = {
   generic: "通用 Git 服务",
 };
 
+export const gitAuthKindLabels: Record<GitAuthKind, string> = {
+  none: "无认证",
+  token: "Token",
+  basic: "Basic",
+  sshKey: "SSH Key",
+};
+
 export const gitStatusLabels: Record<GitConnectionStatus, string> = {
   configured: "待测试",
   verified: "已验证",

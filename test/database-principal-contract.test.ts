@@ -67,7 +67,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
   assert.equal(DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.length, 7);
   assert.equal(DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX.length, 10);
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 123);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 124);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false
@@ -380,7 +380,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   }
   assert.match(gitAutomationMaterialMigration, /"ProjectGitRepositoryMaterialPublicationHead"[\s\S]*?project_git_material_head_guard/u);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "legacy_mcp_source_reference_guard"));
-  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 148/u);
+  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 149/u);
   for (const roleName of ["ai_project_os_runtime", "ai_project_os_entitlement_writer", "ai_project_os_git_automation_worker"]) {
     assert.ok(emailAuthMigration.includes(`'${roleName}'`));
   }

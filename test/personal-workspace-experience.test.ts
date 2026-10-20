@@ -3,12 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("个人工作区提供受保护的总览和资源配置汇总", async () => {
-  const [root, overview, configuration, nav, header, profile] = await Promise.all([
+  const [root, overview, configuration, nav, header, shell, profile] = await Promise.all([
     readFile("src/app/personal/page.tsx", "utf8"),
     readFile("src/app/personal/personal-overview-client.tsx", "utf8"),
     readFile("src/app/personal/configuration/page.tsx", "utf8"),
     readFile("src/components/personal-workspace-nav.tsx", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/components/user-shell.tsx", "utf8"),
     readFile("src/app/profile/profile-client.tsx", "utf8"),
   ]);
 
@@ -34,13 +35,13 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
   assert.doesNotMatch(projectCard, /\/configuration/u);
   assert.match(configuration, /PersonalWorkspaceNav active="configuration"/u);
   assert.match(configuration, /href="\/personal\/models"/u);
-  assert.match(configuration, /href="\/personal\/connections\/git"/u);
-  assert.match(configuration, /href="\/personal\/connections\/mcp"/u);
+  assert.match(configuration, /<ResourceCard href="\/personal\/connections\/git"/u);
+  assert.match(configuration, /<ResourceCard href="\/personal\/connections\/mcp"/u);
   assert.match(configuration, /不会自动成为任何项目的默认配置/u);
   assert.match(nav, /return null/u);
   assert.doesNotMatch(nav, /<nav/u);
-  assert.match(header, /isUserShellPath\(pathname\)/u);
-  assert.match(header, /<UserShell username=\{props\.username\}/u);
+  assert.match(header, /<UserShell username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
+  assert.match(shell, /getActiveGlobalNavigation\(pathname\)/u);
   assert.doesNotMatch(profile, /href="\/profile\/models"/u);
   assert.doesNotMatch(profile, /<h2[^>]*>我的模型<\/h2>/u);
   assert.doesNotMatch(profile, /我的连接|\/profile\/connections/u);
@@ -48,11 +49,9 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
 
 
 test("代码仓库页面归入项目配置导航", async () => {
-  const header = await readFile("src/components/app-header.tsx", "utf8");
-  const materialSections = header.match(/const materialSections:[^;]+;/u)?.[0] ?? "";
-  const configurationSections = header.match(/const configurationSections:[^;]+;/u)?.[0] ?? "";
-  assert.doesNotMatch(materialSections, /"repositories"/u);
-  assert.match(configurationSections, /"configuration", "repositories"/u);
-  const configurationLink = header.slice(header.indexOf('href={`/projects/${projectId}/configuration`}'));
-  assert.match(configurationLink, /aria-current=\{projectSection && configurationSections.includes\(projectSection\)/u);
+  const navigation = await readFile("src/lib/user-navigation.ts", "utf8");
+  assert.match(navigation, /repositories: "governance"/u);
+  assert.match(navigation, /configuration: "governance"/u);
+  assert.match(navigation, /\{ key: "overview", label: "项目概览", segment: "" \}/u);
+  assert.doesNotMatch(navigation, /label: "代码仓库"|segment: "repositories"/u);
 });

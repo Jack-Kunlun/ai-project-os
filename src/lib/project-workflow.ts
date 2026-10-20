@@ -18,6 +18,7 @@ import { assertPlatformConcurrency } from "@/lib/ai-entitlements";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
 import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import { persistNotification } from "@/lib/notification-service";
+import { summarizeTokenUsageBuckets, type TokenUsageSummary } from "@/lib/token-usage";
 
 const JOB_LOCK_NAMESPACE = 23082026;
 // The current monolith executes a job in one request. Keep enough headroom for
@@ -83,6 +84,7 @@ export type PublicProjectJob = Readonly<{
   startedAt: Date | null;
   completedAt: Date | null;
   attempts: readonly PublicJobAttempt[];
+  usage?: TokenUsageSummary;
 }>;
 
 export type PublicProjectJobInputSummary =
@@ -1143,6 +1145,7 @@ type PublicProjectJobSource = Readonly<{
   startedAt?: Date | null;
   completedAt?: Date | null;
   attempts?: readonly Parameters<typeof publicAttempt>[0][];
+  usage?: TokenUsageSummary;
 }>;
 
 function canCancelPersistentProjectProcessingJob(job: PublicProjectJobSource): boolean {
@@ -1203,6 +1206,7 @@ export function toPublicProjectJob(job: PublicProjectJobSource): PublicProjectJo
     startedAt: job.startedAt ?? null,
     completedAt: job.completedAt ?? null,
     attempts: Object.freeze((job.attempts ?? []).map(publicAttempt)),
+    ...(job.usage === undefined ? {} : { usage: job.usage }),
   });
 }
 
@@ -1258,7 +1262,19 @@ export async function getProjectJobInternal(
   assertProjectJobId(jobId);
   const job = await db.backgroundJob.findFirst({ where: { id: jobId, projectId }, select: jobDetailSelect });
   if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
-  return toPublicProjectJob(job);
+  const usageRows = await db.providerCallAudit.groupBy({
+    by: ["usageKnown"],
+    where: { jobId: job.id },
+    _count: { _all: true },
+    _sum: { inputTokens: true, outputTokens: true },
+  });
+  const usage = summarizeTokenUsageBuckets(usageRows.map((row) => ({
+    count: row._count._all,
+    usageKnown: row.usageKnown,
+    inputTokens: row.usageKnown ? row._sum.inputTokens : null,
+    outputTokens: row.usageKnown ? row._sum.outputTokens : null,
+  })));
+  return toPublicProjectJob({ ...job, usage });
 }
 
 export async function getProjectJob(

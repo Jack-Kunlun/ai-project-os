@@ -152,6 +152,6 @@ test("personal Git/MCP probes bind an owner proof and keep the database guard fa
   assert.match(gitClient, /async function saveConnection/u);
   assert.match(mcpClient, /async function testConnection/u);
   assert.match(mcpClient, /async function saveConnection/u);
-  assert.match(gitClient, /HelpTooltip label="Git 连接流程"/u);
-  assert.match(mcpClient, /HelpTooltip label="MCP 连接流程"/u);
+  assert.match(gitClient, /HelpTooltip label=\{t\("Git 连接流程"\)\}/u);
+  assert.match(mcpClient, /HelpTooltip label=\{t\("MCP 连接流程"\)\}/u);
 });

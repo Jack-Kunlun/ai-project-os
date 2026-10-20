@@ -591,7 +591,7 @@ class GitManifestTests(unittest.TestCase):
                 DEPLOYER.validate_manifest_delta(source, target)
 
         self.assertEqual(len(source), 143)
-        self.assertEqual(len(target), 148)
+        self.assertEqual(len(target), 149)
         self.assertEqual(working_tree, target)
         self.assertEqual(target[:len(source)], source)
         self.assertEqual([name for name, _ in target], sorted(name for name, _ in target))
@@ -607,7 +607,7 @@ class GitManifestTests(unittest.TestCase):
                 source = DEPLOYER.git_manifest(DEPLOYER.INITIAL_SOURCE_REVISION)
                 target, files = DEPLOYER.validate_target_tree(candidate, source, candidate_tag)
 
-        self.assertEqual(len(target), 148)
+        self.assertEqual(len(target), 149)
         self.assertIn('v[1-9][0-9]*', files['backup'].decode('utf-8'))
         self.assertIn('ai-project-os-release-stable.py', files['deployer'].decode('utf-8'))
 

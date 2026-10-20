@@ -1,13 +1,13 @@
 .page {
   min-height: 100vh;
-  color: #292f2a;
-  background: #fff;
+  color: var(--app-text);
+  background: var(--app-surface);
 }
 
 .content {
   width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 34px 42px 48px;
+  padding: 32px;
 }
 
 .heading {
@@ -24,12 +24,12 @@
   font-size: 25px;
   font-weight: 600;
   letter-spacing: 0;
-  color: #20242a;
+  color: var(--app-text);
 }
 
 .eyebrow {
   margin: 0 0 7px;
-  color: #6b7167;
+  color: var(--app-muted);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 1.5px;
@@ -37,7 +37,7 @@
 
 .subtitle {
   margin: 8px 0 0;
-  color: #6a7068;
+  color: var(--app-muted);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -47,11 +47,11 @@
   min-height: 36px;
   align-items: center;
   justify-content: center;
-  border: 1px solid #3566c9;
-  border-radius: 7px;
+  border: 1px solid var(--app-accent);
+  border-radius: 6px;
   padding: 8px 14px;
-  color: #fff;
-  background: #3566c9;
+  color: var(--app-on-accent);
+  background: var(--app-accent);
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
@@ -59,7 +59,7 @@
 }
 
 .primaryButton:hover {
-  background: #2b58b3;
+  background: var(--app-accent);
 }
 
 .listSection {
@@ -72,10 +72,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
   padding: 11px 13px;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .filters {
@@ -94,15 +94,15 @@
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 6px 10px;
-  color: #687266;
-  background: #f4f6f9;
+  color: var(--app-muted);
+  background: var(--app-surface-soft);
   font-size: 11px;
   font-weight: 560;
 }
 
 .selectedFilter {
-  color: #fff;
-  background: #3566c9;
+  color: var(--app-on-accent);
+  background: var(--app-accent);
 }
 
 .selectedFilter span,
@@ -113,7 +113,7 @@
 
 .matchCount {
   margin-left: 5px;
-  color: #6a6f67;
+  color: var(--app-muted);
   font-size: 10px;
 }
 
@@ -123,17 +123,17 @@
   min-height: 34px;
   align-items: center;
   gap: 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 7px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
   padding: 0 10px;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .searchBox svg {
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
-  color: #6c7168;
+  color: var(--app-muted);
 }
 
 .searchBox input {
@@ -141,14 +141,14 @@
   min-width: 0;
   border: 0;
   outline: 0;
-  color: #4f594e;
+  color: var(--app-muted);
   background: transparent;
   font: inherit;
   font-size: 11px;
 }
 
 .searchBox input::placeholder {
-  color: #6b6f68;
+  color: var(--app-muted);
 }
 
 .projectGrid {
@@ -164,20 +164,20 @@
   min-width: 0;
   min-height: 219px;
   flex-direction: column;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
   padding: 19px;
-  background: #fff;
+  background: var(--app-surface);
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .projectCard:hover {
-  border-color: #cbd3c5;
+  border-color: var(--app-border);
   box-shadow: 0 8px 22px rgb(35 44 35 / 6%);
 }
 
 .archivedCard {
-  background: #fafbfc;
+  background: var(--app-surface-soft);
 }
 
 .cardHeading {
@@ -205,9 +205,9 @@
   height: 29px;
   flex: 0 0 29px;
   place-items: center;
-  border-radius: 7px;
-  color: #65735c;
-  background: #edf3ff;
+  border-radius: 6px;
+  color: var(--app-muted);
+  background: var(--app-accent-soft);
   font-size: 12px;
   font-weight: 650;
 }
@@ -215,7 +215,7 @@
 .projectIdentity h2 {
   overflow: hidden;
   margin: 0;
-  color: #343c35;
+  color: var(--app-text);
   font-size: 14px;
   font-weight: 620;
   text-overflow: ellipsis;
@@ -226,7 +226,7 @@
   display: -webkit-box;
   overflow: hidden;
   margin: 6px 0 0;
-  color: #6a7168;
+  color: var(--app-muted);
   font-size: 11px;
   line-height: 1.65;
   -webkit-box-orient: vertical;
@@ -235,10 +235,10 @@
 
 .projectStatus {
   flex: 0 0 auto;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 4px 7px;
-  color: #677260;
-  background: #f4f6f9;
+  color: var(--app-muted);
+  background: var(--app-surface-soft);
   font-size: 9px;
 }
 
@@ -254,17 +254,17 @@
   gap: 4px;
   border-radius: 6px;
   padding: 9px 10px;
-  background: #fafbfc;
+  background: var(--app-surface-soft);
 }
 
 .stat strong {
-  color: #495348;
+  color: var(--app-muted);
   font-size: 15px;
   font-weight: 600;
 }
 
 .stat span {
-  color: #6a6f68;
+  color: var(--app-muted);
   font-size: 9px;
 }
 
@@ -272,8 +272,8 @@
   margin: 12px 0 0;
   border-radius: 6px;
   padding: 8px 10px;
-  color: #6a6f67;
-  background: #fafbfc;
+  color: var(--app-muted);
+  background: var(--app-surface-soft);
   font-size: 10px;
   line-height: 1.6;
 }
@@ -284,9 +284,9 @@
   justify-content: space-between;
   gap: 10px;
   margin-top: auto;
-  border-top: 1px solid #edf0f5;
+  border-top: 1px solid var(--app-border);
   padding-top: 12px;
-  color: #6a6f68;
+  color: var(--app-muted);
   font-size: 9px;
 }
 
@@ -298,37 +298,37 @@
 
 .cardFooter a {
   flex: 0 0 auto;
-  color: #64735c;
+  color: var(--app-muted);
   font-size: 10px;
   font-weight: 620;
   text-decoration: none;
 }
 
 .cardFooter a:hover {
-  color: #3d563e;
+  color: var(--app-text);
 }
 
 .projectSkeleton {
   min-height: 219px;
   border-radius: 9px;
-  background: linear-gradient(100deg, #f4f6f9 20%, #f5f6f2 40%, #f4f6f9 60%);
+  background: linear-gradient(100deg, var(--app-surface-soft) 20%, var(--app-border) 40%, var(--app-surface-soft) 60%);
   background-size: 200% 100%;
   animation: shimmer 1.25s linear infinite;
 }
 
 .emptyState {
   margin-top: 17px;
-  border: 1px dashed #d9dcd4;
+  border: 1px dashed var(--app-border);
   border-radius: 9px;
   padding: 45px 22px;
-  color: #6b7168;
-  background: #fff;
+  color: var(--app-muted);
+  background: var(--app-surface);
   text-align: center;
 }
 
 .emptyState h2 {
   margin: 0;
-  color: #4b554a;
+  color: var(--app-muted);
   font-size: 15px;
   font-weight: 600;
 }
@@ -342,7 +342,7 @@
 .emptyState button:not(.primaryButton) {
   border: 0;
   padding: 4px 2px;
-  color: #64745d;
+  color: var(--app-muted);
   background: transparent;
   font-size: 11px;
   font-weight: 620;
@@ -356,17 +356,17 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 15px;
-  border: 1px solid #ead5ce;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 11px 14px;
-  color: #975d50;
-  background: #fbf3ef;
+  color: var(--app-muted);
+  background: var(--app-warning-soft);
   font-size: 12px;
 }
 
 .error button {
   border: 0;
-  color: #7e5147;
+  color: var(--app-muted);
   background: transparent;
   font-size: 11px;
   font-weight: 650;

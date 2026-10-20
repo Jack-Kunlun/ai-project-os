@@ -100,9 +100,10 @@ test("notification return context restores the fetched page cursor for an append
 });
 
 test("Dashboard, deep links, return context and mobile admin entry are bounded contracts", async () => {
-  const [dashboardRoute, dashboardClient, actionClient, actionRoute, actionEngine, notifications, notificationsRoute, notificationService, header] = await Promise.all([
+  const [dashboardRoute, dashboardClient, planClient, actionClient, actionRoute, actionEngine, notifications, notificationsRoute, notificationService, header, userShell, headerAccount, userShellStyles] = await Promise.all([
     readFile("src/app/api/dashboard/route.ts", "utf8"),
     readFile("src/app/dashboard/dashboard-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/plan/project-plan-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/actions/project-actions-client.tsx", "utf8"),
     readFile("src/app/api/projects/[projectId]/actions/route.ts", "utf8"),
     readFile("src/lib/action-engine.ts", "utf8"),
@@ -110,22 +111,26 @@ test("Dashboard, deep links, return context and mobile admin entry are bounded c
     readFile("src/app/api/notifications/route.ts", "utf8"),
     readFile("src/lib/notification-service.ts", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/components/user-shell.tsx", "utf8"),
+    readFile("src/components/header-account.tsx", "utf8"),
+    readFile("src/components/user-shell.module.css", "utf8"),
   ]);
   assert.match(dashboardRoute, /state = projects\.length === 0/u);
   assert.match(dashboardRoute, /"empty-plan"/u);
   assert.match(dashboardRoute, /cache-control/u);
   assert.match(dashboardClient, /\/projects\/\$\{job\.project\.id\}\/jobs\/\$\{job\.id\}/u);
   assert.match(dashboardClient, /href:\s*signal\s*\?/u);
-  assert.match(dashboardClient, /`\/projects\/\$\{atRisk\.project\.id\}\/plan#work-item-\$\{signal\.workItemId\}`/u);
-  assert.match(dashboardClient, /action: "打开项目计划"/u);
-  assert.match(dashboardClient, /#work-item-\$\{signal\.workItemId\}/u);
-  assert.match(dashboardClient, /请求失败时不推断项目健康度/u);
+  assert.match(dashboardClient, /href: signal \? `\/projects\/\$\{entry\.project\.id\}\/plan\?focus=\$\{encodeURIComponent\(signal\.workItemId\)\}/u);
+  assert.match(planClient, /parseProjectPageState\("plan", projectId/u);
+  assert.match(planClient, /navigation\.focus === null/u);
+  assert.match(planClient, /getElementById\(`work-item-\$\{navigation\.focus\}`\)/u);
+  assert.match(dashboardClient, /<UiText text="状态读取失败，重试后再查看待办。" \/>/u);
   assert.match(dashboardClient, /状态读取失败，重试后再查看待办/u);
   assert.match(dashboardClient, /项目状态暂不可用，工作台请求失败时不会显示旧统计/u);
-  assert.match(dashboardClient, /aria-label="工作台常用信息"/u);
+  assert.match(dashboardClient, /aria-label=\{t\("工作台常用信息"\)\}/u);
   assert.match(dashboardClient, /aria-labelledby="attention-heading"/u);
   assert.match(dashboardClient, /aria-labelledby="recent-projects-heading"/u);
-  assert.match(dashboardClient, /work-item-\$\{signal\.workItemId\}/u);
+  assert.match(planClient, /id=\{`work-item-\$\{item\.id\}`\}/u);
   assert.match(actionClient, /searchParams\.get\("action"\)/u);
   assert.match(actionClient, /action: focusActionId/u);
   assert.match(actionClient, /scrollIntoView/u);
@@ -143,8 +148,11 @@ test("Dashboard, deep links, return context and mobile admin entry are bounded c
   assert.match(notificationService, /CURRENT_TIMESTAMP/u);
   assert.match(notificationService, /actionState === "pending"/u);
   assert.match(notifications, /<time className="text-xs text-slate-600">/u);
-  assert.match(notifications, /<span className="text-xs text-slate-600">已读<\/span>/u);
+  assert.match(notifications, /item\.readAt !== null \? <span className="text-xs text-slate-600"><UiText text=\{"已读"\} \/><\/span> : null/u);
   assert.match(notifications, /"text-slate-700 hover:bg-white\/70"/u);
-  assert.match(header, /isSystemAdmin \? <Link href="\/admin"/u);
-  assert.match(header, /sm:hidden/u);
+  assert.match(header, /return <UserShell username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
+  assert.match(userShell, /<HeaderAccount username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
+  assert.match(headerAccount, /\{isSystemAdmin\s*\?\s*<Link href="\/admin"/u);
+  assert.match(userShell, /aria-label=\{t\("打开导航"\)\}/u);
+  assert.match(userShellStyles, /@media \(max-width: 760px\)[\s\S]*\.mobileMenu[\s\S]*display: inline-flex/u);
 });

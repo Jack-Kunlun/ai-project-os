@@ -25,3 +25,11 @@ test("unknown and malformed payloads use the caller fallback", async () => {
   assert.equal(result.summary, "任务加载失败");
   assert.match(result.nextStep, /刷新页面后重试/u);
 });
+
+test("membership preview recovery retains only its two stable failure codes", async () => {
+  for (const code of ["MEMBERSHIP_APPLICATION_PREVIEW_EXPIRED", "MEMBERSHIP_APPLICATION_PREVIEW_STALE"]) {
+    const result = await safeResponseError(new Response(JSON.stringify({ error: { code, message: "private database detail" } }), { status: 409 }), "申请预览失败");
+    assert.equal(result.code, code);
+    assert.doesNotMatch(result.message, /private database/u);
+  }
+});

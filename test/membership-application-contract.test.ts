@@ -155,6 +155,6 @@ test("额度与申请投影只在独立额度页读取，账号资料不重复�
   assert.doesNotMatch(profileRoute, /getPlatformTokenSummary|membershipApplication|entitlements/u);
   assert.match(creditsClient, /平台额度|额度概览/u);
   assert.match(creditsClient, /不是支付订单或发票/u);
-  assert.match(profileClient, /href="\/credits"/u);
-  assert.doesNotMatch(profileClient, /PlatformCreditPanel|平台额度|额度总量|预留中/u);
+  assert.match(readFileSync("src/components/user-shell.tsx", "utf8"), /\/credits[^\n]*额度与账单/u);
+  assert.doesNotMatch(profileClient, /PlatformCreditPanel|额度总量|预留中|availableCredits|availableTokens|platformTokenReservation|platformTokenGrant/u);
 });

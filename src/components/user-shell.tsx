@@ -1,8 +1,14 @@
 "use client";
+import "../app/user-workspace.css";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppearanceControls } from "./appearance-controls";
+import { HeaderAccount } from "./header-account";
+import { WorkspacePicker,selectWorkspace,useWorkspaceSelection } from "./workspace-scope";
+import { BrandMark } from "./brand-mark";
+import { useTranslate, UiText } from "./appearance-provider";
 import { NotificationBell } from "@/components/notification-bell";
 import {
   getActiveGlobalNavigation,
@@ -21,7 +27,7 @@ const PROJECT_LIST_PAGE_SIZE = 50;
 const LAST_PROJECT_STORAGE_KEY = "ai-project-os:user-shell:project-id";
 const EMPTY_PROJECTS: readonly ProjectOption[] = [];
 
-type ProjectOption = Readonly<{ id: string; name: string; archived: boolean }>;
+type ProjectOption = Readonly<{ id: string; name: string; archived: boolean; workspaceId?:string }>;
 type ProjectListState =
   | Readonly<{ status: "loading" }>
   | Readonly<{ status: "error" }>
@@ -56,7 +62,7 @@ async function fetchProjectView(view: "active" | "archived", signal: AbortSignal
       if (!isObject(candidate) || typeof candidate.id !== "string" || !candidate.id || typeof candidate.name !== "string") {
         throw new Error("Project list contained an invalid project");
       }
-      projects.push({ id: candidate.id, name: candidate.name, archived: view === "archived" });
+      projects.push({ id: candidate.id, name: candidate.name, archived: view === "archived",workspaceId:typeof candidate.workspaceId === "string"?candidate.workspaceId:undefined });
     }
     page += 1;
   }
@@ -94,7 +100,8 @@ function rememberProjectId(projectId: string | null): void {
   }
 }
 
-export function UserShell({ username }: Readonly<{ username: string }>): React.JSX.Element {
+export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username: string;isSystemAdmin?:boolean }>): React.JSX.Element {
+  const t=useTranslate(),workspaceId=useWorkspaceSelection(username);
   const pathname = usePathname() ?? "/";
   const router = useRouter();
   const [projectList, setProjectList] = useState<ProjectListState>({ status: "loading" });
@@ -103,11 +110,13 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
   const [mobileNavigationPath, setMobileNavigationPath] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [workspaceName,setWorkspaceName]=useState("");
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const mobileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const searchReturnFocusRef = useRef<HTMLElement | null>(null);
+  const synchronizedProjectRoute = useRef<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -125,7 +134,8 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
     return () => window.removeEventListener(USER_PROJECTS_CHANGED_EVENT, refresh);
   }, []);
 
-  const accessibleProjects = projectList.status === "ready" ? projectList.projects : EMPTY_PROJECTS;
+  const allAccessibleProjects = projectList.status === "ready" ? projectList.projects : EMPTY_PROJECTS;
+  const accessibleProjects = useMemo(()=>workspaceId?allAccessibleProjects.filter(project=>project.workspaceId===workspaceId):allAccessibleProjects,[allAccessibleProjects,workspaceId]);
   const routeContext = useMemo(() => getProjectRouteContext(pathname), [pathname]);
   const mobileNavigationOpen = mobileNavigationPath === pathname;
 
@@ -199,24 +209,35 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
   }, [closeMobileNavigation, closeSearch, mobileNavigationOpen, openSearch, searchOpen]);
 
   const activeGlobalKey = getActiveGlobalNavigation(pathname);
-  const routeProject = routeContext ? accessibleProjects.find((project) => project.id === routeContext.projectId) : undefined;
+  const routeProject = routeContext ? allAccessibleProjects.find((project) => project.id === routeContext.projectId) : undefined;
   const selectedProject = routeContext
     ? routeProject ?? null
     : accessibleProjects.find((project) => project.id === selectedProjectId) ?? null;
 
+  useEffect(() => {
+    if (!routeContext) { synchronizedProjectRoute.current = null; return; }
+    if (!routeProject?.workspaceId) return;
+    const routeKey = `${routeProject.id}:${routeProject.workspaceId}`;
+    if (synchronizedProjectRoute.current === routeKey) return;
+    synchronizedProjectRoute.current = routeKey;
+    // A notification or deep link may enter a different workspace. Do this
+    // once per entered project, so a manual workspace switch can still leave it.
+    if (workspaceId !== routeProject.workspaceId) selectWorkspace(username, routeProject.workspaceId);
+  }, [routeContext, routeProject, username, workspaceId]);
+
   const searchDestinations = useMemo<SearchDestination[]>(() => {
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
     const globalDestinations = USER_GLOBAL_NAVIGATION.map((item) => ({
-      label: item.label,
-      detail: "全局页面",
+      label: t(item.label),
+      detail: t("全局页面"),
       href: item.href,
     }));
     const projectDestinations = accessibleProjects.flatMap((project) => USER_PROJECT_NAVIGATION.map((item) => ({
-      label: item.label,
+      label: t(item.label),
       detail: project.name,
       href: getProjectNavigationHref(project.id, item.key),
       projectId: project.id,
-      searchableText: `${project.name} ${item.label}`.toLocaleLowerCase(),
+      searchableText: `${project.name} ${t(item.label)}`.toLocaleLowerCase(),
     })));
 
     if (!normalizedQuery) {
@@ -229,7 +250,7 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
     const matchingGlobal = globalDestinations.filter((destination) => `${destination.label} ${destination.detail}`.toLocaleLowerCase().includes(normalizedQuery));
     const matchingProjects = projectDestinations.filter((destination) => destination.searchableText.includes(normalizedQuery));
     return [...matchingGlobal, ...matchingProjects].slice(0, 30);
-  }, [accessibleProjects, searchQuery, selectedProject]);
+  }, [accessibleProjects, searchQuery, selectedProject,t]);
 
   function selectProject(projectId: string): void {
     const project = accessibleProjects.find((candidate) => candidate.id === projectId);
@@ -281,27 +302,29 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
   }
 
   const projectSelectLabel = projectList.status === "loading"
-    ? "正在加载可访问项目…"
+    ? t("正在加载可访问项目…")
     : projectList.status === "error"
-      ? "项目列表暂不可用"
+      ? t("项目列表暂不可用")
       : accessibleProjects.length === 0
-        ? "暂无可访问项目"
-        : "选择项目";
+        ? t("暂无可访问项目")
+        : t("选择项目");
 
   return (
     <div className={styles.root} data-user-shell-root>
-      <aside id="user-shell-navigation" className={`${styles.sidebar} ${mobileNavigationOpen ? styles.sidebarOpen : ""}`} aria-label="主导航">
+      <aside id="user-shell-navigation" className={`${styles.sidebar} ${mobileNavigationOpen ? styles.sidebarOpen : ""}`} aria-label={t("主导航")}>
         <div className={styles.brandRow}>
-          <Link href="/dashboard" className={styles.brand} onClick={projectLinkClick} aria-label="AI Project OS 工作台">
-            <span className={styles.brandMark} aria-hidden="true">OS</span>
+          <Link href="/dashboard" className={styles.brand} onClick={projectLinkClick} aria-label={t("AI Project OS 工作台")}>
+            <BrandMark size={30} priority/>
             <span>AI Project OS</span>
           </Link>
-            <button ref={mobileCloseButtonRef} type="button" className={`${styles.iconButton} ${styles.mobileClose}`} onClick={() => closeMobileNavigation(true)} aria-label="关闭导航">
+            <button ref={mobileCloseButtonRef} type="button" className={`${styles.iconButton} ${styles.mobileClose}`} onClick={() => closeMobileNavigation(true)} aria-label={t("关闭导航")}>
             <ShellIcon name="close" />
           </button>
         </div>
 
-        <nav className={styles.globalNavigation} aria-label="全局入口">
+        <WorkspacePicker username={username} onNameChange={setWorkspaceName}/>
+        <div className={styles.sectionLabel}>{t("常用")}</div>
+        <nav className={styles.globalNavigation} aria-label={t("全局入口")}>
           {USER_GLOBAL_NAVIGATION.map((item) => {
             const active = activeGlobalKey === item.key;
             return (
@@ -313,7 +336,7 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
                 onClick={projectLinkClick}
               >
                 <ShellIcon name={item.key} />
-                <span>{item.label}</span>
+                <span>{t(item.label)}</span>
               </Link>
             );
           })}
@@ -321,30 +344,30 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
 
         <div className={styles.sectionDivider} />
         <div className={styles.projectHeading}>
-          <span className={styles.sectionLabel}>当前项目</span>
+          <span className={styles.sectionLabel}>{t("当前项目")}</span>
           <label className={styles.projectPicker}>
             <span className={styles.projectDot} aria-hidden="true">{selectedProject?.name.slice(0, 1) ?? "·"}</span>
             <select
               value={selectedProject?.id ?? ""}
               onChange={handleProjectSelect}
               disabled={projectList.status !== "ready" || accessibleProjects.length === 0}
-              aria-label="切换当前项目"
+              aria-label={t("切换当前项目")}
               aria-describedby="user-shell-project-status"
             >
-              <option value="">{projectSelectLabel}</option>
-              {accessibleProjects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}{project.archived ? "（已归档）" : ""}</option>
+              <option value="">{t(projectSelectLabel)}</option>
+              {(routeProject&&!accessibleProjects.some(p=>p.id===routeProject.id)?[routeProject,...accessibleProjects]:accessibleProjects).map((project) => (
+                <option key={project.id} value={project.id}>{project.name}{project.archived ? t("（已归档）") : ""}</option>
               ))}
             </select>
             <ShellIcon name="chevron" />
           </label>
         </div>
         <p id="user-shell-project-status" className={styles.projectStatus} role={projectList.status === "error" ? "status" : undefined}>
-          {projectList.status === "loading" ? "正在读取有权访问的项目。" : projectList.status === "error" ? "无法读取项目列表，请稍后重试。" : accessibleProjects.length === 0 ? "当前没有可访问的项目。" : selectedProject ? `当前项目：${selectedProject.name}` : "选择项目以查看项目入口。"}
+          {projectList.status === "loading" ? t("正在读取有权访问的项目。") : projectList.status === "error" ? t("无法读取项目列表，请稍后重试。") : accessibleProjects.length === 0 ? t("当前没有可访问的项目。") : selectedProject ? `当前项目：${selectedProject.name}` : t("选择项目以查看项目入口。")}
         </p>
-        {projectList.status === "error" ? <button type="button" className={styles.retryButton} onClick={retryProjectList}>重试读取项目列表</button> : null}
+        {projectList.status === "error" ? <button type="button" className={styles.retryButton} onClick={retryProjectList}><UiText text="重试读取项目列表"/></button> : null}
 
-        <nav className={styles.projectNavigation} aria-label={selectedProject ? `${selectedProject.name} 项目导航` : "当前项目导航"}>
+        <nav className={styles.projectNavigation} aria-label={selectedProject ? `${selectedProject.name} 项目导航` : t("当前项目导航")}>
           {USER_PROJECT_NAVIGATION.map((item) => {
             const active = routeContext?.section === item.key && routeContext.projectId === selectedProject?.id;
             const className = `${styles.navLink} ${styles.projectNavLink} ${active ? styles.navLinkActive : ""}`;
@@ -357,33 +380,22 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
                 onClick={projectLinkClick}
               >
                 <ShellIcon name={item.key} />
-                <span>{item.label}</span>
+                <span>{t(item.label)}</span>
               </Link>
             ) : (
-              <span key={item.key} className={`${className} ${styles.navLinkDisabled}`} aria-disabled="true" title="先选择一个可访问项目">
+              <span key={item.key} className={`${className} ${styles.navLinkDisabled}`} aria-disabled="true" title={t("先选择一个可访问项目")}>
                 <ShellIcon name={item.key} />
-                <span>{item.label}</span>
+                <span>{t(item.label)}</span>
               </span>
             );
           })}
         </nav>
 
         <div className={styles.sidebarBottom}>
-          <div className={styles.sidebarUtilities}>
-            <Link href="/team" className={styles.utilityLink} onClick={projectLinkClick} aria-current={pathname === "/team" || pathname.startsWith("/team/") ? "page" : undefined}>
-              <ShellIcon name="team" />
-              <span>空间与团队</span>
-            </Link>
-            <Link href="/guide" className={styles.utilityLink} onClick={projectLinkClick} aria-current={pathname === "/guide" || pathname.startsWith("/guide/") ? "page" : undefined}>
-              <ShellIcon name="help" />
-              <span>帮助</span>
-            </Link>
-          </div>
-          <Link href="/profile" className={styles.accountLink} onClick={projectLinkClick} aria-label={`账户设置，${username}`} aria-current={pathname === "/profile" || pathname.startsWith("/profile/") ? "page" : undefined}>
-            <span className={styles.avatar} aria-hidden="true">{username.slice(0, 1).toUpperCase()}</span>
-            <span className={styles.accountLabel}>{username} · 账户</span>
-            <ShellIcon name="chevron" />
-          </Link>
+          <div className={styles.sectionDivider}/><div className={styles.sectionLabel}>{t('空间与资源')}</div>
+          <nav aria-label={t('空间与资源')}>
+           {([['/personal/configuration',t('资源配置'),'resources'],['/credits',t('额度与账单'),'credits'],['/team',t('我的团队'),'team']] as const).map(([href,label,icon])=><Link key={href} href={href} className={`${styles.navLink} ${pathname===href?styles.navLinkActive:''}`} aria-current={pathname===href?'page':undefined} onClick={projectLinkClick}><ShellIcon name={icon}/><span>{t(label)}</span></Link>)}
+          </nav>
         </div>
       </aside>
 
@@ -391,7 +403,7 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
         type="button"
         className={`${styles.mobileBackdrop} ${mobileNavigationOpen ? styles.mobileBackdropOpen : ""}`}
         onClick={() => closeMobileNavigation(true)}
-        aria-label="关闭导航"
+        aria-label={t("关闭导航")}
         tabIndex={mobileNavigationOpen ? 0 : -1}
       />
 
@@ -402,22 +414,26 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
             type="button"
             className={`${styles.iconButton} ${styles.mobileMenu}`}
             onClick={() => setMobileNavigationPath(pathname)}
-            aria-label="打开导航"
+            aria-label={t("打开导航")}
             aria-controls="user-shell-navigation"
             aria-expanded={mobileNavigationOpen}
           >
             <ShellIcon name="menu" />
           </button>
-          <span>{getUserPageLabel(pathname)}</span>
+          {workspaceName?<><span className={styles.workspaceCrumb}>{workspaceName}</span><span className={styles.breadcrumbDivider} aria-hidden="true">›</span></>:null}
+          <span className={styles.breadcrumbLabel}>{t(getUserPageLabel(pathname))}</span>
           {selectedProject && routeContext ? <><span className={styles.breadcrumbDivider} aria-hidden="true">/</span><span className={styles.breadcrumbCurrent}>{selectedProject.name}</span></> : null}
         </div>
         <div className={styles.topActions}>
-          <button ref={searchButtonRef} type="button" className={styles.searchButton} onClick={openSearch} aria-haspopup="dialog" aria-label="搜索与跳转">
+          <button ref={searchButtonRef} type="button" className={styles.searchButton} onClick={openSearch} aria-haspopup="dialog" aria-label={t("搜索与跳转")}>
             <ShellIcon name="search" />
-            <span>搜索与跳转</span>
+            <span>{t("搜索与跳转")}</span>
             <kbd>⌘ K</kbd>
           </button>
-          <NotificationBell active={pathname === "/notifications" || pathname.startsWith("/notifications/")} />
+          <NotificationBell active={pathname === "/notifications" || pathname.startsWith("/notifications/")} compact/>
+          <Link href="/guide" className={styles.iconButton} aria-label={t("帮助")} title={t("帮助")}><ShellIcon name="help"/></Link>
+          <AppearanceControls/>
+          <HeaderAccount username={username} isSystemAdmin={isSystemAdmin}/>
         </div>
       </header>
       <div className={styles.contentSpacer} aria-hidden="true" />
@@ -427,10 +443,10 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
           <div className={styles.searchDialog} role="dialog" aria-modal="true" aria-labelledby="user-shell-search-title" onKeyDown={handleSearchKeyDown}>
             <div className={styles.searchDialogHeader}>
               <div>
-                <h2 id="user-shell-search-title">搜索与跳转</h2>
-                <p>按页面名称或你有权访问的项目查找路由。</p>
+                <h2 id="user-shell-search-title"><UiText text="搜索与跳转"/></h2>
+                <p><UiText text="按页面名称或你有权访问的项目查找路由。"/></p>
               </div>
-              <button type="button" className={styles.iconButton} onClick={closeSearch} aria-label="关闭搜索"><ShellIcon name="close" /></button>
+              <button type="button" className={styles.iconButton} onClick={closeSearch} aria-label={t("关闭搜索")}><ShellIcon name="close" /></button>
             </div>
             <label className={styles.searchInputWrap}>
               <ShellIcon name="search" />
@@ -439,15 +455,15 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
                 type="search"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.currentTarget.value)}
-                placeholder="搜索入口或项目名称"
-                aria-label="搜索页面入口和项目"
+                placeholder={t("搜索入口或项目名称")}
+                aria-label={t("搜索页面入口和项目")}
               />
               <kbd>ESC</kbd>
             </label>
-            <p className={styles.searchScopeNote}>仅搜索页面入口和项目名称，不搜索正文内容。</p>
+            <p className={styles.searchScopeNote}><UiText text="仅搜索页面入口和项目名称，不搜索正文内容。"/></p>
             <div className={styles.searchResults}>
               {searchDestinations.length > 0 ? (
-                <ul aria-label="可访问页面">
+                <ul aria-label={t("可访问页面")}>
                   {searchDestinations.map((destination) => (
                     <li key={`${destination.href}-${destination.detail}`}>
                       <Link href={destination.href} onClick={() => { closeSearch(); setMobileNavigationPath(null); }}>
@@ -458,7 +474,7 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
                   ))}
                 </ul>
               ) : (
-                <p className={styles.searchEmpty} role="status">没有匹配的可访问页面或项目。</p>
+                <p className={styles.searchEmpty} role="status"><UiText text="没有匹配的可访问页面或项目。"/></p>
               )}
             </div>
           </div>
@@ -468,7 +484,7 @@ export function UserShell({ username }: Readonly<{ username: string }>): React.J
   );
 }
 
-type ShellIconName = UserProjectNavigationKey | "dashboard" | "ask" | "projects" | "knowledge" | "team" | "help" | "chevron" | "close" | "menu" | "search";
+type ShellIconName = UserProjectNavigationKey | "dashboard" | "ask" | "projects" | "knowledge" | "team" | "help" | "chevron" | "close" | "menu" | "search" | "graph" | "resources" | "credits";
 
 function ShellIcon({ name }: Readonly<{ name: ShellIconName }>): React.JSX.Element {
   const paths: Record<ShellIconName, React.ReactNode> = {
@@ -487,6 +503,9 @@ function ShellIcon({ name }: Readonly<{ name: ShellIconName }>): React.JSX.Eleme
     chevron: <path d="m7 10 5 5 5-5" />,
     close: <><path d="m6 6 12 12M18 6 6 18" /></>,
     menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
+    graph: <><circle cx="5" cy="5" r="2"/><circle cx="19" cy="9" r="2"/><circle cx="7" cy="19" r="2"/><path d="m7 6 10 3M6 7l1 10m2 1 9-8"/></>,
+    resources: <><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/></>,
+    credits: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18m-7 5h4"/></>,
     search: <><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className={styles.icon} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;

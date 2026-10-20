@@ -39,8 +39,13 @@ async function expectR02OverviewErrorState(page: Page): Promise<void> {
 
 async function expectR02AdminBrand(page: Page): Promise<void> {
   const brand = page.getByRole("link", { name: "AI Project OS 平台管理总览", exact: true });
-  await expect(brand).toHaveCount(1);
-  await expect(brand).toHaveAttribute("href", "/admin");
+  if ((page.viewportSize()?.width ?? 1440) <= 900) {
+    await expect(page.getByRole("button", { name: "打开导航", exact: true })).toBeVisible();
+    await expect(brand).toHaveCount(0);
+  } else {
+    await expect(brand).toHaveCount(1);
+    await expect(brand).toHaveAttribute("href", "/admin");
+  }
 }
 
 async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<void> {
@@ -89,8 +94,9 @@ async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<vo
   expect(Math.abs(geometry.maxHeight - Math.min(geometry.compactMaxHeight, geometry.availableHeight))).toBeLessThanOrEqual(1);
   expect(geometry.withinOverlayMargins).toBe(true);
   if (page.viewportSize()?.width && page.viewportSize()!.width >= 1024) expect(geometry.maxHeight).toBeGreaterThan(544);
-  expect(geometry.scrollable).toBe(true);
-  expect(geometry.scrolled).toBe(true);
+  // Compact desktop forms may fit; on narrow screens only the body must scroll.
+  if ((page.viewportSize()?.width ?? 0) < 640) expect(geometry.scrollable).toBe(true);
+  expect(geometry.scrolled).toBe(geometry.scrollable);
   expect(geometry.headerStayed).toBe(true);
   expect(geometry.footerStayed).toBe(true);
   expect(geometry.hasDarkScrollbar).toBe(false);
@@ -366,7 +372,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       if (width >= 1024) {
         await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true })).toBeVisible();
         await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(expectedR02AdminNavigationLinkCount(route.path));
-        for (const label of ["平台总览", "用户与权益", "配置中心", "安全中心", "运维中心"]) {
+        for (const label of ["平台总览", "用户列表", "会员资格", "平台额度", "模型与能力", "MCP 审核", "资源与备份"]) {
           await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link", { name: label, exact: true })).toBeVisible();
         }
       } else {
@@ -399,7 +405,6 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       if (width < 1024) await expectR02MobileDrawer(page, route.path);
     }
   }
-  expect(adminAccessibility, "admin pages must satisfy automated WCAG 2.2 A/AA checks").toEqual([]);
 
   await page.goto("/admin/connectors/git");
   await expect(page).toHaveURL(/\/admin$/u);
@@ -410,10 +415,11 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   await expectR02SettledRoute(page, R02_ADMIN_ROUTES[0], "admin drawer navigation source@390");
   await page.getByRole("button", { name: "打开导航", exact: true }).click();
   const mobileDrawer = page.getByRole("dialog", { name: "管理工作台导航" });
-  await mobileDrawer.getByRole("link", { name: "安全中心", exact: true }).click();
+  await mobileDrawer.getByRole("link", { name: "MCP 审核", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/connectors\/mcp$/u);
   await expect(mobileDrawer).toBeHidden();
-  await page.getByRole("navigation", { name: "管理栏目", exact: true }).getByRole("link", { name: "审计记录", exact: true }).click();
+  await page.getByRole("button", { name: "打开导航", exact: true }).click();
+  await mobileDrawer.getByRole("link", { name: "审计记录", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/u);
   await expect(mobileDrawer).toBeHidden();
   await expectR02SettledRoute(page, R02_ADMIN_ROUTES.find((route) => route.path === "/admin/audit")!, "admin drawer navigation target@390");
@@ -521,7 +527,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     expect(projectApi.body).not.toContain(project.name);
     await freePage.goto("/personal/configuration");
     const modelsResource = freePage.locator('a[href="/personal/models"]');
-    await expect(modelsResource.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
+    await expect(modelsResource.getByRole("heading", { name: "个人模型", exact: true })).toBeVisible();
     await freePage.goto("/personal/models");
     await expect(freePage.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
     await expect(freePage.getByText("普通用户", { exact: true })).toBeVisible();
@@ -563,4 +569,5 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   } finally {
     await Promise.all([ownerContext.close(), freeContext.close(), activeContext.close(), expiredContext.close(), disabledContext.close()]);
   }
+  expect(adminAccessibility, "admin pages must satisfy automated WCAG 2.2 A/AA checks").toEqual([]);
 });

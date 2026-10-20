@@ -1,0 +1,49 @@
+.field {
+  width: 100%;
+  margin-top: .5rem;
+  border: 1px solid var(--app-border, #cbd5e1);
+  border-radius: .75rem;
+  background: var(--app-input, #fff);
+  padding: .72rem .9rem;
+  color: var(--app-text, #0f172a);
+  font-size: .875rem;
+  outline: none;
+}
+
+.field:focus,
+.lightField:focus,
+.editField:focus {
+  border-color: var(--app-accent, #818cf8);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent, #818cf8) 14%, transparent);
+}
+
+.field:disabled {
+  background: var(--app-surface-soft, #f1f5f9);
+  color: var(--app-muted, #64748b);
+}
+
+.lightField {
+  width: 100%;
+  margin-top: .375rem;
+  border: 1px solid var(--app-border, #e2e8f0);
+  border-radius: .5rem;
+  background: var(--app-input, #fff);
+  padding: .625rem .875rem;
+  color: var(--app-text, #0f172a);
+  font-size: .875rem;
+  outline: none;
+}
+
+.lightField option { color: var(--app-text, #0f172a); }
+
+.editField {
+  width: 100%;
+  margin-top: .4rem;
+  border: 1px solid var(--app-border, #e2e8f0);
+  border-radius: .75rem;
+  padding: .7rem .85rem;
+  font-size: .8rem;
+  outline: none;
+}
+
+.editField:focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent, #818cf8) 14%, transparent); }

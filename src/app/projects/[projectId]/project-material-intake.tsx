@@ -1,8 +1,10 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { modalBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { useInquiryOperation } from "@/components/inquiry-operation";
 import { awaitImportedAsset } from "./imported-asset-readiness";
 import { ProjectFactImport } from "./project-fact-import";
 import styles from "./project-materials.module.css";
@@ -43,6 +45,7 @@ export function ProjectMaterialIntake({
   kind: MaterialKind;
   onClose: () => void;
 }) {
+  const translateUi = useTranslate();
   const [hasOpened, setHasOpened] = useState(open);
   if (open && !hasOpened) setHasOpened(true);
   const [contentText, setContentText] = useState("");
@@ -57,6 +60,7 @@ export function ProjectMaterialIntake({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  useInquiryOperation(open, dialogRef);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const kindLabels: Record<MaterialKind, string> = {
@@ -228,18 +232,18 @@ export function ProjectMaterialIntake({
   return (
     <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`${styles.drawerBackdrop} ${modalBackdropClassName}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`${styles.drawer} overflow-hidden ${modalSurfaceClassName}`}>
-        <div className={`${styles.drawerHeader} flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-7`}>
+        <div data-dialog-header className={`${styles.drawerHeader} flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-7`}>
         <div>
-          <h2 id="add-source-dialog-title" className="text-lg font-semibold tracking-tight text-slate-950">添加资料</h2>
-          <p id="add-source-dialog-description" className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">资料会保留原文和来源。需要模型处理时，会先显示本次范围并等待确认。</p>
+          <h2 id="add-source-dialog-title" className="text-lg font-semibold tracking-tight text-slate-950"><UiText text={"添加资料"} /></h2>
+          <p id="add-source-dialog-description" className="mt-1 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"资料会保留原文和来源。需要模型处理时，会先显示本次范围并等待确认。"} /></p>
         </div>
-        <button ref={closeButtonRef} type="button" onClick={closeDrawer} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
+        <button ref={closeButtonRef} data-dialog-close type="button" onClick={closeDrawer} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"关闭"} /></button>
       </div>
 
-      <div className={`${styles.drawerBody} px-5 py-5 sm:px-7`}>
+      <div data-dialog-body className={`${styles.drawerBody} px-5 py-5 sm:px-7`}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 text-xs text-slate-500">
-        <p>当前入口：<strong className="font-semibold">{kindLabels[kind]}</strong></p>
-        <Link href={`/projects/${projectId}/assets`} onClick={() => closeDrawer()} className="font-semibold text-indigo-700 underline underline-offset-4">管理已上传文件</Link>
+        <p><UiText text={"当前入口："} /><strong className="font-semibold">{translateUi(kindLabels[kind])}</strong></p>
+        <Link href={`/projects/${projectId}/assets`} onClick={() => closeDrawer()} className="font-semibold text-indigo-700 underline underline-offset-4"><UiText text={"管理已上传文件"} /></Link>
       </div>
 
       {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700">{error}</p> : null}
@@ -247,44 +251,44 @@ export function ProjectMaterialIntake({
 
       <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-2">
         <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">
-          <h3 className="text-sm font-semibold text-slate-950">手工文本</h3>
-          <p className="mt-1 text-xs leading-5 text-slate-600">粘贴会议记录、进展或其他项目原文。</p>
-          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" />
+          <h3 className="text-sm font-semibold text-slate-950"><UiText text={"手工文本"} /></h3>
+          <p className="mt-1 text-xs leading-5 text-slate-600"><UiText text={"粘贴会议记录、进展或其他项目原文。"} /></p>
+          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder={translateUi("直接输入或粘贴项目资料…")} className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" />
           <details className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <summary className="cursor-pointer text-xs font-semibold text-slate-700">补充来源链接和资料时间（可选）</summary>
-            <label className="mt-4 block text-xs text-slate-600">来源链接<input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400" /></label>
-            <label className="mt-4 block text-xs text-slate-600">资料时间<input type="datetime-local" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none [color-scheme:light]" /></label>
+            <summary className="cursor-pointer text-xs font-semibold text-slate-700"><UiText text={"补充来源链接和资料时间（可选）"} /></summary>
+            <label className="mt-4 block text-xs text-slate-600"><UiText text={"来源链接"} /><input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400" /></label>
+            <label className="mt-4 block text-xs text-slate-600"><UiText text={"资料时间"} /><input type="datetime-local" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none [color-scheme:light]" /></label>
           </details>
-          <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? "保存中…" : "加入原始资料"}</button>
+          <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? <UiText text={"保存中…"} /> : <UiText text={"加入原始资料"} />}</button>
         </form>
 
         <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <h3 className="text-sm font-semibold text-slate-950">图片、文档或文件夹</h3>
-          <p className="mt-1 text-xs leading-5 text-slate-500">支持常用文本、Office、PDF 与图片格式；图片识别需经本次确认。</p>
+          <h3 className="text-sm font-semibold text-slate-950"><UiText text={"图片、文档或文件夹"} /></h3>
+          <p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"支持常用文本、Office、PDF 与图片格式；图片识别需经本次确认。"} /></p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-white px-5 text-center hover:border-indigo-400 hover:bg-indigo-50">
               <input type="file" multiple accept={FILE_ACCEPT} onChange={chooseFiles} className="sr-only" />
-              <span className="text-sm font-semibold text-indigo-700">选择图片或文档</span>
-              <span className="mt-1 text-[12px] text-slate-400">可一次多选</span>
+              <span className="text-sm font-semibold text-indigo-700"><UiText text={"选择图片或文档"} /></span>
+              <span className="mt-1 text-[12px] text-slate-400"><UiText text={"可一次多选"} /></span>
             </label>
             <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white px-5 text-center hover:border-violet-400 hover:bg-violet-50">
               <input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple accept={FILE_ACCEPT} onChange={chooseFiles} className="sr-only" />
-              <span className="text-sm font-semibold text-violet-700">选择整个文件夹</span>
-              <span className="mt-1 text-[12px] text-slate-400">读取子目录中的受支持文件</span>
+              <span className="text-sm font-semibold text-violet-700"><UiText text={"选择整个文件夹"} /></span>
+              <span className="mt-1 text-[12px] text-slate-400"><UiText text={"读取子目录中的受支持文件"} /></span>
             </label>
           </div>
-          <p className="mt-3 text-[12px] leading-5 text-slate-400">单次最多 {maxFiles} 个文件；文件夹中的不支持格式会自动跳过。</p>
-          {files.length > 0 ? <div className="mt-4 min-w-0 rounded-xl bg-white p-4 text-xs text-slate-600"><p className="font-semibold text-slate-800">已选择 {files.length} 个文件</p><p className="mt-2 line-clamp-3 [overflow-wrap:anywhere]">{files.map(selectedFileName).join("、")}</p></div> : null}
-          <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? "上传并解析中…" : files.length > 0 ? `上传并解析 ${files.length} 个文件` : "请先选择文件或文件夹"}</button>
+          <p className="mt-3 text-[12px] leading-5 text-slate-400"><UiText text={"单次最多"} />{" "}{maxFiles} {" "}<UiText text={"个文件；文件夹中的不支持格式会自动跳过。"} /></p>
+          {files.length > 0 ? <div className="mt-4 min-w-0 rounded-xl bg-white p-4 text-xs text-slate-600"><p className="font-semibold text-slate-800"><UiText text={"已选择"} />{" "}{files.length} {" "}<UiText text={"个文件"} /></p><p className="mt-2 line-clamp-3 [overflow-wrap:anywhere]">{files.map(selectedFileName).join("、")}</p></div> : null}
+          <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? <UiText text={"上传并解析中…"} /> : files.length > 0 ? `上传并解析 ${files.length} 个文件` : <UiText text={"请先选择文件或文件夹"} />}</button>
         </div>
       </div>
 
-      {savedAssetCount > 0 && factSourceIds.length === 0 ? <div role="status" className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"><p>文件已保存，暂未有可整理的文字。下一步查看解析进度；图片和扫描件需先确认识别并核对文字。</p><Link href={`/projects/${projectId}/assets`} className="mt-2 inline-flex min-h-11 items-center font-semibold underline">继续解析或核对识别文字 →</Link></div> : null}
+      {savedAssetCount > 0 && factSourceIds.length === 0 ? <div role="status" className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"><p><UiText text={"文件已保存，暂未有可整理的文字。下一步查看解析进度；图片和扫描件需先确认识别并核对文字。"} /></p><Link href={`/projects/${projectId}/assets`} className="mt-2 inline-flex min-h-11 items-center font-semibold underline"><UiText text={"继续解析或核对识别文字 →"} /></Link></div> : null}
       <ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={onChanged} />
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Link href={`/projects/${projectId}/external-sources`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-800">添加网页资料</Link>
-        <Link href={`/projects/${projectId}/repositories`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-800">连接代码仓库</Link>
+        <Link href={`/projects/${projectId}/external-sources`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-800"><UiText text={"添加网页资料"} /></Link>
+        <Link href={`/projects/${projectId}/repositories`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-800"><UiText text={"连接代码仓库"} /></Link>
       </div>
       </div>
       </div>

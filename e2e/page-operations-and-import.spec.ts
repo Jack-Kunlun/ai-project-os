@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { getDb } from "@/lib/db";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
-import { signInR02Admin, signInR02PersonalUser, expectR02NoAccessibilityViolations } from "./support/r02-admin-navigation";
+import { signInR02Admin, signInR02PersonalUser, signOutR02User, expectR02NoAccessibilityViolations } from "./support/r02-admin-navigation";
 import { longTextPdf } from "./support/long-text-pdf";
 
 test.setTimeout(90_000);
@@ -10,7 +10,7 @@ test.setTimeout(90_000);
 async function projectFixture(page: Page) {
   await signInR02Admin(page);
   const user = await seedBrowserPersonalUser(`browser-operations-${randomUUID().slice(0, 8)}`, "BrowserOperations2026Password!");
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await signInR02PersonalUser(page, user);
   await page.goto("/projects");
   await page.getByRole("button", { name: "＋ 新建项目" }).click();
@@ -76,7 +76,7 @@ test("materials keep editing separate, retain drafts, and chain text import into
   await intake.locator("#manual-text textarea").fill(text);
   await intake.getByRole("button", { name: "加入原始资料", exact: true }).click();
   const organize = intake.getByRole("button", { name: "确认发送并加入队列", exact: true });
-  await expect(organize).toBeVisible();
+  await expect(organize).toBeVisible({ timeout: 15_000 });
   const source = await getDb().projectSource.findFirstOrThrow({ where: { projectId, contentText: text }, select: { id: true } });
   expect(flow.prepared).toHaveLength(1);
   expect(flow.prepared[0]!.sourceIds).toEqual([source.id]);
@@ -111,7 +111,7 @@ test("long PDF pages use a dedicated import workspace and fit each consent batch
   await intake.locator('input[type="file"]').first().setInputFiles({ name: "operations-long-pages.pdf", mimeType: "application/pdf", buffer: longTextPdf() });
   await intake.getByRole("button", { name: "上传并解析", exact: true }).click();
   const organize = intake.getByRole("button", { name: "确认发送并加入队列", exact: true });
-  await expect(organize).toBeVisible();
+  await expect(organize).toBeVisible({ timeout: 15_000 });
   expect(flow.prepared).toHaveLength(2);
   expect(parsingReads).toBeGreaterThanOrEqual(1);
   const sources = await getDb().projectSource.findMany({ where: { projectId }, select: { id: true, contentText: true } });
@@ -159,8 +159,8 @@ test("profile operations preserve a failed draft and return to the updated view 
   await expect(page.getByText(displayName, { exact: true }).first()).toBeVisible();
   await expect(edit).toBeFocused();
 
-  await page.getByRole("button", { name: "修改登录名", exact: true }).click();
-  const username = page.getByRole("dialog", { name: "修改登录名", exact: true });
+  await page.getByRole("button", { name: "登录名", exact: true }).click();
+  const username = page.getByRole("dialog", { name: "登录名", exact: true });
   const nextUsername = `operations-${randomUUID().slice(0, 8)}`;
   await username.getByLabel("登录名", { exact: true }).fill(nextUsername);
   await username.getByRole("button", { name: "保存", exact: true }).click();

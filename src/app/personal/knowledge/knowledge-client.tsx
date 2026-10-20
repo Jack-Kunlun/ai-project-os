@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
+import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { useInquiryOperation } from "@/components/inquiry-operation";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { buildPersonalKnowledgeHistoryHref, PersonalKnowledgeQaPanel } from "./personal-knowledge-qa-panel";
 import { PersonalKnowledgeNextSteps } from "./personal-knowledge-next-steps";
-import { PersonalProjectSearchPanel } from "./personal-project-search-panel";
-import { PersonalSemanticIndexPanel } from "./personal-semantic-index-panel";
-import { PersonalSemanticSearchPanel } from "./personal-semantic-search-panel";
+const PersonalProjectSearchPanel = dynamic(() => import("./personal-project-search-panel").then(module => module.PersonalProjectSearchPanel), { loading: () => <p role="status"><UiText text="正在加载…" /></p> });
+const PersonalSemanticIndexPanel = dynamic(() => import("./personal-semantic-index-panel").then(module => module.PersonalSemanticIndexPanel), { loading: () => <p role="status"><UiText text="正在加载…" /></p> });
+const PersonalSemanticSearchPanel = dynamic(() => import("./personal-semantic-search-panel").then(module => module.PersonalSemanticSearchPanel), { loading: () => <p role="status"><UiText text="正在加载…" /></p> });
 import { PersonalKnowledgeEditor, validateKnowledgeDraft, type KnowledgeDraft } from "./personal-knowledge-editor";
 import styles from "./personal-knowledge.module.css";
 
@@ -87,9 +90,9 @@ async function readError(response: Response, fallback: string): Promise<string> 
 }
 
 /** Render server timestamps consistently while preserving a safe fallback. */
-function formatDate(value: string): string {
+function formatDate(value: string, language: "zh-CN" | "en"): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "时间未知" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return Number.isNaN(date.getTime()) ? (language === "en" ? "Unknown time" : "时间未知") : new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 /** Format stored UTF-8 byte evidence without implying binary precision. */
@@ -152,6 +155,8 @@ function filenameFromDisposition(header: string | null, fallback: string): strin
  * offset for a document list that may change between requests.
  */
 export function KnowledgeClient({ username, isSystemAdmin = false }: { username: string; isSystemAdmin?: boolean }) {
+  const { language } = useAppearance();
+  const t = useTranslate();
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedDocumentId = parseDocumentQuery(searchParams.get("document"));
@@ -201,6 +206,9 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const { confirm, dialog } = useAppConfirmDialog();
   const knowledgeDialogRef = useRef<HTMLDialogElement | null>(null);
   const detailDialogRef = useRef<HTMLDialogElement | null>(null);
+  const detailDialogOpen = libraryScreen === "view" && workspaceSection === "library";
+  useInquiryOperation(detailDialogOpen, detailDialogRef);
+  useInquiryOperation(knowledgeModal !== null, knowledgeDialogRef);
   const knowledgeModalRef = useRef<KnowledgeModal>(null);
   const modalReturnScreenRef = useRef<LibraryScreen>("list");
   const detailHistoryEntryRef = useRef(false);
@@ -303,11 +311,11 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   async function confirmDiscardDraft(): Promise<boolean> {
     if (!editorDirty) return true;
     return confirmWithKnowledgeModal({
-      eyebrow: "尚未保存的个人知识",
-      title: "离开编辑页面？",
-      description: "当前修改还没有保存。离开后这些修改会丢失。",
-      confirmLabel: "放弃修改并离开",
-      cancelLabel: "继续编辑",
+      eyebrow: t("尚未保存的个人知识"),
+      title: t("离开编辑页面？"),
+      description: t("当前修改还没有保存。离开后这些修改会丢失。"),
+      confirmLabel: t("放弃修改并离开"),
+      cancelLabel: t("继续编辑"),
     }, "on-cancel");
   }
 
@@ -762,9 +770,9 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         const payload = await response.clone().json() as { error?: { code?: string } };
         if (payload.error?.code === "PERSONAL_KNOWLEDGE_IMPORT_VISION_REQUIRED") {
           if (!visionProviderId) {
-            throw new Error(visionProviderLoadState === "error"
+            throw new Error(t(visionProviderLoadState === "error"
               ? "视觉模型列表暂时无法加载，请重试后再导入图片或扫描 PDF。"
-              : "尚无可用视觉模型。管理员需配置已验证的平台视觉路由，或先添加个人视觉模型。");
+              : "尚无可用视觉模型。管理员需配置已验证的平台视觉路由，或先添加个人视觉模型。"));
           }
           const preparedResponse = await postFile("prepare", visionProviderId);
           if (!preparedResponse.ok) throw new Error(await readError(preparedResponse, "无法准备视觉识别"));
@@ -781,12 +789,12 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           const confirmation = prepared.confirmation;
           const pageList = confirmation.pages.map((page) => `• ${page.locatorLabel}`).join("\n");
           const billingDescription = confirmation.billingMode === "platform"
-            ? `由平台额度支付，额度倍率 ${(confirmation.quotaMultiplierBps ?? 10_000) / 10_000}×。`
-            : "使用个人 BYOK 模型，服务商可能另行计费。";
+            ? `${t("由平台额度支付，额度倍率")} ${(confirmation.quotaMultiplierBps ?? 10_000) / 10_000}×。`
+            : t("使用个人 BYOK 模型，服务商可能另行计费。");
           const decision = await confirmWithKnowledgeModal({
-            eyebrow: "个人知识识别", title: "发送图片或扫描页给视觉模型？",
-            description: `本次将以下 ${confirmation.pageCount} 页发送给 ${confirmation.providerName}（${confirmation.modelId}）识别：\n${pageList}\n${billingDescription}\n每页最多输出 ${confirmation.maxOutputTokens.toLocaleString("zh-CN")} token。\n识别结果仅作为待核对预览。`,
-            confirmLabel: "确认发送", cancelLabel: "返回",
+            eyebrow: t("个人知识识别"), title: t("发送图片或扫描页给视觉模型？"),
+            description: `${t("本次将以下")} ${confirmation.pageCount} ${t("页发送给")} ${confirmation.providerName} (${confirmation.modelId}) ${t("识别：")}\n${pageList}\n${billingDescription}\n${t("每页最多输出")} ${confirmation.maxOutputTokens.toLocaleString(language === "en" ? "en-US" : "zh-CN")} tokens.\n${t("识别结果仅作为待核对预览。")}`,
+            confirmLabel: t("确认发送"), cancelLabel: t("返回"),
           });
           if (!decision) return;
           response = await postFile("execute", confirmation.attemptId);
@@ -892,10 +900,10 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     const targetId = selectedIdRef.current;
     if (target === null || targetId !== target.id || deleting) return;
     const result = await confirm({
-      eyebrow: "Delete personal knowledge",
-      title: `删除「${target.title}」？`,
-      description: "删除后内容会从个人知识列表隐藏，历史版本也不会再从普通页面打开。此操作不能恢复。",
-      confirmLabel: "确认删除",
+      eyebrow: t("删除个人知识"),
+      title: language === "en" ? `Delete “${target.title}”?` : `删除「${target.title}」？`,
+      description: t("删除后内容会从个人知识列表隐藏，历史版本也不会再从普通页面打开。此操作不能恢复。"),
+      confirmLabel: t("确认删除"),
       tone: "danger",
     });
     if (!result.confirmed) return;
@@ -1063,69 +1071,69 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       <div className={styles.content}>
         <header className={styles.heading}>
           <div>
-            <h1>我的知识</h1>
-            <p>维护个人知识、通用记忆与知识图谱。</p>
+            <h1><UiText text="我的知识" /></h1>
+            <p><UiText text="维护个人知识、通用记忆与知识图谱。" /></p>
           </div>
           <div className={styles.headingActions}>
-            <Link href={buildPersonalKnowledgeHistoryHref()} className={styles.button}>历史会话</Link>
-            <button type="button" onClick={() => openKnowledgeModal("import")} className={styles.button}>导入文件</button>
-            <button type="button" onClick={startCreate} className={styles.buttonPrimary}>新建知识</button>
+            <Link href={buildPersonalKnowledgeHistoryHref()} className={styles.button}><UiText text="历史会话" /></Link>
+            <button type="button" onClick={() => openKnowledgeModal("import")} className={styles.button}><UiText text="导入文件" /></button>
+            <button type="button" onClick={startCreate} className={styles.buttonPrimary}><UiText text="新建知识" /></button>
           </div>
         </header>
 
-        {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`${styles.feedback} ${message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess}`}>{message.text}</div> : null}
+        {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`${styles.feedback} ${message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess}`}>{t(message.text)}</div> : null}
 
         {workspaceSection === "library" ? <>
-          <nav className={styles.tabs} aria-label="知识栏目">
-            <button type="button" aria-current={knowledgeFilter === "all" ? "page" : undefined} aria-pressed={knowledgeFilter === "all"} onClick={() => selectKnowledgeFilter("all")} className={`${styles.tab} ${knowledgeFilter === "all" ? styles.activeTab : ""}`}>全部知识</button>
-            <button type="button" aria-current={knowledgeFilter === "memory" ? "page" : undefined} aria-pressed={knowledgeFilter === "memory"} onClick={() => selectKnowledgeFilter("memory")} className={`${styles.tab} ${knowledgeFilter === "memory" ? styles.activeTab : ""}`}>通用记忆</button>
-            <Link href="/personal/knowledge/graph" className={styles.tabLink}>知识图谱</Link>
+          <nav className={styles.tabs} aria-label={t("知识栏目")}>
+            <button type="button" aria-current={knowledgeFilter === "all" ? "page" : undefined} aria-pressed={knowledgeFilter === "all"} onClick={() => selectKnowledgeFilter("all")} className={`${styles.tab} ${knowledgeFilter === "all" ? styles.activeTab : ""}`}><UiText text="全部知识" /></button>
+            <button type="button" aria-current={knowledgeFilter === "memory" ? "page" : undefined} aria-pressed={knowledgeFilter === "memory"} onClick={() => selectKnowledgeFilter("memory")} className={`${styles.tab} ${knowledgeFilter === "memory" ? styles.activeTab : ""}`}><UiText text="通用记忆" /></button>
+            <Link href="/personal/knowledge/graph" className={styles.tabLink}><UiText text="知识图谱" /></Link>
           </nav>
 
-          {knowledgeFilter === "memory" ? <p className={styles.notice}>仅显示你明确标记为通用记忆的内容；这些约定会用于你发起的项目 AI 请求。</p> : null}
+          {knowledgeFilter === "memory" ? <p className={styles.notice}><UiText text="仅显示你明确标记为通用记忆的内容；这些约定会用于你发起的项目 AI 请求。" /></p> : null}
 
-          <section aria-label={knowledgeFilter === "memory" ? "通用记忆列表" : "全部知识列表"}>
+          <section aria-label={t(knowledgeFilter === "memory" ? "通用记忆列表" : "全部知识列表")}>
             <div className={styles.toolbar}>
               <form onSubmit={submitSearch} className={styles.searchForm}>
                 <label className="min-w-0 flex-1">
-                  <span className="sr-only">搜索个人知识标题或正文</span>
-                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索知识标题或正文" maxLength={240} className={styles.searchInput} />
+                  <span className="sr-only"><UiText text="搜索个人知识标题或正文" /></span>
+                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("搜索个人知识标题或正文")} maxLength={240} className={styles.searchInput} />
                 </label>
-                <button type="submit" className={styles.button}>搜索</button>
+                <button type="submit" className={styles.button}><UiText text="搜索" /></button>
               </form>
               <div className={styles.toolbarActions}>
-                <button type="button" onClick={() => void openSearchTool("semantic")} className={styles.button}>智能检索与索引</button>
+                <button type="button" onClick={() => void openSearchTool("semantic")} className={styles.button}><UiText text="智能检索与索引" /></button>
               </div>
             </div>
 
-            {listError ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}><p>{listError}</p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline">重新加载</button></div> : null}
-            {listLoading ? <p className="py-5 text-sm text-slate-500" role="status" aria-live="polite">正在加载知识…</p> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} filter={knowledgeFilter} onCreate={startCreate} /> : <div className={styles.list}>
+            {listError ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}><p>{t(listError)}</p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline"><UiText text="重新加载" /></button></div> : null}
+            {listLoading ? <p className="py-5 text-sm text-slate-500" role="status" aria-live="polite"><UiText text="正在加载知识…" /></p> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} filter={knowledgeFilter} onCreate={startCreate} /> : <div className={styles.list}>
               {documents.map((item) => <button key={item.id} type="button" aria-haspopup="dialog" aria-current={item.id === selectedId ? "true" : undefined} onClick={() => selectDocument(item.id)} className={`${styles.row} ${item.id === selectedId ? styles.selectedRow : ""}`}>
                 <span className={styles.rowBody}>
                   <span className={styles.rowTitle}>{item.title}</span>
-                  <span className={styles.rowExcerpt}>{item.excerpt ?? `已保存 ${formatBytes(item.byteCount)}，打开查看正文。`}</span>
+                  <span className={styles.rowExcerpt}>{item.excerpt ?? `${t("已保存")} ${formatBytes(item.byteCount)}${language === "en" ? ". " : "，"}${t("打开查看正文。")}`}</span>
                 </span>
                 <span className={styles.rowMeta}>
-                  {item.isDefaultMemory ? <span className={styles.memoryBadge}>通用记忆</span> : null}
-                  <span className={styles.versionBadge}>v{item.version}</span>
-                  <span>更新于 {formatDate(item.updatedAt)}</span>
+                  {item.isDefaultMemory ? <span className={styles.memoryBadge}><UiText text="通用记忆" /></span> : null}
+                  <span className={styles.versionBadge}><UiText text={"v"} />{item.version}</span>
+                  <span>{t("更新于")} {formatDate(item.updatedAt, language)}</span>
                 </span>
               </button>)}
             </div>}
 
-            {documents.length > 0 ? <nav className={styles.pager} aria-label="个人知识分页"><span>第 {pageNumber} 页</span><div className={styles.rowActions}><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className={styles.button}>上一页</button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className={styles.button}>下一页</button></div></nav> : null}
+            {documents.length > 0 ? <nav className={styles.pager} aria-label={t("个人知识分页")}><span>{language === "en" ? `Page ${pageNumber}` : `第 ${pageNumber} 页`}</span><div className={styles.rowActions}><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className={styles.button}><UiText text="上一页" /></button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className={styles.button}><UiText text="下一页" /></button></div></nav> : null}
           </section>
         </> : null}
 
         {workspaceSection === "search" ? <section className={styles.searchTools}>
           <div className={styles.heading}>
-            <div><h1>智能检索与索引</h1><p>搜索个人知识，管理语义索引，或查找项目来源。</p></div>
-            <button type="button" onClick={() => void openWorkspaceSection("library")} className={styles.button}>返回知识列表</button>
+            <div><h1><UiText text="智能检索与索引" /></h1><p><UiText text="搜索个人知识，管理语义索引，或查找项目来源。" /></p></div>
+            <button type="button" onClick={() => void openWorkspaceSection("library")} className={styles.button}><UiText text="返回知识列表" /></button>
           </div>
-          <nav className={styles.tabs} aria-label="智能检索工具">
-            <button type="button" aria-current={searchTool === "semantic" ? "page" : undefined} onClick={() => setSearchTool("semantic")} className={`${styles.tab} ${searchTool === "semantic" ? styles.activeTab : ""}`}>个人语义搜索</button>
-            <button type="button" aria-current={searchTool === "index" ? "page" : undefined} onClick={() => setSearchTool("index")} className={`${styles.tab} ${searchTool === "index" ? styles.activeTab : ""}`}>索引管理</button>
-            <button type="button" aria-current={searchTool === "project" ? "page" : undefined} onClick={() => setSearchTool("project")} className={`${styles.tab} ${searchTool === "project" ? styles.activeTab : ""}`}>项目来源搜索</button>
+          <nav className={styles.tabs} aria-label={t("智能检索工具")}>
+            <button type="button" aria-current={searchTool === "semantic" ? "page" : undefined} onClick={() => setSearchTool("semantic")} className={`${styles.tab} ${searchTool === "semantic" ? styles.activeTab : ""}`}><UiText text="个人语义搜索" /></button>
+            <button type="button" aria-current={searchTool === "index" ? "page" : undefined} onClick={() => setSearchTool("index")} className={`${styles.tab} ${searchTool === "index" ? styles.activeTab : ""}`}><UiText text="索引管理" /></button>
+            <button type="button" aria-current={searchTool === "project" ? "page" : undefined} onClick={() => setSearchTool("project")} className={`${styles.tab} ${searchTool === "project" ? styles.activeTab : ""}`}><UiText text="项目来源搜索" /></button>
           </nav>
           <div>{searchTool === "semantic" ? <PersonalSemanticSearchPanel onManageIndex={() => setSearchTool("index")} /> : searchTool === "index" ? <PersonalSemanticIndexPanel onOpenSemanticSearch={() => setSearchTool("semantic")} /> : <PersonalProjectSearchPanel />}</div>
         </section> : null}
@@ -1133,7 +1141,8 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
 
       <dialog
         ref={detailDialogRef}
-        aria-label="个人知识详情"
+        data-inquiry-surface="knowledge-detail"
+        aria-label={t("个人知识详情")}
         aria-modal="true"
         tabIndex={-1}
         onCancel={(event) => { event.preventDefault(); void returnToList(); }}
@@ -1145,8 +1154,8 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         className={styles.detailDialog}
       >
         <div className={styles.detailContent}>
-          {detailLoading ? <p role="status" className="py-8 text-sm text-slate-500">正在加载知识详情…</p> : document ? <>
-            <DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onClose={() => void returnToList()} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} />
+          {detailLoading ? <p role="status" className="py-8 text-sm text-slate-500"><UiText text="正在加载知识详情…" /></p> : document ? <>
+            <DocumentDetail language={language} document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onClose={() => void returnToList()} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} />
             <PersonalKnowledgeNextSteps key={`${document.id}:${document.version}`} content={document.content} onOpenSemanticIndex={() => void openSearchTool("index")} />
           </> : <>{message?.tone === "error" ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}>{message.text}</div> : null}<EmptyDetail onCreate={startCreate} /></>}
         </div>
@@ -1154,6 +1163,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
 
         <dialog
           ref={knowledgeDialogRef}
+        data-inquiry-surface="knowledge-editor"
           aria-labelledby="knowledge-modal-title"
           aria-modal="true"
           tabIndex={-1}
@@ -1161,7 +1171,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           onKeyDown={(event: KeyboardEvent<HTMLDialogElement>) => {
             if (event.key !== "Tab" || !event.currentTarget.open) return;
             const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
-              .filter((element) => element.getClientRects().length > 0 && element.closest("[hidden], [aria-hidden='true']") === null);
+              .filter((element) => element.getClientRects().length > 0 && element.closest("[hidden], [inert], [aria-hidden='true']") === null && getComputedStyle(element).visibility !== "hidden");
             if (focusable.length === 0) {
               event.preventDefault();
               event.currentTarget.focus();
@@ -1190,39 +1200,39 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           data-variant={knowledgeModal === "editor" ? mode : knowledgeModal ?? undefined}
         >
           {knowledgeModal === "editor" ? <div className={mode === "create" ? "h-[78dvh] max-h-[760px] min-h-0 max-sm:h-[88dvh]" : "h-dvh max-h-dvh min-h-0"}>
-            <PersonalKnowledgeEditor mode={mode === "create" ? "create" : "edit"} draft={draft} saving={saving} error={message?.tone === "error" ? message.text : null} notice={message?.tone === "success" ? message.text : null} onDraftChange={updateDraft} onCancel={() => void requestCloseKnowledgeModal()} onSubmit={saveDraft} />
+            <PersonalKnowledgeEditor mode={mode === "create" ? "create" : "edit"} draft={draft} saving={saving} error={message?.tone === "error" ? t(message.text) : null} notice={message?.tone === "success" ? t(message.text) : null} onDraftChange={updateDraft} onCancel={() => void requestCloseKnowledgeModal()} onSubmit={saveDraft} />
           </div> : null}
           {knowledgeModal === "import" ? <div className="flex h-dvh max-h-dvh min-h-0 flex-col">
-            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7">
-              <div><h2 id="knowledge-modal-title" className="text-xl font-semibold">导入知识</h2></div>
-              <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} aria-label="关闭导入弹窗" className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">关闭</button>
+          <div data-dialog-header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7">
+              <div><h2 id="knowledge-modal-title" className="text-xl font-semibold"><UiText text="导入知识" /></h2></div>
+              <button data-dialog-close type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} aria-label={t("关闭导入弹窗")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text="关闭" /></button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
-              <p className="max-w-2xl text-sm leading-6 text-slate-500">选择文本、Markdown、JSON、PDF、DOCX 或图片。提取结果会转入编辑弹窗，核对后再保存。</p>
-              {message?.tone === "error" ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{message.text}</div> : null}
+            <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
+              <p className="max-w-2xl text-sm leading-6 text-slate-500"><UiText text="选择文本、Markdown、JSON、PDF、DOCX 或图片。提取结果会转入编辑弹窗，核对后再保存。" /></p>
+              {message?.tone === "error" ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{t(message.text)}</div> : null}
               <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
-                <label className="block text-sm font-semibold text-slate-700">选择文件
+                <label className="block text-sm font-semibold text-slate-700"><UiText text="选择文件" />
                   <input type="file" accept=".txt,.md,.json,.pdf,.docx,.png,.jpg,.jpeg,.webp" disabled={importing} onChange={(event) => void importFile(event)} className="mt-2 block w-full text-sm disabled:opacity-50" />
                 </label>
-                {importing ? <p role="status" className="mt-3 text-sm text-indigo-700">正在提取文件内容…</p> : null}
+                {importing ? <p role="status" className="mt-3 text-sm text-indigo-700"><UiText text="正在提取文件内容…" /></p> : null}
               </div>
               <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4 text-sm text-slate-600">
-                <label className="block font-semibold text-slate-700">图片及扫描 PDF 识别模型
+                <label className="block font-semibold text-slate-700"><UiText text="图片及扫描 PDF 识别模型" />
                   <select value={visionProviderId} disabled={importing || visionProviderLoadState !== "ready"} onChange={(event) => setVisionProviderId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal disabled:bg-slate-100">
-                    <option value="">选择视觉模型</option>
-                    {visionProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.billingMode === "platform" ? "平台额度" : "个人 BYOK"} · {provider.name} · {provider.modelId}</option>)}
+                    <option value=""><UiText text="选择视觉模型" /></option>
+                    {visionProviders.map((provider) => <option key={provider.id} value={provider.id}>{t(provider.billingMode === "platform" ? "平台额度" : "个人 BYOK")} · {provider.name} · {provider.modelId}</option>)}
                   </select>
                 </label>
-                <p className="mt-3 text-xs leading-5">遇到图片或扫描页时，会在发送前显示模型与页数，并请你单独确认。一次最多识别 3 页扫描内容；识别结果仅作为待核对预览，确认保存后才进入知识库。</p>
-                {visionProviderLoadState === "loading" ? <p role="status" className="mt-2 text-xs text-slate-500">正在读取可用视觉模型…</p> : null}
-                {visionProviderLoadState === "error" ? <div role="alert" className="mt-2 text-xs text-rose-700"><p>{visionProviderLoadError}</p><button type="button" onClick={() => { setVisionProviderLoadState("loading"); setVisionProviderLoadError(null); setVisionProviderReloadToken((value) => value + 1); }} className="mt-1 font-semibold underline">重新加载</button></div> : null}
-                {visionProviderLoadState === "ready" && !visionProviders.some((provider) => provider.billingMode === "platform") ? <p className="mt-2 text-xs text-amber-700">平台视觉模型暂不可用，请管理员配置并验证 visionExtract 路由；你也可以选择个人 BYOK 模型。文本文件和可提取文字的 PDF 仍可导入。</p> : null}
-                {visionProviderLoadState === "ready" && visionProviders.length === 0 ? <p className="mt-2 text-xs text-amber-700">当前没有可用视觉模型。可先等待管理员配置平台路由，或添加个人视觉模型。</p> : null}
-                <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-700"><input type="checkbox" checked={forcePdfVision} onChange={(event) => setForcePdfVision(event.target.checked)} className="mt-0.5 shrink-0" /><span>PDF 含扫描正文或图片时，使用视觉模型逐页补充识别（最多 3 页）。即使页眉有可复制文字，也建议勾选；发送前会再次确认。</span></label>
+                <p className="mt-3 text-xs leading-5"><UiText text="遇到图片或扫描页时，会在发送前显示模型与页数，并请你单独确认。一次最多识别 3 页扫描内容；识别结果仅作为待核对预览，确认保存后才进入知识库。" /></p>
+                {visionProviderLoadState === "loading" ? <p role="status" className="mt-2 text-xs text-slate-500"><UiText text="正在读取可用视觉模型…" /></p> : null}
+                {visionProviderLoadState === "error" ? <div role="alert" className="mt-2 text-xs text-rose-700"><p>{t(visionProviderLoadError ?? "视觉模型列表加载失败")}</p><button type="button" onClick={() => { setVisionProviderLoadState("loading"); setVisionProviderLoadError(null); setVisionProviderReloadToken((value) => value + 1); }} className="mt-1 font-semibold underline"><UiText text="重新加载" /></button></div> : null}
+                {visionProviderLoadState === "ready" && !visionProviders.some((provider) => provider.billingMode === "platform") ? <p className="mt-2 text-xs text-amber-700"><UiText text="平台视觉模型暂不可用，请管理员配置并验证 visionExtract 路由；你也可以选择个人 BYOK 模型。文本文件和可提取文字的 PDF 仍可导入。" /></p> : null}
+                {visionProviderLoadState === "ready" && visionProviders.length === 0 ? <p className="mt-2 text-xs text-amber-700"><UiText text="当前没有可用视觉模型。可先等待管理员配置平台路由，或添加个人视觉模型。" /></p> : null}
+                <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-700"><input type="checkbox" checked={forcePdfVision} onChange={(event) => setForcePdfVision(event.target.checked)} className="mt-0.5 shrink-0" /><span><UiText text="PDF 含扫描正文或图片时，使用视觉模型逐页补充识别（最多 3 页）。即使页眉有可复制文字，也建议勾选；发送前会再次确认。" /></span></label>
               </div>
             </div>
-            <div className="shrink-0 border-t border-slate-100 px-5 py-3 text-right sm:px-7">
-              <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50">完成</button>
+            <div data-dialog-footer className="shrink-0 border-t border-slate-100 px-5 py-3 text-right sm:px-7">
+              <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50"><UiText text="完成" /></button>
             </div>
           </div> : null}
         </dialog>
@@ -1233,17 +1243,19 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
 
 /** Explain an empty list or search result and preserve the create entry point. */
 function EmptyList({ searchQuery, filter, onCreate }: { searchQuery: string; filter: KnowledgeFilter; onCreate: () => void }): React.JSX.Element {
-  const title = searchQuery ? "没有匹配的知识" : filter === "memory" ? "还没有通用记忆" : "还没有个人知识";
-  const description = searchQuery ? "换一个关键词，或清空搜索后查看全部内容。" : filter === "memory" ? "编辑知识并明确标记为通用记忆后，会显示在这里。" : "新建或导入一条知识，开始整理个人资料。";
-  return <div className={styles.empty}><p className="font-semibold text-slate-700">{title}</p><p className="mt-2">{description}</p>{!searchQuery && filter === "all" ? <button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}>新建知识</button> : null}</div>;
+  const t = useTranslate();
+  const title = t(searchQuery ? "没有匹配的知识" : filter === "memory" ? "还没有通用记忆" : "还没有个人知识");
+  const description = t(searchQuery ? "换一个关键词，或清空搜索后查看全部内容。" : filter === "memory" ? "编辑知识并明确标记为通用记忆后，会显示在这里。" : "新建或导入一条知识，开始整理个人资料。");
+  return <div className={styles.empty}><p className="font-semibold text-slate-700">{title}</p><p className="mt-2">{description}</p>{!searchQuery && filter === "all" ? <button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}><UiText text="新建知识" /></button> : null}</div>;
 }
 
 /** Render the neutral detail state before a document has been selected. */
 function EmptyDetail({ onCreate }: { onCreate: () => void }): React.JSX.Element {
-  return <div className={styles.empty}><h2 className="font-semibold text-slate-700">这条知识暂不可用</h2><p className="mt-2">内容可能已删除，或当前账号已不能访问。</p><button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}>新建知识</button></div>;
+  return <div className={styles.empty}><h2 className="font-semibold text-slate-700"><UiText text="这条知识暂不可用" /></h2><p className="mt-2"><UiText text="内容可能已删除，或当前账号已不能访问。" /></p><button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}><UiText text="新建知识" /></button></div>;
 }
 
 type DocumentDetailProps = Readonly<{
+  language: "zh-CN" | "en";
   document: KnowledgeDocument;
   revisions: KnowledgeRevision[];
   historyOpen: boolean;
@@ -1268,6 +1280,7 @@ type DocumentDetailProps = Readonly<{
 
 /** Present the current document, its immutable history, and owner actions. */
 function DocumentDetail({
+  language,
   document,
   revisions,
   historyOpen,
@@ -1289,25 +1302,27 @@ function DocumentDetail({
   onLoadMoreHistory,
   onToggleRevision,
 }: DocumentDetailProps): React.JSX.Element {
+  const t = useTranslate();
   return (
     <article>
-      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
+      <div data-dialog-header className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h2 id="personal-knowledge-detail-title" className="break-words text-xl font-semibold tracking-[-0.02em]">{document.title}</h2>
-          {document.isDefaultMemory ? <span className="mt-2 inline-block rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">个人通用记忆 · 项目 AI 可自动参考</span> : null}
-          <p className="mt-2 text-xs text-slate-400">版本 {document.version} · {formatBytes(document.byteCount)} · 更新于 {formatDate(document.updatedAt)}</p>
+          {document.isDefaultMemory ? <span className="mt-2 inline-block rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700"><UiText text="个人通用记忆 · 项目 AI 可自动参考" /></span> : null}
+          <p className="mt-2 text-xs text-slate-400">{t("版本")} {document.version} · {formatBytes(document.byteCount)} · {t("更新于")} {formatDate(document.updatedAt, language)}</p>
         </div>
         <div className={styles.rowActions}>
-          <button type="button" onClick={onClose} data-detail-close className={styles.button}>关闭</button>
-          <button type="button" onClick={onEdit} className={styles.buttonPrimary}>编辑</button>
-          <button type="button" onClick={onDelete} disabled={deleting} className={styles.buttonDanger}>{deleting ? "删除中…" : "删除"}</button>
+          <button type="button" onClick={onClose} data-dialog-close data-detail-close className={styles.button}><UiText text="关闭" /></button>
+          <button type="button" onClick={onEdit} className={styles.buttonPrimary}><UiText text="编辑" /></button>
+          <button type="button" onClick={onDelete} disabled={deleting} className={styles.buttonDanger}>{deleting ? t("删除中…") : t("删除")}</button>
         </div>
       </div>
 
+      <div data-dialog-body>
       <div className="mt-5 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => onExport("markdown")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{exporting === "markdown" ? "导出中…" : "导出 Markdown"}</button>
-        <button type="button" onClick={() => onExport("text")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{exporting === "text" ? "导出中…" : "导出纯文本"}</button>
-        <button type="button" onClick={onHistory} disabled={historyLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{historyLoading ? "读取历史中…" : historyOpen ? "收起版本历史" : "查看版本历史"}</button>
+        <button type="button" onClick={() => onExport("markdown")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "markdown" ? "导出中…" : "导出 Markdown")}</button>
+        <button type="button" onClick={() => onExport("text")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "text" ? "导出中…" : "导出纯文本")}</button>
+        <button type="button" onClick={onHistory} disabled={historyLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(historyLoading ? "读取历史中…" : historyOpen ? "收起版本历史" : "查看版本历史")}</button>
       </div>
 
       <div id="personal-knowledge-content" className="mt-5 scroll-mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-5">
@@ -1320,15 +1335,15 @@ function DocumentDetail({
         <section className="mt-6 border-t border-slate-100 pt-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold">版本历史</h3>
-              <p className="mt-1 text-xs text-slate-500">历史列表只读取元数据，展开版本时再读取正文。</p>
+              <h3 className="text-lg font-semibold"><UiText text="版本历史" /></h3>
+              <p className="mt-1 text-xs text-slate-500"><UiText text="历史列表只读取元数据，展开版本时再读取正文。" /></p>
             </div>
-            <span className="text-xs text-slate-400">{revisions.length} 个版本</span>
+            <span className="text-xs text-slate-400">{revisions.length} {t("个版本")}</span>
           </div>
 
-          {historyError ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{historyError}</p><button type="button" onClick={onReloadHistory} className="mt-2 font-semibold underline">重新加载历史</button></div> : null}
-          {historyLoading && revisions.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-500">正在读取版本历史…</p> : null}
-          {!historyLoading && !historyError && revisions.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-500">暂时没有版本记录。</p> : null}
+          {historyError ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{t(historyError)}</p><button type="button" onClick={onReloadHistory} className="mt-2 font-semibold underline"><UiText text="重新加载历史" /></button></div> : null}
+          {historyLoading && revisions.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-500"><UiText text="正在读取版本历史…" /></p> : null}
+          {!historyLoading && !historyError && revisions.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-500"><UiText text="暂时没有版本记录。" /></p> : null}
 
           {revisions.length > 0 ? <div className="mt-4 space-y-3">
             {revisions.map((revision) => {
@@ -1341,20 +1356,21 @@ function DocumentDetail({
                 : null;
               return <div key={revision.id} className="rounded-2xl border border-slate-200 bg-white">
                 <button type="button" aria-expanded={isExpanded} onClick={() => onToggleRevision(revision.version)} className="block w-full cursor-pointer px-4 py-3 text-left">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold text-slate-700">版本 {revision.version} · {revision.title}</span><span className="text-xs text-slate-400">{formatDate(revision.createdAt)} · {formatBytes(revision.byteCount)}</span></div>
+                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold text-slate-700">{t("版本")} {revision.version} · {revision.title}</span><span className="text-xs text-slate-400">{formatDate(revision.createdAt, language)} · {formatBytes(revision.byteCount)}</span></div>
                 </button>
                 {isExpanded ? <div className="border-t border-slate-100 px-4 py-4">
-                  {revisionLoading && loadedBody === null ? <p className="text-xs text-slate-500">正在读取版本正文…</p> : null}
-                  {revisionError && loadedBody === null ? <div role="alert" className="text-xs text-rose-700"><p>{revisionError}</p><button type="button" onClick={() => onToggleRevision(revision.version)} className="mt-2 font-semibold underline">重新读取正文</button></div> : null}
+                  {revisionLoading && loadedBody === null ? <p className="text-xs text-slate-500"><UiText text="正在读取版本正文…" /></p> : null}
+                  {revisionError && loadedBody === null ? <div role="alert" className="text-xs text-rose-700"><p>{t(revisionError)}</p><button type="button" onClick={() => onToggleRevision(revision.version)} className="mt-2 font-semibold underline"><UiText text="重新读取正文" /></button></div> : null}
                   {loadedBody ? <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-6 text-slate-600">{loadedBody.content}</pre> : null}
                 </div> : null}
               </div>;
             })}
           </div> : null}
 
-          {historyNextCursor ? <button type="button" onClick={onLoadMoreHistory} disabled={historyLoading} className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{historyLoading ? "读取中…" : "加载更多版本"}</button> : null}
+          {historyNextCursor ? <button type="button" onClick={onLoadMoreHistory} disabled={historyLoading} className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{t(historyLoading ? "读取中…" : "加载更多版本")}</button> : null}
         </section>
       ) : null}
+      </div>
     </article>
   );
 }

@@ -7,6 +7,7 @@ import { listPublicOidcProviders } from "@/lib/oidc";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
 import { getGitHubOAuthAvailability } from "@/lib/github-oauth";
 import { isEmailAuthEnabled } from "@/lib/email-auth-config";
+import { AuthPage } from "@/components/auth-page";
 
 export const dynamic = "force-dynamic";
 
@@ -48,5 +49,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const noticeTone = (params.password === "updated" || params.phone === "updated" || params.account === "closed") ? "success" as const : notice ? "error" as const : undefined;
   const returnTo = canonicalInternalReturnPath(params.returnTo);
   const githubAvailability = await getGitHubOAuthAvailability();
-  return <LoginForm emailAuthEnabled={isEmailAuthEnabled()} phoneAuthStatus={await getPhoneAuthStatus()} phoneAutoRegistrationEnabled={isLocalRegistrationEnabled()} notice={notice} noticeTone={noticeTone} oidcProviders={await listPublicOidcProviders()} returnTo={returnTo} githubLoginAvailable={githubAvailability.status === "available"} githubAvailability={githubAvailability.status} />;
+  return (
+    <AuthPage sectionLabel="登录工作区">
+      <LoginForm emailAuthEnabled={isEmailAuthEnabled()} phoneAuthStatus={await getPhoneAuthStatus()} phoneAutoRegistrationEnabled={isLocalRegistrationEnabled()} notice={notice} noticeTone={noticeTone} oidcProviders={await listPublicOidcProviders()} returnTo={returnTo} githubLoginAvailable={githubAvailability.status === "available"} githubAvailability={githubAvailability.status} />
+    </AuthPage>
+  );
 }

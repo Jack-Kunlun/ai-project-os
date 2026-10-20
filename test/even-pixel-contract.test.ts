@@ -6,16 +6,21 @@ import test from "node:test";
 const SOURCE_EXTENSIONS = new Set([".css", ".ts", ".tsx"]);
 const EXPLICIT_PIXEL = /(?<!\d)(\d+)px/gu;
 
-// v1.1.0 follows the approved prototype, including its 11/13/25px type scale
-// and compact spacing. Keep the preceding grid rule for existing surfaces;
-// do not round the confirmed design merely to satisfy the old style contract.
+// Prototype CSS keeps its approved type and spacing scale outside the legacy sweep.
 const APPROVED_PROTOTYPE_STYLES = new Set([
   "src/app/admin/admin-workspace.module.css",
   "src/app/ask/ask-client.module.css",
+  "src/app/credits/credits-client.module.css",
+  "src/components/token-activity.module.css",
+  "src/app/appearance.css",
   "src/app/dashboard/dashboard-client.module.css",
+  "src/app/inquiry.css",
+  "src/app/user-workspace.css",
   "src/components/auth-page.module.css",
   "src/app/personal/knowledge/graph/knowledge-graph.module.css",
   "src/app/personal/knowledge/personal-knowledge.module.css",
+  "src/app/profile/profile-page.module.css",
+  "src/app/personal/usage/usage-client.module.css",
   "src/app/projects/[projectId]/automations/project-automations-client.module.css",
   "src/app/projects/[projectId]/governance/project-management.module.css",
   "src/app/projects/[projectId]/intelligence/project-intelligence-client.module.css",
@@ -25,6 +30,7 @@ const APPROVED_PROTOTYPE_STYLES = new Set([
   "src/app/projects/[projectId]/project-support.module.css",
   "src/app/projects/projects-client.module.css",
   "src/app/support-pages.module.css",
+  "src/components/token-usage.module.css",
   "src/components/user-shell.module.css",
   "src/components/workspace-ui.module.css",
 ]);
@@ -45,7 +51,10 @@ test("legacy UI keeps its even pixel grid outside the approved v1.1.0 prototype 
     if (APPROVED_PROTOTYPE_STYLES.has(file)) continue;
     const original = await readFile(file, "utf8");
     const content = file === "src/app/globals.css"
-      ? original.replace(/\/\* Match user operation surfaces to the compact workspace design\. \*\/[\s\S]*?(?=\/\* Tables use)/u, "")
+      ? original
+        .replace(/\/\* Match user operation surfaces to the compact workspace design\. \*\/[\s\S]*?(?=\/\* Tables use)/u, "")
+        .replace(/\/\* Shared geometry from the approved product prototype\. \*\/[\s\S]*?(?=\/\*|$)/u, "")
+        .replace(/\/\* Shared surface geometry follows the reviewed prototype\. \*\/[\s\S]*$/u, "")
       : original;
     for (const match of content.matchAll(EXPLICIT_PIXEL)) {
       const pixels = Number(match[1]);

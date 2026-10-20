@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 
@@ -69,6 +70,7 @@ function sourceKindLabel(kind: string): string {
  * service's server-side membership checks and size limit.
  */
 export function PersonalProjectSearchPanel(): React.JSX.Element {
+  const translateUi = useTranslate();
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [scope, setScope] = useState<"selected" | "allAccessible">("selected");
@@ -210,33 +212,33 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
     <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="personal-project-search-title">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Workspace search</p>
-          <h2 id="personal-project-search-title" className="mt-2 text-lg font-semibold text-slate-900">搜索我的空间</h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500">默认只搜索第一个可访问项目及个人知识。跨项目检索需手动选择范围；结果保留项目归属，不会合并成一套规则。</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Workspace search"} /></p>
+          <h2 id="personal-project-search-title" className="mt-2 text-lg font-semibold text-slate-900"><UiText text={"搜索我的空间"} /></h2>
+          <p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"默认只搜索第一个可访问项目及个人知识。跨项目检索需手动选择范围；结果保留项目归属，不会合并成一套规则。"} /></p>
         </div>
-        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">最多 {MAX_SELECTED_PROJECTS} 个项目</span>
+        <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600"><UiText text={"最多"} />{" "}{MAX_SELECTED_PROJECTS} {" "}<UiText text={"个项目"} /></span>
       </div>
 
       <div className="mt-5">
-        <fieldset className="mb-4 flex flex-wrap gap-2" aria-label="项目搜索范围">
-          <legend className="sr-only">项目搜索范围</legend>
-          <label className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-semibold ${scope === "selected" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}><input className="sr-only" type="radio" name="project-search-scope" value="selected" checked={scope === "selected"} onChange={() => { clearSearchForScopeChange(); setScope("selected"); }} />选定项目</label>
-          <label className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-semibold ${scope === "allAccessible" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}><input className="sr-only" type="radio" name="project-search-scope" value="allAccessible" checked={scope === "allAccessible"} onChange={() => { clearSearchForScopeChange(); setScope("allAccessible"); }} />全部可访问的未归档项目</label>
+        <fieldset className="mb-4 flex flex-wrap gap-2" aria-label={translateUi("项目搜索范围")}>
+          <legend className="sr-only"><UiText text={"项目搜索范围"} /></legend>
+          <label className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-semibold ${scope === "selected" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}><input className="sr-only" type="radio" name="project-search-scope" value="selected" checked={scope === "selected"} onChange={() => { clearSearchForScopeChange(); setScope("selected"); }} /><UiText text={"选定项目"} /></label>
+          <label className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-semibold ${scope === "allAccessible" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}><input className="sr-only" type="radio" name="project-search-scope" value="allAccessible" checked={scope === "allAccessible"} onChange={() => { clearSearchForScopeChange(); setScope("allAccessible"); }} /><UiText text={"全部可访问的未归档项目"} /></label>
         </fieldset>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold text-slate-700">选择项目</p>
-          <span className="text-xs text-slate-400">已选 {selectedIds.length}/{MAX_SELECTED_PROJECTS}</span>
+          <p className="text-xs font-semibold text-slate-700"><UiText text={"选择项目"} /></p>
+          <span className="text-xs text-slate-400"><UiText text={"已选"} />{" "}{selectedIds.length}/{MAX_SELECTED_PROJECTS}</span>
         </div>
-        {loadingProjects ? <p className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-500">正在读取可访问项目…</p> : null}
+        {loadingProjects ? <p className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-500"><UiText text={"正在读取可访问项目…"} /></p> : null}
         {projectError ? <p className="mt-3 rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700" role="alert">{projectError}</p> : null}
-        {!loadingProjects && projectError === null && projects.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-slate-200 px-4 py-4 text-xs text-slate-500">当前没有可选项目。</p> : null}
+        {!loadingProjects && projectError === null && projects.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-slate-200 px-4 py-4 text-xs text-slate-500"><UiText text={"当前没有可选项目。"} /></p> : null}
         {scope === "selected" && projects.length > 0 ? (
-          <div className="mt-3 flex max-h-36 flex-wrap gap-2 overflow-y-auto" aria-label="可搜索项目">
+          <div className="mt-3 flex max-h-36 flex-wrap gap-2 overflow-y-auto" aria-label={translateUi("可搜索项目")}>
             {projects.map((project) => {
               const selected = selectedIds.includes(project.id);
               const disabled = !selected && selectedIds.length >= MAX_SELECTED_PROJECTS;
               return <button key={project.id} type="button" onClick={() => toggleProject(project.id)} disabled={disabled} aria-pressed={selected} className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${selected ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-slate-50"} disabled:cursor-not-allowed disabled:opacity-45`}>
-                {project.name}<span className="ml-1.5 font-normal text-slate-400">{project.archivedAt === null ? "进行中" : "已归档"}</span>
+                {project.name}<span className="ml-1.5 font-normal text-slate-400">{project.archivedAt === null ? <UiText text={"进行中"} /> : <UiText text={"已归档"} />}</span>
               </button>;
             })}
           </div>
@@ -245,31 +247,30 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
 
       <form onSubmit={searchProjects} className="mt-5 flex flex-col gap-2 sm:flex-row">
         <label className="min-w-0 flex-1">
-          <span className="sr-only">搜索已选项目资料</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={240} placeholder="例如：发布前检查、当前里程碑…" disabled={searching} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-300 focus:bg-white focus:ring-4 focus:ring-indigo-100 disabled:opacity-60" />
+          <span className="sr-only"><UiText text={"搜索已选项目资料"} /></span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={240} placeholder={translateUi("例如：发布前检查、当前里程碑…")} disabled={searching} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-300 focus:bg-white focus:ring-4 focus:ring-indigo-100 disabled:opacity-60" />
         </label>
-        <button type="submit" disabled={searching || (scope === "selected" && selectedIds.length === 0)} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50">{searching ? "搜索中…" : "搜索工作台"}</button>
+        <button type="submit" disabled={searching || (scope === "selected" && selectedIds.length === 0)} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50">{searching ? <UiText text={"搜索中…"} /> : <UiText text={"搜索工作台"} />}</button>
       </form>
 
       {error ? <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</p> : null}
-      {scope === "allAccessible" ? <p className="mt-4 text-xs text-slate-400">当前范围：本次搜索时仍有权访问的未归档项目（最多 50 个）</p> : selectedProjects.length > 0 ? <p className="mt-4 text-xs text-slate-400">当前范围：{selectedProjects.map((project) => project.name).join("、")}</p> : null}
-      {!searching && results.length === 0 && personalResults.length === 0 && (scope === "allAccessible" || selectedProjects.length > 0) && query.trim().length > 0 && error === null ? <p className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center text-xs text-slate-500">没有找到匹配的内容。</p> : null}
-      {results.length > 0 ? <h3 className="mt-5 text-sm font-semibold text-slate-800">所选范围的项目结果</h3> : null}
-      {results.length > 0 ? <ol className="mt-3 space-y-3" aria-label="项目搜索结果">
+      {scope === "allAccessible" ? <p className="mt-4 text-xs text-slate-400"><UiText text={"当前范围：本次搜索时仍有权访问的未归档项目（最多 50 个）"} /></p> : selectedProjects.length > 0 ? <p className="mt-4 text-xs text-slate-400"><UiText text={"当前范围："} />{selectedProjects.map((project) => project.name).join("、")}</p> : null}
+      {!searching && results.length === 0 && personalResults.length === 0 && (scope === "allAccessible" || selectedProjects.length > 0) && query.trim().length > 0 && error === null ? <p className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center text-xs text-slate-500"><UiText text={"没有找到匹配的内容。"} /></p> : null}
+      {results.length > 0 ? <h3 className="mt-5 text-sm font-semibold text-slate-800"><UiText text={"所选范围的项目结果"} /></h3> : null}
+      {results.length > 0 ? <ol className="mt-3 space-y-3" aria-label={translateUi("项目搜索结果")}>
         {results.map((result) => <li key={`${result.projectId}:${result.citation.chunkId}`} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500"><span className="font-semibold text-indigo-700">#{result.rank} {result.projectName}</span><span>·</span><span>{sourceKindLabel(result.citation.sourceKind)}</span><span>·</span><span>来源 {result.citation.sourceId.slice(0, 8)}…</span><span>·</span><span>当前索引 {result.snapshotId.slice(0, 8)}…</span></div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500"><span className="font-semibold text-indigo-700">#{result.rank} {result.projectName}</span><span>·</span><span>{sourceKindLabel(result.citation.sourceKind)}</span><span>·</span><span><UiText text={"来源"} />{" "}{result.citation.sourceId.slice(0, 8)}…</span><span>·</span><span><UiText text={"当前索引"} />{" "}{result.snapshotId.slice(0, 8)}…</span></div>
           <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{result.citation.excerpt}</p>
-          <p className="mt-2 text-xs text-slate-400">内容指纹 {result.citation.contentHash.slice(0, 12)}… · 片段 {result.citation.rangeStart}–{result.citation.rangeEnd}</p>
+          <p className="mt-2 text-xs text-slate-400"><UiText text={"内容指纹"} />{" "}{result.citation.contentHash.slice(0, 12)}<UiText text={"… · 片段"} />{" "}{result.citation.rangeStart}–{result.citation.rangeEnd}</p>
           <Link
             href={`/projects/${encodeURIComponent(result.projectId)}/materials/sources/${encodeURIComponent(result.citation.sourceId)}?contentHash=${encodeURIComponent(result.citation.sourceContentHash)}`}
             prefetch={false}
             className="mt-3 inline-flex rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50"
           >
-            打开并核对原始资料
-          </Link>
+            <UiText text={"打开并核对原始资料"} /></Link>
         </li>)}
       </ol> : null}
-      {personalResults.length > 0 ? <div className="mt-5"><h3 className="text-sm font-semibold text-slate-800">个人知识</h3><ol className="mt-3 space-y-2" aria-label="个人知识搜索结果">{personalResults.map((result) => <li key={result.id} className="rounded-2xl border border-slate-200 px-4 py-3"><a href={`/personal/knowledge?document=${result.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">{result.title}</a><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{result.excerpt ?? ""}</p></li>)}</ol></div> : null}
+      {personalResults.length > 0 ? <div className="mt-5"><h3 className="text-sm font-semibold text-slate-800"><UiText text={"个人知识"} /></h3><ol className="mt-3 space-y-2" aria-label={translateUi("个人知识搜索结果")}>{personalResults.map((result) => <li key={result.id} className="rounded-2xl border border-slate-200 px-4 py-3"><a href={`/personal/knowledge?document=${result.id}`} className="text-sm font-semibold text-indigo-700 hover:underline">{result.title}</a><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{result.excerpt ?? ""}</p></li>)}</ol></div> : null}
     </section>
   );
 }

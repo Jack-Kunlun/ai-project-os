@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { GraphicCaptchaDialog, type GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
+import dynamic from "next/dynamic";
+import type { GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
+const GraphicCaptchaDialog = dynamic(() => import("@/components/graphic-captcha-dialog").then(module => module.GraphicCaptchaDialog));
+import { useTranslate } from "@/components/appearance-provider";
 import { readSmsSendResponse } from "@/lib/sms-send-response";
 
 type SmsPurpose = "register" | "login" | "close" | "recover" | "bind" | "change-old" | "change-new";
@@ -35,6 +38,7 @@ export function SmsCodeInput({
   onCodeChange,
   onChallengeIdChange,
 }: SmsCodeInputProps) {
+  const t = useTranslate();
   const [pendingRequest, setPendingRequest] = useState<{ phone: string; sequence: number } | null>(null);
   const [captchaRequest, setCaptchaRequest] = useState<{ phone: string; purpose: SmsPurpose; sequence: number } | null>(null);
   const [cooldown, setCooldown] = useState<{ phone: string; expiresAt: number } | null>(null);
@@ -185,7 +189,7 @@ export function SmsCodeInput({
 
   return (
     <div>
-      <label htmlFor={id} className="block text-sm font-semibold">短信验证码</label>
+      <label htmlFor={id} className="block text-sm font-semibold">{t("短信验证码")}</label>
       <div className="mt-2 flex min-w-0 gap-2">
         <input
           id={id}
@@ -200,7 +204,7 @@ export function SmsCodeInput({
           required
           disabled={unavailable}
           aria-describedby={`${id}-message`}
-          placeholder="输入 6 位验证码"
+          placeholder={t("输入 6 位验证码")}
           className={`${controlHeight} min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50/80 px-3 text-base outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60`}
         />
         <button
@@ -210,11 +214,11 @@ export function SmsCodeInput({
           disabled={sendDisabled}
           className={`${controlHeight} shrink-0 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400`}
         >
-          {unavailable ? "暂不可用" : pending ? "发送中…" : secondsRemaining > 0 ? `${secondsRemaining} 秒后重发` : "获取验证码"}
+          {unavailable ? t("暂不可用") : pending ? t("发送中…") : secondsRemaining > 0 ? t("{{seconds}} 秒后重发").replace("{{seconds}}", String(secondsRemaining)) : t("获取验证码")}
         </button>
       </div>
       <p id={`${id}-message`} role={currentMessage ? "status" : undefined} className={`mt-1.5 text-xs leading-5 ${currentMessage?.tone === "error" || unavailable ? "text-amber-800" : "text-slate-500"}`}>
-        {currentMessage?.text ?? (unavailable ? "短信服务暂不可用，请稍后重试或联系管理员。" : "验证码有效期为 5 分钟。")}
+        {t(currentMessage?.text ?? (unavailable ? "短信服务暂不可用，请稍后重试或联系管理员。" : "验证码有效期为 5 分钟。"))}
       </p>
       {captchaRequest ? (
         <GraphicCaptchaDialog

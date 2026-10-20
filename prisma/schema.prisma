@@ -5736,9 +5736,26 @@ model UnifiedQuestionConversation {
   owner         AppUser                   @relation("UnifiedQuestionConversationOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   turns         UnifiedQuestionTurn[]
   confirmations UnifiedQuestionConfirmation[]
+  presentationRevisions UnifiedQuestionPresentationRevision[]
 
   @@unique([ownerUserId, id])
   @@index([ownerUserId, updatedAt, id])
+}
+
+/// Append-only user display preferences; never modify the original Q&A title,
+/// conversation head, confirmation version or immutable source snapshots.
+model UnifiedQuestionPresentationRevision {
+  id             String                      @id @default(uuid()) @db.Uuid
+  ownerUserId    String                      @db.Uuid
+  conversationId String                      @db.Uuid
+  revision       Int
+  title          String?                     @db.VarChar(120)
+  pinned         Boolean                     @default(false)
+  createdAt      DateTime                    @default(now())
+  conversation   UnifiedQuestionConversation @relation(fields: [ownerUserId, conversationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([conversationId, revision], map: "UnifiedQuestionPresentationRevision_conversation_revision_key")
+  @@index([ownerUserId, conversationId, revision], map: "UnifiedQuestionPresentationRevision_owner_conv_rev_idx")
 }
 
 /// Successful turns retain complete Q&A and exact bounded source snapshots.

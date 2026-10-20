@@ -11,23 +11,23 @@ test("personal connection cards expose a permission-safe scope evidence contract
 
   for (const source of [models, git, mcp]) {
     assert.match(source, /import \{ ScopeEvidenceCard \} from "@\/components\/scope-evidence-card"/u);
-    assert.match(source, /scope: "个人连接"/u);
-    assert.match(source, /owner: "当前账户"/u);
+    assert.match(source, /scope: t\("个人连接"\)/u);
+    assert.match(source, /owner: t\("当前账户"\)/u);
     assert.match(source, /尚未取得项目委托证据/u);
     assert.doesNotMatch(source, /affectedProjects: [^\n]*project(?:Id|\.name)/u);
   }
 
-  assert.match(models, /title="个人模型连接边界"/u);
-  assert.match(models, /payer: "个人连接所有者承担费用"/u);
+  assert.match(models, /title=\{t\("个人模型连接边界"\)\}/u);
+  assert.match(models, /payer: t\("个人连接所有者承担费用"\)/u);
   assert.match(models, /provider\.lastTestedAt/u);
 
-  assert.match(git, /title="个人 Git 连接边界"/u);
-  assert.match(git, /payer: "不适用（Git 连接不产生平台模型费用）"/u);
+  assert.match(git, /title=\{t\("个人 Git 连接边界"\)\}/u);
+  assert.match(git, /payer: t\("不适用（Git 连接不产生平台模型费用）"\)/u);
   assert.match(git, /connection\.lastTestedAt/u);
   assert.match(git, /不以仓库数量代替项目影响/u);
   assert.doesNotMatch(git, /已关联仓库/u);
 
-  assert.match(mcp, /title="个人 MCP 连接边界"/u);
+  assert.match(mcp, /title=\{t\("个人 MCP 连接边界"\)\}/u);
   assert.match(mcp, /第三方费用由连接所有者承担或按其与服务商约定/u);
   assert.match(mcp, /connection\.lastDiscoveredAt/u);
   assert.match(mcp, /不是调用成功/u);

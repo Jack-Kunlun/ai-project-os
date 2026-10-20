@@ -66,10 +66,12 @@ test("inconsistent upload policy relationships fail closed", () => {
 });
 
 test("upload route and UI share server policy, durable admission and quota usage", async () => {
-  const [route, client, header, login, git, mcp, guide, migration, projects] = await Promise.all([
+  const [route, client, shell, shellCss, navigation, login, git, mcp, guide, migration, projects] = await Promise.all([
     readFile("src/app/api/projects/[projectId]/assets/route.ts", "utf8"),
     readFile("src/app/projects/[projectId]/assets/project-assets-client.tsx", "utf8"),
-    readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/components/user-shell.tsx", "utf8"),
+    readFile("src/components/user-shell.module.css", "utf8"),
+    readFile("src/lib/user-navigation.ts", "utf8"),
     readFile("src/app/login/login-form.tsx", "utf8"),
     readFile("src/app/connections/connections-client.tsx", "utf8"),
     readFile("src/app/connections/mcp/mcp-connections-client.tsx", "utf8"),
@@ -99,10 +101,11 @@ test("upload route and UI share server policy, durable admission and quota usage
   assert.match(client, /maxGlobalConcurrentUploads/u);
   assert.match(client, /retainedObjectCount/u);
   assert.doesNotMatch(client, /最多导入 100 个/u);
-  assert.doesNotMatch(header, /项目导航[\s\S]{0,500}overflow-x-auto/u);
-  assert.match(header, /项目列表/u);
-  assert.match(header, /\/materials/u);
-  assert.doesNotMatch(header, /查看指引/u);
+  assert.doesNotMatch(shellCss, /\.projectNavigation\s*\{[^}]*overflow-x:\s*auto/u);
+  assert.match(shell, /USER_GLOBAL_NAVIGATION\.map/u);
+  assert.match(navigation, /\{ key: "projects", label: "我的项目", href: "\/personal\/projects" \}/u);
+  assert.match(navigation, /\{ key: "materials", label: "项目资料", segment: "materials" \}/u);
+  assert.doesNotMatch(navigation, /label: "查看指引"/u);
   assert.doesNotMatch(login, /打开使用指南/u);
   assert.match(git, /公网 HTTPS/u);
   assert.match(git, /自建 HTTPS \/ CA/u);
@@ -112,7 +115,7 @@ test("upload route and UI share server policy, durable admission and quota usage
   assert.doesNotMatch(projects, /onDoubleClick=\{openProjectFromCard\}/u);
   assert.match(projects, /const archived = project\.archivedAt !== null/u);
   assert.match(projects, /archived \? "已归档"/u);
-  assert.match(projects, /<Link href=\{`\/projects\/\$\{project\.id\}`\} aria-label=\{`查看项目 \$\{project\.name\}`\}>进入项目 →<\/Link>/u);
+  assert.match(projects, /<Link href=\{`\/projects\/\$\{project\.id\}`\} aria-label=\{`\$\{t\("查看项目"\)\} \$\{project\.name\}`\}><UiText text="进入项目 →" \/><\/Link>/u);
   assert.match(guide, /getUploadPolicy/u);
   assert.match(guide, /maxDeploymentBytes/u);
   assert.match(guide, /软删除但仍保留/u);

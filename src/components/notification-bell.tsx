@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslate } from "./appearance-provider";
 import { useCallback, useEffect, useState } from "react";
 
-export function NotificationBell({ active }: { active: boolean }) {
+export function NotificationBell({ active,compact=false }: { active: boolean;compact?:boolean }) {
+  const t=useTranslate();
   const [unreadCount, setUnreadCount] = useState(0);
 
   const reload = useCallback(async () => {
@@ -32,6 +34,5 @@ export function NotificationBell({ active }: { active: boolean }) {
     };
   }, [reload]);
 
-  const label = unreadCount > 0 ? `打开通知中心，${unreadCount} 条未读` : "打开通知中心";
-  return <Link href="/notifications" aria-label={label} aria-current={active ? "page" : undefined} title={label} className={`relative flex h-11 w-11 items-center justify-center rounded-full border transition ${active ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"}`}><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>{unreadCount > 0 ? <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white">{unreadCount > 99 ? "99+" : unreadCount}</span> : null}</Link>;
+  return <Link href="/notifications" aria-label={unreadCount>0?`${t("通知中心")} · ${unreadCount}`:t("通知中心")} aria-current={active ? "page" : undefined} title={t("通知中心")} className={`relative flex ${compact?"h-8 w-8 border-0":"h-11 w-11"} items-center justify-center rounded-full border transition ${active ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"}`}><svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>{unreadCount > 0 ? <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white">{unreadCount > 99 ? "99+" : unreadCount}</span> : null}</Link>;
 }

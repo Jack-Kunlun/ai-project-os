@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useTranslate } from "./appearance-provider";
+import { useInquiryOperation } from "./inquiry-operation";
 import { createPortal } from "react-dom";
 import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
 
 /** Keep mutations out of the reading surface while preserving parent-owned drafts. */
-export function OperationPanel({ title, triggerLabel, description, children, open, onOpenChange, className, disabled, triggerId, variant = "modal" }: {
+export function OperationPanel({ title, translateTitle = true, triggerLabel, description, children, open, onOpenChange, className, disabled, triggerId, variant = "modal" }: {
   title: string;
+  translateTitle?: boolean;
   triggerLabel?: string;
   description?: string;
   children: ReactNode;
@@ -24,6 +27,9 @@ export function OperationPanel({ title, triggerLabel, description, children, ope
   if (isOpen && !hasOpened) setHasOpened(true);
   const dialogRef = useRef<HTMLElement>(null);
   const titleId = useId();
+  const t = useTranslate();
+  const backdropStarted = useRef(false);
+  const owned = useInquiryOperation(isOpen, dialogRef);
   const descriptionId = useId();
 
   function changeOpen(value: boolean) {
@@ -54,7 +60,7 @@ export function OperationPanel({ title, triggerLabel, description, children, ope
     if (event.key !== "Tab" || !dialogRef.current) return;
     const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
       "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
-    )].filter((element) => element.getClientRects().length > 0 && element.getAttribute("aria-hidden") !== "true");
+    )].filter((element) => element.getClientRects().length > 0 && !element.closest("[hidden], [inert], [aria-hidden='true']") && getComputedStyle(element).visibility !== "hidden");
     const first = focusable[0];
     const last = focusable.at(-1);
     if (!first || !last) {
@@ -73,13 +79,13 @@ export function OperationPanel({ title, triggerLabel, description, children, ope
   }
 
   return <div className={className} data-operation-panel>
-    <button data-operation-trigger id={triggerId} type="button" disabled={disabled} onClick={() => changeOpen(true)} aria-haspopup="dialog" aria-expanded={isOpen} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{triggerLabel ?? title}</button>
+    <button data-operation-trigger id={triggerId} type="button" disabled={disabled} onClick={() => changeOpen(true)} aria-haspopup="dialog" aria-expanded={isOpen} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{t(triggerLabel ?? title)}</button>
     {hasOpened && typeof document !== "undefined" ? createPortal(
-      <div hidden={!isOpen} inert={!isOpen} aria-hidden={!isOpen || undefined} style={isOpen ? undefined : { display: "none" }} className={`fixed inset-0 z-[60] flex ${modalBackdropClassName} p-0 ${variant === "drawer" ? "items-stretch justify-end" : "items-end justify-center sm:items-center sm:p-5"}`} onMouseDown={(event) => { if (event.target === event.currentTarget) changeOpen(false); }}>
-        <section data-operation-surface={variant} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} tabIndex={-1} onKeyDown={handleKeyDown} className={`flex w-full flex-col overflow-hidden outline-none ${variant === "drawer" ? "h-dvh max-h-dvh max-w-3xl rounded-none" : "max-h-[95dvh] max-w-6xl rounded-t-2xl sm:rounded-2xl"} ${modalSurfaceClassName}`}>
+      <div hidden={!isOpen} inert={!isOpen} aria-hidden={!isOpen || undefined} style={isOpen ? undefined : { display: "none" }} className={`fixed inset-0 z-[60] flex ${modalBackdropClassName} p-0 ${variant === "drawer" ? "items-stretch justify-end" : "items-end justify-center sm:items-center sm:p-5"}`} onPointerDown={(event) => { backdropStarted.current=event.target===event.currentTarget; }} onClick={(event) => { if (backdropStarted.current && event.target === event.currentTarget) changeOpen(false); }}>
+        <section data-inquiry-owned={String(owned)} data-operation-surface={variant} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} tabIndex={-1} onKeyDown={handleKeyDown} className={`flex w-full flex-col overflow-hidden outline-none ${variant === "drawer" ? "h-dvh max-h-dvh max-w-3xl rounded-none" : "max-h-[95dvh] max-w-6xl rounded-t-2xl sm:rounded-2xl"} ${modalSurfaceClassName}`}>
           <header data-operation-header className={`flex items-start justify-between gap-5 px-6 py-5 sm:px-8 ${modalHeaderClassName}`}>
-            <div><h2 id={titleId} className="text-xl font-semibold text-slate-950">{title}</h2>{description ? <p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-600">{description}</p> : null}</div>
-            <button type="button" onClick={() => changeOpen(false)} className="shrink-0 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">返回查看</button>
+            <div><h2 id={titleId} className="text-xl font-semibold text-slate-950">{translateTitle ? t(title) : title}</h2>{description ? <p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-600">{t(description)}</p> : null}</div>
+            <button data-dialog-close type="button" onClick={() => changeOpen(false)} className="shrink-0 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t("返回查看")}</button>
           </header>
           <div data-operation-content className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6 sm:px-8">{children}</div>
         </section>

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { UiText, useAppearance } from "@/components/appearance-provider";
 import {
   connectionButtonClass,
   connectionErrorText,
@@ -104,8 +105,8 @@ const actionDescriptions: Record<PersonalGovernanceKind, Partial<Record<Personal
   },
 };
 
-function actionDescription(kind: PersonalGovernanceKind, action: PersonalGovernanceAction): string {
-  return actionDescriptions[kind][action] ?? "此治理动作需要先生成安全预览。";
+function actionDescription(kind: PersonalGovernanceKind, action: PersonalGovernanceAction, t: (text: string) => string): string {
+  return t(actionDescriptions[kind][action] ?? "此治理动作需要先生成安全预览。");
 }
 
 function governanceBoundary(kind: PersonalGovernanceKind): string {
@@ -114,16 +115,16 @@ function governanceBoundary(kind: PersonalGovernanceKind): string {
     : "重新测试会先固定安全地址并执行只读 ls-remote；其他治理动作不会自动发起网络请求。";
 }
 
-function heldActionMessage(kind: PersonalGovernanceKind): string {
-  return kind === "mcp"
+function heldActionMessage(kind: PersonalGovernanceKind, t: (text: string) => string): string {
+  return t(kind === "mcp"
     ? "治理动作已安全挂起，未发起 MCP 协议请求，也未向远端发送凭据。"
-    : "治理动作已安全挂起，未发起网络请求。";
+    : "治理动作已安全挂起，未发起网络请求。");
 }
 
-function unavailableActionNote(kind: PersonalGovernanceKind): string {
-  return kind === "mcp"
+function unavailableActionNote(kind: PersonalGovernanceKind, t: (text: string) => string): string {
+  return t(kind === "mcp"
     ? "尚未开放，不能绕过治理：此治理动作当前不会触发 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证；服务端也不会自动重试。"
-    : "尚未开放，不能绕过治理：此治理动作当前不会触发网络请求，外部连通性仍未验证；服务端也不会自动重试。";
+    : "尚未开放，不能绕过治理：此治理动作当前不会触发网络请求，外部连通性仍未验证；服务端也不会自动重试。");
 }
 
 const blockerLabels: Record<string, string> = {
@@ -143,8 +144,8 @@ const blockerLabels: Record<string, string> = {
   external_io_planned_not_dispatched: "尚未开放外部发包，不能绕过治理",
 };
 
-export function connectionBlockerText(blockers: readonly string[]): string {
-  return blockers.map((blocker) => blockerLabels[blocker] ?? blocker).join("、");
+export function connectionBlockerText(blockers: readonly string[], t: (text: string) => string = (text) => text): string {
+  return blockers.map((blocker) => t(blockerLabels[blocker] ?? blocker)).join(" · ");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -164,27 +165,28 @@ function readText(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
-function itemProjectName(item: Record<string, unknown>): string {
-  return readText(item.projectName) ?? "项目名称不可见";
+function itemProjectName(item: Record<string, unknown>, t: (text: string) => string): string {
+  return readText(item.projectName) ?? t("项目名称不可见");
 }
 
-function itemStatus(item: Record<string, unknown>): string {
-  return readText(item.status) ?? "状态不可用";
+function itemStatus(item: Record<string, unknown>, t: (text: string) => string): string {
+  const status = readText(item.status);
+  return status === null ? t("状态不可用") : t(status);
 }
 
-function itemExpiry(item: Record<string, unknown>): string {
+function itemExpiry(item: Record<string, unknown>, t: (text: string) => string, language: "zh-CN" | "en"): string {
   const expiry = readText(item.expiresAt);
-  return expiry === null ? "无到期时间" : `有效至 ${formatConnectionDate(expiry)}`;
+  return expiry === null ? t("无到期时间") : `${t("有效至 ")}${formatConnectionDate(expiry, language)}`;
 }
 
-function impactTotals(kind: PersonalGovernanceKind, impact: Readonly<Record<string, unknown>>): Readonly<{ count: number; summary: string }> {
+function impactTotals(kind: PersonalGovernanceKind, impact: Readonly<Record<string, unknown>>, t: (text: string) => string): Readonly<{ count: number; summary: string }> {
   if (kind === "git") {
     const legacy = readItems(impact.legacyLinks);
     const delegations = readItems(impact.liveDelegations);
     const runs = readItems(impact.manualRuns);
     const history = readCount(impact.historicalReferences);
     const count = legacy.length + delegations.length + runs.length + history;
-    return { count, summary: `遗留关联 ${legacy.length}、活动委托 ${delegations.length}、手动读取 ${runs.length}、历史引用 ${history}` };
+    return { count, summary: `${t("遗留关联")}: ${legacy.length} · ${t("活动委托")}: ${delegations.length} · ${t("手动读取")}: ${runs.length} · ${t("历史引用")}: ${history}` };
   }
   const delegations = readItems(impact.liveDelegations);
   const grants = readItems(impact.activeToolGrants);
@@ -192,11 +194,11 @@ function impactTotals(kind: PersonalGovernanceKind, impact: Readonly<Record<stri
   const actions = readCount(impact.nonTerminalActions);
   const dispatches = readCount(impact.reservedDispatches);
   const count = delegations.length + grants.length + attestations + actions + dispatches;
-  return { count, summary: `活动委托 ${delegations.length}、工具授权 ${grants.length}、V2 审核 ${attestations}、未终态动作 ${actions}、派发预留 ${dispatches}` };
+  return { count, summary: `${t("活动委托")}: ${delegations.length} · ${t("工具授权")}: ${grants.length} · ${t("V2 审核")}: ${attestations} · ${t("未终态动作")}: ${actions} · ${t("派发预留")}: ${dispatches}` };
 }
 
-function blockerText(code: string): string {
-  return blockerLabels[code] ?? `安全策略阻断（${code}）`;
+function blockerText(code: string, t: (text: string) => string): string {
+  return blockerLabels[code] ? t(blockerLabels[code]) : `${t("安全策略阻断")} (${code})`;
 }
 
 function previewApiPath(kind: PersonalGovernanceKind, connectionId: string, operation: "preview" | "execute"): string {
@@ -228,7 +230,7 @@ function actionIsAvailable(
   return true;
 }
 
-function stableGovernanceError(error: unknown, fallback: string): string {
+function stableGovernanceError(error: unknown, fallback: string, t: (text: string) => string): string {
   if (error instanceof Error && error.name === "ConnectionRequestError") {
     const code = "code" in error && typeof error.code === "string" ? error.code : "";
     const messages: Record<string, string> = {
@@ -245,57 +247,61 @@ function stableGovernanceError(error: unknown, fallback: string): string {
       GIT_EXTERNAL_IO_PLANNED_NOT_DISPATCHED: "重新测试或重信任尚未开放外部发包，未执行远程操作。",
       MCP_EXTERNAL_IO_PLANNED_NOT_DISPATCHED: "重新发现或重信任尚未开放外部发包，未执行远程操作。",
     };
-    if (messages[code] !== undefined) return messages[code];
+    if (messages[code] !== undefined) return t(messages[code]);
   }
-  return connectionErrorText(error, fallback);
+  return t(connectionErrorText(error, fallback));
 }
 
 function ImpactDetails({ kind, impact }: Readonly<{ kind: PersonalGovernanceKind; impact: Readonly<Record<string, unknown>> }>) {
+  const { t, language } = useAppearance();
+
   const gitLegacy = readItems(impact.legacyLinks);
   const gitDelegations = readItems(impact.liveDelegations);
   const gitRuns = readItems(impact.manualRuns);
   const mcpDelegations = readItems(impact.liveDelegations);
   const mcpGrants = readItems(impact.activeToolGrants);
-  const totals = impactTotals(kind, impact);
+  const totals = impactTotals(kind, impact, t);
 
   return (
     <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Safety impact</p>
-          <h4 className="mt-1 text-sm font-semibold text-slate-900">影响预览</h4>
+          <h4 className="mt-1 text-sm font-semibold text-slate-900"><UiText text={"影响预览"} /></h4>
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">共 {totals.count} 项</span>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700"><UiText text={"共 "} />{totals.count} <UiText text={" 项"} /></span>
       </div>
       <p className="mt-2 text-xs leading-5 text-slate-600">{totals.summary}</p>
-      <p className="mt-2 text-[12px] leading-5 text-slate-500">仅展示你有权查看的安全项目名、状态、到期时间和计数；不展示 endpoint、凭据或原始指纹。</p>
+      <p className="mt-2 text-[12px] leading-5 text-slate-500"><UiText text={"仅展示你有权查看的安全项目名、状态、到期时间和计数；不展示 endpoint、凭据或原始指纹。"} /></p>
       {kind === "git" ? (
         <div className="mt-3 space-y-2 text-xs">
-          {gitLegacy.map((item, index) => <ImpactRow key={`legacy-${index}`} label="遗留项目关联" item={item} />)}
-          {gitDelegations.map((item, index) => <ImpactRow key={`delegation-${index}`} label="活动项目委托" item={item} />)}
-          {gitRuns.map((item, index) => <ImpactRow key={`run-${index}`} label="手动读取" item={item} />)}
-          {readCount(impact.historicalReferences) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800">历史引用：{readCount(impact.historicalReferences)} 条（不可删除引用）</p> : null}
-          {gitLegacy.length + gitDelegations.length + gitRuns.length + readCount(impact.historicalReferences) === 0 ? <p className="rounded-xl bg-emerald-50 px-3 py-2 leading-5 text-emerald-800">当前没有发现下游项目影响。</p> : null}
+          {gitLegacy.map((item, index) => <ImpactRow key={`legacy-${index}`} label={t("遗留项目关联")} item={item} t={t} language={language} />)}
+          {gitDelegations.map((item, index) => <ImpactRow key={`delegation-${index}`} label={t("活动项目委托")} item={item} t={t} language={language} />)}
+          {gitRuns.map((item, index) => <ImpactRow key={`run-${index}`} label={t("手动读取")} item={item} t={t} language={language} />)}
+          {readCount(impact.historicalReferences) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800"><UiText text={"历史引用："} />{readCount(impact.historicalReferences)} <UiText text={" 条（不可删除引用）"} /></p> : null}
+          {gitLegacy.length + gitDelegations.length + gitRuns.length + readCount(impact.historicalReferences) === 0 ? <p className="rounded-xl bg-emerald-50 px-3 py-2 leading-5 text-emerald-800"><UiText text={"当前没有发现下游项目影响。"} /></p> : null}
         </div>
       ) : (
         <div className="mt-3 space-y-2 text-xs">
-          {mcpDelegations.map((item, index) => <ImpactRow key={`delegation-${index}`} label="活动项目委托" item={item} />)}
-          {mcpGrants.map((item, index) => <ImpactRow key={`grant-${index}`} label={`工具授权${readText(item.toolName) === null ? "" : ` · ${readText(item.toolName)}`}`} item={item} />)}
-          {readCount(impact.v2Attestations) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800">V2 管理员审核证据：{readCount(impact.v2Attestations)} 条（删除永久阻断）</p> : null}
-          {readCount(impact.nonTerminalActions) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800">未终态动作：{readCount(impact.nonTerminalActions)} 条</p> : null}
-          {readCount(impact.reservedDispatches) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800">派发预留：{readCount(impact.reservedDispatches)} 条</p> : null}
-          {mcpDelegations.length + mcpGrants.length + readCount(impact.v2Attestations) + readCount(impact.nonTerminalActions) + readCount(impact.reservedDispatches) === 0 ? <p className="rounded-xl bg-emerald-50 px-3 py-2 leading-5 text-emerald-800">当前没有发现下游项目影响。</p> : null}
+          {mcpDelegations.map((item, index) => <ImpactRow key={`delegation-${index}`} label={t("活动项目委托")} item={item} t={t} language={language} />)}
+          {mcpGrants.map((item, index) => <ImpactRow key={`grant-${index}`} label={`${t("工具授权")}${readText(item.toolName) === null ? "" : ` · ${readText(item.toolName)}`}`} item={item} t={t} language={language} />)}
+          {readCount(impact.v2Attestations) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800"><UiText text={"V2 管理员审核证据："} />{readCount(impact.v2Attestations)} <UiText text={" 条（删除永久阻断）"} /></p> : null}
+          {readCount(impact.nonTerminalActions) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800"><UiText text={"未终态动作："} />{readCount(impact.nonTerminalActions)} <UiText text={" 条"} /></p> : null}
+          {readCount(impact.reservedDispatches) > 0 ? <p className="rounded-xl bg-amber-50 px-3 py-2 leading-5 text-amber-800"><UiText text={"派发预留："} />{readCount(impact.reservedDispatches)} <UiText text={" 条"} /></p> : null}
+          {mcpDelegations.length + mcpGrants.length + readCount(impact.v2Attestations) + readCount(impact.nonTerminalActions) + readCount(impact.reservedDispatches) === 0 ? <p className="rounded-xl bg-emerald-50 px-3 py-2 leading-5 text-emerald-800"><UiText text={"当前没有发现下游项目影响。"} /></p> : null}
         </div>
       )}
     </div>
   );
 }
 
-function ImpactRow({ label, item }: Readonly<{ label: string; item: Record<string, unknown> }>) {
-  return <p className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 leading-5 text-slate-700"><span><strong className="font-semibold">{label}</strong> · {itemProjectName(item)}</span><span className="text-slate-500">{itemStatus(item)} · {itemExpiry(item)}</span></p>;
+function ImpactRow({ label, item, t, language }: Readonly<{ label: string; item: Record<string, unknown>; t: (text: string) => string; language: "zh-CN" | "en" }>) {
+  return <p className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 leading-5 text-slate-700"><span><strong className="font-semibold">{label}</strong> · {itemProjectName(item, t)}</span><span className="text-slate-500">{itemStatus(item, t)} · {itemExpiry(item, t, language)}</span></p>;
 }
 
 export function ConnectionGovernancePanel({ kind, connection, onReload, onRemoved }: ConnectionGovernancePanelProps) {
+  const { t, language } = useAppearance();
+
   const { confirm, dialog } = useAppConfirmDialog();
   const [selectedAction, setSelectedAction] = useState<PersonalGovernanceAction>(() => defaultAction(kind, connection.status));
   const [reason, setReason] = useState("");
@@ -397,7 +403,7 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
       setMessage({ tone: payload.preview.canExecute ? "info" : "error", text: payload.preview.canExecute ? "预览已生成，请核对影响并完成独立确认。" : "预览已生成，但当前存在安全阻断，不能执行。" });
     } catch (error) {
       if (isConnectionConflict(error)) await onReload();
-      setMessage({ tone: "error", text: stableGovernanceError(error, "安全影响预览失败") });
+      setMessage({ tone: "error", text: stableGovernanceError(error, "安全影响预览失败", t) });
     } finally {
       setPending(null);
     }
@@ -406,15 +412,28 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
   async function executePreview() {
     if (preview === null || pending !== null) return;
     setPending("confirm");
+    const confirmationTitle = action === "delete"
+      ? "确认永久删除这条连接？"
+      : action === "disable"
+        ? "确认停用这条连接？"
+        : action === "enable"
+          ? "确认重新启用这条连接？"
+          : action === "retest"
+            ? "确认重新测试这个仓库？"
+            : action === "rediscover"
+              ? "确认重新发现 MCP 工具？"
+              : action === "rotateCredential"
+                ? "确认轮换连接凭据？"
+                : "确认重新信任此连接网络？";
     const result = await confirm({
-      eyebrow: "Independent confirmation",
-      title: `确认${actionLabels[kind][action] ?? "这项变更"}？`,
-      description: `本次预览将在 ${formatConnectionDate(preview.expiresAt)} 失效。${impactTotals(kind, preview.impact).summary}。请输入确认短语后才会执行。`,
-      inputLabel: action === "delete" ? `输入连接名称“${connection.name}”以确认` : "输入“确认”以确认预览仍有效",
+      eyebrow: t("Independent confirmation"),
+      title: t(confirmationTitle),
+      description: `${t("本次预览将在 ")}${formatConnectionDate(preview.expiresAt, language)}${t(" 失效。")}${impactTotals(kind, preview.impact, t).summary}${t("。请输入原文短语“确认”以确认预览仍有效")}`,
+      inputLabel: action === "delete" ? `${t("输入连接名称“")}${connection.name}${t("”以确认")}` : t("输入原文短语“确认”以继续"),
       inputPlaceholder: action === "delete" ? connection.name : "确认",
       requiredValue: action === "delete" ? connection.name : "确认",
-      confirmLabel: action === "delete" ? "确认删除" : "确认执行",
-      cancelLabel: "返回预览",
+      confirmLabel: t(action === "delete" ? "确认删除" : "确认执行"),
+      cancelLabel: t("返回预览"),
       tone: action === "delete" ? "danger" : action === "disable" ? "warning" : "primary",
       maxLength: 80,
     });
@@ -448,9 +467,9 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
       setConfirmationName("");
       if (action === "delete" && status === "completed") {
         onRemoved();
-        setMessage({ tone: "success", text: "连接已删除；页面列表已局部更新。" });
+        setMessage({ tone: "success", text: t("连接已删除；页面列表已局部更新。") });
       } else {
-        setMessage({ tone: held ? "info" : "success", text: held ? heldActionMessage(kind) : "连接治理变更已完成；页面列表将局部刷新。" });
+        setMessage({ tone: held ? "info" : "success", text: held ? heldActionMessage(kind, t) : t("连接治理变更已完成；页面列表将局部刷新。") });
         await onReload();
       }
     } catch (error) {
@@ -458,14 +477,14 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
         setPreview(null);
         await onReload();
       }
-      setMessage({ tone: "error", text: stableGovernanceError(error, "安全变更未执行") });
+      setMessage({ tone: "error", text: stableGovernanceError(error, "安全变更未执行", t) });
     } finally {
       setPending(null);
     }
   }
 
-  const totals = preview === null ? null : impactTotals(kind, preview.impact);
-  const actionLabel = actionLabels[kind][action] ?? "连接变更";
+  const totals = preview === null ? null : impactTotals(kind, preview.impact, t);
+  const actionLabel = t(actionLabels[kind][action] ?? "连接变更");
 
   return (
     <section className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4" aria-labelledby={`governance-title-${connection.id}`}>
@@ -473,25 +492,25 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Connection governance</p>
-          <h4 id={`governance-title-${connection.id}`} className="mt-1 text-sm font-semibold text-slate-900">高风险变更安全预览</h4>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600">所有轮换、停用、启用、删除和重新信任/测试都必须先生成预览，再完成独立确认。不会自动撤销项目授权。{governanceBoundary(kind)}</p>
+          <h4 id={`governance-title-${connection.id}`} className="mt-1 text-sm font-semibold text-slate-900"><UiText text={"高风险变更安全预览"} /></h4>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600"><UiText text={"所有轮换、停用、启用、删除和重新信任/测试都必须先生成预览，再完成独立确认。不会自动撤销项目授权。"} />{t(governanceBoundary(kind))}</p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">scope personal · owner pays</span>
       </div>
-      {connection.recoveryState === "rebuildRequired" ? <p role="status" className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">账号恢复后，该无凭据连接仅保留历史配置，不能补凭据或复活。请使用新名称新建连接并重新验证/发现、重新配置项目委托及必要审核；旧项目授权不会自动恢复。</p> : null}
-      {connection.recoveryState === "credentialRebindRequired" ? <p role="status" className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">账号恢复后，该连接仅可填写新凭据并执行轮换重绑；其他治理动作、测试、发现和重信任都不能作为恢复通道。</p> : null}
+      {connection.recoveryState === "rebuildRequired" ? <p role="status" className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"><UiText text={"账号恢复后，该无凭据连接仅保留历史配置，不能补凭据或复活。请使用新名称新建连接并重新验证/发现、重新配置项目委托及必要审核；旧项目授权不会自动恢复。"} /></p> : null}
+      {connection.recoveryState === "credentialRebindRequired" ? <p role="status" className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"><UiText text={"账号恢复后，该连接仅可填写新凭据并执行轮换重绑；其他治理动作、测试、发现和重信任都不能作为恢复通道。"} /></p> : null}
       {actions.length > 0 ? <form onSubmit={createPreview} className="mt-4 grid gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-semibold text-slate-700">变更类型<select className={connectionFieldClass} value={action} onChange={(event) => chooseAction(event.target.value as PersonalGovernanceAction)} disabled={pending !== null || preview !== null}>{actions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className="mt-1 block text-xs font-normal leading-5 text-slate-500">{actionDescription(kind, action)}</span></label>
-          <label className="block text-xs font-semibold text-slate-700">变更原因<input className={connectionFieldClass} value={reason} onChange={(event) => { setReason(event.target.value); setPreview(null); }} maxLength={500} placeholder="例如：凭据轮换或项目范围调整" required disabled={pending !== null || preview !== null} /></label>
+          <label className="block text-xs font-semibold text-slate-700"><UiText text={"变更类型"} /><select className={connectionFieldClass} value={action} onChange={(event) => chooseAction(event.target.value as PersonalGovernanceAction)} disabled={pending !== null || preview !== null}>{actions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select><span className="mt-1 block text-xs font-normal leading-5 text-slate-500">{actionDescription(kind, action, t)}</span></label>
+          <label className="block text-xs font-semibold text-slate-700"><UiText text={"变更原因"} /><input className={connectionFieldClass} value={reason} onChange={(event) => { setReason(event.target.value); setPreview(null); }} maxLength={500} placeholder={t("例如：凭据轮换或项目范围调整")} required disabled={pending !== null || preview !== null} /></label>
         </div>
-        {action === "rotateCredential" ? <label className="block text-xs font-semibold text-slate-700">新凭据（仅当前浏览器暂存）<input type="password" autoComplete="new-password" className={connectionFieldClass} value={secret} onChange={(event) => { setSecret(event.target.value); setPreview(null); }} minLength={8} maxLength={32768} placeholder="不会在预览或响应中回显" required disabled={pending !== null || preview !== null} /></label> : null}
-        {action === "delete" ? <label className="block text-xs font-semibold text-slate-700">删除预览确认名称<input className={connectionFieldClass} value={confirmationName} onChange={(event) => { setConfirmationName(event.target.value); setPreview(null); }} maxLength={80} placeholder={connection.name} required disabled={pending !== null || preview !== null} /></label> : null}
-        {kind === "git" && action === "retest" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-semibold text-slate-700">只读仓库路径<input className={connectionFieldClass} value={repositoryPath} onChange={(event) => { setRepositoryPath(event.target.value); setPreview(null); setTestedProbe(null); }} maxLength={768} placeholder="owner/repository" disabled={pending !== null || preview !== null} /></label><label className="block text-xs font-semibold text-slate-700">分支 / ref<input className={connectionFieldClass} value={trackedRef} onChange={(event) => { setTrackedRef(event.target.value); setPreview(null); setTestedProbe(null); }} maxLength={255} placeholder="main" disabled={pending !== null || preview !== null} /></label></div> : null}
-        {preview === null ? <button type="submit" disabled={pending !== null} className={`${connectionButtonClass} min-h-11 w-fit bg-indigo-600 px-4 text-white hover:bg-indigo-500`}>{pending === "preview" ? "生成预览中…" : `生成${actionLabel}预览`}</button> : <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setPreview(null); setMessage(null); }} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-white`}>重新生成预览</button>{preview.canExecute ? <button type="button" onClick={() => void executePreview()} disabled={pending !== null} className={`${connectionButtonClass} bg-slate-950 px-4 text-white hover:bg-indigo-700`}>{pending === "confirm" ? "等待确认…" : pending === "execute" ? "执行中…" : `继续${actionLabel}`}</button> : null}</div>}
+        {action === "rotateCredential" ? <label className="block text-xs font-semibold text-slate-700"><UiText text={"新凭据（仅当前浏览器暂存）"} /><input type="password" autoComplete="new-password" className={connectionFieldClass} value={secret} onChange={(event) => { setSecret(event.target.value); setPreview(null); }} minLength={8} maxLength={32768} placeholder={t("不会在预览或响应中回显")} required disabled={pending !== null || preview !== null} /></label> : null}
+        {action === "delete" ? <label className="block text-xs font-semibold text-slate-700"><UiText text={"删除预览确认名称"} /><input className={connectionFieldClass} value={confirmationName} onChange={(event) => { setConfirmationName(event.target.value); setPreview(null); }} maxLength={80} placeholder={connection.name} required disabled={pending !== null || preview !== null} /></label> : null}
+        {kind === "git" && action === "retest" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-semibold text-slate-700"><UiText text={"只读仓库路径"} /><input className={connectionFieldClass} value={repositoryPath} onChange={(event) => { setRepositoryPath(event.target.value); setPreview(null); setTestedProbe(null); }} maxLength={768} placeholder="owner/repository" disabled={pending !== null || preview !== null} /></label><label className="block text-xs font-semibold text-slate-700"><UiText text={"分支 / ref"} /><input className={connectionFieldClass} value={trackedRef} onChange={(event) => { setTrackedRef(event.target.value); setPreview(null); setTestedProbe(null); }} maxLength={255} placeholder="main" disabled={pending !== null || preview !== null} /></label></div> : null}
+        {preview === null ? <button type="submit" disabled={pending !== null} className={`${connectionButtonClass} min-h-11 w-fit bg-indigo-600 px-4 text-white hover:bg-indigo-500`}>{pending === "preview" ? t("生成预览中…") : `${t("生成")}${actionLabel}${t("预览")}`}</button> : <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setPreview(null); setMessage(null); }} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-white`}><UiText text={"重新生成预览"} /></button>{preview.canExecute ? <button type="button" onClick={() => void executePreview()} disabled={pending !== null} className={`${connectionButtonClass} bg-slate-950 px-4 text-white hover:bg-indigo-700`}>{pending === "confirm" ? t("等待确认…") : pending === "execute" ? t("执行中…") : `${t("继续")}${actionLabel}`}</button> : null}</div>}
       </form> : null}
-      {preview !== null ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4" aria-live="polite"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Preview issued</p><p className="mt-1 text-sm font-semibold text-slate-900">{actionLabel} · 配置版本 {preview.connection.configurationVersion}</p><p className="mt-1 text-xs text-slate-500">作用域：{preview.scope} · 费用承担者：{preview.owner.feePayer === "connection_owner" ? "连接所有者" : "未定义"}</p><p className="mt-1 text-xs text-slate-500">签发于 {formatConnectionDate(preview.issuedAt)}，有效至 {formatConnectionDate(preview.expiresAt)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${preview.canExecute ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{preview.canExecute ? "可在确认后执行" : "阻断，不能执行"}</span></div><p className="mt-3 text-xs leading-5 text-slate-600">费用承担者为连接所有者。第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p>{totals !== null ? <ImpactDetails kind={kind} impact={preview.impact} /> : null}{preview.blockers.length > 0 ? <div className="mt-4 rounded-2xl bg-rose-50 p-4"><p className="text-xs font-semibold text-rose-800">安全阻断</p><ul className="mt-2 space-y-1 text-xs leading-5 text-rose-700">{preview.blockers.map((blocker) => <li key={blocker}>· {blockerText(blocker)}</li>)}</ul></div> : null}{(action === "retest" || action === "rediscover" || action === "retrust") && testedProbe === null ? <p className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{unavailableActionNote(kind)}</p> : null}</div> : null}
-      {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-3 text-xs leading-5 ${message.tone === "error" ? "text-rose-700" : message.tone === "success" ? "text-emerald-700" : "text-slate-600"}`}>{message.text}</p> : null}
+      {preview !== null ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4" aria-live="polite"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Preview issued</p><p className="mt-1 text-sm font-semibold text-slate-900">{actionLabel} <UiText text={" · 配置版本 "} />{preview.connection.configurationVersion}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"作用域："} />{t(preview.scope)} <UiText text={" · 费用承担者："} />{t(preview.owner.feePayer === "connection_owner" ? "连接所有者" : "未定义")}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"签发于 "} />{formatConnectionDate(preview.issuedAt, language)}<UiText text={"，有效至 "} />{formatConnectionDate(preview.expiresAt, language)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${preview.canExecute ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{t(preview.canExecute ? "可在确认后执行" : "阻断，不能执行")}</span></div><p className="mt-3 text-xs leading-5 text-slate-600"><UiText text={"费用承担者为连接所有者。第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p>{totals !== null ? <ImpactDetails kind={kind} impact={preview.impact} /> : null}{preview.blockers.length > 0 ? <div className="mt-4 rounded-2xl bg-rose-50 p-4"><p className="text-xs font-semibold text-rose-800"><UiText text={"安全阻断"} /></p><ul className="mt-2 space-y-1 text-xs leading-5 text-rose-700">{preview.blockers.map((blocker) => <li key={blocker}>· {blockerText(blocker, t)}</li>)}</ul></div> : null}{(action === "retest" || action === "rediscover" || action === "retrust") && testedProbe === null ? <p className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{unavailableActionNote(kind, t)}</p> : null}</div> : null}
+      {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-3 text-xs leading-5 ${message.tone === "error" ? "text-rose-700" : message.tone === "success" ? "text-emerald-700" : "text-slate-600"}`}>{t(message.text)}</p> : null}
     </section>
   );
 }

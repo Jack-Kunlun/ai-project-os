@@ -1,5 +1,6 @@
+import {createElement} from "react";
 import assert from "node:assert/strict";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup } from "./render-with-appearance";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { PersonalKnowledgeEditor, validateKnowledgeDraft } from "../src/app/personal/knowledge/personal-knowledge-editor";
@@ -13,7 +14,7 @@ test("个人知识入口保留服务端会话保护并使用全局用户壳", as
 
   assert.match(page, /requirePageSession\(\)/u);
   assert.match(page, /isSystemAdmin=\{user\.role === "admin"\}/u);
-  assert.match(header, /return isUserShellPath\(pathname\) \? <UserShell username=\{props\.username\} \/> : <LegacyAppHeader/u);
+  assert.match(header, /<UserShell username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
   assert.match(personalNav, /export function PersonalWorkspaceNav/u);
   assert.match(personalNav, /return null/u);
 });
@@ -44,7 +45,7 @@ test("个人知识页面提供纯文本生命周期入口并保持请求无缓�
   assert.match(source, /revisionContent\?\.documentId === document\.id/u);
   assert.match(source, /加载更多版本/u);
   assert.match(source, /导出 Markdown/u);
-  assert.match(source, /<h1>我的知识<\/h1>/u);
+  assert.match(source, /<h1><UiText text="我的知识" \/><\/h1>/u);
   assert.match(source, /PersonalWorkspaceNav/u);
   assert.match(source, /active="knowledge"/u);
   assert.match(source, /useSearchParams/u);
@@ -118,7 +119,10 @@ test("新建使用弹窗、编辑使用抽屉且不让旧列表响应覆盖草�
 test("知识列表提供三个栏目，新增用弹窗，编辑和导入用抽屉，检索按需打开", async () => {
   const source = await readFile("src/app/personal/knowledge/knowledge-client.tsx", "utf8");
 
-  assert.match(source, /aria-label="知识栏目"[\s\S]*全部知识[\s\S]*通用记忆[\s\S]*知识图谱/u);
+  assert.match(source, /<UiText text="全部知识" \/>/u);
+  assert.match(source, /<UiText text="通用记忆" \/>/u);
+  assert.match(source, /href="\/personal\/knowledge\/graph"/u);
+  assert.match(source, /aria-label=\{t\(knowledgeFilter === "memory" \? "通用记忆列表" : "全部知识列表"\)\}/u);
   assert.match(source, /params\.set\("isDefaultMemory", "true"\)/u);
   assert.match(source, /openSearchTool\("semantic"\)/u);
   assert.match(source, /\/personal\/knowledge\/graph/u);
@@ -137,7 +141,7 @@ test("2000 字个人通用记忆限制在小屏表单中可见且阻止超限保
   const overLimitDraft = { title: "测试", content: "甲".repeat(2_001), isDefaultMemory: true };
   const unmarkedDraft = { ...overLimitDraft, isDefaultMemory: false };
   const shortenedDraft = { ...overLimitDraft, content: "甲".repeat(2_000) };
-  const render = (draft: typeof overLimitDraft, error: string | null = null) => renderToStaticMarkup(PersonalKnowledgeEditor({
+  const render = (draft: typeof overLimitDraft, error: string | null = null) => renderToStaticMarkup(createElement(PersonalKnowledgeEditor,{
     mode: "create",
     draft,
     saving: false,

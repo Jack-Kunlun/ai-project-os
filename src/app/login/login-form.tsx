@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AuthPage } from "@/components/auth-page";
+import { useTranslate } from "@/components/appearance-provider";
 import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
 import styles from "@/components/auth-page.module.css";
 
@@ -33,6 +33,7 @@ export function LoginForm({
   emailAuthEnabled = false,
 }: LoginFormProps) {
   const router = useRouter();
+  const t = useTranslate();
   const [method, setMethod] = useState<"password" | "sms">("password");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -117,46 +118,45 @@ export function LoginForm({
   }
 
   return (
-    <AuthPage sectionLabel="登录工作区">
           <form onSubmit={submit} className={styles.form}>
             <div className={styles.formHeading}>
-              <p className={styles.formEyebrow}>欢迎回来</p>
-              <h2>登录 AI Project OS</h2>
-              <p>使用你的账号进入工作区。</p>
+              <p className={styles.formEyebrow}>{t("欢迎回来")}</p>
+              <h2>{t("登录 AI Project OS")}</h2>
+              <p>{t("使用你的账号进入工作区。")}</p>
             </div>
 
             {phoneAuthStatus !== "disabled" ? (
               <div className={styles.methodSection}>
-                <div role="tablist" aria-label="选择登录方式" className={styles.methodTabs}>
-                  <button type="button" role="tab" aria-selected={method === "password"} onClick={() => changeLoginMethod("password")} className={`${styles.methodTab} ${method === "password" ? styles.methodTabSelected : ""}`}>用户名密码</button>
-                  <button type="button" role="tab" aria-selected={method === "sms"} disabled={!smsLoginAvailable} onClick={() => changeLoginMethod("sms")} className={`${styles.methodTab} ${method === "sms" ? styles.methodTabSelected : ""}`}>手机号验证码</button>
+                <div role="tablist" aria-label={t("选择登录方式")} className={styles.methodTabs}>
+                  <button type="button" role="tab" aria-selected={method === "password"} onClick={() => changeLoginMethod("password")} className={`${styles.methodTab} ${method === "password" ? styles.methodTabSelected : ""}`}>{t("用户名密码")}</button>
+                  <button type="button" role="tab" aria-selected={method === "sms"} disabled={!smsLoginAvailable} onClick={() => changeLoginMethod("sms")} className={`${styles.methodTab} ${method === "sms" ? styles.methodTabSelected : ""}`}>{t("手机号验证码")}</button>
                 </div>
                 {smsLoginAvailable ? (
                   <p className={styles.methodHint}>
-                    {phoneAutoRegistrationEnabled ? "验证码验证后登录；手机号首次使用时会自动创建账号和个人工作区。" : "验证码用于登录已有账号；如需新账号，请先完成注册。"}
+                    {t(phoneAutoRegistrationEnabled ? "验证码验证后登录；手机号首次使用时会自动创建账号和个人工作区。" : "验证码用于登录已有账号；如需新账号，请先完成注册。")}
                   </p>
-                ) : <p role="status" className={`${styles.methodHint} ${styles.statusWarning}`}>短信服务暂不可用，请稍后重试或联系管理员。</p>}
+                ) : <p role="status" className={`${styles.methodHint} ${styles.statusWarning}`}>{t("短信服务暂不可用，请稍后重试或联系管理员。")}</p>}
               </div>
             ) : null}
 
             {method === "password" ? (
               <>
-                <label className={styles.fieldLabel} htmlFor="login-username">{emailAuthEnabled ? "用户名、手机号或已验证邮箱" : "用户名或手机号"}</label>
+                <label className={styles.fieldLabel} htmlFor="login-username">{t(emailAuthEnabled ? "用户名、手机号或已验证邮箱" : "用户名或手机号")}</label>
                 <div className={styles.inputShell}>
                   <span className={styles.inputIcon}><UserIcon /></span>
-                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={emailAuthEnabled ? 320 : 64} required placeholder={emailAuthEnabled ? "输入用户名、手机号或已验证邮箱" : "输入用户名或手机号"} className={styles.textInput} />
+                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={emailAuthEnabled ? 320 : 64} required placeholder={t(emailAuthEnabled ? "输入用户名、手机号或已验证邮箱" : "输入用户名或手机号")} className={styles.textInput} />
                 </div>
 
-                <label className={`${styles.fieldLabel} ${styles.nextFieldLabel}`} htmlFor="login-password">密码</label>
+                <label className={`${styles.fieldLabel} ${styles.nextFieldLabel}`} htmlFor="login-password">{t("密码")}</label>
                 <div className={styles.inputShell}>
                   <span className={styles.inputIcon}><LockIcon /></span>
-                  <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className={styles.textInput} />
+                  <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder={t("输入密码")} className={styles.textInput} />
                 </div>
               </>
             ) : (
               <div className={styles.smsFields}>
                 <div className={styles.smsPhoneField}>
-                  <label className={styles.fieldLabel} htmlFor="login-phone">手机号</label>
+                  <label className={styles.fieldLabel} htmlFor="login-phone">{t("手机号")}</label>
                   <div className={styles.phoneShell}>
                     <span aria-hidden="true" className={styles.phonePrefix}>+86</span>
                     <input
@@ -174,7 +174,7 @@ export function LoginForm({
                       maxLength={11}
                       required
                       pattern="1[3-9][0-9]{9}"
-                      placeholder="输入 11 位手机号"
+                      placeholder={t("输入 11 位手机号")}
                       className={styles.phoneInput}
                     />
                   </div>
@@ -197,35 +197,34 @@ export function LoginForm({
 
             {method === "password" ? (
               <div className={styles.recoverLink}>
-                <Link href="/recover">忘记账号或密码？</Link>
+                <Link href="/recover">{t("忘记账号或密码？")}</Link>
               </div>
             ) : null}
 
-            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}>{notice}</p> : null}
-            {smsSuccessNotice ? <p role="status" className={`${styles.notice} ${styles.noticeSuccess}`}>{smsSuccessNotice}</p> : null}
-            {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{error}</p> : null}
+            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}>{t(notice)}</p> : null}
+            {smsSuccessNotice ? <p role="status" className={`${styles.notice} ${styles.noticeSuccess}`}>{t(smsSuccessNotice)}</p> : null}
+            {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{t(error)}</p> : null}
 
-            <button type="submit" disabled={pending} className={styles.submitButton}>{pending ? "登录中…" : "登 录"}</button>
+            <button type="submit" disabled={pending} className={styles.submitButton}>{pending ? t("登录中…") : t("登 录")}</button>
 
-            <p className={styles.registerPrompt}>还没有账号？ <Link href="/register">创建账号</Link></p>
+            <p className={styles.registerPrompt}>{t("还没有账号？")} <Link href="/register">{t("创建账号")}</Link></p>
 
-            <div className={styles.alternativeHeading}><span />其他登录方式<span /></div>
+            <div className={styles.alternativeHeading}><span />{t("其他登录方式")}<span /></div>
 
             {githubLoginAvailable ? (
               <div className={styles.providerBlock}>
-                <a href={githubHref} className={styles.providerLink}><GitHubIcon />使用 GitHub 登录</a>
-                <p className={styles.providerHint}>首次使用 GitHub 登录会自动创建普通用户账号。</p>
+                <a href={githubHref} className={styles.providerLink}><GitHubIcon />{t("使用 GitHub 登录")}</a>
+                <p className={styles.providerHint}>{t("首次使用 GitHub 登录会自动创建普通用户账号。")}</p>
               </div>
             ) : (
               <div className={styles.providerBlock}>
-                <button type="button" disabled className={`${styles.providerLink} ${styles.providerUnavailable}`}><GitHubIcon />使用 GitHub 登录</button>
-                <p className={styles.providerHint}>{githubUnavailableMessage}</p>
+                <button type="button" disabled className={`${styles.providerLink} ${styles.providerUnavailable}`}><GitHubIcon />{t("使用 GitHub 登录")}</button>
+                <p className={styles.providerHint}>{t(githubUnavailableMessage)}</p>
               </div>
             )}
 
-            {oidcProviders.length > 0 ? <div className={styles.oidcProviders}>{oidcProviders.map((provider) => <a key={provider.id} href={`/api/auth/oidc/start/${provider.id}?returnTo=${encodeURIComponent(returnTo)}`} className={styles.oidcLink}>使用 {provider.name} 登录</a>)}</div> : null}
+            {oidcProviders.length > 0 ? <div className={styles.oidcProviders}>{oidcProviders.map((provider) => <a key={provider.id} href={`/api/auth/oidc/start/${provider.id}?returnTo=${encodeURIComponent(returnTo)}`} className={styles.oidcLink}>{t("使用 {provider} 登录").replace("{provider}", provider.name)}</a>)}</div> : null}
           </form>
-    </AuthPage>
   );
 }
 

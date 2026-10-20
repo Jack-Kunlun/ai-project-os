@@ -29,7 +29,7 @@ test("ADM-014 persistent configuration cards expose honest scope evidence", asyn
   assert.match(team, /尚未取得验证证据/u);
 
   assert.match(automations, /ScopeEvidenceCard/u);
-  assert.match(automations, /仅当前项目 · \$\{kindLabels\[rule\.kind\]\}/u);
+  assert.match(automations, /scope: `\$\{translateUi\("仅当前项目"\)\} · \$\{translateUi\(kindLabels\[rule\.kind\]\)\}`/u);
   assert.match(automations, /AI 工作台当次确认后决定/u);
   assert.match(automations, /不产生模型费用/u);
   assert.match(automations, /status === "succeeded"/u);
@@ -37,17 +37,17 @@ test("ADM-014 persistent configuration cards expose honest scope evidence", asyn
 
   assert.match(settings, /ScopeEvidenceCard/u);
   assert.match(settings, /项目影响需经活动默认路由影响预览核实/u);
-  assert.match(settings, /当前有 \$\{provider\._count\.platformDefaultAiRoutes\} 条活动默认路由引用/u);
+  assert.match(settings, /当前有[\s\S]*?provider\._count\.platformDefaultAiRoutes[\s\S]*?条活动默认路由引用/u);
   assert.match(settings, /尚无活动默认路由引用；暂无项目影响证据/u);
   assert.doesNotMatch(settings, /affectedProjects:\s*provider\._count\.platformDefaultAiRoutes > 0 \? `被/u);
-  assert.match(probeBudget, /function budgetEvidence\(budget: ProbeBudgetSummary \| null, loading: boolean\)/u);
+  assert.match(probeBudget, /function budgetEvidence\(budget: ProbeBudgetSummary \| null, loading: boolean, language: "zh-CN" \| "en", t:/u);
   assert.match(probeBudget, /尚未启用预算；暂无探测预算状态证据/u);
   assert.match(probeBudget, /ScopeEvidenceCard title="平台探测预算边界"/u);
   assert.match(probeBudget, /平台 · 供应商连通性探测/u);
   assert.match(probeBudget, /平台管理员/u);
   assert.match(probeBudget, /平台探测预算/u);
   assert.match(probeBudget, /项目不适用 · 仅平台供应商连通性探测/u);
-  assert.match(probeBudget, /budgetEvidence\(budget, loading\)/u);
+  assert.match(probeBudget, /budgetEvidence\(budget, loading, language, t\)/u);
 
   for (const source of [platform, team, automations, settings, probeBudget]) {
     const pixelValues = [...source.matchAll(/(?<![\d.])(\d+)px/gu)].map((match) => Number(match[1]));

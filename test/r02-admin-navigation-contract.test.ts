@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import test from "node:test";
+import { cloneElement, createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AppearanceProvider } from "../src/components/appearance-provider";
+import { AdminPageHeader } from "../src/components/admin-page-header";
+import { adminNavigationGroups, adminNavigationItems, getAdminNavigationState } from "../src/lib/admin-navigation";
 
 const read = (file: string) => readFile(file, "utf8");
 
@@ -39,32 +44,30 @@ test("system-admin identity is passed from protected server pages to shared head
   assert.doesNotMatch(teamPage, /isSystemAdmin\s*:\s*true/u);
 });
 
-test("admin navigation is five direct destinations with a separate section bar and accessible mobile drawer", async () => {
-  const [shell, workspaceStyles] = await Promise.all([
-    read("src/components/admin-shell.tsx"),
-    read("src/app/admin/admin-workspace.module.css"),
+test("admin navigation exposes the prototype destinations once and keeps aliases on their parent", async () => {
+  const [shell, workspaceStyles, dialog] = await Promise.all([
+    read("src/components/admin-shell.tsx"), read("src/app/admin/admin-workspace.module.css"), read("src/components/workspace-dialog.tsx"),
   ]);
-  const primarySource = shell.split("const primaryItems", 2)[1]?.split("];", 1)[0] ?? "";
-  const itemKeys = [...primarySource.matchAll(/key:\s*"([A-Za-z]+)"/gu)].map((match) => match[1]);
-  assert.equal(itemKeys.length, 5);
-  for (const [label, href] of [["平台总览", "/admin"], ["用户与权益", "/admin/users"], ["配置中心", "/admin/models"], ["安全中心", "/admin/connectors/mcp"], ["运维中心", "/admin/operations/failures"]]) {
-    assert.match(primarySource, new RegExp(`label: "${label}", href: "${href.replaceAll("/", "\\/")}"`, "u"));
+  assert.equal(adminNavigationGroups.length, 5);
+  assert.equal(adminNavigationItems.length, 13);
+  assert.equal(new Set(adminNavigationItems.map(item => item.href)).size, 13);
+  for (const item of adminNavigationItems) {
+    assert.deepEqual(getAdminNavigationState(item.href).currentLinks, [item.href]);
+    assert.ok(item.label.length > 0);
   }
-  assert.match(shell, /<nav aria-label="管理工作台导航" className="admin-primary-navigation">/u);
-  assert.match(shell, /<nav aria-label="管理栏目" className="admin-module-navigation">/u);
-  assert.doesNotMatch(shell, /aria-expanded=\{isExpanded\}|admin-nav-/u);
+  for (const [route, href] of [["/admin/users/owned-user", "/admin/users"], ["/admin/models/routes", "/admin/models"], ["/admin/models/governance", "/admin/models"], ["/admin/users/memberships", "/admin/users/memberships"]]) {
+    assert.deepEqual(getAdminNavigationState(route).currentLinks, [href]);
+  }
+  assert.deepEqual(getAdminNavigationState("/admin/connectors/git").currentLinks, []);
+  assert.match(shell, /<nav aria-label=\{t\("管理工作台导航"\)\}/u);
+  assert.doesNotMatch(shell, /admin-module-navigation|moduleGroups/u);
+  assert.match(shell, /<WorkspaceDialog title="管理工作台导航"[\s\S]*?drawer>/u);
+  assert.match(dialog, /onCancel=[\s\S]*?onClose\(\)/u);
+  assert.match(dialog, /document\.activeElement/u);
   assert.match(workspaceStyles, /width: 218px/u);
   assert.match(workspaceStyles, /flex: 0 0 59px/u);
   assert.match(workspaceStyles, /@media \(max-width: 900px\)/u);
-  assert.match(shell, /role="dialog" aria-modal="true"/u);
-  assert.match(shell, /aria-labelledby="admin-mobile-navigation-title" aria-label="管理工作台导航"/u);
-  assert.match(shell, /event\.key === "Escape"/u);
-  assert.match(shell, /previousFocus\?\.focus\(\)/u);
-  assert.match(shell, /document\.activeElement === first/u);
-  assert.match(shell, /document\.activeElement === last/u);
-  assert.match(shell, /aria-current=\{current \? \(pathname === item\.href \? "page" : "location"\) : undefined\}/u);
-  assert.match(shell, /aria-current=\{current \? "page" : undefined\}/u);
-  for (const label of ["用户", "会员", "额度", "模型能力", "短信服务", "探测预算", "MCP 审核", "审计记录", "失败收件箱", "资源与备份"]) assert.match(shell, new RegExp(`label: "${label}"`, "u"));
+  assert.match(workspaceStyles, /var\(--app-bg\)/u);
 });
 
 test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle guards", async () => {
@@ -115,4 +118,15 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(support, /focusable\.last\(\)/u);
   assert.match(support, /AxeBuilder/u);
   assert.doesNotMatch(spec, /seedR02Viewer/u);
+});
+
+test("admin page headings translate UI labels while preserving user-provided display names", () => {
+  const render = (translateTitle: boolean) => {
+    const provider = createElement(AppearanceProvider, null, createElement(AdminPageHeader, { title: "平台总览", translateTitle }));
+    return renderToStaticMarkup(cloneElement(provider, {
+      initialLanguage: "en", initialMessages: { "平台总览": "Platform overview" },
+    }));
+  };
+  assert.match(render(true), />Platform overview<\/h1>/u);
+  assert.match(render(false), />平台总览<\/h1>/u);
 });

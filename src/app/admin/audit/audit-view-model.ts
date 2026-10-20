@@ -117,19 +117,19 @@ export function auditResultLabel(value: string): string {
  * show a stable prefix, and the full value stays available through the element
  * title.
  */
-export function auditFilterChipValue(key: string, value: string): string {
+export function auditFilterChipValue(key: string, value: string, locale = "zh-CN"): string {
   if (key === "source") return auditSourceLabel(value);
   if (key === "result") return auditResultLabel(value);
   if (key === "action") return auditActionLabel(value);
-  if (key === "from" || key === "to") return shortTimestamp(value);
+  if (key === "from" || key === "to") return shortTimestamp(value, locale);
   if (UUID_PATTERN.test(value) && value.length > 12) return `${value.slice(0, 8)}…`;
   return value.length > 24 ? `${value.slice(0, 24)}…` : value;
 }
 
-function shortTimestamp(value: string): string {
+function shortTimestamp(value: string, locale: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" }).format(parsed);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(parsed);
 }
 
 export function sourceActions(value: string): readonly string[] {
@@ -217,12 +217,12 @@ export type AuditFilterChip = Readonly<{
   display: string;
 }>;
 
-export function auditFilterChips(filters: FilterValues): readonly AuditFilterChip[] {
+export function auditFilterChips(filters: FilterValues, locale = "zh-CN"): readonly AuditFilterChip[] {
   return Object.entries(filters).map(([key, value]) => ({
     key,
     label: FILTER_LABELS[key] ?? key,
     value,
-    display: auditFilterChipValue(key, value),
+    display: auditFilterChipValue(key, value, locale),
   }));
 }
 

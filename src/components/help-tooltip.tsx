@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAppearance } from "./appearance-provider";
 
 type TooltipPosition = Readonly<{ left: number; top: number; maxHeight: number; above: boolean }>;
 
 /** Short, on-demand field guidance that also works with keyboard and touch. */
 export function HelpTooltip({ label, children }: Readonly<{ label: string; children: React.ReactNode }>): React.JSX.Element {
+  const { language } = useAppearance();
   const [position, setPosition] = useState<TooltipPosition | null>(null);
   const open = position !== null;
   const id = useId();
@@ -14,22 +16,26 @@ export function HelpTooltip({ label, children }: Readonly<{ label: string; child
   const tooltip = useRef<HTMLSpanElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function cancelHide() {
+  const cancelHide = useCallback(() => {
     if (hideTimer.current !== null) clearTimeout(hideTimer.current);
     hideTimer.current = null;
-  }
+  }, []);
 
   function scheduleHide() {
     cancelHide();
     hideTimer.current = setTimeout(() => setPosition(null), 150);
   }
 
-  function show() {
+  const show = useCallback(() => {
     cancelHide();
     const bounds = root.current?.getBoundingClientRect();
     if (!bounds) return;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
+    if (bounds.bottom <= 0 || bounds.top >= viewportHeight || bounds.right <= 0 || bounds.left >= viewportWidth) {
+      setPosition(null);
+      return;
+    }
     const width = Math.min(288, viewportWidth - 32);
     const spaceAbove = bounds.top - 24;
     const spaceBelow = viewportHeight - bounds.bottom - 24;
@@ -40,7 +46,7 @@ export function HelpTooltip({ label, children }: Readonly<{ label: string; child
       maxHeight: Math.max(80, above ? spaceAbove : spaceBelow),
       above,
     });
-  }
+  }, [cancelHide]);
 
   useEffect(() => {
     if (!open) return;
@@ -51,7 +57,12 @@ export function HelpTooltip({ label, children }: Readonly<{ label: string; child
       if (event.target instanceof Node && !root.current?.contains(event.target) && !tooltip.current?.contains(event.target)) setPosition(null);
     }
     function closeOnScroll(event: Event) {
-      if (event.target instanceof Node && !tooltip.current?.contains(event.target)) setPosition(null);
+      if (event.target instanceof Node && tooltip.current?.contains(event.target)) return;
+      const trigger = root.current;
+      // A focus/scroll-into-view event may arrive just after pointer enter.
+      // Keep an actively used hint anchored instead of making it disappear.
+      if (trigger?.matches(":hover") || trigger?.contains(document.activeElement)) show();
+      else setPosition(null);
     }
     function closeOnResize() { setPosition(null); }
     document.addEventListener("keydown", closeOnEscape);
@@ -64,7 +75,7 @@ export function HelpTooltip({ label, children }: Readonly<{ label: string; child
       document.removeEventListener("scroll", closeOnScroll, true);
       window.removeEventListener("resize", closeOnResize);
     };
-  }, [open]);
+  }, [open, show]);
 
   useEffect(() => () => {
     if (hideTimer.current !== null) clearTimeout(hideTimer.current);
@@ -81,7 +92,7 @@ export function HelpTooltip({ label, children }: Readonly<{ label: string; child
     >
       <button
         type="button"
-        aria-label={`${label}填写示例`}
+        aria-label={language === "en" ? `${label} example` : `${label}填写示例`}
         aria-expanded={open}
         aria-controls={id}
         aria-describedby={open ? id : undefined}

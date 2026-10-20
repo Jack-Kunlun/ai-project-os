@@ -147,7 +147,12 @@ async function startImageContainer(
     "--add-host", "host.docker.internal:host-gateway",
     "--mount", `type=bind,src=${temporaryDirectory},dst=/ci-secrets`,
   ];
-  if (hostPort !== undefined) args.push("--publish", `127.0.0.1:${hostPort}:3000`);
+  if (hostPort !== undefined) {
+    // The app runs as the host UID, which may differ from the image's node UID.
+    // Keep image/data caches private and disposable without changing the image.
+    args.push("--tmpfs", `/app/.next/cache:rw,noexec,nosuid,size=128m,mode=0700,uid=${uid},gid=${gid}`);
+    args.push("--publish", `127.0.0.1:${hostPort}:3000`);
+  }
   for (const [key, value] of Object.entries(environment)) args.push("--env", `${key}=${value}`);
   args.push(imageId);
   return capture("docker", args);

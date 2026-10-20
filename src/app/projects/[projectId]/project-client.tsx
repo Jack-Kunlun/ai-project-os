@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -228,6 +229,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
 }
 
 function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projectId: string; username: string; isSystemAdmin: boolean }) {
+  const translateUi = useTranslate();
   const router = useRouter();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("materials", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -729,27 +731,27 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
   }
 
   if (!project) {
-    return <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}><div className="h-40 animate-pulse rounded-3xl bg-slate-100" aria-label="正在加载项目" /></ProjectShell>;
+    return <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}><div className="h-40 animate-pulse rounded-3xl bg-slate-100" aria-label={translateUi("正在加载项目")} /></ProjectShell>;
   }
 
   return (
     <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}>
-      {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
+      {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700"><UiText text={"← 返回来源页面"} /></Link> : null}
       <div className={styles.pageHeader}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Project materials</p>
-            <h1 aria-label={`${project.name} · 项目资料`} className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-slate-950">项目资料</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">查看有来源的资料、整理结果和后台识别任务。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400"><UiText text={"Project materials"} /></p>
+            <h1 aria-label={`${project.name} · 项目资料`} className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-slate-950"><UiText text={"项目资料"} /></h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600"><UiText text={"查看有来源的资料、整理结果和后台识别任务。"} /></p>
           </div>
-          <div className="flex flex-wrap gap-2" aria-label="资料主要操作">
-            <Link href={buildProjectQuestionHref(projectId)} className={styles.secondaryAction}>智能问答</Link>
-            <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} disabled={Boolean(project.archivedAt)} className={styles.primaryAction}>添加资料</button>
+          <div className="flex flex-wrap gap-2" aria-label={translateUi("资料主要操作")}>
+            <Link href={buildProjectQuestionHref(projectId)} className={styles.secondaryAction}><UiText text={"智能问答"} /></Link>
+            <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} disabled={Boolean(project.archivedAt)} className={styles.primaryAction}><UiText text={"添加资料"} /></button>
           </div>
         </div>
       </div>
 
-      <nav aria-label="项目资料栏目" className={styles.tabs}>
+      <nav aria-label={translateUi("项目资料栏目")} className={styles.tabs}>
         {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`${styles.tab} ${materialsView === tab.view ? styles.tabActive : ""}`}>{tab.label}{tab.view === "review" && itemCounts.candidate > 0 ? <span className={styles.countBadge}>{itemCounts.candidate}</span> : null}</Link>)}
       </nav>
 
@@ -758,43 +760,43 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       {materialsView === "materials" ? <section id="source-library" aria-labelledby="sources-heading" className={styles.sourceSection}>
         <div className={styles.sectionHeading}>
           <div>
-            <h2 id="sources-heading" tabIndex={-1} className="text-lg font-semibold text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">资料来源</h2>
-            <p className="mt-1 text-xs leading-5 text-slate-500">保留原文和来源，可查看版本并追溯整理结果。</p>
+            <h2 id="sources-heading" tabIndex={-1} className="text-lg font-semibold text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100"><UiText text={"资料来源"} /></h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"保留原文和来源，可查看版本并追溯整理结果。"} /></p>
           </div>
-          <span className={styles.totalCount}>{isSourcesLoading ? "读取中…" : sourceError ? "读取失败" : `${sourcePagination.total} 条资料`}</span>
+          <span className={styles.totalCount}>{isSourcesLoading ? <UiText text={"读取中…"} /> : sourceError ? <UiText text={"读取失败"} /> : `${sourcePagination.total} 条资料`}</span>
         </div>
 
-        <p className={styles.safetyNote} role="note"><strong>安全提示：</strong>资料不会自动成为已确认事实；请勿提交密码、Token 或带凭据的链接。</p>
+        <p className={styles.safetyNote} role="note"><strong><UiText text={"安全提示："} /></strong><UiText text={"资料不会自动成为已确认事实；请勿提交密码、Token 或带凭据的链接。"} /></p>
 
         {sourceError ? <div className={styles.errorNotice} role="alert">{sourceError}</div> : null}
         {sourceSuccess ? <div className={styles.successNotice} role="status" aria-live="polite">{sourceSuccess}</div> : null}
 
         <div className={styles.sourceLayout}>
-          <nav aria-label="按资料类型筛选" className={styles.categoryNav}>
+          <nav aria-label={translateUi("按资料类型筛选")} className={styles.categoryNav}>
             {MATERIAL_SOURCE_CATEGORIES.map((category) => <button key={category.value} type="button" aria-pressed={sourceKind === category.value} onClick={() => replaceMaterialsQuery({ kind: category.value, page: 1 })} className={`${styles.categoryButton} ${sourceKind === category.value ? styles.categoryButtonActive : ""}`}>{category.label}</button>)}
           </nav>
           <div className={styles.sourceContent}>
             <div className={styles.sourceTools}>
-              <label className="min-w-0 flex-1"><span className="sr-only">搜索原始资料</span><input value={sourceSearch} onChange={(event) => { replaceMaterialsQuery({ search: event.target.value, page: 1 }); }} placeholder="搜索资料内容、来源链接或哈希" className={styles.searchInput} /></label>
-              <span className="shrink-0 text-xs text-slate-400">按最近接入排序</span>
+              <label className="min-w-0 flex-1"><span className="sr-only"><UiText text={"搜索原始资料"} /></span><input value={sourceSearch} onChange={(event) => { replaceMaterialsQuery({ search: event.target.value, page: 1 }); }} placeholder={translateUi("搜索资料内容、来源链接或哈希")} className={styles.searchInput} /></label>
+              <span className="shrink-0 text-xs text-slate-400"><UiText text={"按最近接入排序"} /></span>
             </div>
 
-            {isSourcesLoading ? <div role="status" className={styles.loadingRows} aria-label="正在加载项目资料">{[1, 2, 3].map((item) => <div key={item} className={styles.loadingRow} aria-hidden="true" />)}</div>
+            {isSourcesLoading ? <div role="status" className={styles.loadingRows} aria-label={translateUi("正在加载项目资料")}>{[1, 2, 3].map((item) => <div key={item} className={styles.loadingRow} aria-hidden="true" />)}</div>
               : sourceError ? null
                 : sources.length === 0 ? <div className={styles.emptyState}>
-                  <p className="text-sm font-medium text-slate-700">{sourceSearch.trim() || sourceKind !== "all" ? "没有匹配的资料" : "还没有项目资料"}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">{sourceSearch.trim() || sourceKind !== "all" ? "调整搜索词或资料类型后重试。" : "可以添加文本、图片、文档、网页或代码仓库资料。"}</p>
+                  <p className="text-sm font-medium text-slate-700">{sourceSearch.trim() || sourceKind !== "all" ? <UiText text={"没有匹配的资料"} /> : <UiText text={"还没有项目资料"} />}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{sourceSearch.trim() || sourceKind !== "all" ? <UiText text={"调整搜索词或资料类型后重试。"} /> : <UiText text={"可以添加文本、图片、文档、网页或代码仓库资料。"} />}</p>
                 </div>
-                  : <ul className={styles.sourceList} aria-label="项目原始资料列表">
+                  : <ul className={styles.sourceList} aria-label={translateUi("项目原始资料列表")}>
                     {sources.map((source) => (
                       <li key={source.id} className={styles.sourceRow}>
                         <div className={styles.sourceRowMain}>
-                          <div className={styles.sourceMeta}><span className={styles.kindBadge}>{source.kind}</span><span>{source.kind === "manual" ? "手工文本" : "来源已接入"}</span><time dateTime={source.ingestedAt}>{formatSourceDate(source.ingestedAt)}</time></div>
-                          <h3 className={styles.sourcePreview}>{source.preview || "未提供文字预览"}</h3>
+                          <div className={styles.sourceMeta}><span className={styles.kindBadge}>{source.kind}</span><span>{source.kind === "manual" ? <UiText text={"手工文本"} /> : <UiText text={"来源已接入"} />}</span><time dateTime={source.ingestedAt}>{formatSourceDate(source.ingestedAt)}</time></div>
+                          <h3 className={styles.sourcePreview}>{source.preview || <UiText text={"未提供文字预览"} />}</h3>
                         </div>
                         <div className={styles.sourceActions}>
-                          <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { status: itemStatus, search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className={styles.detailAction}>查看详情</Link>
-                          <button type="button" onClick={() => void handleDeleteSource(source)} disabled={deletingSourceId !== null} className={styles.deleteAction} aria-label={`删除原始资料 ${source.preview.slice(0, 24)}`}>{deletingSourceId === source.id ? "删除中…" : "删除"}</button>
+                          <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { status: itemStatus, search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className={styles.detailAction}><UiText text={"查看详情"} /></Link>
+                          <button type="button" onClick={() => void handleDeleteSource(source)} disabled={deletingSourceId !== null} className={styles.deleteAction} aria-label={`删除原始资料 ${source.preview.slice(0, 24)}`}>{deletingSourceId === source.id ? <UiText text={"删除中…"} /> : <UiText text={"删除"} />}</button>
                         </div>
                       </li>
                     ))}
@@ -807,11 +809,11 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       {materialsView === "review" ? <><ProjectMaterialReviewQueue projectId={projectId} embedded onChanged={reloadProjectAndSources} /><section id="confirmed-facts" tabIndex={-1} aria-labelledby="items-heading" className="mt-6 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Confirmed facts</p>
-            <h2 id="items-heading" tabIndex={-1} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">已确认事实</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">查看 AI 自动整理和人工补充的事实，每条记录都能回溯原始资料；有冲突或不确定的内容单独进入待处理。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Confirmed facts"} /></p>
+            <h2 id="items-heading" tabIndex={-1} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100"><UiText text={"已确认事实"} /></h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500"><UiText text={"查看 AI 自动整理和人工补充的事实，每条记录都能回溯原始资料；有冲突或不确定的内容单独进入待处理。"} /></p>
           </div>
-          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isItemsLoading ? "读取中…" : itemError ? "读取失败" : `${itemCounts.confirmed} 已确认 · ${itemCounts.candidate} 待确认`}</span>
+          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isItemsLoading ? <UiText text={"读取中…"} /> : itemError ? <UiText text={"读取失败"} /> : `${itemCounts.confirmed} 已确认 · ${itemCounts.candidate} 待确认`}</span>
         </div>
 
         {itemError ? (
@@ -821,15 +823,15 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
           <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{itemSuccess}</div>
         ) : null}
 
-        <OperationPanel title={isEditingItem ? "编辑事实" : "手动补充事实"} triggerLabel={isEditingItem ? "继续编辑事实" : "手动补充"} open={itemEditorOpen} onOpenChange={setItemEditorOpen} className="mt-6" description="自动整理后的事实可在下方查看；只有需要手动补充或纠正时才使用此操作区。">
+        <OperationPanel title={isEditingItem ? translateUi("编辑事实") : translateUi("手动补充事实")} triggerLabel={isEditingItem ? "继续编辑事实" : "手动补充"} open={itemEditorOpen} onOpenChange={setItemEditorOpen} className="mt-6" description="自动整理后的事实可在下方查看；只有需要手动补充或纠正时才使用此操作区。">
           {itemError ? <p role="alert" className="mb-4 text-sm text-rose-700">{itemError}</p> : null}
         <div className="mt-8 grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
           <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Fact candidate</p>
-            <h3 id="item-form-heading" className="mt-3 text-xl font-semibold tracking-tight text-white">{isEditingItem ? "编辑事实候选" : "补充事实候选"}</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-400">{isEditingItem ? "编辑后会回到待确认状态；原始资料归属保持不变。" : "选择当前项目的原始资料，填写可以被原文精确支持的事实候选。"}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300"><UiText text={"Fact candidate"} /></p>
+            <h3 id="item-form-heading" className="mt-3 text-xl font-semibold tracking-tight text-white">{isEditingItem ? <UiText text={"编辑事实候选"} /> : <UiText text={"补充事实候选"} />}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{isEditingItem ? <UiText text={"编辑后会回到待确认状态；原始资料归属保持不变。"} /> : <UiText text={"选择当前项目的原始资料，填写可以被原文精确支持的事实候选。"} />}</p>
 
-            <label className="mt-6 block text-sm font-medium text-slate-200" htmlFor="item-source">Source <span className="text-rose-300">（必选）</span></label>
+            <label className="mt-6 block text-sm font-medium text-slate-200" htmlFor="item-source"><UiText text={"Source"} />{" "}<span className="text-rose-300"><UiText text={"（必选）"} /></span></label>
               <select
               id="item-source"
               value={itemForm.sourceId}
@@ -838,16 +840,16 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               required
               className="mt-2 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
-                <option value="" className="bg-slate-950">选择当前项目的原始资料</option>
+                <option value="" className="bg-slate-950"><UiText text={"选择当前项目的原始资料"} /></option>
               {sourceOptions.map((source) => (
                 <option key={source.id} value={source.id} className="bg-slate-950">
                   {source.kind} · {sourcePreview(source.preview).slice(0, 52)}
                 </option>
               ))}
             </select>
-            {isEditingItem ? <p className="mt-2 text-xs text-slate-500">编辑时 Source 不可更换。</p> : null}
+            {isEditingItem ? <p className="mt-2 text-xs text-slate-500"><UiText text={"编辑时 Source 不可更换。"} /></p> : null}
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-type">类型 <span className="text-rose-300">（必选）</span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-type"><UiText text={"类型"} />{" "}<span className="text-rose-300"><UiText text={"（必选）"} /></span></label>
             <select
               id="item-type"
               value={itemForm.type}
@@ -858,7 +860,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               {itemTypes.map((itemType) => <option key={itemType.value} value={itemType.value} className="bg-slate-950">{itemType.label}</option>)}
             </select>
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-title">标题 <span className="text-rose-300">（必填）</span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-title"><UiText text={"标题"} />{" "}<span className="text-rose-300"><UiText text={"（必填）"} /></span></label>
             <input
               id="item-title"
               value={itemForm.title}
@@ -866,11 +868,11 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               maxLength={160}
               required
               disabled={isSavingItem}
-              placeholder="例如：本周确定采用 cursor pagination"
+              placeholder={translateUi("例如：本周确定采用 cursor pagination")}
               className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
             />
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-content">内容 <span className="text-rose-300">（必填）</span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-content"><UiText text={"内容"} />{" "}<span className="text-rose-300"><UiText text={"（必填）"} /></span></label>
             <textarea
               id="item-content"
               value={itemForm.content}
@@ -879,11 +881,11 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               rows={5}
               required
               disabled={isSavingItem}
-              placeholder="描述事实、进展、问题或风险……"
+              placeholder={translateUi("描述事实、进展、问题或风险……")}
               className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
             />
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-source-excerpt">精确原文摘录 <span className="text-rose-300">（必填）</span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-source-excerpt"><UiText text={"精确原文摘录"} />{" "}<span className="text-rose-300"><UiText text={"（必填）"} /></span></label>
             <textarea
               id="item-source-excerpt"
               value={itemForm.sourceExcerpt}
@@ -892,11 +894,11 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               rows={5}
               required
               disabled={isSavingItem}
-              placeholder="从下方所选 Source 原文复制一段完全一致的文字"
+              placeholder={translateUi("从下方所选 Source 原文复制一段完全一致的文字")}
               className="mt-2 w-full resize-y rounded-xl border border-indigo-300/30 bg-indigo-300/10 px-4 py-3 font-mono text-sm leading-6 text-white outline-none transition placeholder:font-sans placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
             />
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-occurred-at">发生时间 <span className="font-normal text-slate-500">（可选）</span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-occurred-at"><UiText text={"发生时间"} />{" "}<span className="font-normal text-slate-500"><UiText text={"（可选）"} /></span></label>
             <input
               id="item-occurred-at"
               type="datetime-local"
@@ -912,7 +914,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
                 disabled={isSavingItem || isItemsLoading || !itemForm.sourceId || sourceOptions.length === 0}
                 className="flex flex-1 items-center justify-center rounded-xl bg-indigo-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isSavingItem ? "保存中…" : isEditingItem ? "保存编辑" : "保存候选条目"}
+                {isSavingItem ? <UiText text={"保存中…"} /> : isEditingItem ? <UiText text={"保存编辑"} /> : <UiText text={"保存候选条目"} />}
               </button>
               {isEditingItem ? (
                 <button
@@ -921,31 +923,30 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
                   disabled={isSavingItem}
                   className="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  取消编辑
-                </button>
+                  <UiText text={"取消编辑"} /></button>
               ) : null}
             </div>
           </form>
 
           <div className="min-w-0 max-w-full rounded-2xl border border-indigo-100 bg-indigo-50/60 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Selected source</p>
-            <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">所选原始资料</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-600">复制下方原文中的连续片段到“精确原文摘录”，服务端会验证它确实来自当前原始资料。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Selected source"} /></p>
+            <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950"><UiText text={"所选原始资料"} /></h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={"复制下方原文中的连续片段到“精确原文摘录”，服务端会验证它确实来自当前原始资料。"} /></p>
             {selectedSource && "contentText" in selectedSource ? (
               <div className="mt-5 min-w-0 max-w-full rounded-xl border border-indigo-100 bg-white p-4">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   <span className="rounded-full bg-indigo-100 px-2.5 py-1 font-semibold uppercase tracking-wide text-indigo-700">{selectedSource.kind}</span>
-                  <span>接入于：{formatSourceDate(selectedSource.ingestedAt)}</span>
+                  <span><UiText text={"接入于："} />{formatSourceDate(selectedSource.ingestedAt)}</span>
                 </div>
                 <pre className="mt-4 min-w-0 max-w-full max-h-[34rem] overflow-auto whitespace-pre-wrap border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">{selectedSource.contentText}</pre>
               </div>
             ) : selectedSource ? (
               <div className="mt-5 rounded-xl border border-dashed border-indigo-200 bg-white/70 px-5 py-10 text-center text-sm leading-6 text-slate-500">
-                {isSourceDetailLoading ? "正在加载资料原文…" : "正在准备资料原文…"}
+                {isSourceDetailLoading ? <UiText text={"正在加载资料原文…"} /> : <UiText text={"正在准备资料原文…"} />}
               </div>
             ) : (
               <div className="mt-5 rounded-xl border border-dashed border-indigo-200 bg-white/70 px-5 py-10 text-center text-sm leading-6 text-slate-500">
-                {sources.length === 0 ? "请先在上方添加一条原始资料。" : "请选择一条原始资料查看完整内容。"}
+                {sources.length === 0 ? <UiText text={"请先在上方添加一条原始资料。"} /> : <UiText text={"请选择一条原始资料查看完整内容。"} />}
               </div>
             )}
           </div>
@@ -956,29 +957,29 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
         <div className="mt-10 border-t border-slate-100 pt-8">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">All project items</p>
-              <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">事实与候选记录</h3>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400"><UiText text={"All project items"} /></p>
+              <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950"><UiText text={"事实与候选记录"} /></h3>
             </div>
-            <span className="text-xs text-slate-400">按最近更新时间排序</span>
+            <span className="text-xs text-slate-400"><UiText text={"按最近更新时间排序"} /></span>
           </div>
 
           <div className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]">
-            <label><span className="sr-only">搜索项目条目</span><input value={itemSearch} onChange={(event) => { setItemSearch(event.target.value); setItemPage(1); }} placeholder="搜索标题、内容或证据摘录" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
-            <label><span className="sr-only">按条目类型筛选</span><select value={itemType} onChange={(event) => { setItemType(event.target.value); setItemPage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部类型</option><option value="decision">决策</option><option value="progress">进展</option><option value="issue">问题</option><option value="risk">风险</option></select></label>
-            <label><span className="sr-only">按审核状态筛选</span><select value={itemStatus} onChange={(event) => { replaceMaterialsQuery({ status: parseProjectItemReviewStatus(event.target.value) }); setItemPage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部状态</option><option value="candidate">待确认</option><option value="confirmed">已确认</option><option value="dismissed">已驳回</option><option value="superseded">已替代</option></select></label>
+            <label><span className="sr-only"><UiText text={"搜索项目条目"} /></span><input value={itemSearch} onChange={(event) => { setItemSearch(event.target.value); setItemPage(1); }} placeholder={translateUi("搜索标题、内容或证据摘录")} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
+            <label><span className="sr-only"><UiText text={"按条目类型筛选"} /></span><select value={itemType} onChange={(event) => { setItemType(event.target.value); setItemPage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all"><UiText text={"全部类型"} /></option><option value="decision"><UiText text={"决策"} /></option><option value="progress"><UiText text={"进展"} /></option><option value="issue"><UiText text={"问题"} /></option><option value="risk"><UiText text={"风险"} /></option></select></label>
+            <label><span className="sr-only"><UiText text={"按审核状态筛选"} /></span><select value={itemStatus} onChange={(event) => { replaceMaterialsQuery({ status: parseProjectItemReviewStatus(event.target.value) }); setItemPage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all"><UiText text={"全部状态"} /></option><option value="candidate"><UiText text={"待确认"} /></option><option value="confirmed"><UiText text={"已确认"} /></option><option value="dismissed"><UiText text={"已驳回"} /></option><option value="superseded"><UiText text={"已替代"} /></option></select></label>
           </div>
 
           {isItemsLoading ? (
-            <div className="mt-5 space-y-4" aria-label="正在加载项目条目">
+            <div className="mt-5 space-y-4" aria-label={translateUi("正在加载项目条目")}>
               {[1, 2].map((item) => <div key={item} className="h-56 animate-pulse rounded-2xl bg-slate-100" />)}
             </div>
           ) : itemError ? null : items.length === 0 ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
-              <p className="text-sm font-medium text-slate-700">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? "没有匹配的项目条目" : "还没有项目条目"}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? "调整关键词、类型或状态后重试。" : "从上方选择原始资料并保存第一条决策、进展、问题或风险候选。"}</p>
+              <p className="text-sm font-medium text-slate-700">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? <UiText text={"没有匹配的项目条目"} /> : <UiText text={"还没有项目条目"} />}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? <UiText text={"调整关键词、类型或状态后重试。"} /> : <UiText text={"从上方选择原始资料并保存第一条决策、进展、问题或风险候选。"} />}</p>
             </div>
           ) : (
-            <ul className="mt-5 space-y-4" aria-label="全部项目条目列表">
+            <ul className="mt-5 space-y-4" aria-label={translateUi("全部项目条目列表")}>
               {items.map((item) => (
                 <ItemCard
                   key={item.id}
@@ -1031,19 +1032,19 @@ function ItemCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide ${itemTypeClass(item.type)}`}>
-              {item.type} · {itemTypeLabels[item.type]}
+              <UiText text={itemTypeLabels[item.type]} />
             </span>
             <span className={`rounded-full border px-2.5 py-1 text-[12px] font-semibold ${itemStatusClass(item.reviewStatus)}`}>
-              {itemStatusLabels[item.reviewStatus]}
+              <UiText text={itemStatusLabels[item.reviewStatus]} />
             </span>
             {item.aiCandidateClaim ? (
               <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">
-                AI 候选 · {item.aiCandidateClaim.reviewStatus === "candidate" ? "待审阅" : item.aiCandidateClaim.reviewStatus === "accepted" ? "已接受" : "已驳回"}
+                <UiText text={"AI 候选 ·"} />{" "}{item.aiCandidateClaim.reviewStatus === "candidate" ? <UiText text={"待审阅"} /> : item.aiCandidateClaim.reviewStatus === "accepted" ? <UiText text={"已接受"} /> : <UiText text={"已驳回"} />}
               </span>
             ) : null}
             {item.webAiCandidate ? (
               <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">
-                AI 整理 · {item.webAiCandidate.reviewStatus === "candidate" ? "待审阅" : item.webAiCandidate.reviewStatus === "accepted" ? "已接受" : "已驳回"}
+                <UiText text={"AI 整理 ·"} />{" "}{item.webAiCandidate.reviewStatus === "candidate" ? <UiText text={"待审阅"} /> : item.webAiCandidate.reviewStatus === "accepted" ? <UiText text={"已接受"} /> : <UiText text={"已驳回"} />}
               </span>
             ) : null}
           </div>
@@ -1059,8 +1060,7 @@ function ItemCard({
               disabled={editDisabled}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              编辑
-            </button>
+              <UiText text={"编辑"} /></button>
             {item.reviewStatus === "candidate" ? (
               <>
                 <button
@@ -1069,7 +1069,7 @@ function ItemCard({
                   disabled={actionsDisabled}
                   className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isActionPending ? "处理中…" : itemActionText("confirm")}
+                  {isActionPending ? <UiText text={"处理中…"} /> : itemActionText("confirm")}
                 </button>
                 <button
                   type="button"
@@ -1077,7 +1077,7 @@ function ItemCard({
                   disabled={actionsDisabled}
                   className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isActionPending ? "处理中…" : itemActionText("dismiss")}
+                  {isActionPending ? <UiText text={"处理中…"} /> : itemActionText("dismiss")}
                 </button>
               </>
             ) : (
@@ -1087,45 +1087,45 @@ function ItemCard({
                 disabled={actionsDisabled}
                 className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isActionPending ? "处理中…" : itemActionText("reopen")}
+                {isActionPending ? <UiText text={"处理中…"} /> : itemActionText("reopen")}
               </button>
             )}
           </div>
         ) : (
           <span className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-400">
-            {requiresAiWorkbench && item.reviewStatus === "candidate" ? <Link href={materialReviewHref} className="text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-900">前往审核 AI 候选</Link> : "只读"}
+            {requiresAiWorkbench && item.reviewStatus === "candidate" ? <Link href={materialReviewHref} className="text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-900"><UiText text={"前往审核 AI 候选"} /></Link> : <UiText text={"只读"} />}
           </span>
         )}
       </div>
 
       <div className="mt-5 grid gap-4 border-t border-slate-100 pt-5 lg:grid-cols-[1.15fr_0.85fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">精确原文摘录</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"精确原文摘录"} /></p>
           <blockquote className="mt-2 whitespace-pre-wrap break-words border-l-2 border-indigo-200 pl-3 text-sm leading-6 text-slate-600">
-            {item.sourceExcerpt || "未提供精确原文摘录"}
+            {item.sourceExcerpt || <UiText text={"未提供精确原文摘录"} />}
           </blockquote>
         </div>
 
         <dl className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-1">
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Source 链接</dt>
+            <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"Source 链接"} /></dt>
             <dd className="mt-1 min-w-0">
               {item.source.externalRef ? (
                 <a href={item.source.externalRef} target="_blank" rel="noopener noreferrer" className="block truncate text-indigo-600 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-700" title={item.source.externalRef}>{item.source.externalRef}</a>
-              ) : "未提供外部链接"}
+              ) : <UiText text={"未提供外部链接"} />}
             </dd>
           </div>
           <div>
-            <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Source SHA-256</dt>
+            <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"Source SHA-256"} /></dt>
             <dd className="mt-1 break-all font-mono text-xs leading-5 text-slate-600">{item.source.contentHash}</dd>
           </div>
         </dl>
       </div>
 
       <dl className="mt-5 grid gap-3 border-t border-slate-100 pt-5 text-xs text-slate-500 sm:grid-cols-3">
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">发生时间</dt><dd className="mt-1">{formatSourceDate(item.occurredAt)}</dd></div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">确认时间</dt><dd className="mt-1">{formatSourceDate(item.confirmedAt)}</dd></div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">更新时间</dt><dd className="mt-1">{formatSourceDate(item.updatedAt)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"发生时间"} /></dt><dd className="mt-1">{formatSourceDate(item.occurredAt)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"确认时间"} /></dt><dd className="mt-1">{formatSourceDate(item.confirmedAt)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"更新时间"} /></dt><dd className="mt-1">{formatSourceDate(item.updatedAt)}</dd></div>
       </dl>
     </li>
   );

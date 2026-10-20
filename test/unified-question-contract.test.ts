@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { unifiedQuestionPresentationSchema } from "../src/lib/unified-question-contract";
+
+test("conversation display changes require a revision and a bounded single-line title or an explicit pin value", () => {
+  assert.deepEqual(unifiedQuestionPresentationSchema.parse({ expectedRevision: 0, title: "  项目讨论  " }), { expectedRevision: 0, title: "项目讨论" });
+  assert.equal(unifiedQuestionPresentationSchema.safeParse({ expectedRevision: 3, pinned: false }).success, true);
+  for (const input of [{}, { expectedRevision: 0 }, { expectedRevision: -1, pinned: true }, { expectedRevision: 0, title: " " },
+    { expectedRevision: 0, title: "x".repeat(121) }, { expectedRevision: 0, title: "a\nb" }, { expectedRevision: 0, title: "a\u0085b" },
+    { expectedRevision: 0, pinned: "false" }, { expectedRevision: 0, pinned: true, ownerUserId: "other" }]) {
+    assert.equal(unifiedQuestionPresentationSchema.safeParse(input).success, false);
+  }
+});
 import {
   buildUnifiedQuestionMessages,
   parseUnifiedQuestionModelOutput,

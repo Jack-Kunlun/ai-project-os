@@ -1,3 +1,5 @@
+import { workspaceViewQuery, workspaceViewWhere } from "@/lib/workspace-view-query";
+import { ApiError } from "@/lib/api-errors";
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-response";
@@ -20,9 +22,16 @@ export async function GET(request: Request) {
   try {
     const user = await requireApiSession(request);
     const db = getDb();
-    const projectWhere = { AND: [accessibleProjectWhere(user), { archivedAt: null }] };
+    const url = new URL(request.url);
+    for (const name of new Set(url.searchParams.keys())) {
+      if (url.searchParams.getAll(name).length !== 1) throw new ApiError(400, "INVALID_QUERY", "Query parameters must be unique");
+    }
+    const query = workspaceViewQuery.parse(Object.fromEntries(url.searchParams));
+    const projectWhere = {
+      AND: [accessibleProjectWhere(user), { archivedAt: null, workspace: { closedAt: null } }, workspaceViewWhere(query.workspaceId)],
+    };
 
-    const [projects, activeJobCount, pendingAssetReviews, recentJobs, activePlatformRouteCount, quota] = await Promise.all([
+    const [projects, activeJobCount, reviewCounts, recentJobs, activePlatformRouteCount, quota] = await Promise.all([
       db.project.findMany({
         where: projectWhere,
         orderBy: { updatedAt: "desc" },
@@ -78,8 +87,10 @@ export async function GET(request: Request) {
       db.backgroundJob.count({
         where: { status: { in: ["queued", "waitingConsent", "running"] }, project: { is: projectWhere } },
       }),
-      db.projectAsset.count({
+      db.projectAsset.groupBy({
+        by: ["projectId"],
         where: { status: "awaitingReview", project: projectWhere },
+        _count: { _all: true },
       }),
       db.backgroundJob.findMany({
         where: { projectId: { not: null }, project: { is: projectWhere } },
@@ -160,8 +171,11 @@ export async function GET(request: Request) {
             ? "empty-plan"
             : "healthy";
 
+    const pendingReviewsByProject = new Map(reviewCounts.map((entry) => [entry.projectId, entry._count._all]));
+    const pendingAssetReviews = reviewCounts.reduce((count, entry) => count + entry._count._all, 0);
     const publicProjects = projects.map((project) => ({
       ...project,
+      pendingReviewCount: pendingReviewsByProject.get(project.id) ?? 0,
       backgroundJobs: project.backgroundJobs.map(toPublicProjectJob),
     }));
     const publicRecentJobs = recentJobs.map((job) => ({

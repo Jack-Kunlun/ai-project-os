@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin, signInR02PersonalUser } from "./support/r02-admin-navigation";
+import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin, signInR02PersonalUser, signOutR02User } from "./support/r02-admin-navigation";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 
 type SourcePreview = Readonly<{
@@ -86,11 +86,11 @@ async function expectCitationDrawer(
   await expect(drawer).toContainText(citation.revision);
   await expect(drawer.getByText(content, { exact: true })).toBeVisible();
   await drawer.getByRole("button", { name: "关闭窗口", exact: true }).click();
-  await expect(drawer).toHaveCount(0);
+  await expect(page.locator("dialog").filter({ hasText: "当时的引用来源" })).toBeHidden();
 }
 
 test("unified Ask keeps real source snapshots across scopes (isolated client route fixture; history persistence is not proven here)", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(180_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
   const user = await seedBrowserPersonalUser(`browser-ask-${suffix}`, "BrowserAsk2026Password!");
@@ -131,7 +131,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   expect(projectSource.content).toBe(projectContent);
 
   const thirdQuestion = `第三轮核对个人知识版本 ${suffix}`;
-  const conversationId = randomUUID();
+  const conversationId = randomUUID(), otherConversationId = randomUUID();
   const conversationTitle = `统一问答验收 ${suffix}`;
   const prepareBodies: Record<string, unknown>[] = [];
   const executeBodies: Record<string, unknown>[] = [];
@@ -146,6 +146,10 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     source: CitationSnapshot;
   }>>();
   let currentConversation: AskConversationFixture | null = null;
+  let waitExecute: Promise<void> | null = null, waitPrepare: Promise<void> | null = null, waitRead: Promise<void> | null = null;
+  let releaseExecute = () => {}, releasePrepare = () => {}, releaseRead = () => {};
+  let delayedReads = 0;
+
 
   // Only Ask conversation/turn HTTP responses are isolated fixtures. Project,
   // personal knowledge, and Ask source-directory requests above and in the UI
@@ -186,6 +190,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
         source,
       });
       confirmationIds.push(id);
+      if (waitPrepare) await waitPrepare;
       await route.fulfill({ json: { confirmation } });
       return;
     }
@@ -197,6 +202,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
       return;
     }
     executeBodies.push(body);
+    if (waitExecute) await waitExecute;
     expect(body).toMatchObject({
       phase: "execute",
       conversationId: prepared.conversationId,
@@ -231,18 +237,29 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await route.fulfill({ json: { conversation: currentConversation } });
   });
 
+  let displayRevision = 0, pinned = false, forceRenameConflict = false;
   await page.route("**/api/ask/conversations**", async (route) => {
     const url = new URL(route.request().url());
-    if (route.request().method() !== "GET") {
-      await route.fallback();
-      return;
+    if (route.request().method() === "PATCH" && url.pathname === `/api/ask/conversations/${conversationId}` && currentConversation) {
+      const body = route.request().postDataJSON() as { expectedRevision: number; title?: string; pinned?: boolean };
+      if (forceRenameConflict) { displayRevision++; forceRenameConflict = false; }
+      if (body.expectedRevision !== displayRevision) {
+        await route.fulfill({ status: 409, json: { error: { code: "UNIFIED_QUESTION_CONFLICT" } } }); return;
+      }
+      displayRevision++;
+      if (body.title !== undefined) currentConversation = { ...currentConversation, title: body.title };
+      if (body.pinned !== undefined) pinned = body.pinned;
+      await route.fulfill({ json: { presentation: { id: conversationId, title: currentConversation.title, pinned, presentationRevision: displayRevision } } }); return;
     }
+    if (route.request().method() !== "GET") { await route.fallback(); return; }
     if (url.pathname === "/api/ask/conversations") {
       const search = (url.searchParams.get("search") ?? "").toLocaleLowerCase();
       const searchable = JSON.stringify(currentConversation ?? {}).toLocaleLowerCase();
       const conversations = currentConversation !== null && (search.length === 0 || searchable.includes(search)) ? [{
         id: currentConversation.id,
         title: currentConversation.title,
+        pinned, presentationRevision: displayRevision,
+        usage: { status: "known", requestCount: 2, knownRequestCount: 2, unknownRequestCount: 0, inputTokens: 120, outputTokens: 40, totalTokens: 160 },
         updatedAt: currentConversation.turns.at(-1)?.createdAt ?? new Date().toISOString(),
         turnCount: currentConversation.turns.length,
         ranges: [...new Set(currentConversation.turns.map((turn) => turn.contextName))],
@@ -250,8 +267,13 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
       await route.fulfill({ json: { conversations, pagination: { page: 1, totalPages: 1, total: conversations.length } } });
       return;
     }
+    if (url.pathname === `/api/ask/conversations/${otherConversationId}`) {
+      await route.fulfill({ json: { conversation: { id: otherConversationId, title: "另一个会话", turns: [], lastTurnId: null } } }); return;
+    }
     if (url.pathname === `/api/ask/conversations/${conversationId}` && currentConversation !== null) {
-      await route.fulfill({ json: { conversation: currentConversation } });
+      const snapshot = { ...currentConversation, pinned, presentationRevision: displayRevision };
+      if (waitRead) { delayedReads++; await waitRead; }
+      await route.fulfill({ json: { conversation: snapshot } });
       return;
     }
     await route.fulfill({ status: 404, json: { error: { message: "Fixture conversation not found." } } });
@@ -259,9 +281,34 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
 
   await page.goto(`/ask?scope=personal&focusDocumentId=${encodeURIComponent(documentId)}`);
   await expect(page.getByRole("heading", { name: "智能问答", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const emptyRounds = page.getByLabel("会话内容", { exact: true });
+  const welcomeTitle = emptyRounds.getByRole("heading", { name: "想了解什么？", exact: true });
+  await expect(welcomeTitle).toBeVisible();
+  await expect.poll(() => emptyRounds.evaluate(element => element.scrollTop)).toBe(0);
+  const welcomeBox = await welcomeTitle.boundingBox(), roundsBox = await emptyRounds.boundingBox();
+  expect(welcomeBox!.y).toBeGreaterThanOrEqual(roundsBox!.y);
+  expect(await emptyRounds.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+  for (const theme of ["light", "dark"]) {
+    await page.context().addCookies([
+      { name: "aipos-language", value: "en", url: new URL(page.url()).origin },
+      { name: "aipos-theme", value: theme, url: new URL(page.url()).origin },
+    ]);
+    await page.reload();
+    const englishRounds = page.getByLabel("Conversation content", { exact: true });
+    await expect(englishRounds.getByRole("heading", { name: "What would you like to know?", exact: true })).toBeVisible();
+    expect(await englishRounds.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: `test-results/unified-question/empty-en-${theme}-1280.png` });
+  }
+  await page.context().addCookies([
+    { name: "aipos-language", value: "zh-CN", url: new URL(page.url()).origin },
+    { name: "aipos-theme", value: "light", url: new URL(page.url()).origin },
+  ]);
+  await page.reload();
+  await page.setViewportSize({ width: 1440, height: 900 });
   const sourceDirectory = page.locator("aside").filter({ has: page.getByRole("heading", { name: "范围内的内容", exact: true }) });
   await expect(sourceDirectory.getByText(personalTitle, { exact: true })).toBeVisible();
-  await expect(sourceDirectory.getByText("1 条内容", { exact: true })).toBeVisible();
+  await expect(sourceDirectory.getByText(/1\s*条内容/u)).toBeVisible();
 
   async function prepareAndExecute(question: string, round: number, source: CitationSnapshot, contextName: string): Promise<void> {
     await page.getByRole("textbox", { name: "输入问题", exact: true }).fill(question);
@@ -276,12 +323,12 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await expect(submit).toBeDisabled();
     expect(executeBodies).toHaveLength(round - 1);
     if (round === 1) {
-      await expect(confirmation).toContainText("预计预留 36 额度 Token");
-      await expect(confirmation).toContainText("额度倍率 1.5 倍");
-      await expect(confirmation).toContainText("最多输出 2,048 Token");
+      await expect(confirmation).toContainText(/预计预留\s*36\s*额度 Token/u);
+      await expect(confirmation).toContainText(/额度倍率\s*1\.5\s*倍/u);
+      await expect(confirmation).toContainText(/最多输出\s*2,048\s*Token/u);
     }
     if (round === 3) {
-      await expect(confirmation).toContainText("前 2 轮完整问答");
+      await expect(confirmation).toContainText(/前\s*2\s*轮完整问答/u);
       await confirmation.getByText("查看本轮携带的历史问答", { exact: true }).click();
       await expect(confirmation).toContainText("个人空间");
       await expect(confirmation).toContainText(projectName);
@@ -289,7 +336,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await consent.check();
     await expect(submit).toBeEnabled();
     await submit.click();
-    await expect(confirmation).toHaveCount(0);
+    await expect(page.locator("dialog").filter({ hasText: "确认本轮提问" })).toBeHidden();
     const turn = page.getByRole("article", { name: `第 ${round} 轮`, exact: true });
     await expect(turn).toBeVisible();
     await expect(turn).toContainText(question);
@@ -327,8 +374,76 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   const historyResult = history.getByRole("button", { name: new RegExp(`统一问答验收 ${suffix}`, "u") });
   await expect(historyResult).toBeVisible();
   await expect(historyResult).toContainText("2 轮问答");
+  // Conversation APIs are isolated client interaction fixtures, not persisted AI output.
+  // PostgreSQL gates separately verify real owner access, revisions and persistence.
+  // Capture the reported hover state and verify it does not move the row.
+  await historyResult.hover();
+  await page.screenshot({ path: "test-results/unified-question/history-zh-CN-light.png" });
+  for (const variant of [
+    { language: "zh-CN", theme: "dark", width: 1440 },
+    { language: "en", theme: "light", width: 1440 },
+    { language: "en", theme: "dark", width: 1440 },
+    { language: "en", theme: "dark", width: 390 },
+  ]) {
+    await page.context().addCookies([
+      { name: "aipos-language", value: variant.language, url: new URL(page.url()).origin },
+      { name: "aipos-theme", value: variant.theme, url: new URL(page.url()).origin },
+    ]);
+    await page.setViewportSize({ width: variant.width, height: 900 });
+    await page.reload();
+    const english = variant.language === "en";
+    await page.getByRole("button", { name: english ? "Conversation history" : "历史会话", exact: true }).click();
+    const matrixHistory = page.getByRole("dialog", { name: english ? "Conversation history" : "历史会话", exact: true });
+    await matrixHistory.getByRole("textbox", { name: english ? "Search conversation history" : "搜索历史会话", exact: true }).fill(suffix);
+    const row = matrixHistory.getByRole("button", { name: new RegExp(`统一问答验收 ${suffix}`, "u") });
+    await expect(row).toBeVisible();
+    const before = await row.boundingBox();
+    await row.hover();
+    const after = await row.boundingBox();
+    expect(after).toEqual(before);
+    await expect(row).toContainText("160");
+    const pin = matrixHistory.getByRole("button", { name: english ? (pinned ? "Unpin conversation" : "Pin conversation") : (pinned ? "取消置顶" : "置顶会话"), exact: true });
+    const previousPin = pinned;
+    const pinRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/conversations" && response.request().method() === "GET");
+    await pin.click();
+    await pinRefresh;
+    await expect(matrixHistory.getByRole("button", { name: english ? (previousPin ? "Pin conversation" : "Unpin conversation") : (previousPin ? "置顶会话" : "取消置顶"), exact: true })).toHaveAttribute("aria-pressed", String(!previousPin));
+    await matrixHistory.getByRole("button", { name: english ? "Rename conversation" : "重命名会话", exact: true }).click();
+    const rename = page.getByRole("dialog", { name: english ? "Rename conversation" : "重命名会话", exact: true });
+    const nameInput = rename.getByRole("textbox", { name: english ? "Conversation name" : "会话名称", exact: true });
+    const newTitle = `${conversationTitle} ${variant.language}-${variant.theme}`;
+    await nameInput.fill(newTitle);
+    forceRenameConflict = true;
+    await rename.getByRole("button", { name: english ? "Save" : "保存", exact: true }).click();
+    await expect(rename.getByRole("alert")).toContainText(english ? "updated in another window" : "其他窗口");
+    await expect(nameInput).toHaveValue(newTitle);
+    await expectR02NoHorizontalOverflow(page, `rename dialog ${variant.language}/${variant.theme}/${variant.width}`);
+    await expectR02NoAccessibilityViolations(page, `rename dialog ${variant.language}/${variant.theme}/${variant.width}`);
+    expect(await nameInput.evaluate(element => Number.parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(12);
+    await page.screenshot({ path: `test-results/unified-question/rename-${variant.language}-${variant.theme}-${variant.width}.png` });
+    await rename.getByRole("button", { name: english ? "Load latest state" : "读取最新状态", exact: true }).click();
+    await expect(rename.getByRole("alert")).toHaveCount(0);
+    await expect(nameInput).toHaveValue(newTitle);
+    const renameRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/conversations" && response.request().method() === "GET");
+    await rename.getByRole("button", { name: english ? "Save" : "保存", exact: true }).click();
+    await expect(rename).toBeHidden();
+    await renameRefresh;
+    await expect(matrixHistory.getByRole("button", { name: english ? "Rename conversation" : "重命名会话", exact: true })).toBeFocused();
+    await expect(row).toContainText(newTitle);
+    await expectR02NoHorizontalOverflow(page, `conversation history ${variant.language}/${variant.theme}/${variant.width}`);
+    await expectR02NoAccessibilityViolations(page, `conversation history ${variant.language}/${variant.theme}/${variant.width}`);
+    await page.screenshot({ path: `test-results/unified-question/history-${variant.language}-${variant.theme}-${variant.width}.png` });
+  }
+  await page.context().addCookies([
+    { name: "aipos-language", value: "zh-CN", url: new URL(page.url()).origin },
+    { name: "aipos-theme", value: "light", url: new URL(page.url()).origin },
+  ]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.getByRole("button", { name: "历史会话", exact: true }).click();
+  await historySearch.fill(suffix);
   await historyResult.click();
-  await expect(history).toHaveCount(0);
+  await expect(page.locator("dialog").filter({ hasText: "历史会话" })).toBeHidden();
   await expect(page).toHaveURL(new RegExp(`/ask\\?conversation=${conversationId}$`, "u"));
   await expect(page.getByRole("article", { name: "第 1 轮", exact: true })).toBeVisible();
   await expect(page.getByRole("article", { name: "第 2 轮", exact: true })).toBeVisible();
@@ -364,13 +479,146 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await expectR02NoHorizontalOverflow(page, "unified Ask at 390px");
   await expectR02NoAccessibilityViolations(page, "unified Ask at 390px");
   await page.screenshot({ path: "test-results/v110/ask-mobile.png" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/dashboard");
+  const launcher = page.locator(".inquiry-launcher");
+  await launcher.click();
+  const floating = page.locator('[data-floating-inquiry-root]');
+  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
+  const floatingHistory = floating.getByRole("dialog", { name: "历史会话", exact: true });
+  await floatingHistory.getByRole("button", { name: "重命名会话", exact: true }).click();
+  const nestedRename = floating.getByRole("dialog", { name: "重命名会话", exact: true });
+  await expect(nestedRename).toBeVisible();
+  await nestedRename.getByRole("textbox").press("Alt+j");
+  await expect(nestedRename).toBeVisible();
+  await nestedRename.getByRole("textbox").press("Escape");
+  await expect(nestedRename).toBeHidden();
+  await expect(floatingHistory).toBeVisible();
+  await floatingHistory.getByRole("button", { name: "关闭窗口", exact: true }).press("Escape");
+  await expect(floatingHistory).toBeHidden();
+  await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toBeVisible();
+  await floating.getByRole("textbox", { name: "输入问题", exact: true }).press("Escape");
+  await expect(launcher).toHaveAttribute("aria-expanded", "false");
+  await launcher.click();
+  await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toBeVisible();
+
+  // Reopen first so the following full-page round carries the existing head.
+  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
+  await floatingHistory.getByRole("button", { name: new RegExp(conversationTitle, "u") }).click();
+  await expect(floating.getByRole("article", { name: "第 3 轮", exact: true })).toBeVisible();
+  // Keep an older GET in flight in the floating instance while the full page
+  // appends a new round. Releasing it later must not remove that round.
+  waitRead = new Promise<void>(resolve => { releaseRead = resolve; });
+  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
+  await floatingHistory.getByRole("button", { name: new RegExp(conversationTitle, "u") }).click();
+  await expect.poll(() => delayedReads).toBe(1);
+  await floatingHistory.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await floating.getByRole("button", { name: "收起问答", exact: true }).click();
+  await page.getByRole("link", { name: "智能问答", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/ask$/u);
+  // Opening the full page without an id preserves the current shared context.
+  await page.getByRole("combobox", { name: "智能问答内容范围", exact: true }).selectOption("personal");
+  const fourthQuestion = `后台继续问答 ${suffix}`;
+  await page.getByRole("textbox", { name: "输入问题", exact: true }).fill(fourthQuestion);
+  await page.getByRole("button", { name: "核对并提问", exact: true }).click();
+  const backgroundConfirmation = page.getByRole("dialog", { name: "确认本轮提问", exact: true });
+  await backgroundConfirmation.getByRole("checkbox", { name: /我已核对本轮问题/u }).check();
+  waitExecute = new Promise<void>(resolve => { releaseExecute = resolve; });
+  await backgroundConfirmation.getByRole("button", { name: "确认并提问", exact: true }).click();
+  await expect(backgroundConfirmation).toBeHidden();
+  await expect.poll(() => executeBodies.length).toBe(4);
+  await page.getByRole("link", { name: "我的知识", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/personal\/knowledge$/u);
+  await launcher.click();
+  await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toBeDisabled();
+  await floating.getByRole("button", { name: "收起问答", exact: true }).click();
+  await page.getByRole("button", { name: "新建知识", exact: true }).first().click();
+  const editor = page.getByRole("dialog", { name: "新建知识", exact: true });
+  const untouchedDraft = `问答期间继续编辑 ${suffix}`;
+  await editor.getByRole("textbox", { name: "标题", exact: true }).fill(untouchedDraft);
+  const completion = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/turns" && response.request().postDataJSON()?.phase === "execute");
+  releaseExecute(); waitExecute = null;
+  await completion;
+  const oldReadCompletion = page.waitForResponse(response => new URL(response.url()).pathname === `/api/ask/conversations/${conversationId}` && response.request().method() === "GET");
+  releaseRead(); waitRead = null;
+  await oldReadCompletion;
+  await expect(floating.locator('textarea[aria-label="输入问题"]')).toBeEnabled();
+  await expect(editor.getByRole("textbox", { name: "标题", exact: true })).toHaveValue(untouchedDraft);
+  await expect(page).toHaveURL(/\/personal\/knowledge$/u);
+  await editor.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("dialog", { name: "离开编辑页面？", exact: true }).getByRole("button", { name: "放弃修改并离开", exact: true }).click();
+  await launcher.click();
+  await expect(floating.getByRole("article", { name: "第 4 轮", exact: true })).toContainText(fourthQuestion);
+  await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toBeEnabled();
+  expect(executeBodies).toHaveLength(4);
+  await floating.getByRole("button", { name: "收起问答", exact: true }).click();
+
+  // Native History API is supported by the App Router. Simulate a saved
+  // conversation target arriving while the current confirmation owns the lock.
+  await page.getByRole("link", { name: "智能问答", exact: true }).first().click();
+  await page.getByRole("textbox", { name: "输入问题", exact: true }).fill(`确认历史快照 ${suffix}`);
+  await page.getByRole("button", { name: "核对并提问", exact: true }).click();
+  const frozenConfirmation = page.getByRole("dialog", { name: "确认本轮提问", exact: true });
+  await frozenConfirmation.getByText("查看本轮携带的历史问答", { exact: true }).click();
+  await page.evaluate(id => window.history.pushState(null, "", `/ask?conversation=${id}`), otherConversationId);
+  await expect(page).toHaveURL(new RegExp(`conversation=${otherConversationId}$`, "u"));
+  await expect(frozenConfirmation).toContainText(fourthQuestion);
+  await expect(frozenConfirmation).not.toContainText("另一个会话");
+  await frozenConfirmation.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await expect(page.locator('[data-ask-page]')).toContainText("另一个会话");
+  expect(executeBodies).toHaveLength(4);
+
+  // Public navigation disposes the old floating instance before a late prepare
+  // can open a native modal in a hidden ancestor.
+  await page.getByRole("link", { name: "帮助", exact: true }).click();
+  await page.getByRole("link", { name: "联系作者", exact: true }).click();
+  await expect(page).toHaveURL(/\/contact$/u);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/guide$/u);
+  await launcher.click();
+  await floating.getByRole("textbox", { name: "输入问题", exact: true }).fill(`未发送确认 ${suffix}`);
+  waitPrepare = new Promise<void>(resolve => { releasePrepare = resolve; });
+  await floating.getByRole("button", { name: "核对并提问", exact: true }).click();
+  await expect.poll(() => prepareBodies.length).toBe(6);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/contact$/u);
+  releasePrepare(); waitPrepare = null;
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
+  await page.getByRole("link", { name: "隐私政策", exact: true }).click();
+  await expect(page).toHaveURL(/\/privacy$/u);
+  expect(executeBodies).toHaveLength(4);
+
+  // An old account's delayed history response cannot populate the next account.
+  await page.goBack();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/guide$/u);
+  await launcher.click();
+  waitRead = new Promise<void>(resolve => { releaseRead = resolve; });
+  const beforeDelayedReads = delayedReads;
+  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
+  await floatingHistory.getByRole("button", { name: new RegExp(conversationTitle, "u") }).click();
+  await expect.poll(() => delayedReads).toBe(beforeDelayedReads + 1);
+  await floatingHistory.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await floating.getByRole("button", { name: "收起问答", exact: true }).click();
+  const nextUser = await seedBrowserPersonalUser(`browser-ask-next-${suffix}`, "BrowserAsk2026Password!");
+  await signOutR02User(page);
+  // Stay in the client navigation session so the original promise stays alive.
+  await page.getByLabel("用户名或手机号", { exact: true }).fill(nextUser.username);
+  await page.getByLabel("密码", { exact: true }).fill(nextUser.password);
+  await page.getByRole("button", { name: "登 录", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  releaseRead(); waitRead = null;
+  await launcher.click();
+  await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toHaveValue("");
+  await expect(floating.getByRole("article")).toHaveCount(0);
+  await expect(floating).not.toContainText(fourthQuestion);
 });
 
 test("3D knowledge graph rotates, pans, zooms and drags without losing direct source details", async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await signInR02Admin(page);
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
   const user = await seedBrowserPersonalUser(`browser-graph-${suffix}`, "BrowserGraph2026Password!");
   await signInR02PersonalUser(page, user);
@@ -426,7 +674,7 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   const personalSourceDialog = page.getByRole("dialog", { name: "来源内容", exact: true });
   await expect(personalSourceDialog.getByText(personalContent, { exact: true })).toBeVisible();
   await personalSourceDialog.getByRole("button", { name: "关闭窗口", exact: true }).click();
-  await expect(personalSourceDialog).toHaveCount(0);
+  await expect(page.locator("dialog").filter({ hasText: "来源内容" })).toBeHidden();
 
   const space = page.getByTestId("knowledge-graph-space");
   const personalNode = page.getByRole("button", { name: `来源：${personalTitle}`, exact: true });
@@ -497,7 +745,7 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   const projectSourceDialog = page.getByRole("dialog", { name: "来源内容", exact: true });
   await expect(projectSourceDialog.getByText(projectContent, { exact: true })).toBeVisible();
   await projectSourceDialog.getByRole("button", { name: "关闭窗口", exact: true }).click();
-  await expect(projectSourceDialog).toHaveCount(0);
+  await expect(page.locator("dialog").filter({ hasText: "来源内容" })).toBeHidden();
   // Both the project source and its fact open the same real evidence detail.
   await page.getByRole("button", { name: `来源：${projectNodeTitle}`, exact: true }).click();
   await expect(page).toHaveURL(`/projects/${projectId}/materials/sources/${sourcePayload.source.id}`);

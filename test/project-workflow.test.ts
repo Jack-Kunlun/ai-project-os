@@ -101,6 +101,9 @@ type FakeProviderCallAudit = {
   id: string;
   jobId: string;
   status: string;
+  usageKnown: boolean;
+  inputTokens: number | null;
+  outputTokens: number | null;
   safeErrorCode: string | null;
   completedAt: Date | null;
 };
@@ -211,6 +214,27 @@ class FakeWorkflowDb {
   };
 
   readonly providerCallAudit = {
+    groupBy: async ({ where }: { where: { jobId: string } }) => {
+      const groups = new Map<boolean, { usageKnown: boolean; count: number; inputTokens: number; outputTokens: number }>();
+      for (const audit of this.audits.values()) {
+        if (audit.jobId !== where.jobId) continue;
+        const group = groups.get(audit.usageKnown) ?? { usageKnown: audit.usageKnown, count: 0, inputTokens: 0, outputTokens: 0 };
+        group.count += 1;
+        if (audit.usageKnown) {
+          group.inputTokens += audit.inputTokens ?? 0;
+          group.outputTokens += audit.outputTokens ?? 0;
+        }
+        groups.set(audit.usageKnown, group);
+      }
+      return [...groups.values()].map((group) => ({
+        usageKnown: group.usageKnown,
+        _count: { _all: group.count },
+        _sum: {
+          inputTokens: group.usageKnown ? group.inputTokens : null,
+          outputTokens: group.usageKnown ? group.outputTokens : null,
+        },
+      }));
+    },
     updateMany: async ({ where, data }: { where: { jobId: string; status?: string }; data: Partial<FakeProviderCallAudit> }) => {
       let count = 0;
       for (const audit of this.audits.values()) {
@@ -332,6 +356,9 @@ class FakeWorkflowDb {
       id: randomUUID(),
       jobId,
       status,
+      usageKnown: false,
+      inputTokens: null,
+      outputTokens: null,
       safeErrorCode: null,
       completedAt: null,
     };

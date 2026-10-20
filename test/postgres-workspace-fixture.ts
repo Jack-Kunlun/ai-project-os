@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 
+type PostgresWorkspaceFixtureOptions = Readonly<{
+  passwordRecord?: Readonly<{ passwordHash: string; passwordSalt: string; passwordVersion: number }>;
+}>;
+
 /**
  * Create the smallest complete workspace fixture for a disposable PostgreSQL
  * gate.  The production default workspace is intentionally not used: project
@@ -9,6 +13,7 @@ import { grantWorkspaceMembership } from "../src/lib/membership-governance";
  */
 export async function createPostgresWorkspaceFixture(
   db: PrismaClient,
+  options: PostgresWorkspaceFixtureOptions = {},
 ): Promise<Readonly<{ workspaceId: string; ownerId: string }>> {
   const suffix = randomUUID().slice(0, 8);
   const ownerId = randomUUID();
@@ -17,10 +22,19 @@ export async function createPostgresWorkspaceFixture(
   await db.$transaction(async (tx) => {
     // Freeze the identity columns shared by historical upgrade schemas. Prisma
     // inserts current model defaults even when only the id is selected.
-    await tx.$executeRaw`
-      INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
-      VALUES (${ownerId}::uuid, ${`postgres_gate_workspace_owner_${suffix}`}, 'user', CURRENT_TIMESTAMP)
-    `;
+    const username = `postgres_gate_workspace_owner_${suffix}`;
+    if (options.passwordRecord) {
+      const { passwordHash, passwordSalt, passwordVersion } = options.passwordRecord;
+      await tx.$executeRaw`
+        INSERT INTO "AppUser" ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "updatedAt")
+        VALUES (${ownerId}::uuid, ${username}, ${passwordHash}, ${passwordSalt}, ${passwordVersion}, 'user', CURRENT_TIMESTAMP)
+      `;
+    } else {
+      await tx.$executeRaw`
+        INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
+        VALUES (${ownerId}::uuid, ${username}, 'user', CURRENT_TIMESTAMP)
+      `;
+    }
     await tx.workspace.create({
       select: { id: true },
       data: {

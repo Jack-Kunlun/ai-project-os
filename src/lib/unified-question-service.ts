@@ -28,6 +28,7 @@ import {
 } from "@/lib/personal-knowledge-qa-provider";
 import { accessibleProjectWhere, assertProjectAccess, type ProjectPermission } from "@/lib/access-control";
 import { assertWebAiProjectAccess } from "@/lib/web-ai-access";
+import { summarizeTokenUsage, summarizeTokenUsageBuckets, unknownTokenUsage, type TokenUsageSummary } from "@/lib/token-usage";
 import {
   buildUnifiedQuestionMessages,
   canonicalUnifiedQuestionJson,
@@ -40,6 +41,7 @@ import {
   unifiedQuestionSearchTerms,
   UNIFIED_QUESTION_CONFIRMATION_TTL_MS,
   unifiedQuestionScopeSchema,
+  unifiedQuestionPresentationSchema,
   type UnifiedQuestionCitationSnapshot,
   type UnifiedQuestionScope,
   type UnifiedQuestionSourcePreview,
@@ -584,6 +586,128 @@ async function readHistory(db: Prisma.TransactionClient, ownerUserId: string, co
   return Object.freeze({ conversation, turns: Object.freeze(turns) });
 }
 
+async function readTurnTokenUsage(
+  db: Prisma.TransactionClient,
+  ownerUserId: string,
+  conversationId: string,
+  turnIds: readonly string[],
+): Promise<ReadonlyMap<string, TokenUsageSummary>> {
+  if (turnIds.length === 0) return new Map();
+  const accessibleIds = await accessibleUsageProjects(db, ownerUserId);
+  const rows = await db.$queryRaw<Array<{
+    turnId: string;
+    inputTokens: number;
+    outputTokens: number;
+    usageKnown: boolean;
+  }>>(Prisma.sql`
+    SELECT turn."id" AS "turnId", audit."inputTokens", audit."outputTokens", audit."usageKnown"
+    FROM "UnifiedQuestionTurn" AS turn
+    JOIN "UnifiedQuestionConfirmation" AS confirmation
+      ON confirmation."ownerUserId" = turn."ownerUserId"
+      AND confirmation."conversationId" = turn."conversationId"
+      AND confirmation."expectedSequence" + 1 = turn."sequence"
+      AND confirmation."status"::text = 'consumed'
+    JOIN "UnifiedQuestionAudit" AS audit
+      ON audit."ownerUserId" = confirmation."ownerUserId"
+      AND audit."confirmationId" = confirmation."id"
+      AND audit."status"::text = 'succeeded'
+    WHERE turn."ownerUserId" = ${ownerUserId}::uuid
+      AND turn."conversationId" = ${conversationId}::uuid
+      AND turn."id" = ANY(${[...turnIds]}::uuid[])
+      AND audit."scopeProjectIds" <@ ${accessibleIds}::uuid[]
+      AND (confirmation."projectId" IS NULL OR confirmation."projectId" = ANY(${accessibleIds}::uuid[]))
+  `);
+  const grouped = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const items = grouped.get(row.turnId) ?? [];
+    items.push(row);
+    grouped.set(row.turnId, items);
+  }
+  const summaries = new Map<string, TokenUsageSummary>();
+  for (const turnId of turnIds) {
+    const matches = grouped.get(turnId) ?? [];
+    summaries.set(turnId, matches.length === 1 ? summarizeTokenUsage(matches) : unknownTokenUsage(1));
+  }
+  return summaries;
+}
+
+async function addTurnTokenUsage<T extends Readonly<{ id: string }>>(
+  db: Prisma.TransactionClient,
+  ownerUserId: string,
+  conversationId: string,
+  turns: readonly T[],
+): Promise<readonly (T & Readonly<{ usage: TokenUsageSummary }>)[]> {
+  const usageByTurn = await readTurnTokenUsage(db, ownerUserId, conversationId, turns.map((turn) => turn.id));
+  return Object.freeze(turns.map((turn) => Object.freeze({ ...turn, usage: usageByTurn.get(turn.id) ?? unknownTokenUsage(1) })));
+}
+
+/** Call totals include failed/uncertain attempts. Legacy successful turns with
+ * no matching audit contribute unknown usage, never a fabricated zero. Call
+ * this only after the entire conversation's current permissions are verified. */
+async function accessibleUsageProjects(db: Prisma.TransactionClient, ownerUserId: string) {
+  const rows = await db.project.findMany({ where: { AND: [accessibleProjectWhere({ id: ownerUserId, role: "user" }), { workspace: { closedAt: null } }] }, select: { id: true } });
+  return rows.map(row => row.id);
+}
+
+async function usageProjectIds(db: Prisma.TransactionClient, ownerUserId: string, ids: readonly string[]) {
+  if (!ids.length) return [];
+  const rows = await db.unifiedQuestionAudit.findMany({
+    where: { ownerUserId, confirmation: { conversationId: { in: [...ids] } } },
+    select: { scopeProjectIds: true, confirmation: { select: { projectId: true } } },
+  });
+  return [...new Set(rows.flatMap(row => [...row.scopeProjectIds, ...(row.confirmation.projectId ? [row.confirmation.projectId] : [])]))];
+}
+
+async function conversationTokenUsage(db: Prisma.TransactionClient, actor: Actor, ids: readonly string[]) {
+  const ownerUserId = actor.id;
+  if (ids.length === 0) return new Map<string, TokenUsageSummary>();
+  const accessibleIds = await accessibleUsageProjects(db, ownerUserId);
+  const countedAudit = Prisma.sql`(a."status"::text IN ('running', 'unknown') OR a."usageKnown" OR EXISTS (
+    SELECT 1 FROM "PlatformTokenReservation" r WHERE r."userId" = a."ownerUserId"
+      AND r."unifiedQuestionConfirmationId" = a."confirmationId" AND r."status"::text <> 'released'
+  ))`;
+  const restrictedRows = await db.$queryRaw<Array<{ conversationId: string }>>(Prisma.sql`
+    SELECT DISTINCT c."conversationId" FROM "UnifiedQuestionAudit" a JOIN "UnifiedQuestionConfirmation" c
+      ON c."ownerUserId" = a."ownerUserId" AND c."id" = a."confirmationId"
+    WHERE a."ownerUserId" = ${ownerUserId}::uuid AND c."conversationId" = ANY(${[...ids]}::uuid[])
+      AND ${countedAudit}
+      AND (NOT a."scopeProjectIds" <@ ${accessibleIds}::uuid[] OR (c."projectId" IS NOT NULL AND NOT c."projectId" = ANY(${accessibleIds}::uuid[])))
+  `);
+  const restricted = new Set(restrictedRows.map(row => row.conversationId));
+  const safeIds = ids.filter(id => !restricted.has(id));
+  const buckets = safeIds.length === 0 ? [] : await db.$queryRaw<Array<{ conversationId: string; usageKnown: boolean; count: bigint; inputTokens: bigint; outputTokens: bigint }>>(Prisma.sql`
+    WITH calls AS (
+      SELECT c."conversationId", a."usageKnown" AND a."status"::text <> 'running' AS "usageKnown", a."inputTokens", a."outputTokens"
+      FROM "UnifiedQuestionAudit" a JOIN "UnifiedQuestionConfirmation" c
+        ON c."ownerUserId" = a."ownerUserId" AND c."id" = a."confirmationId"
+      WHERE a."ownerUserId" = ${ownerUserId}::uuid AND c."conversationId" = ANY(${safeIds}::uuid[])
+        AND ${countedAudit}
+      UNION ALL
+      SELECT t."conversationId", false, 0, 0 FROM "UnifiedQuestionTurn" t
+      WHERE t."ownerUserId" = ${ownerUserId}::uuid AND t."conversationId" = ANY(${safeIds}::uuid[])
+        AND NOT EXISTS (
+          SELECT 1 FROM "UnifiedQuestionConfirmation" c JOIN "UnifiedQuestionAudit" a
+            ON a."ownerUserId" = c."ownerUserId" AND a."confirmationId" = c."id" AND a."status"::text = 'succeeded'
+          WHERE c."ownerUserId" = t."ownerUserId" AND c."conversationId" = t."conversationId"
+            AND c."expectedSequence" + 1 = t."sequence" AND c."status"::text = 'consumed'
+        )
+    ) SELECT "conversationId", "usageKnown", COUNT(*) AS count,
+      SUM(CASE WHEN "usageKnown" THEN "inputTokens" ELSE 0 END) AS "inputTokens",
+      SUM(CASE WHEN "usageKnown" THEN "outputTokens" ELSE 0 END) AS "outputTokens"
+    FROM calls GROUP BY "conversationId", "usageKnown"
+  `);
+  return new Map(ids.map(id => [id, restricted.has(id) ? unknownTokenUsage() : summarizeTokenUsageBuckets(buckets.filter(row => row.conversationId === id).map(row => ({
+    count: Number(row.count), usageKnown: row.usageKnown, inputTokens: Number(row.inputTokens), outputTokens: Number(row.outputTokens),
+  })))]));
+}
+
+async function presentation(db: Prisma.TransactionClient, ownerUserId: string, conversationId: string) {
+  return db.unifiedQuestionPresentationRevision.findFirst({
+    where: { ownerUserId, conversationId }, orderBy: { revision: "desc" },
+    select: { title: true, pinned: true, revision: true },
+  });
+}
+
 /** Viewing retained history and sending it to a model have different permission requirements. */
 async function verifyHistoryProjects(actor: Actor, projectIds: readonly string[], db: Prisma.TransactionClient, requireModelUse = false): Promise<void> {
   const ids = [...new Set(projectIds.map((id) => canonicalId(id)))].sort();
@@ -979,7 +1103,7 @@ async function successfulConversation(snapshot: Snapshot, answer: string, citati
       where: { ownerUserId: snapshot.owner.id, conversationId: snapshot.conversationId }, select: { projectIds: true },
     });
     const historyProjectIds = historyMetadata.flatMap((turn) => turn.projectIds);
-    await lockProjects(tx, [...snapshot.scopeProjectIds, ...citationProjectIds(citations), ...historyProjectIds]);
+    await lockProjects(tx, [...snapshot.scopeProjectIds, ...citationProjectIds(citations), ...historyProjectIds, ...await usageProjectIds(tx, snapshot.owner.id, [snapshot.conversationId])]);
     const scopeRows = await scopeProjectRows(current, snapshot.scope, snapshot.projectId, tx, true);
     if (!sameJson(scopeRows.map((row) => row.id).sort(), [...snapshot.scopeProjectIds].sort())) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
     await lockPersonalKnowledgeQaRoute(tx);
@@ -1028,8 +1152,11 @@ async function successfulConversation(snapshot: Snapshot, answer: string, citati
     const turns = await tx.unifiedQuestionTurn.findMany({ where: { ownerUserId: snapshot.owner.id, conversationId: snapshot.conversationId }, orderBy: { sequence: "asc" },
       select: { id: true, sequence: true, scope: true, projectId: true, contextName: true, question: true, answer: true,
         modelId: true, providerName: true, createdAt: true, citations: true } });
-    return Object.freeze({ conversation: Object.freeze({ id: snapshot.conversationId, title: conversation.title ?? snapshot.question,
-      turns, lastTurnId: turnId }) });
+    const display = await presentation(tx, snapshot.owner.id, snapshot.conversationId);
+    return Object.freeze({ conversation: Object.freeze({ id: snapshot.conversationId, title: display?.title ?? conversation.title ?? snapshot.question,
+      pinned: display?.pinned ?? false, presentationRevision: display?.revision ?? 0,
+      usage: (await conversationTokenUsage(tx, current, [snapshot.conversationId])).get(snapshot.conversationId),
+      turns: await addTurnTokenUsage(tx, snapshot.owner.id, snapshot.conversationId, turns), lastTurnId: turnId }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
 }
 
@@ -1124,20 +1251,52 @@ async function authorizedConversation(actor: Actor, conversationId: string, db: 
     const current = await currentActor(tx, actor);
     const metadata = await tx.unifiedQuestionTurn.findMany({ where: { ownerUserId: actor.id, conversationId }, select: { projectIds: true } });
     const projectIds = metadata.flatMap((turn) => turn.projectIds);
-    await lockProjects(tx, projectIds);
+    await lockProjects(tx, [...projectIds, ...await usageProjectIds(tx, actor.id, [conversationId])]);
     await verifyHistoryProjects(current, projectIds, tx);
     const history = await readHistory(tx, actor.id, conversationId);
     const turns = await tx.unifiedQuestionTurn.findMany({ where: { ownerUserId: actor.id, conversationId }, orderBy: { sequence: "asc" },
       select: { id: true, sequence: true, scope: true, projectId: true, contextName: true, question: true, answer: true,
         modelId: true, providerName: true, createdAt: true, citations: true } });
-    return Object.freeze({ conversation: Object.freeze({ id: conversationId, title: history.conversation.title ?? turns[0]?.question ?? "新会话",
-      turns, lastTurnId: history.conversation.headTurnId }) });
+    const display = await presentation(tx, actor.id, conversationId);
+    return Object.freeze({ conversation: Object.freeze({ id: conversationId, title: display?.title ?? history.conversation.title ?? turns[0]?.question ?? "新会话",
+      pinned: display?.pinned ?? false, presentationRevision: display?.revision ?? 0,
+      usage: (await conversationTokenUsage(tx, actor, [conversationId])).get(conversationId),
+      turns: await addTurnTokenUsage(tx, actor.id, conversationId, turns), lastTurnId: history.conversation.headTurnId }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 });
 }
 
 export async function getUnifiedQuestionConversation(conversationIdInput: unknown, actorValue: unknown, db: PrismaClient = getDb()): Promise<unknown> {
   assertActorShape(actorValue);
   return authorizedConversation(actorValue, canonicalId(conversationIdInput), db);
+}
+
+export async function updateUnifiedQuestionPresentation(conversationIdInput: unknown, input: unknown, actorValue: unknown, db: PrismaClient = getDb()) {
+  assertActorShape(actorValue);
+  const conversationId = canonicalId(conversationIdInput);
+  const parsed = unifiedQuestionPresentationSchema.safeParse(input);
+  if (!parsed.success) return fail("UNIFIED_QUESTION_INVALID_INPUT");
+  return db.$transaction(async tx => {
+    await lockActorAccess(tx, actorValue.id);
+    const actor = await currentActor(tx, actorValue);
+    const conversation = await tx.unifiedQuestionConversation.findFirst({ where: { id: conversationId, ownerUserId: actor.id, headTurnId: { not: null } } });
+    if (!conversation) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    const metadata = await tx.unifiedQuestionTurn.findMany({ where: { ownerUserId: actor.id, conversationId }, select: { projectIds: true } });
+    const projectIds = metadata.flatMap(turn => turn.projectIds);
+    await lockProjects(tx, projectIds);
+    try { await verifyHistoryProjects(actor, projectIds, tx); }
+    catch { return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE"); }
+    const previous = await presentation(tx, actor.id, conversationId);
+    if ((previous?.revision ?? 0) !== parsed.data.expectedRevision) return fail("UNIFIED_QUESTION_CONFLICT");
+    const title = parsed.data.title ?? previous?.title ?? null;
+    const pinned = parsed.data.pinned ?? previous?.pinned ?? false;
+    let revision = previous?.revision ?? 0;
+    if (title !== (previous?.title ?? null) || pinned !== (previous?.pinned ?? false)) {
+      await mutationContext(tx);
+      revision += 1;
+      await tx.unifiedQuestionPresentationRevision.create({ data: { ownerUserId: actor.id, conversationId, revision, title, pinned, createdAt: await databaseNow(tx) } });
+    }
+    return Object.freeze({ presentation: Object.freeze({ id: conversationId, title: title ?? conversation.title ?? "新会话", pinned, presentationRevision: revision }) });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 });
 }
 
 export async function getUnifiedQuestionSources(input: Readonly<{ scope?: unknown; projectId?: unknown; focusDocumentId?: unknown }>, actorValue: unknown, db: PrismaClient = getDb()): Promise<unknown> {
@@ -1181,7 +1340,10 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
     const candidateRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT c."id" FROM "UnifiedQuestionConversation" c
       WHERE c."ownerUserId" = ${actor.id}::uuid AND c."headTurnId" IS NOT NULL
-        AND (${needle}::text IS NULL OR c."title" ILIKE ${needle} ESCAPE '\\' OR EXISTS (
+        AND (${needle}::text IS NULL OR COALESCE((
+          SELECT r."title" FROM "UnifiedQuestionPresentationRevision" r
+          WHERE r."ownerUserId" = c."ownerUserId" AND r."conversationId" = c."id" ORDER BY r."revision" DESC LIMIT 1
+        ), c."title") ILIKE ${needle} ESCAPE '\\' OR EXISTS (
           SELECT 1 FROM "UnifiedQuestionTurn" t
           WHERE t."ownerUserId" = c."ownerUserId" AND t."conversationId" = c."id"
             AND (t."question" ILIKE ${needle} ESCAPE '\\' OR t."answer" ILIKE ${needle} ESCAPE '\\' OR t."citations"::text ILIKE ${needle} ESCAPE '\\')
@@ -1194,7 +1356,7 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
       where: { ownerUserId: actor.id, conversationId: { in: ids } }, select: { conversationId: true, projectIds: true },
     });
     const projectIds = metadata.flatMap((row) => row.projectIds);
-    await lockProjects(tx, projectIds);
+    await lockProjects(tx, [...projectIds, ...await usageProjectIds(tx, actor.id, ids)]);
     const inaccessible = new Set<string>();
     for (const projectId of [...new Set(projectIds)].sort()) {
       try { await assertProjectPermission(actor, projectId, "view", tx); }
@@ -1204,6 +1366,15 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
     if (safeIds.length === 0) return Object.freeze({ conversations: Object.freeze([]), pagination: Object.freeze({ page, totalPages: 1, total: 0 }) });
     const conversations = await tx.unifiedQuestionConversation.findMany({ where: { ownerUserId: actor.id, id: { in: safeIds }, headTurnId: { not: null } },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }], select: { id: true, title: true, updatedAt: true, headSequence: true } });
+    const displays = await tx.$queryRaw<Array<{ conversationId: string; title: string | null; pinned: boolean; revision: number }>>(Prisma.sql`
+      SELECT DISTINCT ON ("conversationId") "conversationId", "title", "pinned", "revision"
+      FROM "UnifiedQuestionPresentationRevision"
+      WHERE "ownerUserId" = ${actor.id}::uuid AND "conversationId" = ANY(${safeIds}::uuid[])
+      ORDER BY "conversationId", "revision" DESC
+    `);
+    const displayById = new Map(displays.map(row => [row.conversationId, row]));
+    // Stable sort retains the last-question ordering within each pin group.
+    conversations.sort((a, b) => Number(displayById.get(b.id)?.pinned ?? false) - Number(displayById.get(a.id)?.pinned ?? false));
     const rows = await tx.unifiedQuestionTurn.findMany({ where: { ownerUserId: actor.id, conversationId: { in: safeIds } },
       orderBy: [{ conversationId: "asc" }, { sequence: "asc" }], select: { conversationId: true, scope: true, contextName: true } });
     const rangesById = new Map<string, Set<string>>();
@@ -1215,8 +1386,12 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
     const total = conversations.length;
     const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
     const start = (page - 1) * HISTORY_PAGE_SIZE;
-    const selected = conversations.slice(start, start + HISTORY_PAGE_SIZE).map((conversation) => Object.freeze({
-      id: conversation.id, title: conversation.title ?? "新会话", updatedAt: conversation.updatedAt.toISOString(),
+    const pageRows = conversations.slice(start, start + HISTORY_PAGE_SIZE);
+    const usageById = await conversationTokenUsage(tx, actor, pageRows.map(row => row.id));
+    const selected = pageRows.map((conversation) => Object.freeze({
+      id: conversation.id, title: displayById.get(conversation.id)?.title ?? conversation.title ?? "新会话", updatedAt: conversation.updatedAt.toISOString(),
+      pinned: displayById.get(conversation.id)?.pinned ?? false, presentationRevision: displayById.get(conversation.id)?.revision ?? 0,
+      usage: usageById.get(conversation.id),
       turnCount: conversation.headSequence, ranges: Object.freeze([...(rangesById.get(conversation.id) ?? [])].slice(0, 8)),
     }));
     return Object.freeze({ conversations: Object.freeze(selected), pagination: Object.freeze({ page, totalPages, total }) });

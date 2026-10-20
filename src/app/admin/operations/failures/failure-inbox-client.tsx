@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AdminPageHeader } from "@/components/admin-page-header";
+import { useAppearance } from "@/components/appearance-provider";
 import {
   SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS,
   SYSTEM_FAILURE_INBOX_LIFECYCLES,
@@ -17,9 +18,9 @@ import {
 const lifecycleOptions = SYSTEM_FAILURE_INBOX_LIFECYCLES;
 const sourceOptions = SYSTEM_FAILURE_INBOX_SOURCES;
 
-function formatDate(value: string): string {
+function formatDate(value: string, language: "zh-CN" | "en"): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "未取得" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+  return Number.isNaN(date.getTime()) ? "未取得" : new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "medium" }).format(date);
 }
 
 function lifecycleTone(value: SystemFailureInboxLifecycle): string {
@@ -38,6 +39,7 @@ async function readError(response: Response): Promise<string> {
 }
 
 export function AdminFailureInboxClient() {
+  const { language, t } = useAppearance();
   const [source, setSource] = useState<SystemFailureInboxSource | "">("");
   const [lifecycle, setLifecycle] = useState<SystemFailureInboxLifecycle | "">("");
   const [appliedFilters, setAppliedFilters] = useState<Readonly<{ source?: SystemFailureInboxSource; lifecycle?: SystemFailureInboxLifecycle }>>({});
@@ -105,49 +107,50 @@ export function AdminFailureInboxClient() {
   }
 
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
-    <AdminPageHeader title="失败与待对账收件箱" description="只读汇总平台与后台任务异常；业务责任方在用户侧处理，管理员后台不提供业务详情入口。" meta={data ? `测量于 ${formatDate(data.observedAt)}` : undefined} />
+    <AdminPageHeader title="失败与待对账收件箱" description="只读汇总平台与后台任务异常；业务责任方在用户侧处理，管理员后台不提供业务详情入口。" meta={data ? <>{t("测量于")} {formatDate(data.observedAt, language)}</> : undefined} />
 
     <form onSubmit={applyFilters} className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="text-xs font-semibold text-slate-600">来源<select value={source} onChange={(event) => setSource(event.target.value as SystemFailureInboxSource | "")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><option value="">全部来源</option>{sourceOptions.map((value) => <option key={value} value={value}>{SYSTEM_FAILURE_INBOX_SOURCE_LABELS[value]}</option>)}</select></label>
-        <label className="text-xs font-semibold text-slate-600">状态<select value={lifecycle} onChange={(event) => setLifecycle(event.target.value as SystemFailureInboxLifecycle | "")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><option value="">全部状态</option>{lifecycleOptions.map((value) => <option key={value} value={value}>{SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS[value]}</option>)}</select></label>
+        <label className="text-xs font-semibold text-slate-600">{t("来源")}<select aria-label={t("来源")} value={source} onChange={(event) => setSource(event.target.value as SystemFailureInboxSource | "")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><option value="">{t("全部来源")}</option>{sourceOptions.map((value) => <option key={value} value={value}>{t(SYSTEM_FAILURE_INBOX_SOURCE_LABELS[value])}</option>)}</select></label>
+        <label className="text-xs font-semibold text-slate-600">{t("状态")}<select aria-label={t("状态")} value={lifecycle} onChange={(event) => setLifecycle(event.target.value as SystemFailureInboxLifecycle | "")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900"><option value="">{t("全部状态")}</option>{lifecycleOptions.map((value) => <option key={value} value={value}>{t(SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS[value])}</option>)}</select></label>
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-        <p className="text-xs leading-5 text-slate-500">近 {data?.window.days ?? 7} 天终态失败，当前待对账状态不因窗口消失；责任人复核项按实时状态返回。排序按发生时间、来源和不透明记录标识稳定倒序；游标绑定当前筛选。</p>
-        <button type="submit" className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">应用筛选</button>
+        <p className="text-xs leading-5 text-slate-500">{t("近")} {data?.window.days ?? 7} {t("天终态失败，当前待对账状态不因窗口消失；责任人复核项按实时状态返回。排序按发生时间、来源和不透明记录标识稳定倒序；游标绑定当前筛选。")}</p>
+        <button type="submit" className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("应用筛选")}</button>
       </div>
     </form>
 
     <section className="mt-6 rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="failure-inbox-list-title">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
-        <div><h2 id="failure-inbox-list-title" className="text-lg font-semibold text-slate-950">安全异常集合</h2><p className="mt-1 text-xs text-slate-500">实时测量结果，不承诺跨页严格历史快照；状态已解决时允许在下一页消失。</p></div>
-        <div className="flex items-center gap-2"><button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">上一页</button><button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">下一页</button></div>
+        <div><h2 id="failure-inbox-list-title" className="text-lg font-semibold text-slate-950">{t("安全异常集合")}</h2><p className="mt-1 text-xs text-slate-500">{t("实时测量结果，不承诺跨页严格历史快照；状态已解决时允许在下一页消失。")}</p></div>
+        <div className="flex items-center gap-2"><button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">{t("上一页")}</button><button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">{t("下一页")}</button></div>
       </div>
-      {data && data.partialSources.length > 0 ? <aside role="status" className="mx-4 mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-900 sm:mx-6">安全查询上限提示：{data.partialSources.map((value) => SYSTEM_FAILURE_INBOX_SOURCE_LABELS[value]).join("、")} 仅展示受控上限内的部分结果，不是完整清单；请结合实时测量时间继续复核。</aside> : null}
+      {data && data.partialSources.length > 0 ? <aside role="status" className="mx-4 mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-900 sm:mx-6">{t("安全查询上限提示：")} {data.partialSources.map((value) => t(SYSTEM_FAILURE_INBOX_SOURCE_LABELS[value])).join(", ")} {t("仅展示受控上限内的部分结果，不是完整清单；请结合实时测量时间继续复核。")}</aside> : null}
       <div aria-live="polite">
-        {loading ? <div className="px-6 py-16 text-center text-sm text-slate-500">正在读取安全异常…</div> : error ? <div role="alert" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700">{error}</p><p className="mt-2 text-xs text-slate-500">请刷新页面或缩小筛选范围。</p></div> : data?.entries.length === 0 ? <div className="px-6 py-16 text-center text-sm text-slate-500">当前测量没有符合条件的异常。</div> : <div className="grid gap-4 p-4 sm:p-6">{data?.entries.map((entry) => <FailureEntryCard key={entry.entryId} entry={entry} />)}</div>}
+        {loading ? <div className="px-6 py-16 text-center text-sm text-slate-500">{t("正在读取安全异常…")}</div> : error ? <div role="alert" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700">{t(error)}</p><p className="mt-2 text-xs text-slate-500">{t("请刷新页面或缩小筛选范围。")}</p></div> : data?.entries.length === 0 ? <div className="px-6 py-16 text-center text-sm text-slate-500">{t("当前测量没有符合条件的异常。")}</div> : <div className="grid gap-4 p-4 sm:p-6">{data?.entries.map((entry) => <FailureEntryCard key={entry.entryId} entry={entry} />)}</div>}
       </div>
     </section>
   </div>;
 }
 
 function FailureEntryCard({ entry }: { entry: SystemFailureInboxEntry }) {
+  const { language, t } = useAppearance();
   return <article className="rounded-2xl border border-slate-200 bg-slate-50 p-5" tabIndex={0} aria-labelledby={`failure-entry-${entry.entryId}`}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">{SYSTEM_FAILURE_INBOX_SOURCE_LABELS[entry.source]}</p>
-        <h3 id={`failure-entry-${entry.entryId}`} className="mt-2 text-base font-semibold text-slate-950">{entry.responsibility}</h3>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">{t(SYSTEM_FAILURE_INBOX_SOURCE_LABELS[entry.source])}</p>
+        <h3 id={`failure-entry-${entry.entryId}`} className="mt-2 text-base font-semibold text-slate-950">{t(entry.responsibility)}</h3>
       </div>
-      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${lifecycleTone(entry.lifecycle)}`}>{SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS[entry.lifecycle]}</span>
+      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${lifecycleTone(entry.lifecycle)}`}>{t(SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS[entry.lifecycle])}</span>
     </div>
     <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-      <div><dt className="text-xs font-semibold text-slate-500">发生时间</dt><dd className="mt-1 text-slate-800">{formatDate(entry.occurredAt)}</dd></div>
-      <div><dt className="text-xs font-semibold text-slate-500">安全错误码</dt><dd className="mt-1 font-mono text-xs text-slate-800">{entry.safeErrorCode}</dd></div>
-      <div><dt className="text-xs font-semibold text-slate-500">责任范围</dt><dd className="mt-1 text-slate-800">{entry.responsibility}</dd></div>
+      <div><dt className="text-xs font-semibold text-slate-500">{t("发生时间")}</dt><dd className="mt-1 text-slate-800">{formatDate(entry.occurredAt, language)}</dd></div>
+      <div><dt className="text-xs font-semibold text-slate-500">{t("安全错误码")}</dt><dd className="mt-1 font-mono text-xs text-slate-800">{entry.safeErrorCode}</dd></div>
+      <div><dt className="text-xs font-semibold text-slate-500">{t("责任范围")}</dt><dd className="mt-1 text-slate-800">{t(entry.responsibility)}</dd></div>
     </dl>
     <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-sm leading-6 sm:grid-cols-2">
-      <div><p className="text-xs font-semibold text-slate-500">安全原因</p><p className="mt-1 text-slate-700">{entry.reason}</p></div>
-      <div><p className="text-xs font-semibold text-slate-500">唯一下一步</p><p className="mt-1 text-slate-700">{entry.nextStep}</p>{entry.destination ? <Link href={entry.destination} className="mt-3 inline-flex rounded-xl bg-indigo-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">打开安全入口</Link> : <p className="mt-3 text-xs text-slate-500">当前管理员没有可安全打开的详情入口。</p>}</div>
+      <div><p className="text-xs font-semibold text-slate-500">{t("安全原因")}</p><p className="mt-1 text-slate-700">{t(entry.reason)}</p></div>
+      <div><p className="text-xs font-semibold text-slate-500">{t("唯一下一步")}</p><p className="mt-1 text-slate-700">{t(entry.nextStep)}</p>{entry.destination ? <Link href={entry.destination} className="mt-3 inline-flex rounded-xl bg-indigo-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("打开安全入口")}</Link> : <p className="mt-3 text-xs text-slate-500">{t("当前管理员没有可安全打开的详情入口。")}</p>}</div>
     </div>
   </article>;
 }

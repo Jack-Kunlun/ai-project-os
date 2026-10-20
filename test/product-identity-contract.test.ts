@@ -10,8 +10,9 @@ const FORMAL_IDENTITY_FILES = [
 ] as const;
 
 test("formal product identity stays stable while diagnostic version remains explicit", async () => {
-  const [appHeader, publicInfoPage, layout, terms, health, systemOverview] = await Promise.all([
+  const [appHeader, publicInfoPage, layout, terms, shell, health, systemOverview] = await Promise.all([
     ...FORMAL_IDENTITY_FILES.map((path) => readFile(path, "utf8")),
+    readFile("src/components/user-shell.tsx", "utf8"),
     readFile("src/app/api/health/route.ts", "utf8"),
     readFile("src/lib/system-overview.ts", "utf8"),
   ]);
@@ -21,7 +22,7 @@ test("formal product identity stays stable while diagnostic version remains expl
     assert.doesNotMatch(source, /APP_VERSION|0\.2\.0-dev/u);
   }
 
-  assert.match(appHeader, /AI PROJECT OS/u);
+  assert.match(shell, /AI Project OS/u);
   assert.match(publicInfoPage, /AI PROJECT OS/u);
   assert.match(layout, /title: "AI Project OS"/u);
   assert.match(terms, /版本与部署验证/u);

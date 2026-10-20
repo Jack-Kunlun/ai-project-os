@@ -79,7 +79,7 @@ test("materials workspace has source, intake, review, and unified question route
   assert.match(review, /确认进入已确认事实/u);
   assert.match(detail, /safeMaterialsReturnTo/u);
   assert.match(detail, /返回原始资料/u);
-  assert.match(detail, />原始资料<\/span>/u);
+  assert.match(detail, /<UiText text=\{"原始资料"\} \/>/u);
   assert.doesNotMatch(detail, />候选资料<\/span>/u);
   assert.match(overview, /"materialsReview"/u);
   assert.doesNotMatch(overview, /materials#review-queue/u);

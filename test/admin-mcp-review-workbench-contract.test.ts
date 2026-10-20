@@ -10,11 +10,12 @@ test("管理员 MCP 页面由服务器守住权限并挂载审核工作台", asy
   ]);
   assert.match(page, /requireSystemAdminPage/u);
   assert.match(page, /McpReviewWorkbench/u);
-  assert.match(layout, /AdminHeader/u);
+  assert.match(shell, /AdminHeader/u);
+  const navigation = await readFile("src/lib/admin-navigation.ts", "utf8");
   assert.match(layout, /AdminAppShell/u);
-  assert.match(shell, /key: "security",\s*label: "安全中心"/u);
-  assert.match(shell, /href: "\/admin\/connectors\/mcp"/u);
-  assert.match(shell, /label: "MCP 审核"/u);
+  assert.match(navigation, /key: "services",\s*label: "服务与接入"/u);
+  assert.match(navigation, /href: "\/admin\/connectors\/mcp"/u);
+  assert.match(navigation, /label: "MCP 审核"/u);
 });
 
 test("MCP 审核工作台只消费净化候选 API，不暴露连接材料或动作入口", async () => {

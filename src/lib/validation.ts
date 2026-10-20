@@ -12,6 +12,7 @@ const projectSlugSchema = z
 const projectDescriptionSchema = z.string().trim().max(2000, "description is too long");
 
 export const createProjectSchema = z.object({
+  workspaceId: z.uuid().optional(),
   name: projectNameSchema,
   slug: projectSlugSchema.optional(),
   description: projectDescriptionSchema.optional(),

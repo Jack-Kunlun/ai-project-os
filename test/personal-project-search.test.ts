@@ -210,7 +210,8 @@ test("project search route and panel keep selected project scope explicit", asyn
   assert.match(route, /assertSameOrigin/u);
   assert.match(route, /parsePersonalProjectSearchInput/u);
   assert.match(route, /cache-control/u);
-  assert.match(panel, /最多 \{MAX_SELECTED_PROJECTS\} 个项目/u);
+  assert.match(panel, /最多"\}.*\{MAX_SELECTED_PROJECTS\}.*"个项目"/u);
+  assert.match(panel, /current\.length >= MAX_SELECTED_PROJECTS/u);
   assert.match(panel, /projectIds: selectedIds/u);
   assert.match(panel, /全部可访问的未归档项目/u);
   assert.match(panel, /本次搜索时仍有权访问的未归档项目/u);

@@ -97,8 +97,9 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
   assert.match(docs["src/app/admin/guide/page.tsx"], /用户、会员与额度/u);
   assert.match(docs["src/app/admin/guide/page.tsx"], /成功条件：/u);
   assert.match(docs["src/app/admin/guide/page.tsx"], /常见阻塞：/u);
-  assert.match(docs["src/components/admin-shell.tsx"], /key: "users",\s*label: "用户与权益"/u);
-  assert.match(docs["src/components/admin-shell.tsx"], /href: "\/admin\/users"/u);
+  const navigation = await readFile("src/lib/admin-navigation.ts", "utf8");
+  assert.match(navigation, /key: "users",\s*label: "用户与用量"/u);
+  assert.match(navigation, /href: "\/admin\/users"/u);
   assert.doesNotMatch(docs["src/app/admin/models/platform-credit-governance-client.tsx"] ?? "", /Grant 明细/u);
 
   const currentRelease = docs["docs/releases/v0.4.0-dev.1.md"];

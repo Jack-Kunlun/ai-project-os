@@ -1,10 +1,10 @@
 .root {
-  --shell-ink: #20242a;
-  --shell-secondary: #646a73;
-  --shell-line: #e5e7eb;
-  --shell-sidebar: #f7f8fa;
-  --shell-accent: #3566c9;
-  --shell-accent-bg: #edf3ff;
+  --shell-ink: var(--app-text);
+  --shell-secondary: var(--app-muted);
+  --shell-line: var(--app-border);
+  --shell-sidebar: var(--app-surface-soft);
+  --shell-accent: var(--app-accent);
+  --shell-accent-bg: var(--app-accent-soft);
   position: relative;
   z-index: 40;
   height: 59px;
@@ -52,9 +52,9 @@
   height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 5px;
+  border-radius: 6px;
   background: #333b48;
-  color: #fff;
+  color: var(--app-on-accent);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
@@ -74,17 +74,17 @@
   gap: 10px;
   border-radius: 6px;
   padding: 6px 10px;
-  color: #515a67;
+  color: var(--app-muted);
   font-size: 12px;
   font-weight: 450;
   text-decoration: none;
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: box-shadow 140ms ease;
 }
 
 .navLink:hover,
 .utilityLink:hover,
 .accountLink:hover {
-  background: #eceff3;
+  background: var(--app-surface-soft);
   color: var(--shell-ink);
 }
 
@@ -94,14 +94,14 @@
 .brand:focus-visible,
 .searchButton:focus-visible,
 .iconButton:focus-visible {
-  outline: 2px solid #7890b6;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
 
 .navLinkActive {
-  background: #eaf0fa;
-  color: #2c579d;
-  box-shadow: inset 2px 0 #3566c9;
+  background: var(--app-accent-soft);
+  color: var(--app-link);
+  box-shadow: inset 2px 0 var(--app-accent);
   font-weight: 500;
 }
 
@@ -112,7 +112,7 @@
 
 .navLinkDisabled:hover {
   background: transparent;
-  color: #515a67;
+  color: var(--app-muted);
 }
 
 .icon {
@@ -135,7 +135,7 @@
 .sectionLabel {
   display: block;
   margin: 0 10px 7px;
-  color: #666f7a;
+  color: var(--app-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
@@ -147,9 +147,9 @@
   min-height: 35px;
   align-items: center;
   gap: 8px;
-  border: 1px solid #e1e5eb;
-  border-radius: 7px;
-  background: #fff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
   padding: 4px 8px;
 }
 
@@ -159,10 +159,10 @@
   height: 21px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid #cdd5df;
-  border-radius: 5px;
-  background: #eff2f6;
-  color: #636f80;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-soft);
+  color: var(--app-muted);
   font-size: 10px;
 }
 
@@ -173,20 +173,20 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #3d4652;
+  color: var(--app-text);
   font: inherit;
   font-size: 11px;
   text-overflow: ellipsis;
 }
 
 .projectPicker select:focus-visible {
-  outline: 2px solid #7890b6;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
   border-radius: 3px;
 }
 
 .projectPicker select:disabled {
-  color: #666f7a;
+  color: var(--app-muted);
   cursor: not-allowed;
 }
 
@@ -198,7 +198,7 @@
 .projectStatus {
   min-height: 16px;
   margin: 5px 3px 7px;
-  color: #666f7a;
+  color: var(--app-muted);
   font-size: 10px;
   line-height: 1.5;
 }
@@ -207,7 +207,7 @@
   margin: -2px 3px 8px;
   border-radius: 4px;
   padding: 2px 5px;
-  color: #3566c9;
+  color: var(--app-accent);
   font-size: 10px;
   text-align: left;
   text-decoration: underline;
@@ -215,7 +215,7 @@
 }
 
 .retryButton:focus-visible {
-  outline: 2px solid #7890b6;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
 
@@ -247,9 +247,9 @@
   min-height: 30px;
   align-items: center;
   gap: 6px;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 4px 5px;
-  color: #666f7c;
+  color: var(--app-muted);
   font-size: 10px;
   text-decoration: none;
 }
@@ -264,7 +264,7 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  border-top: 1px solid #e0e4eb;
+  border-top: 1px solid var(--app-border);
   border-radius: 0;
   padding: 11px 5px 1px;
   color: var(--shell-ink);
@@ -278,8 +278,8 @@
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
-  background: #e9edf3;
-  color: #536272;
+  background: var(--app-surface-soft);
+  color: var(--app-muted);
   font-size: 10px;
   font-weight: 600;
 }
@@ -287,7 +287,7 @@
 .accountLabel {
   min-width: 0;
   overflow: hidden;
-  color: #515a67;
+  color: var(--app-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -312,7 +312,7 @@
   justify-content: space-between;
   gap: 15px;
   border-bottom: 1px solid var(--shell-line);
-  background: rgb(255 255 255 / 96%);
+  background: var(--app-surface);
   padding: 0 30px;
   backdrop-filter: blur(12px);
 }
@@ -326,19 +326,19 @@
 
 .breadcrumb {
   gap: 9px;
-  color: #666f7a;
+  color: var(--app-muted);
   font-size: 11px;
 }
 
 .breadcrumbCurrent {
   overflow: hidden;
-  color: #515b68;
+  color: var(--app-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .breadcrumbDivider {
-  color: #6a7077;
+  color: var(--app-muted);
 }
 
 .topActions {
@@ -354,13 +354,13 @@
   border-radius: 6px;
   background: transparent;
   padding: 0 8px;
-  color: #666f7a;
+  color: var(--app-muted);
   font-size: 11px;
   transition: background-color 140ms ease, color 140ms ease;
 }
 
 .searchButton:hover {
-  background: #f7f8fa;
+  background: var(--app-surface-soft);
   color: var(--shell-ink);
 }
 
@@ -371,11 +371,11 @@
 
 .searchButton kbd,
 .searchInputWrap kbd {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--app-border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--app-surface);
   padding: 1px 4px;
-  color: #666f7a;
+  color: var(--app-muted);
   font-family: inherit;
   font-size: 9px;
   line-height: 1.4;
@@ -399,7 +399,7 @@
 }
 
 .iconButton:hover {
-  background: #edf0f5;
+  background: var(--app-surface-soft);
 }
 
 .mobileMenu,
@@ -427,9 +427,9 @@
   width: min(100%, 560px);
   max-height: min(72vh, 640px);
   overflow: hidden;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
-  background: #fff;
+  background: var(--app-surface);
   box-shadow: 0 22px 70px rgb(31 39 34 / 18%);
 }
 
@@ -450,7 +450,7 @@
 .searchDialogHeader p,
 .searchScopeNote {
   margin-top: 4px;
-  color: #666f7a;
+  color: var(--app-muted);
   font-size: 10px;
 }
 
@@ -460,14 +460,14 @@
   align-items: center;
   gap: 9px;
   margin: 0 18px;
-  border: 1px solid #dfe3e8;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
   padding: 0 10px;
-  color: #646f80;
+  color: var(--app-muted);
 }
 
 .searchInputWrap:focus-within {
-  border-color: #93a6c4;
+  border-color: var(--app-accent);
   box-shadow: 0 0 0 2px rgb(120 144 182 / 15%);
 }
 
@@ -488,7 +488,7 @@
 }
 
 .searchInputWrap input::placeholder {
-  color: #6a6f76;
+  color: var(--app-muted);
 }
 
 .searchScopeNote {
@@ -498,7 +498,7 @@
 .searchResults {
   max-height: min(49vh, 420px);
   overflow: auto;
-  border-top: 1px solid #edf0f4;
+  border-top: 1px solid var(--app-border);
   padding: 6px 8px 9px;
 }
 
@@ -516,9 +516,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 6px 10px;
-  color: #3d4652;
+  color: var(--app-text);
   font-size: 11px;
   text-decoration: none;
 }
@@ -526,13 +526,13 @@
 .searchResults a:hover,
 .searchResults a:focus-visible {
   outline: 0;
-  background: #f3f5f8;
-  color: #405b83;
+  background: var(--app-surface-soft);
+  color: var(--app-link);
 }
 
 .searchResults small {
   overflow: hidden;
-  color: #666f7a;
+  color: var(--app-muted);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -540,7 +540,7 @@
 
 .searchEmpty {
   padding: 19px 10px;
-  color: #666f7a;
+  color: var(--app-muted);
   font-size: 11px;
   text-align: center;
 }
@@ -613,3 +613,14 @@
     transition-duration: 0.01ms;
   }
 }
+/* Current prototype: visible project context, independent graph and header utilities. */
+.root{--shell-ink:var(--app-text);--shell-secondary:var(--app-muted);--shell-line:var(--app-border);--shell-sidebar:var(--app-surface-soft);--shell-accent:var(--app-accent);--shell-accent-bg:var(--app-accent-soft)}
+.topbar{background:var(--app-surface);backdrop-filter:none}
+.sidebar{padding:24px 16px 16px}.brandRow{margin-bottom:22px}.sectionLabel{margin:12px 10px 8px}.sidebarBottom{margin-top:12px;padding:0}.projectStatus{display:none}.projectNavigation{margin-top:14px}.sectionDivider{margin:20px 0 12px}.topActions{gap:12px}.navLink{min-height:34px}.globalNavigation{margin-top:4px}
+@media(max-width:760px){.topActions{gap:6px}.breadcrumb{max-width:38%;overflow:hidden}.topbar{padding:0 12px}.sidebar{padding-top:18px}}
+
+.workspaceCrumb{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}@media(max-width:940px){.workspaceCrumb{max-width:150px}}@media(max-width:700px){.workspaceCrumb{display:none}.workspaceCrumb+span{display:none}}
+
+.breadcrumbLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobileMenu, .breadcrumbDivider { flex-shrink: 0; }
+@media (max-width: 700px) { .breadcrumbCurrent, .breadcrumbLabel + .breadcrumbDivider { display: none; } }

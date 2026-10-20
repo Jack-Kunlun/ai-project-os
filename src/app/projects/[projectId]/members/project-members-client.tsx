@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
@@ -73,17 +74,17 @@ export function ProjectMembersClient({ projectId, username, isSystemAdmin, embed
     {dialog}
     <div className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10"}>
       {!embedded ? <div className="mb-5"><BackButton fallbackHref={`/projects/${projectId}`} /></div> : null}
-      {!embedded ? <h1 className="text-3xl font-semibold">成员权限</h1> : null}
-      <p className="mt-2 text-sm text-slate-600">查看当前项目的有效权限并管理显式授权；团队级账号与邀请在团队空间处理。</p>
+      {!embedded ? <h1 className="text-3xl font-semibold"><UiText text={"成员权限"} /></h1> : null}
+      <p className="mt-2 text-sm text-slate-600"><UiText text={"查看当前项目的有效权限并管理显式授权；团队级账号与邀请在团队空间处理。"} /></p>
       {error ? <p role="alert" className="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
-      {loading ? <p role="status" className="mt-7 text-sm text-slate-500">正在加载成员…</p> : payload ? <>
+      {loading ? <p role="status" className="mt-7 text-sm text-slate-500"><UiText text={"正在加载成员…"} /></p> : payload ? <>
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-5">
-          <div><h2 className="text-lg font-semibold">{payload.project.name}</h2><p className="mt-1 text-xs text-slate-500">{payload.canManage ? "你拥有当前项目的 Owner 权限，可为已有团队成员设置 Editor 或 Viewer 权限。" : "你可以查看当前项目已明确授权的成员。"}</p></div>
-          {payload.canManage ? <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">我的权限：Owner</span> : null}
-          {payload.canManage && payload.canManageWorkspace ? <Link href={`/team/${encodeURIComponent(payload.project.workspaceId)}?view=invitations`} className="rounded-xl border border-indigo-200 px-4 py-2.5 text-xs font-semibold text-indigo-700">邀请成员与创建账号 →</Link> : null}
+          <div><h2 className="text-lg font-semibold">{payload.project.name}</h2><p className="mt-1 text-xs text-slate-500">{payload.canManage ? <UiText text={"你拥有当前项目的 Owner 权限，可为已有团队成员设置 Editor 或 Viewer 权限。"} /> : <UiText text={"你可以查看当前项目已明确授权的成员。"} />}</p></div>
+          {payload.canManage ? <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700"><UiText text={"我的权限：Owner"} /></span> : null}
+          {payload.canManage && payload.canManageWorkspace ? <Link href={`/team/${encodeURIComponent(payload.project.workspaceId)}?view=invitations`} className="rounded-xl border border-indigo-200 px-4 py-2.5 text-xs font-semibold text-indigo-700"><UiText text={"邀请成员与创建账号 →"} /></Link> : null}
         </div>
-        {payload.truncated ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">团队成员选择列表只展示前 200 人；当前项目已有授权仍全部列出并可撤销。</p> : null}
-        {payload.members.length === 0 ? <p className="mt-6 rounded-md border border-dashed border-slate-200 bg-white p-8 text-sm text-slate-500">当前没有可显示的项目成员。</p> : <ul className="mt-5 grid gap-3 md:grid-cols-2">{payload.members.map((member) => <li key={member.userId} className="rounded-md border border-slate-200 bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{member.displayName || member.username}</h3><p className="mt-1 text-xs text-slate-500">@{member.username}{member.workspaceRole ? ` · 团队 ${member.workspaceRole}` : ""}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">有效权限：{member.inheritedOwner ? "Owner · 团队继承" : member.projectRole ?? "无项目权限"}</span></div>{member.inheritedOwner && member.projectRole ? <p className="mt-2 text-xs text-slate-500">另有显式项目授权：{member.projectRole}；团队继承权限优先。</p> : null}{payload.canManage && member.projectRole !== "owner" && !member.inheritedOwner ? <MemberRoleEditor key={member.membershipId ?? member.userId} member={member} disabled={pendingUserId !== null} error={operationError?.userId === member.userId ? operationError.message : null} onSave={(role) => save(member, role)} /> : null}</li>)}</ul>}
+        {payload.truncated ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800"><UiText text={"团队成员选择列表只展示前 200 人；当前项目已有授权仍全部列出并可撤销。"} /></p> : null}
+        {payload.members.length === 0 ? <p className="mt-6 rounded-md border border-dashed border-slate-200 bg-white p-8 text-sm text-slate-500"><UiText text={"当前没有可显示的项目成员。"} /></p> : <ul className="mt-5 grid gap-3 md:grid-cols-2">{payload.members.map((member) => <li key={member.userId} className="rounded-md border border-slate-200 bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{member.displayName || member.username}</h3><p className="mt-1 text-xs text-slate-500">@{member.username}{member.workspaceRole ? <> · <UiText text="团队" /> {member.workspaceRole}</> : ""}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600"><UiText text={"有效权限："} />{member.inheritedOwner ? <UiText text={"Owner · 团队继承"} /> : member.projectRole ?? <UiText text={"无项目权限"} />}</span></div>{member.inheritedOwner && member.projectRole ? <p className="mt-2 text-xs text-slate-500"><UiText text={"另有显式项目授权："} />{member.projectRole}<UiText text={"；团队继承权限优先。"} /></p> : null}{payload.canManage && member.projectRole !== "owner" && !member.inheritedOwner ? <MemberRoleEditor key={member.membershipId ?? member.userId} member={member} disabled={pendingUserId !== null} error={operationError?.userId === member.userId ? operationError.message : null} onSave={(role) => save(member, role)} /> : null}</li>)}</ul>}
       </> : null}
     </div>
   </RootElement>;
@@ -94,10 +95,10 @@ function MemberRoleEditor({ member, disabled, error, onSave }: { member: Member;
   const [open, setOpen] = useState(false);
   return <OperationPanel title={`编辑 @${member.username} 的项目权限`} triggerLabel="编辑权限" open={open} onOpenChange={setOpen} disabled={disabled} description="只修改当前项目的显式授权，变更原因和操作人会写入审计记录。">
     <div className="max-w-xl rounded-md border border-slate-200 bg-white p-5">
-      <label className="block text-sm font-semibold text-slate-700">项目权限<select value={role} onChange={(event) => setRole(event.target.value as typeof role)} disabled={disabled} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal"><option value="">不单独授权</option>{member.canGrant || member.projectRole === "viewer" ? <option value="viewer" disabled={!member.canGrant}>Viewer · 查看</option> : null}{member.canGrant || member.projectRole === "editor" ? <option value="editor" disabled={!member.canGrant}>Editor · 编辑</option> : null}</select></label>
-      {!member.canGrant ? <p className="mt-3 text-xs text-amber-700">该成员已离开团队或账号停用，只能撤销现有项目授权。</p> : null}
+      <label className="block text-sm font-semibold text-slate-700"><UiText text={"项目权限"} /><select value={role} onChange={(event) => setRole(event.target.value as typeof role)} disabled={disabled} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal"><option value=""><UiText text={"不单独授权"} /></option>{member.canGrant || member.projectRole === "viewer" ? <option value="viewer" disabled={!member.canGrant}><UiText text={"Viewer · 查看"} /></option> : null}{member.canGrant || member.projectRole === "editor" ? <option value="editor" disabled={!member.canGrant}><UiText text={"Editor · 编辑"} /></option> : null}</select></label>
+      {!member.canGrant ? <p className="mt-3 text-xs text-amber-700"><UiText text={"该成员已离开团队或账号停用，只能撤销现有项目授权。"} /></p> : null}
       {error ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
-      <button type="button" disabled={disabled || (role || null) === member.projectRole} onClick={async () => { if (await onSave(role || null)) setOpen(false); }} className="mt-4 min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-semibold text-white disabled:opacity-50">保存权限</button>
+      <button type="button" disabled={disabled || (role || null) === member.projectRole} onClick={async () => { if (await onSave(role || null)) setOpen(false); }} className="mt-4 min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"保存权限"} /></button>
     </div>
   </OperationPanel>;
 }

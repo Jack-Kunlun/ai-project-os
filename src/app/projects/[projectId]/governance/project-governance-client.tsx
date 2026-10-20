@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
@@ -173,6 +174,7 @@ export function ProjectGovernanceSections({ projectId, navigation }: Readonly<{ 
  * header and hero; each usage/task panel has its own loading and error state.
  */
 export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: embeddedProjectId, navigation: embeddedNavigation, embedded = false }: ProjectGovernanceClientProps) {
+  const translateUi = useTranslate();
   const routeParams = useParams<{ projectId: string }>();
   const projectId = embeddedProjectId ?? routeParams.projectId;
   const router = useRouter();
@@ -343,47 +345,47 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
   const RootElement = embedded ? "section" : "main";
 
   return (
-    <RootElement aria-label={embedded ? "项目用量与任务运行" : undefined} className={embedded ? "text-slate-950" : "min-h-screen bg-[#f5f7fb] text-slate-950"}>
+    <RootElement aria-label={embedded ? translateUi("项目用量与任务运行") : undefined} className={embedded ? "text-slate-950" : "min-h-screen bg-[#f5f7fb] text-slate-950"}>
       {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="governance" isSystemAdmin={isSystemAdmin} /> : null}
       <div className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-10 sm:px-8 lg:px-10"}>
         {!embedded ? <section className="flex flex-wrap items-end justify-between gap-5 pb-8">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project management</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目管理</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">这里只处理状态治理、权限、动作审批、任务运行与模型路由等管理工作。项目计划和资料审核分别归入对应的独立入口。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600"><UiText text={"Project management"} /></p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]"><UiText text={"项目管理"} /></h1>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600"><UiText text={"这里只处理状态治理、权限、动作审批、任务运行与模型路由等管理工作。项目计划和资料审核分别归入对应的独立入口。"} /></p>
           </div>
-          <button type="button" onClick={() => void Promise.allSettled([reload(), fetchOperations()])} disabled={loading || operationsLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
+          <button type="button" onClick={() => void Promise.allSettled([reload(), fetchOperations()])} disabled={loading || operationsLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40"><UiText text={"刷新"} /></button>
         </section> : null}
 
-        {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
+        {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700"><UiText text={"← 返回来源页面"} /></Link> : null}
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
-        {!embedded ? <nav aria-label="项目管理功能" className="mb-8 grid gap-3 sm:grid-cols-3">
-          <Link href={`/projects/${projectId}/world`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">状态治理</span><span className="mt-1 block text-xs text-slate-500">管理事实关系、替代链与状态快照</span></Link>
-          <Link href={`/projects/${projectId}/actions`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">动作与审批</span><span className="mt-1 block text-xs text-slate-500">处理外部动作及人工审批</span></Link>
-          <Link href={`/projects/${projectId}/tools`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">工具权限</span><span className="mt-1 block text-xs text-slate-500">管理项目可使用的只读工具</span></Link>
+        {!embedded ? <nav aria-label={translateUi("项目管理功能")} className="mb-8 grid gap-3 sm:grid-cols-3">
+          <Link href={`/projects/${projectId}/world`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold"><UiText text={"状态治理"} /></span><span className="mt-1 block text-xs text-slate-500"><UiText text={"管理事实关系、替代链与状态快照"} /></span></Link>
+          <Link href={`/projects/${projectId}/actions`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold"><UiText text={"动作与审批"} /></span><span className="mt-1 block text-xs text-slate-500"><UiText text={"处理外部动作及人工审批"} /></span></Link>
+          <Link href={`/projects/${projectId}/tools`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold"><UiText text={"工具权限"} /></span><span className="mt-1 block text-xs text-slate-500"><UiText text={"管理项目可使用的只读工具"} /></span></Link>
         </nav> : null}
         {!embedded && (loading || summary === null) ? <div className="h-44 animate-pulse rounded-3xl bg-slate-200" /> : (
           <>
             {!embedded && summary !== null ? <section className="grid gap-4 md:grid-cols-3">
-              <Metric label="待人工收口" value={summary.jobs.reconciliationRequired} detail="结果未知且需要人工确认的任务" tone={summary.jobs.reconciliationRequired > 0 ? "amber" : "slate"} />
-              <Metric label="运行异常" value={summary.jobs.failed + summary.github.partial + summary.github.rateLimited + summary.github.unknown} detail={`失败任务 ${summary.jobs.failed} · 仓库风险 ${summary.github.partial + summary.github.rateLimited + summary.github.unknown}`} tone={summary.jobs.failed + summary.github.unknown > 0 ? "rose" : "slate"} />
-              <Metric label="语义索引" value={readinessLabels[summary.index.readiness] ?? summary.index.readiness} detail={`${summary.index.activeRecordCount} 条活动记忆`} tone={summary.index.compatible ? "emerald" : "amber"} />
+              <Metric label={translateUi("待人工收口")} value={summary.jobs.reconciliationRequired} detail="结果未知且需要人工确认的任务" tone={summary.jobs.reconciliationRequired > 0 ? "amber" : "slate"} />
+              <Metric label={translateUi("运行异常")} value={summary.jobs.failed + summary.github.partial + summary.github.rateLimited + summary.github.unknown} detail={`失败任务 ${summary.jobs.failed} · 仓库风险 ${summary.github.partial + summary.github.rateLimited + summary.github.unknown}`} tone={summary.jobs.failed + summary.github.unknown > 0 ? "rose" : "slate"} />
+              <Metric label={translateUi("语义索引")} value={translateUi(readinessLabels[summary.index.readiness] ?? summary.index.readiness)} detail={`${summary.index.activeRecordCount} 条活动记忆`} tone={summary.index.compatible ? "emerald" : "amber"} />
             </section> : null}
 
             <section id="ai-usage" className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
-                <SectionHeader eyebrow="AI routes & billing" title="AI 用量与计费" description="直接查看项目当前使用的模型路由、调用次数与 Token。供应商实际账单与本地调用审计分开显示。" border={false} />
-                <div className="flex flex-wrap items-center gap-3"><Link href={`/credits?projectId=${projectId}`} className="text-xs font-semibold text-indigo-700 hover:text-indigo-900">查看平台额度流水 →</Link><div className="flex rounded-xl bg-slate-100 p-1" aria-label="用量统计周期">{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}>{days} 天</button>)}</div></div>
+                <SectionHeader eyebrow="AI routes & billing" title={translateUi("AI 用量与计费")} description="直接查看项目当前使用的模型路由、调用次数与 Token。供应商实际账单与本地调用审计分开显示。" border={false} />
+                <div className="flex flex-wrap items-center gap-3"><Link href={`/credits?projectId=${projectId}`} className="text-xs font-semibold text-indigo-700 hover:text-indigo-900"><UiText text={"查看平台额度流水 →"} /></Link><div className="flex rounded-xl bg-slate-100 p-1" aria-label={translateUi("用量统计周期")}>{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}>{days} {" "}<UiText text={"天"} /></button>)}</div></div>
               </div>
-              {usageError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{usageError}<button type="button" onClick={() => void fetchUsage(usageDays)} className="ml-3 font-semibold underline">重试</button></p> : usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
+              {usageError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{usageError}<button type="button" onClick={() => void fetchUsage(usageDays)} className="ml-3 font-semibold underline"><UiText text={"重试"} /></button></p> : usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
                 <>
                   <div className="mt-6">
-                    <h3 className="text-sm font-semibold text-slate-800">当前 AI 路由</h3>
-                    {currentRoutes.length === 0 ? <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-5 text-xs text-slate-500">当前用量接口不返回实时路由；请前往 AI 工作台查看路由来源、承担方与就绪状态。</p> : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{currentRoutes.map((route) => (
+                    <h3 className="text-sm font-semibold text-slate-800"><UiText text={"当前 AI 路由"} /></h3>
+                    {currentRoutes.length === 0 ? <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-5 text-xs text-slate-500"><UiText text={"当前用量接口不返回实时路由；请前往 AI 工作台查看路由来源、承担方与就绪状态。"} /></p> : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{currentRoutes.map((route) => (
                       <article key={`${route.operation}:${route.providerConnectionId}`} className="rounded-2xl border border-slate-200 p-4">
-                        <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-800">{operationLabels[route.operation] ?? route.operation}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${route.providerStatus === "verified" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{route.providerStatus === "verified" ? "已验证" : route.providerStatus}</span></div>
+                        <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-800">{translateUi(operationLabels[route.operation] ?? route.operation)}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${route.providerStatus === "verified" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{route.providerStatus === "verified" ? <UiText text={"已验证"} /> : route.providerStatus}</span></div>
                         <p className="mt-3 text-sm font-semibold text-slate-700">{route.providerName}</p>
                         <p className="mt-1 break-all text-xs text-slate-500">{route.modelId}</p>
                       </article>
@@ -393,19 +395,19 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
                   <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5">
                     <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr]">
                       <div>
-                        <h3 className="text-sm font-semibold text-slate-800">供应商实际计费</h3>
-                        <p className="mt-2 text-xs leading-5 text-slate-600">本页的请求数与 Token 来自应用审计；实际扣费由供应商根据当次价格、缓存命中和计费时段结算。读取余额只会使用已保存的供应商凭据查询账户余额，不会发送项目资料。</p>
+                        <h3 className="text-sm font-semibold text-slate-800"><UiText text={"供应商实际计费"} /></h3>
+                        <p className="mt-2 text-xs leading-5 text-slate-600"><UiText text={"本页的请求数与 Token 来自应用审计；实际扣费由供应商根据当次价格、缓存命中和计费时段结算。读取余额只会使用已保存的供应商凭据查询账户余额，不会发送项目资料。"} /></p>
                       </div>
                       <div className="space-y-3">
-                        {routedProviders.length === 0 ? <p className="text-xs text-slate-500">当前接口未返回可用于余额查询的连接；实际账单请在对应供应商控制台核对。</p> : routedProviders.map((provider) => {
+                        {routedProviders.length === 0 ? <p className="text-xs text-slate-500"><UiText text={"当前接口未返回可用于余额查询的连接；实际账单请在对应供应商控制台核对。"} /></p> : routedProviders.map((provider) => {
                           const balance = providerBalances[provider.providerConnectionId];
                           return (
                             <article key={provider.providerConnectionId} className="rounded-xl border border-indigo-100 bg-white p-4">
-                              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{provider.providerName}</p><p className="mt-1 text-[12px] text-slate-400">账户余额 · 非项目成本分摊</p></div>{provider.balanceAvailable && canReadProviderBalance ? <button type="button" onClick={() => void refreshProviderBalance(provider.providerConnectionId)} disabled={billingPending !== null} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{billingPending === provider.providerConnectionId ? "读取中…" : balance ? "刷新余额" : "读取账户余额"}</button> : null}</div>
-                              {provider.balanceAvailable && !canReadProviderBalance ? <p className="mt-3 text-xs text-slate-500">项目 Owner 或工作区管理员可读取账户余额。</p> : null}
-                              {!provider.balanceAvailable ? <p className="mt-3 text-xs text-slate-500">该供应商暂不支持应用内余额查询，请在供应商控制台核对账单。</p> : null}
-                              {balance ? <div className="mt-3 space-y-2">{balance.balances.map((item) => <div key={item.currency} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs"><span className="text-slate-500">{item.currency} 可用余额</span><span className="font-semibold text-slate-800">{item.total} {item.currency}</span></div>)}<p className="text-[10px] text-slate-400">{balance.isAvailable ? "账户可正常调用" : "账户当前不可调用"} · 查询于 {formatDate(balance.fetchedAt)}</p></div> : null}
-                              {provider.providerKind === "deepseek" ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold"><a href="https://platform.deepseek.com/usage" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看实际用量</a><a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看官方价格</a></div> : null}
+                              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{provider.providerName}</p><p className="mt-1 text-[12px] text-slate-400"><UiText text={"账户余额 · 非项目成本分摊"} /></p></div>{provider.balanceAvailable && canReadProviderBalance ? <button type="button" onClick={() => void refreshProviderBalance(provider.providerConnectionId)} disabled={billingPending !== null} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{billingPending === provider.providerConnectionId ? <UiText text={"读取中…"} /> : balance ? <UiText text={"刷新余额"} /> : <UiText text={"读取账户余额"} />}</button> : null}</div>
+                              {provider.balanceAvailable && !canReadProviderBalance ? <p className="mt-3 text-xs text-slate-500"><UiText text={"项目 Owner 或工作区管理员可读取账户余额。"} /></p> : null}
+                              {!provider.balanceAvailable ? <p className="mt-3 text-xs text-slate-500"><UiText text={"该供应商暂不支持应用内余额查询，请在供应商控制台核对账单。"} /></p> : null}
+                              {balance ? <div className="mt-3 space-y-2">{balance.balances.map((item) => <div key={item.currency} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs"><span className="text-slate-500">{item.currency} {" "}<UiText text={"可用余额"} /></span><span className="font-semibold text-slate-800">{item.total} {item.currency}</span></div>)}<p className="text-[10px] text-slate-400">{balance.isAvailable ? <UiText text={"账户可正常调用"} /> : <UiText text={"账户当前不可调用"} />} {" "}<UiText text={"· 查询于"} />{" "}{formatDate(balance.fetchedAt)}</p></div> : null}
+                              {provider.providerKind === "deepseek" ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold"><a href="https://platform.deepseek.com/usage" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4"><UiText text={"查看实际用量"} /></a><a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4"><UiText text={"查看官方价格"} /></a></div> : null}
                             </article>
                           );
                         })}
@@ -415,39 +417,39 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
                   </div>
 
                   <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <UsageMetric label="模型调用尝试" value={formatNumber(usage.totals.requestCount)} detail={`${formatNumber(usage.totals.recordCount)} 条审计/运行记录`} />
-                    <UsageMetric label="输入 Token" value={formatNumber(usage.totals.inputTokens)} detail={`周期始于 ${formatDate(usage.period.start)}`} />
-                    <UsageMetric label="输出 Token" value={formatNumber(usage.totals.outputTokens)} detail={`合计 ${formatNumber(usage.totals.totalTokens)} Token`} />
-                    <UsageMetric label="异常请求" value={formatNumber(usage.totals.failedRequests + usage.totals.unknownRequests)} detail={`失败 ${formatNumber(usage.totals.failedRequests)} · 未知 ${formatNumber(usage.totals.unknownRequests)}`} />
+                    <UsageMetric label={translateUi("模型调用尝试")} value={formatNumber(usage.totals.requestCount)} detail={`${formatNumber(usage.totals.recordCount)} 条审计/运行记录`} />
+                    <UsageMetric label={translateUi("输入 Token")} value={formatNumber(usage.totals.inputTokens)} detail={`周期始于 ${formatDate(usage.period.start)}`} />
+                    <UsageMetric label={translateUi("输出 Token")} value={formatNumber(usage.totals.outputTokens)} detail={`合计 ${formatNumber(usage.totals.totalTokens)} Token`} />
+                    <UsageMetric label={translateUi("异常请求")} value={formatNumber(usage.totals.failedRequests + usage.totals.unknownRequests)} detail={`失败 ${formatNumber(usage.totals.failedRequests)} · 未知 ${formatNumber(usage.totals.unknownRequests)}`} />
                   </div>
                   <div className="mt-6 grid gap-5 lg:grid-cols-2">
-                    <UsageList title="按供应商与模型" empty="当前周期没有模型调用。" items={usage.byProvider.map((entry) => ({ key: `${entry.source}:${entry.providerKind}:${entry.modelId}`, label: `${entry.providerName} · ${entry.modelId}`, detail: `${entry.source === "legacy" ? "旧运行台账" : entry.providerKind} · ${formatNumber(entry.requestCount)} 次`, value: `${formatNumber(entry.totalTokens)} Token` }))} />
-                    <UsageList title="按能力" empty="当前周期没有能力用量。" items={usage.byOperation.map((entry) => ({ key: entry.operation, label: operationLabels[entry.operation] ?? entry.operation, detail: `${formatNumber(entry.requestCount)} 次请求`, value: `${formatNumber(entry.totalTokens)} Token` }))} />
+                    <UsageList title={translateUi("按供应商与模型")} empty="当前周期没有模型调用。" items={usage.byProvider.map((entry) => ({ key: `${entry.source}:${entry.providerKind}:${entry.modelId}`, label: `${entry.providerName} · ${entry.modelId}`, detail: `${entry.source === "legacy" ? "旧运行台账" : entry.providerKind} · ${formatNumber(entry.requestCount)} 次`, value: `${formatNumber(entry.totalTokens)} Token` }))} />
+                    <UsageList title={translateUi("按能力")} empty="当前周期没有能力用量。" items={usage.byOperation.map((entry) => ({ key: entry.operation, label: translateUi(operationLabels[entry.operation] ?? entry.operation), detail: `${formatNumber(entry.requestCount)} 次请求`, value: `${formatNumber(entry.totalTokens)} Token` }))} />
                   </div>
-                  <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">{usage.pricing.reason}。这里展示可核对的请求与 Token，不把 Token 直接换算为金额。</p>
+                  <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">{usage.pricing.reason}<UiText text={"。这里展示可核对的请求与 Token，不把 Token 直接换算为金额。"} /></p>
                 </>
               )}
             </section>
 
             <details id="task-runs" tabIndex={-1} open className="group mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white shadow-sm outline-none focus:ring-4 focus:ring-indigo-100">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>任务运行记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开记录</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span><UiText text={"任务运行记录"} /></span><span className="text-xs font-medium text-slate-400 group-open:hidden"><UiText text={"展开记录"} /></span><span className="hidden text-xs font-medium text-slate-400 group-open:inline"><UiText text={"收起"} /></span></summary>
               <div className="border-t border-slate-100 p-6 sm:p-8">
-              <SectionHeader eyebrow="Recoverable operations" title="任务异常与人工收口" description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
-              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索任务记录</span><input value={operationSearch} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ search: value, cursor: null }); }} placeholder="搜索执行阶段或错误代码" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按任务类型筛选</span><select value={operationKind} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ kind: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部任务类型</option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按任务状态筛选</span><select value={operationStatus} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ status: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部状态</option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{statusLabels[value]}</option>)}</select></label></div>
-              {operationsError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{operationsError}<button type="button" onClick={() => void fetchOperations()} className="ml-3 font-semibold underline">重试</button></p> : operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => {
+              <SectionHeader eyebrow="Recoverable operations" title={translateUi("任务异常与人工收口")} description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
+              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only"><UiText text={"搜索任务记录"} /></span><input value={operationSearch} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ search: value, cursor: null }); }} placeholder={translateUi("搜索执行阶段或错误代码")} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only"><UiText text={"按任务类型筛选"} /></span><select value={operationKind} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ kind: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部任务类型"} /></option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></label><label><span className="sr-only"><UiText text={"按任务状态筛选"} /></span><select value={operationStatus} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ status: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部状态"} /></option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{translateUi(statusLabels[value])}</option>)}</select></label></div>
+              {operationsError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{operationsError}<button type="button" onClick={() => void fetchOperations()} className="ml-3 font-semibold underline"><UiText text={"重试"} /></button></p> : operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => {
                 const unknownOutcome = projectJobUnknownPresentation(operation);
                 return (
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{jobLabels[operation.kind] ?? operation.kind}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(operation.githubSync?.status ?? (unknownOutcome?.tone === "danger" ? "failed" : operation.status))}`}>{operation.githubSync ? statusLabels[operation.githubSync.status] ?? operation.githubSync.status : unknownOutcome?.label ?? statusLabels[operation.status] ?? operation.status}</span></div>
+                    <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{translateUi(jobLabels[operation.kind] ?? operation.kind)}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(operation.githubSync?.status ?? (unknownOutcome?.tone === "danger" ? "failed" : operation.status))}`}>{translateUi(operation.githubSync ? statusLabels[operation.githubSync.status] ?? operation.githubSync.status : unknownOutcome?.label ?? statusLabels[operation.status] ?? operation.status)}</span></div>
                     <p className="mt-2 text-xs text-slate-400">{formatDate(operation.createdAt)} · {unknownOutcome?.stageLabel ?? operation.stage}{operation.failureCode ? ` · ${operation.failureCode}` : ""}</p>
-                    {unknownOutcome ? <p className={`mt-2 text-xs leading-5 ${unknownOutcome.tone === "danger" ? "text-rose-700" : "text-amber-800"}`}>{unknownOutcome.summary}{operation.capability.reason === "specializedReconciliationRequired" ? "该旧式 GitHub 任务仍有子运行阻塞，当前只能查看，不能用通用对账关闭。" : unknownOutcome.recordNotice}</p> : null}
-                    {operation.githubSync ? <p className="mt-2 text-xs text-slate-500">GitHub：新增 {operation.githubSync.counts.added} · 更新 {operation.githubSync.counts.updated} · 删除 {operation.githubSync.counts.deleted} · 保留 {operation.githubSync.counts.withheld}</p> : null}
+                    {unknownOutcome ? <p className={`mt-2 text-xs leading-5 ${unknownOutcome.tone === "danger" ? "text-rose-700" : "text-amber-800"}`}>{unknownOutcome.summary}{operation.capability.reason === "specializedReconciliationRequired" ? <UiText text={"该旧式 GitHub 任务仍有子运行阻塞，当前只能查看，不能用通用对账关闭。"} /> : unknownOutcome.recordNotice}</p> : null}
+                    {operation.githubSync ? <p className="mt-2 text-xs text-slate-500"><UiText text={"GitHub：新增"} />{" "}{operation.githubSync.counts.added} {" "}<UiText text={"· 更新"} />{" "}{operation.githubSync.counts.updated} {" "}<UiText text={"· 删除"} />{" "}{operation.githubSync.counts.deleted} {" "}<UiText text={"· 保留"} />{" "}{operation.githubSync.counts.withheld}</p> : null}
                     {operation.githubSync?.warnings.length ? <p className="mt-2 text-xs leading-5 text-amber-700">{operation.githubSync.warnings.join(" · ")}</p> : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link href={buildProjectHref(projectId, "job", { jobId: operation.id, search: operationSearch, kind: operationKind, status: operationStatus, cursor: operationCursor, focus: "task-runs", from: embedded ? "overview" : "governance", returnTo: navigation.returnTo })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">查看详情</Link>
-                    {operation.capability.action ? <button type="button" onClick={() => void actOnJob(operation)} disabled={pending !== null} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 disabled:opacity-40">{pending === `${operation.id}:${operation.capability.action}` ? "处理中…" : operation.capability.action === "reconcile" ? "人工收口" : "取消任务"}</button> : null}
+                    <Link href={buildProjectHref(projectId, "job", { jobId: operation.id, search: operationSearch, kind: operationKind, status: operationStatus, cursor: operationCursor, focus: "task-runs", from: embedded ? "overview" : "governance", returnTo: navigation.returnTo })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"><UiText text={"查看详情"} /></Link>
+                    {operation.capability.action ? <button type="button" onClick={() => void actOnJob(operation)} disabled={pending !== null} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 disabled:opacity-40">{pending === `${operation.id}:${operation.capability.action}` ? <UiText text={"处理中…"} /> : operation.capability.action === "reconcile" ? <UiText text={"人工收口"} /> : <UiText text={"取消任务"} />}</button> : null}
                   </div>
                 </article>
               ); })}</div>}

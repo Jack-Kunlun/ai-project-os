@@ -13,26 +13,27 @@ import {
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 
-test("global user navigation exposes the four confirmed direct destinations", () => {
+test("global user navigation exposes the five confirmed direct destinations", () => {
   assert.deepEqual(USER_GLOBAL_NAVIGATION.map(({ key, href }) => [key, href]), [
     ["dashboard", "/dashboard"],
     ["ask", "/ask"],
     ["projects", "/personal/projects"],
     ["knowledge", "/personal/knowledge"],
+    ["graph", "/personal/knowledge/graph"],
   ]);
   assert.equal(getActiveGlobalNavigation("/ask"), "ask");
-  assert.equal(getActiveGlobalNavigation("/personal/knowledge/graph"), "knowledge");
+  assert.equal(getActiveGlobalNavigation("/personal/knowledge/graph"), "graph");
   assert.equal(getActiveGlobalNavigation("/projects"), "projects");
 });
 
 test("project shell keeps all six direct destinations on their real route paths", () => {
   assert.deepEqual(USER_PROJECT_NAVIGATION.map(({ key }) => key), [
-    "plan", "materials", "overview", "intelligence", "automations", "governance",
+    "overview", "plan", "materials", "intelligence", "automations", "governance",
   ]);
   assert.deepEqual(USER_PROJECT_NAVIGATION.map(({ key }) => getProjectNavigationHref(projectId, key)), [
+    `/projects/${projectId}`,
     `/projects/${projectId}/plan`,
     `/projects/${projectId}/materials`,
-    `/projects/${projectId}`,
     `/projects/${projectId}/intelligence`,
     `/projects/${projectId}/automations`,
     `/projects/${projectId}/governance`,

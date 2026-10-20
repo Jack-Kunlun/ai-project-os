@@ -35,8 +35,8 @@ test("high-growth project lists use server pagination with search and filters", 
   ]);
   for (const client of [projects, materials, assets, webSources, actions]) {
     assert.match(client, /ListPagination/u);
-    assert.match(client, /placeholder="搜索/u);
   }
+  assert.match(projects, /placeholder=\{t\("搜索项目"\)\}/u);
   assert.match(governance, /CursorPagination/u);
   assert.match(governance, /搜索任务记录/u);
   assert.match(governance, /AI 用量与计费/u);

@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import { getDb } from "@/lib/db";
 import { deleteArchivedProject, updateProjectLifecycle } from "@/lib/project-lifecycle";
 import { seedBrowserPersonalUser, type BrowserPersonalUser } from "./support/browser-fixtures";
+import { signOutR02User } from "./support/r02-admin-navigation";
 
 const BROWSER_ADMIN_PASSWORD = "BrowserGate2026Password!";
 
@@ -23,7 +24,7 @@ async function signInBrowserPersonalUser(page: Page): Promise<BrowserPersonalUse
   }
   await expect(page).toHaveURL(/\/admin$/u);
   const personalUser = await seedBrowserPersonalUser(`browser-confirmation-${randomUUID().replaceAll("-", "").slice(0, 12)}`, "BrowserPersonal2026Password!");
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await expect(page).toHaveURL(/\/login$/u);
   await page.getByLabel("用户名或手机号", { exact: true }).fill(personalUser.username);
   await page.getByLabel("密码", { exact: true }).fill(personalUser.password);

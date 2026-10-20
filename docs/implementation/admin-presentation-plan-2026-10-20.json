@@ -1,0 +1,103 @@
+{
+  "status": "accepted_local",
+  "task": "S4",
+  "risk": "high",
+  "objective": "Align the existing admin UI with the accepted prototype and the shared language/theme model, after the accepted user interaction checkpoint.",
+  "prerequisite": "user-polish-acceptance.json accepted_local",
+  "scope": [
+    "Admin shell/header/navigation/page presentation",
+    "Admin static UI text, placeholders, aria labels, safe error labels and display dates",
+    "Shared presentation-only hints and primary hover colors",
+    "Production-client cache-group boundaries for duplicated admin presentation modules"
+  ],
+  "constraints": [
+    "No API/schema/permission/billing/provider/consent/execution change",
+    "Keep every existing real operation and all safe preview/confirmation boundaries",
+    "No dependencies; only the user-accepted total-static allowance850->852KiB, all other budgets unchanged; no commit/push/deploy",
+    "Preserve unrelated work"
+  ],
+  "slices": [
+    {
+      "observable": "Direct grouped destinations, compact header and working responsive navigation match the prototype",
+      "owner": "root",
+      "allowed": "Admin layout/shell/header/navigation/style modules",
+      "stop": "Any auth/permission contract change required",
+      "status": "accepted_local"
+    },
+    {
+      "observable": "Existing admin pages and operation surfaces switch Chinese/English using the existing provider",
+      "owner": "implement",
+      "allowed": "Assigned admin and legacy admin UI clients plus one dictionary module",
+      "stop": "Business or payload changes required",
+      "status": "accepted_local"
+    },
+    {
+      "observable": "User regression, admin four-theme/language screenshots and relevant operation surfaces pass on the exact candidate image",
+      "owner": "root",
+      "allowed": "UI contracts/E2E/evidence",
+      "stop": "A reproducible failure; fix only its demonstrated cause",
+      "status": "accepted_local"
+    }
+  ],
+  "verification_budget": {
+    "targeted": "Navigation/dictionary/UI contracts and changed-file lint",
+    "required": "Default coverage, affected type/build/performance, isolated authenticated browser and same-image candidate",
+    "database": "Reuse the unchanged 91 groups/149-migration OID10/11 auth checks unless a server business or access boundary changes",
+    "review_max": 1,
+    "expand_only_on": "Concrete regression, required server/API/schema change, or a demonstrated build-budget issue",
+    "build": "One final candidate with approved852KiB total-static budget, unchanged critical-route and other budgets; authenticated browser and same-image Compose. Repeat only on measured failure."
+  },
+  "progress": {
+    "root": "Direct grouped navigation, header/account/search, common fields/portal geometry and safe raw-title support implemented;24 existing admin/doc contracts and new raw-title +language-key contracts passed, focused lint clean. User Git/MCP portal leak found in live preview and fixed in sources, pending combined candidate.",
+    "worker": "Completed17 assigned TSX files; focused lint, semantic fetch/confirmation diff and enum/method comparison passed. Last edit before freeze included in root checks.",
+    "additionalClientFinding": "SMS native editor needs backdrop pointer-start/end close; root applies after worker handoff.",
+    "browserMatrix": "4 language/theme cases across14 admin routes plus real seeded user detail, account operation, model/SMS editors, search/account and390px navigation.",
+    "dictionary": "Final hashed English resource en.ad28670d0ec94cd7.json; literal and catalog coverage contracts passed.",
+    "integration": "Runtime source coverage passed1628 tests (1456 pass,172 isolated skips); final lint/type checks passed. Initial admin image built but exceeded two performance budgets.",
+    "independent_review": "Completed read-only review of next.config.ts hash845f51be020b90ba35a15be3e2f9b82548751e3ebc091ee43d6f014e36966716: no establishedP1/P2; final image measurement and interaction checks pending.",
+    "build_resource_retry": "The optimized build remained at compilation for over10 minutes while Docker swap was nearly exhausted (1MiB free of1GiB). Canceled only this task build and reduced ignored local builder heap4096->3072MiB; shipping Dockerfile and runtime config unchanged.",
+    "diagnosticBrowser": "Candidate111d3a diagnostic suite28/36 passed; discovered narrow avatar target, Chinese audit punctuation, untranslated guide body, early SMS readiness and outdated unconditional desktop-scroll assertion. Sources/tests corrected; no diagnostics count as final acceptance.",
+    "incrementalBundle": "Measured853.5/850KiB and162.2/160KiB; modal styles separated from confirmation component and duplicated Next client lazy-loading runtime grouped. Same independent reviewer completed final incremental static review; all26 targeted contracts and changed-file lint/type checks passed.",
+    "finalRemediation": "Removed the unhelpful framework extraction group. React.lazy now loads only opened admin header dialogs;27 input classes from4 styled-jsx blocks moved to static CSS module. Backups initial render uses a deterministic hydration zone, followed by browser timezone; audit labels retain proper language-specific spacing. Axe waits finite real color/opacity transitions before measurement; thresholds remain unchanged.",
+    "diagnosticBrowser2": "30/37 passed on candidate; four cases reached the full route matrix then detected backup hydration error; remaining failures from audit prefix whitespace and transient CSS colors. SMS captcha fixture loaded/retried/closed without provider calls. Final source/image checks pending.",
+    "localBuildHeapFailure": "Final source lint/type/default coverage passed; Docker type checker exhausted3072MiB heap at375s. Task-only retry restores4096MiB and sets CIRCLE_NODE_TOTAL=2, supported by installed Next16.3.8 config-shared.js:218, to limit build workers to1. Shipping Dockerfile unchanged; candidate remains local and release-ineligible.",
+    "userBudgetDecision": "2026-10-20: user accepts851.4/850KiB small excess; total static allowance increased by2KiB to852KiB. No more chunk extraction for this difference; unbuilt projectMembers group withdrawn.",
+    "pendingDialogFix": "AdminHeader pending search and mobile navigation mutually disabled; Ctrl+K checks pending navigation. WorkspaceDialog cleanup closes a connected native dialog to restore focus on unmount. Delayed real chunk browser regression added for both directions, Escape and close button.",
+    "diagnosticBrowser3": {
+      "status": "interrupted_after_measured_failure",
+      "result": "9 passed,5 failed,23 not run",
+      "findings": [
+        "Cold API responses4.7-8s exceed5s submission expectations; scoped waits increased to15s without changing result assertions",
+        "Large smoke journey reached notifications at its60s whole-test limit; budget increased to120s",
+        "Audit copy aria-label had an English separator in Chinese, causing exact label mismatch and300s locator wait; corrected language-specific separator"
+      ],
+      "evidence": "evidence/prototype-alignment/admin-local-candidate-browser-diagnostic.log",
+      "notAcceptance": true
+    },
+    "resourceCleanup": {
+      "userFeedback": "Too many images and stopped containers left behind",
+      "result": "8 unused containers,10 obsolete images,42 task cache records and13 old exported Next builds removed; Docker cache reclaimed12.01GB. Current3120 preview restored and healthy. No data volume or unrelated project resource deleted.",
+      "evidence": "evidence/prototype-alignment/docker-task-cleanup-acceptance.json"
+    },
+    "latestCandidate": {
+      "status": "accepted_local",
+      "sourceHash": "43f1e5e3fecf808fd5a696098862e86604451a808194ec9894e0007f4932aaf0",
+      "manifest": "evidence/prototype-alignment/release-images-ui-acceptance-final.json",
+      "build": "Final app-only concentrated build passed; existing worker/migration reused. See concentrated-ui-build-result.json for all diagnostic/failed invocations.",
+      "browser": "Final13/13 passed across four language/theme combinations,55 route patterns per combination; earlier37 unchanged passing behavior cases reused.",
+      "compose": "Reused passing 149-migration Compose/persistence proof for unchanged backend, plus fresh final-image authenticated browser startup.",
+      "performance": "All budgets passed;850.5/852KiB total static client.",
+      "preview": "3120 updated and healthy; DB/key/uploads/worker unchanged.",
+      "cleanup": "Temporary containers0; superseded candidates absent; task cache2.55GB reclaimed; shared caches and all data volumes preserved.",
+      "acceptance": "evidence/prototype-alignment/final-local-ui-acceptance.json",
+      "releaseProof": false
+    }
+  },
+  "risk_reason": "The first admin image exceeded unchanged total-static and SMS-route budgets; next.config.ts now extracts account/menu and admin presentation modules without changing server builds.",
+  "localArtifactPolicy": [
+    "Keep one current app/worker/migrate set; preserve existing active legacy environments",
+    "Reuse the frozen candidate for further browser/Compose verification; do not rebuild without a new runtime change or measured build failure",
+    "Remove exited task verification containers and unreferenced superseded candidate images after each run; scoped cache cleanup only, no global prune or data volume removal"
+  ],
+  "localAcceptance": "evidence/prototype-alignment/final-local-ui-acceptance.json"
+}

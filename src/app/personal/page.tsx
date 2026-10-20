@@ -1,7 +1,7 @@
 import { AppHeader } from "@/components/app-header";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { requirePageSession } from "@/lib/auth";
-import { PersonalOverviewClient } from "./personal-overview-client";
+import { PersonalOverviewClient } from "./personal-overview-loader";
 
 export const dynamic = "force-dynamic";
 

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
-import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin } from "./support/r02-admin-navigation";
+import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
 
 test("login keeps drafts and real authentication while fitting the platform on desktop and mobile", async ({ page }) => {
   await signInR02Admin(page);
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   const user = await seedBrowserPersonalUser(`browser-login-${randomUUID().slice(0, 10)}`, "BrowserLogin2026Password!");
   await page.goto("/login?returnTo=%2Fpersonal%2Fknowledge");
   await expect(page.getByRole("heading", { name: "登录 AI Project OS", exact: true })).toBeVisible();

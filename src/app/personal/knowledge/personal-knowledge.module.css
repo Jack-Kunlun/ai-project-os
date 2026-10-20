@@ -1,7 +1,7 @@
 .page {
   min-height: 100vh;
-  background: #fff;
-  color: #243041;
+  background: var(--app-surface);
+  color: var(--app-text);
 }
 
 .content {
@@ -23,12 +23,12 @@
   font-size: 25px;
   font-weight: 600;
   letter-spacing: -0.035em;
-  color: #253246;
+  color: var(--app-text);
 }
 
 .heading p {
   margin: 6px 0 0;
-  color: #646e7c;
+  color: var(--app-muted);
   font-size: 13px;
   line-height: 1.65;
 }
@@ -52,13 +52,13 @@
 }
 
 .page :global(.knowledge-question-links) {
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid var(--app-border);
   padding: 0 0 14px;
 }
 
 .page :global(.knowledge-question-label) {
   margin-right: 3px;
-  color: #646e7c;
+  color: var(--app-muted);
   font-size: 11px;
 }
 
@@ -66,24 +66,24 @@
   display: inline-flex;
   min-height: 33px;
   align-items: center;
-  border: 1px solid #dfe5ed;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--app-surface);
   padding: 6px 10px;
-  color: #496b9e;
+  color: var(--app-muted);
   font-size: 11px;
   font-weight: 550;
   text-decoration: none;
 }
 
 .page :global(.knowledge-question-link:hover) {
-  background: #f7f9fc;
-  border-color: #c8d5e8;
+  background: var(--app-accent-soft);
+  border-color: var(--app-border);
 }
 
 .page :global(.knowledge-next-steps) {
   margin-top: 16px;
-  border-top: 1px solid #edf0f4;
+  border-top: 1px solid var(--app-border);
   padding-top: 14px;
 }
 
@@ -94,11 +94,11 @@
   min-height: 36px;
   align-items: center;
   justify-content: center;
-  border: 1px solid #dfe5ed;
-  border-radius: 7px;
-  background: #fff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
   padding: 7px 12px;
-  color: #536176;
+  color: var(--app-muted);
   font-size: 12px;
   font-weight: 550;
   line-height: 1.4;
@@ -107,36 +107,36 @@
 }
 
 .button:hover {
-  border-color: #c8d5e8;
-  background: #f7f9fc;
-  color: #315b99;
+  border-color: var(--app-border);
+  background: var(--app-accent-soft);
+  color: var(--app-link);
 }
 
 .buttonPrimary {
-  border-color: #416cad;
-  background: #416cad;
-  color: #fff;
+  border-color: var(--app-accent);
+  background: var(--app-accent);
+  color: var(--app-on-accent);
 }
 
 .buttonPrimary:hover {
-  border-color: #345d98;
-  background: #345d98;
+  border-color: var(--app-accent);
+  background: var(--app-accent);
 }
 
 .buttonDanger {
-  border-color: #edd6d6;
-  color: #a64b4b;
+  border-color: var(--app-border);
+  color: var(--app-muted);
 }
 
 .buttonDanger:hover {
-  background: #fff6f6;
+  background: var(--app-danger-soft);
 }
 
 .tabs {
   display: flex;
   align-items: stretch;
   gap: 22px;
-  border-bottom: 1px solid #e6eaf0;
+  border-bottom: 1px solid var(--app-border);
   margin-bottom: 19px;
 }
 
@@ -149,7 +149,7 @@
   border-bottom: 2px solid transparent;
   background: transparent;
   padding: 0 2px;
-  color: #646e80;
+  color: var(--app-muted);
   font-size: 13px;
   font-weight: 500;
   text-decoration: none;
@@ -158,22 +158,22 @@
 
 .tab:hover,
 .tabLink:hover {
-  color: #315b99;
+  color: var(--app-link);
 }
 
 .activeTab {
-  border-bottom-color: #4b76b4;
-  color: #315b99;
+  border-bottom-color: var(--app-accent);
+  color: var(--app-link);
   font-weight: 600;
 }
 
 .notice {
   margin: 0 0 14px;
-  border: 1px solid #e0e8f4;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #f7f9fc;
+  background: var(--app-accent-soft);
   padding: 10px 12px;
-  color: #617085;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.65;
 }
@@ -196,25 +196,25 @@
 .searchInput {
   width: 100%;
   min-height: 38px;
-  border: 1px solid #dfe5ed;
-  border-radius: 7px;
-  background: #fff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
   padding: 8px 11px;
-  color: #334155;
+  color: var(--app-text);
   font-size: 13px;
   outline: none;
 }
 
 .searchInput:focus {
-  border-color: #7b9ac8;
+  border-color: var(--app-border);
   box-shadow: 0 0 0 3px #eaf0f8;
 }
 
 .list {
   overflow: hidden;
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
-  background: #fff;
+  background: var(--app-surface);
 }
 
 .row {
@@ -224,8 +224,8 @@
   justify-content: space-between;
   gap: 16px;
   border: 0;
-  border-bottom: 1px solid #edf0f4;
-  background: #fff;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface);
   padding: 14px 16px;
   text-align: left;
   cursor: pointer;
@@ -237,7 +237,7 @@
 
 .row:hover,
 .selectedRow {
-  background: #f8faff;
+  background: var(--app-surface);
 }
 
 .row:focus-visible,
@@ -246,7 +246,7 @@
 .buttonDanger:focus-visible,
 .tab:focus-visible,
 .tabLink:focus-visible {
-  outline: 3px solid #c8d9f0;
+  outline: 3px solid var(--app-border);
   outline-offset: 2px;
 }
 
@@ -258,7 +258,7 @@
 .rowTitle {
   display: block;
   overflow: hidden;
-  color: #344155;
+  color: var(--app-text);
   font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -269,7 +269,7 @@
   display: -webkit-box;
   overflow: hidden;
   margin-top: 5px;
-  color: #656e7b;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.55;
   -webkit-box-orient: vertical;
@@ -281,30 +281,30 @@
   flex-shrink: 0;
   align-items: center;
   gap: 9px;
-  color: #686f7c;
+  color: var(--app-muted);
   font-size: 11px;
   white-space: nowrap;
 }
 
 .memoryBadge {
   border-radius: 4px;
-  background: #eef3fa;
+  background: var(--app-accent-soft);
   padding: 3px 6px;
-  color: #52719c;
+  color: var(--app-muted);
   font-size: 10px;
 }
 
 .versionBadge {
-  color: #696f79;
+  color: var(--app-muted);
   font-size: 10px;
 }
 
 .empty {
-  border: 1px dashed #dce3ec;
+  border: 1px dashed var(--app-border);
   border-radius: 8px;
-  background: #fafbfd;
+  background: var(--app-surface);
   padding: 28px 16px;
-  color: #646f80;
+  color: var(--app-muted);
   text-align: center;
   font-size: 13px;
 }
@@ -315,26 +315,26 @@
   justify-content: space-between;
   gap: 12px;
   padding-top: 12px;
-  color: #666e7a;
+  color: var(--app-muted);
   font-size: 11px;
 }
 
 .feedback {
   margin: 12px 0;
-  border-radius: 7px;
+  border-radius: 6px;
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.55;
 }
 
 .feedbackError {
-  background: #fff5f5;
-  color: #a64444;
+  background: var(--app-danger-soft);
+  color: var(--app-muted);
 }
 
 .feedbackSuccess {
-  background: #f0f8f2;
-  color: #477450;
+  background: var(--app-success-soft);
+  color: var(--app-muted);
 }
 
 .detailDialog {
@@ -346,10 +346,10 @@
   margin: 0;
   overflow: hidden;
   border: 0;
-  border-left: 1px solid #e3e8ef;
-  background: #fff;
+  border-left: 1px solid var(--app-border);
+  background: var(--app-surface);
   padding: 0;
-  color: #293548;
+  color: var(--app-text);
   box-shadow: -14px 0 40px rgb(31 45 67 / 12%);
 }
 
@@ -369,11 +369,11 @@
   max-height: 90dvh;
   margin: auto;
   overflow: hidden;
-  border: 1px solid #e0e5ec;
+  border: 1px solid var(--app-border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--app-surface);
   padding: 0;
-  color: #293548;
+  color: var(--app-text);
   box-shadow: 0 22px 64px rgb(31 45 67 / 18%);
 }
 
@@ -401,21 +401,21 @@
 
 .searchTools {
   margin-top: 4px;
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
-  background: #fff;
+  background: var(--app-surface);
   padding: 20px;
 }
 
 .searchTools h2 {
   margin: 0;
-  color: #344155;
+  color: var(--app-text);
   font-size: 20px;
   font-weight: 600;
 }
 
 .searchTools p {
-  color: #656e7b;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -433,13 +433,13 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid var(--app-border);
   padding: 18px 22px;
 }
 
 .knowledgeDialog :global(.knowledge-editor-header) h2 {
   margin: 0;
-  color: #344155;
+  color: var(--app-text);
   font-size: 19px;
   font-weight: 600;
 }
@@ -447,10 +447,10 @@
 .knowledgeDialog :global(.knowledge-editor-intro) {
   flex-shrink: 0;
   margin: 14px 22px 0;
-  border-radius: 7px;
-  background: #f6f8fb;
+  border-radius: 6px;
+  background: var(--app-surface-soft);
   padding: 10px 12px;
-  color: #616f82;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -465,7 +465,7 @@
 .knowledgeDialog :global(.knowledge-editor-field) {
   display: block;
   margin-bottom: 17px;
-  color: #526176;
+  color: var(--app-muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -475,11 +475,11 @@
   display: block;
   width: 100%;
   margin-top: 7px;
-  border: 1px solid #dfe5ed;
-  border-radius: 7px;
-  background: #fff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
   padding: 9px 11px;
-  color: #334155;
+  color: var(--app-text);
   font-size: 13px;
   font-weight: 400;
   outline: none;
@@ -492,7 +492,7 @@
 
 .knowledgeDialog :global(.knowledge-editor-field) input:focus,
 .knowledgeDialog :global(.knowledge-editor-field) textarea:focus {
-  border-color: #7b9ac8;
+  border-color: var(--app-border);
   box-shadow: 0 0 0 3px #eaf0f8;
 }
 
@@ -500,11 +500,11 @@
   display: flex;
   align-items: flex-start;
   gap: 9px;
-  border: 1px solid #e1e8f2;
-  border-radius: 7px;
-  background: #f8faff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
   padding: 11px 12px;
-  color: #596b83;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -523,35 +523,35 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  border-top: 1px solid #edf0f4;
-  background: rgb(255 255 255 / 96%);
+  border-top: 1px solid var(--app-border);
+  background: var(--app-surface);
   padding: 12px 22px;
 }
 
 .knowledgeDialog :global(.knowledge-editor-button),
 .knowledgeDialog :global(.knowledge-editor-submit) {
   min-height: 36px;
-  border: 1px solid #dfe5ed;
-  border-radius: 7px;
-  background: #fff;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
   padding: 7px 12px;
-  color: #536176;
+  color: var(--app-muted);
   font-size: 12px;
   font-weight: 550;
 }
 
 .knowledgeDialog :global(.knowledge-editor-submit) {
-  border-color: #416cad;
-  background: #416cad;
-  color: #fff;
+  border-color: var(--app-accent);
+  background: var(--app-accent);
+  color: var(--app-on-accent);
 }
 
 .knowledgeDialog :global(.knowledge-editor-button:hover) {
-  background: #f7f9fc;
+  background: var(--app-accent-soft);
 }
 
 .knowledgeDialog :global(.knowledge-editor-submit:hover) {
-  background: #345d98;
+  background: var(--app-accent);
 }
 
 .knowledgeDialog :global(.knowledge-editor-button:disabled),
@@ -608,10 +608,10 @@
 
 .knowledgeDialog :global(.knowledge-editor-error) {
   width: 100%;
-  border-radius: 7px;
-  background: #fff5f5;
+  border-radius: 6px;
+  background: var(--app-danger-soft);
   padding: 9px 11px;
-  color: #a64444;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.5;
 }

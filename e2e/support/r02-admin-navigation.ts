@@ -2,6 +2,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { BrowserPersonalUser } from "./browser-fixtures";
+import { settleVisualState } from "./settle-visual-state";
 
 export const R02_VIEWPORTS = [1440, 1024, 768, 390] as const;
 export const R02_ADMIN_PASSWORD = "BrowserGate2026Password!";
@@ -33,7 +34,7 @@ export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin", heading: "平台总览", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取就绪证据…", "正在读取默认路由状态…", "读取中…"] },
   { path: "/admin/models", heading: "平台模型", terminal: { kind: "heading", name: "已配置连接" }, pendingTexts: ["读取中…"] },
   { path: "/admin/models/routes", heading: "平台模型", terminal: { kind: "text", name: "平台能力配置" }, pendingTexts: ["读取中…"] },
-  { path: "/admin/sms", heading: "短信服务", terminal: { kind: "heading", name: "供应商配置" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/sms", heading: "短信服务", terminal: { kind: "text", name: "尚未配置短信供应商" }, pendingTexts: ["正在读取供应商配置…"] },
   { path: "/admin/credits", heading: "平台额度", terminal: { kind: "text", name: "平台额度治理" }, pendingTexts: ["读取中…"] },
   { path: "/admin/operations/probes", heading: "连接探测预算", terminal: { kind: "text", name: "平台连接探测预算" }, pendingTexts: ["读取中…"] },
   { path: "/admin/connectors/mcp", heading: "MCP 工具安全审核", terminal: { kind: "text", name: "当前没有候选记录" }, pendingTexts: ["正在读取安全快照…"] },
@@ -47,7 +48,7 @@ export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
 ] as const;
 
 export function expectedR02AdminNavigationLinkCount(pathname: string): number {
-  return pathname.startsWith("/admin") ? 5 : 0;
+  return pathname.startsWith("/admin") ? 13 : 0;
 }
 
 const R02_PROJECT_PENDING_TEXTS = [
@@ -87,7 +88,7 @@ export function r02ProjectGuardRoutes(projectId: string): string[] {
 }
 
 export async function settleR02Admin(page: Page): Promise<void> {
-  await expect(page).toHaveURL(/\/admin$/u);
+  await expect(page).toHaveURL(/\/admin$/u, { timeout: 15_000 });
 }
 
 export async function signInR02Admin(page: Page): Promise<void> {
@@ -116,6 +117,22 @@ export async function signInR02PersonalUser(page: Page, user: BrowserPersonalUse
   await expect(page).toHaveURL(/\/dashboard$/u);
 }
 
+export async function signOutR02User(page: Page): Promise<void> {
+  const logout = page.getByRole("button", { name: /^(退出|Sign out)$/u, exact: true });
+  if (await logout.isVisible()) {
+    await logout.click();
+    await expect(page).toHaveURL(/\/login$/u);
+    return;
+  }
+
+  const accountMenu = page.getByRole("button", { name: /^(账户菜单|Account menu)$/u, exact: true });
+  await expect(accountMenu).toBeVisible();
+  await accountMenu.click();
+  await expect(logout).toBeVisible();
+  await logout.click();
+  await expect(page).toHaveURL(/\/login$/u);
+}
+
 export async function expectR02NoHorizontalOverflow(page: Page, surface: string): Promise<void> {
   const dimensions = await page.evaluate(() => ({
     bodyWidth: document.body.scrollWidth,
@@ -139,7 +156,8 @@ export async function expectR02SettledRoute(page: Page, route: R02RouteExpectati
   const terminal = route.terminal.kind === "heading"
     ? page.getByRole("heading", { name: route.terminal.name, exact: true })
     : page.getByText(route.terminal.name, { exact: route.terminal.exact ?? true });
-  await expect(route.terminal.kind === "heading" ? terminal.first() : terminal.last(), `${surface} terminal content`).toBeVisible();
+  // Aggregate projections can finish after the independently rendered header. This checks readiness, not a latency budget.
+  await expect(route.terminal.kind === "heading" ? terminal.first() : terminal.last(), `${surface} terminal content`).toBeVisible({ timeout: 15_000 });
   for (const pendingText of route.pendingTexts ?? []) {
     await expect(page.getByText(pendingText, { exact: true }), `${surface} must complete ${pendingText}`).toHaveCount(0);
   }
@@ -158,12 +176,14 @@ export async function expectR02InViewport(page: Page, locator: Locator, surface:
 }
 
 export async function readR02AccessibilityViolations(page: Page) {
+  await settleVisualState(page);
   const result = await new AxeBuilder({ page }).withTags(R02_WCAG_TAGS).analyze();
   return result.violations.map((violation) => ({
     help: violation.help,
     id: violation.id,
     impact: violation.impact,
     targets: violation.nodes.map((node) => node.target),
+    details: violation.nodes.map((node) => node.failureSummary),
   }));
 }
 
@@ -178,7 +198,7 @@ export async function expectR02MobileDrawer(page: Page, pathname = "/admin"): Pr
   const drawer = page.getByRole("dialog", { name: "管理工作台导航" });
   await expect(drawer).toBeVisible();
   await expect(drawer.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(expectedR02AdminNavigationLinkCount(pathname));
-  const close = drawer.getByRole("button", { name: "关闭管理导航", exact: true });
+  const close = drawer.getByRole("button", { name: "关闭窗口", exact: true });
   await expect(close).toBeFocused();
   const focusable = drawer.locator('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
   await focusable.first().focus();

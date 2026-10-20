@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useTranslate } from "@/components/appearance-provider";
 import { modalNativeBackdropClassName, modalSurfaceClassName } from "./modal-styles";
 
 export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test" | "recover" | "bind" | "change-old" | "change-new" | "verify" | "password";
@@ -33,6 +34,7 @@ async function readResponse(response: Response): Promise<unknown> {
 }
 
 export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purpose, onVerified, onOpenChange }: GraphicCaptchaDialogProps) {
+  const t = useTranslate();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
   const onVerifiedRef = useRef(onVerified);
@@ -195,13 +197,13 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
         <section className={`w-full max-w-sm rounded-2xl p-5 sm:p-6 ${modalSurfaceClassName}`}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 id="graphic-captcha-title" className="text-lg font-semibold text-slate-950">安全验证</h2>
-              <p id="graphic-captcha-description" className="mt-1 text-sm leading-5 text-slate-600">{channel === "email" ? "发送邮件前，请输入图片中的 6 位字母或数字。" : "发送短信前，请输入图片中的 6 位字母或数字。"}</p>
+              <h2 id="graphic-captcha-title" className="text-lg font-semibold text-slate-950">{t("安全验证")}</h2>
+              <p id="graphic-captcha-description" className="mt-1 text-sm leading-5 text-slate-600">{t(channel === "email" ? "发送邮件前，请输入图片中的 6 位字母或数字。" : "发送短信前，请输入图片中的 6 位字母或数字。")}</p>
             </div>
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              aria-label="关闭图形验证码"
+              aria-label={t("关闭图形验证码")}
               className="-mr-2 -mt-2 rounded-lg px-2 py-1 text-xl leading-6 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
             >
               ×
@@ -209,10 +211,10 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
           </div>
 
           <div className="mt-5 flex h-[76px] items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-            {challenge ? <Image src={challenge.image} alt="图形验证码" width={216} height={72} unoptimized className="h-full max-w-full object-contain" /> : <span className="text-sm text-slate-500">{loading ? "正在加载验证码…" : "验证码暂不可用"}</span>}
+            {challenge ? <Image src={challenge.image} alt={t("图形验证码")} width={216} height={72} unoptimized className="h-full max-w-full object-contain" /> : <span className="text-sm text-slate-500">{loading ? t("正在加载验证码…") : t("验证码暂不可用")}</span>}
           </div>
 
-          <label htmlFor="graphic-captcha-answer" className="mt-4 block text-sm font-medium text-slate-700">验证码</label>
+          <label htmlFor="graphic-captcha-answer" className="mt-4 block text-sm font-medium text-slate-700">{t("验证码")}</label>
           <input
             ref={answerRef}
             id="graphic-captcha-answer"
@@ -228,11 +230,11 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
             aria-describedby="graphic-captcha-error"
             aria-invalid={Boolean(error)}
             disabled={loading || submitting || !challenge}
-            placeholder="输入 6 位验证码"
+            placeholder={t("输入 6 位验证码")}
             className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 text-base uppercase tracking-[0.2em] outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50"
           />
           <p id="graphic-captcha-error" role={error ? "alert" : undefined} aria-live="polite" className={`mt-2 min-h-5 text-xs leading-5 ${error ? "text-rose-700" : "text-slate-500"}`}>
-            {error ?? "验证码区分字母和数字，不区分大小写。"}
+            {t(error ?? "验证码区分字母和数字，不区分大小写。")}
           </p>
 
           <div className="mt-3 flex gap-3">
@@ -242,7 +244,7 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
               disabled={loading || submitting}
               className="flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? "加载中…" : "刷新验证码"}
+              {loading ? t("加载中…") : t("刷新验证码")}
             </button>
             <button
               type="button"
@@ -250,7 +252,7 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
               disabled={loading || submitting || !challenge || !/^[A-Za-z0-9]{6}$/u.test(answer.trim())}
               className="flex-1 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting ? "验证并发送中…" : channel === "email" ? "验证并发送邮件" : "验证并发送短信"}
+              {submitting ? t("验证并发送中…") : channel === "email" ? t("验证并发送邮件") : t("验证并发送短信")}
             </button>
           </div>
         </section>

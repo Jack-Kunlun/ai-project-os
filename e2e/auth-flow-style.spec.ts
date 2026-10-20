@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { getEntitlementDb } from "@/lib/db";
-import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin } from "./support/r02-admin-navigation";
+import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
 
 async function checkAuthLayout(page: Page, name: string) {
   for (const width of [1440, 390, 320]) {
@@ -16,12 +16,17 @@ async function checkAuthLayout(page: Page, name: string) {
 
 test("registration shares the login layout, preserves a rejected draft, and creates a real personal account", async ({ page }) => {
   await signInR02Admin(page);
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await page.getByRole("link", { name: "创建账号", exact: true }).click();
   await expect(page.getByRole("heading", { name: "创建账号", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "返回登录", exact: true })).toHaveAttribute("href", "/login");
   await checkAuthLayout(page, "register");
 
+  const usernameInput = page.getByLabel("用户名", { exact: true });
+  await usernameInput.fill("valid-name.01");
+  expect(await usernameInput.evaluate((element: HTMLInputElement) => element.checkValidity())).toBe(true);
+  await usernameInput.fill("invalid!name");
+  expect(await usernameInput.evaluate((element: HTMLInputElement) => element.validity.patternMismatch)).toBe(true);
   const username = `auth_style_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const password = "BrowserAuthStyle2026!";
   await page.getByLabel("用户名", { exact: true }).fill(username);
@@ -42,7 +47,7 @@ test("registration shares the login layout, preserves a rejected draft, and crea
 
 test("unavailable phone recovery keeps its controls disabled and returns to the same login experience", async ({ page }) => {
   await signInR02Admin(page);
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await page.getByRole("link", { name: "忘记账号或密码？", exact: true }).click();
   await expect(page.getByRole("heading", { name: "找回账号与密码", exact: true })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "短信找回暂不可用" })).toBeVisible();

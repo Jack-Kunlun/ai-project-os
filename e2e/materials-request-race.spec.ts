@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
-import { signInR02Admin } from "./support/r02-admin-navigation";
+import { signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
 
 type Deferred = { promise: Promise<void>; resolve: () => void };
 type DelayedResponse = { requested: Deferred; release: Deferred; completed: Deferred };
@@ -22,7 +22,7 @@ async function signInPersonalUser(page: Page): Promise<void> {
     `browser-material-race-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
     "BrowserMaterialRace2026Password!",
   );
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await signOutR02User(page);
   await page.getByLabel("用户名或手机号", { exact: true }).fill(user.username);
   await page.getByLabel("密码", { exact: true }).fill(user.password);
   await page.getByRole("button", { name: "登 录", exact: true }).click();

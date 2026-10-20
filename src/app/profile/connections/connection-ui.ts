@@ -1,3 +1,5 @@
+import type { AppearanceLanguage } from "@/components/appearance-provider";
+
 export type ConnectionMessage = Readonly<{
   tone: "success" | "error" | "info";
   text: string;
@@ -35,9 +37,9 @@ export function connectionErrorText(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-export function formatConnectionDate(value: string | null): string {
-  if (!value) return "暂无记录";
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+export function formatConnectionDate(value: string | null, language: AppearanceLanguage = "zh-CN"): string {
+  if (!value) return language === "en" ? "No record" : "暂无记录";
+  return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 export const connectionFieldClass = "mt-1.5 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-500";

@@ -10,6 +10,7 @@ import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { getProjectOperationsSummary } from "@/lib/project-operations";
 import { listUserNotifications as listNotificationService, markNotificationRead as markNotificationService, openNotification as openNotificationService, persistNotification, NotificationServiceError, type NotificationListOptions } from "@/lib/notification-service";
+import { summarizeTokenUsageBuckets } from "@/lib/token-usage";
 
 export { projectNotification, safeNotificationActionHref } from "@/lib/notification-service";
 export type { NotificationFilter, NotificationListOptions } from "@/lib/notification-service";
@@ -426,11 +427,25 @@ export async function getProjectAutomationRun(
       },
     });
     if (run === null) return null;
+    const jobIds = safeAutomationJobIds(run.jobIds);
+    const usageRows = jobIds.length === 0 ? [] : await tx.providerCallAudit.groupBy({
+      by: ["usageKnown"],
+      where: { jobId: { in: [...jobIds] }, job: { projectId } },
+      _count: { _all: true },
+      _sum: { inputTokens: true, outputTokens: true },
+    });
+    const usage = summarizeTokenUsageBuckets(usageRows.map((row) => ({
+      count: row._count._all,
+      usageKnown: row.usageKnown,
+      inputTokens: row.usageKnown ? row._sum.inputTokens : null,
+      outputTokens: row.usageKnown ? row._sum.outputTokens : null,
+    })));
     return Object.freeze({
       ...run,
-      jobIds: safeAutomationJobIds(run.jobIds),
+      jobIds,
       result: projectAutomationRunResult(run.rule.kind, run.status, run.result),
       failureCode: safeAutomationFailureCode(run.failureCode),
+      usage,
     });
   });
 }

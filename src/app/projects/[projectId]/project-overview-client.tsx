@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -96,8 +97,8 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
   return await response.json() as T;
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function formatDate(value: string, language: "zh-CN" | "en"): string {
+  return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 const worldStatusMeta: Record<WorldStatus, { label: string; detail: string; tone: string }> = {
@@ -146,6 +147,9 @@ function orderedNextWork(items: OverviewWorkItem[]): OverviewWorkItem[] {
 }
 
 export function ProjectOverviewClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
+  const translateUi = useTranslate();
+  const { language } = useAppearance();
+  const t = useTranslate();
   const { projectId } = useParams<{ projectId: string }>();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("overview", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -184,16 +188,16 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
     setError(null);
     try {
       const [projectPayload, itemsPayload, snapshotPayload, governancePayload, worldPayload] = await Promise.all([
-        fetch(`/api/projects/${projectId}`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ project: Project }>(response, "项目加载失败")),
-        fetch(`/api/projects/${projectId}/items?page=1&pageSize=1`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ counts: OverviewData["itemCounts"] }>(response, "项目事实加载失败")),
-        fetch(`/api/projects/${projectId}/snapshots`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ snapshot: SnapshotRecord | null; stale: boolean }>(response, "项目快照加载失败")),
-        fetch(`/api/projects/${projectId}/governance`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ summary: GovernanceSummary }>(response, "项目提醒加载失败")),
-        fetch(`/api/projects/${projectId}/world`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ state: WorldSummary }>(response, "项目状态加载失败")),
+        fetch(`/api/projects/${projectId}`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ project: Project }>(response, t("项目加载失败"))),
+        fetch(`/api/projects/${projectId}/items?page=1&pageSize=1`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ counts: OverviewData["itemCounts"] }>(response, t("项目事实加载失败"))),
+        fetch(`/api/projects/${projectId}/snapshots`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ snapshot: SnapshotRecord | null; stale: boolean }>(response, t("项目快照加载失败"))),
+        fetch(`/api/projects/${projectId}/governance`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ summary: GovernanceSummary }>(response, t("项目提醒加载失败"))),
+        fetch(`/api/projects/${projectId}/world`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ state: WorldSummary }>(response, t("项目状态加载失败"))),
       ]);
       const [planResult, factsResult, jobsResult] = await Promise.allSettled([
-        fetch(`/api/projects/${projectId}/plan`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<OverviewPlan>(response, "项目目标和计划暂不可用")),
-        fetch(`/api/projects/${projectId}/items?reviewStatus=confirmed&page=1&pageSize=5`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ items: ConfirmedFact[] }>(response, "最近确认事实暂不可用")),
-        fetch(`/api/projects/${projectId}/jobs`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ jobs: OverviewJob[] }>(response, "项目活动暂不可用")),
+        fetch(`/api/projects/${projectId}/plan`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<OverviewPlan>(response, t("项目目标和计划暂不可用"))),
+        fetch(`/api/projects/${projectId}/items?reviewStatus=confirmed&page=1&pageSize=5`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ items: ConfirmedFact[] }>(response, t("最近确认事实暂不可用"))),
+        fetch(`/api/projects/${projectId}/jobs`, { cache: "no-store", signal: controller.signal }).then((response) => readJson<{ jobs: OverviewJob[] }>(response, t("项目活动暂不可用"))),
       ]);
       if (controller.signal.aborted || sequence !== requestSequence.current || currentProjectId.current !== requestedProjectId) return;
 
@@ -205,20 +209,20 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
         governance: governancePayload.summary,
         world: worldPayload.state,
         plan: planResult.status === "fulfilled" ? planResult.value : null,
-        planError: planResult.status === "rejected" ? planResult.reason instanceof Error ? planResult.reason.message : "项目目标和计划暂不可用" : null,
+        planError: planResult.status === "rejected" ? t(planResult.reason instanceof Error ? planResult.reason.message : "项目目标和计划暂不可用") : null,
         recentFacts: factsResult.status === "fulfilled" ? factsResult.value.items : [],
-        factsError: factsResult.status === "rejected" ? factsResult.reason instanceof Error ? factsResult.reason.message : "最近确认事实暂不可用" : null,
+        factsError: factsResult.status === "rejected" ? t(factsResult.reason instanceof Error ? factsResult.reason.message : "最近确认事实暂不可用") : null,
         jobs: jobsResult.status === "fulfilled" ? jobsResult.value.jobs : [],
-        activityError: jobsResult.status === "rejected" ? jobsResult.reason instanceof Error ? jobsResult.reason.message : "项目活动暂不可用" : null,
+        activityError: jobsResult.status === "rejected" ? t(jobsResult.reason instanceof Error ? jobsResult.reason.message : "项目活动暂不可用") : null,
       });
       setMessage(null);
     } catch (cause) {
       if (controller.signal.aborted || sequence !== requestSequence.current || currentProjectId.current !== requestedProjectId) return;
-      setError(cause instanceof Error ? cause.message : "项目概览加载失败");
+      setError(t(cause instanceof Error ? cause.message : "项目概览加载失败"));
     } finally {
       if (!controller.signal.aborted && sequence === requestSequence.current && currentProjectId.current === requestedProjectId) setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load({ showLoading: true }), 0);
@@ -252,20 +256,20 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
     if (!currentData) return [];
     const jobs: ProjectJobActivity[] = currentData.jobs.map((job) => ({
       id: `job:${job.id}`,
-      label: activityJobLabels[job.kind],
-      detail: `${jobStatusLabels[job.status]}${job.reconciliationRequired ? " · 需要核对" : job.stage ? ` · ${job.stage}` : ""}`,
+      label: t(activityJobLabels[job.kind]),
+      detail: `${t(jobStatusLabels[job.status])}${job.reconciliationRequired ? ` · ${t("需要核对")}` : job.stage ? ` · ${t(job.stage)}` : ""}`,
       createdAt: job.createdAt,
       href: `/projects/${projectId}/jobs/${job.id}`,
     }));
     const audits: ProjectJobActivity[] = (currentData.plan?.audits ?? []).map((audit) => ({
       id: `audit:${audit.id}`,
-      label: "计划动态",
-      detail: `${audit.event} · ${audit.actor.displayName?.trim() || audit.actor.username}`,
+      label: t("计划动态"),
+      detail: `${t(audit.event)} · ${audit.actor.displayName?.trim() || audit.actor.username}`,
       createdAt: audit.createdAt,
       href: `/projects/${projectId}/plan#plan-history`,
     }));
     return [...jobs, ...audits].sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 5);
-  }, [currentData, projectId]);
+  }, [currentData, projectId, t]);
 
   const overviewReturnTo = buildProjectHref(projectId, "overview", { focus: "current-state" });
   const projectCandidateHref = buildProjectHref(projectId, "materials", { status: "candidate", focus: "items-heading", from: "overview", returnTo: overviewReturnTo });
@@ -277,14 +281,14 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
   const nextStep = (() => {
     if (currentData === null || summary === null) return null;
     const returnTo = buildProjectHref(projectId, "overview", { focus: "current-state" });
-    if (currentData.project._count.sources === 0 && currentData.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo }), action: "添加资料" };
-    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "这里只核对仍待处理、尚未自动形成事实的内容。", href: pendingDetailHref, action: "开始审核" };
-    if (!currentData.governance.index.compatible) return { title: "智能问答", detail: "选择项目范围，核对资料后开始或继续提问。", href: `/ask?scope=project&projectId=${encodeURIComponent(projectId)}`, action: "打开智能问答" };
-    return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: buildProjectHref(projectId, "intelligence", { focus: "agent-investigation", from: "overview", returnTo }), action: "打开简报与调查" };
+    if (currentData.project._count.sources === 0 && currentData.project._count.assets === 0) return { title: t("添加第一份项目资料"), detail: t("输入文本，或上传图片、文档和文件夹。"), href: buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo }), action: t("添加资料") };
+    if (summary.pendingContent > 0) return { title: t("审核待确认内容"), detail: t("这里只核对仍待处理、尚未自动形成事实的内容。"), href: pendingDetailHref, action: t("开始审核") };
+    if (!currentData.governance.index.compatible) return { title: t("智能问答"), detail: t("选择项目范围，核对资料后开始或继续提问。"), href: `/ask?scope=project&projectId=${encodeURIComponent(projectId)}`, action: t("打开智能问答") };
+    return { title: t("查询项目或生成简报"), detail: t("当前项目已经具备可引用的智能查询基础。"), href: buildProjectHref(projectId, "intelligence", { focus: "agent-investigation", from: "overview", returnTo }), action: t("打开简报与调查") };
   })();
 
   const attentionVisible = summary !== null && (summary.attentionTotal > 0 || currentData?.world.status === "at_risk" || (currentData?.plan?.health.counts.blocked ?? 0) > 0);
-  const attentionDetail = currentData && summary ? `待核对 ${summary.pendingContent} · 失败任务 ${summary.failedJobs} · 受阻工作 ${currentData.plan?.health.counts.blocked ?? (currentData.planError ? "暂不可用" : 0)}` : "";
+  const attentionDetail = currentData && summary ? t("待核对 {pending} · 失败任务 {failed} · 受阻工作 {blocked}").replace("{pending}", String(summary.pendingContent)).replace("{failed}", String(summary.failedJobs)).replace("{blocked}", String(currentData.plan?.health.counts.blocked ?? t("暂不可用"))) : "";
   const activeWorkCount = currentData?.plan?.workItems.filter((item) => item.status !== "completed" && item.status !== "cancelled").length;
   const blockedWorkCount = currentData?.plan?.workItems.filter((item) => item.status === "blocked").length;
 
@@ -299,117 +303,117 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
-      }), "项目快照生成失败");
+      }), t("项目快照生成失败"));
       if (currentProjectId.current !== requestedProjectId) return;
       await load();
-      if (currentProjectId.current === requestedProjectId) setMessage("项目状态快照已更新。");
+      if (currentProjectId.current === requestedProjectId) setMessage(t("项目状态快照已更新。"));
     } catch (cause) {
-      if (currentProjectId.current === requestedProjectId) setError(cause instanceof Error ? cause.message : "项目快照生成失败");
+      if (currentProjectId.current === requestedProjectId) setError(t(cause instanceof Error ? cause.message : "项目快照生成失败"));
     } finally {
       if (currentProjectId.current === requestedProjectId) setSnapshotPendingProjectId(null);
     }
   }
 
   return (
-    <main className={styles.page} aria-label="Project overview">
+    <main className={styles.page} aria-label={t("项目概览")}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="overview" isSystemAdmin={isSystemAdmin} />
       <div className={styles.content}>
         {loading && currentData === null ? <OverviewSkeleton /> : currentData === null || summary === null || nextStep === null ? (
-          <div className={styles.error} role="alert"><span>{error ?? "项目概览加载失败"}</span><button type="button" onClick={() => void load({ showLoading: true })}>重试</button></div>
+          <div className={styles.error} role="alert"><span>{t(error ?? "项目概览加载失败")}</span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text={"重试"} /></button></div>
         ) : (
           <>
             <section className={styles.heading}>
               <div className={styles.headingCopy}>
-                <p className={styles.eyebrow}>PROJECT OVERVIEW</p>
+                <p className={styles.eyebrow}><UiText text={"PROJECT OVERVIEW"} /></p>
                 <h1>{currentData.project.name}</h1>
-                <p className={styles.subtitle}>{currentData.project.description || "尚未填写项目说明。"}</p>
+                <p className={styles.subtitle}>{currentData.project.description || t("尚未填写项目说明。")}</p>
               </div>
-              <span className={`${styles.statusPill} ${worldStatusMeta[currentData.world.status].tone}`}>{currentData.project.archivedAt ? "已归档" : worldStatusMeta[currentData.world.status].label}</span>
+              <span className={`${styles.statusPill} ${worldStatusMeta[currentData.world.status].tone}`}>{t(currentData.project.archivedAt ? "已归档" : worldStatusMeta[currentData.world.status].label)}</span>
             </section>
 
-            {currentData.project.archivedAt ? <p className={styles.archiveNotice}>项目已归档，当前概览为只读状态。</p> : null}
-            {error ? <p role="alert" className={styles.inlineError}>{error}</p> : null}
-            {message ? <p role="status" className={styles.inlineSuccess}>{message}</p> : null}
+            {currentData.project.archivedAt ? <p className={styles.archiveNotice}><UiText text={"项目已归档，当前概览为只读状态。"} /></p> : null}
+            {error ? <p role="alert" className={styles.inlineError}>{t(error)}</p> : null}
+            {message ? <p role="status" className={styles.inlineSuccess}>{t(message)}</p> : null}
 
-            <section className={styles.metrics} aria-label="项目关键指标">
-              <MetricCard label="进行中工作" value={currentData.planError ? "—" : activeWorkCount ?? 0} detail={currentData.planError ? "项目计划暂不可用" : currentData.plan ? `${blockedWorkCount ?? 0} 项受阻` : "项目计划尚未设置"} href={`/projects/${projectId}/plan`} />
-              <MetricCard label="待核对内容" value={summary.pendingContent} detail="项目候选与 AI 审核队列" href={pendingDetailHref} />
-              <MetricCard label="已确认事实" value={summary.confirmed} detail={`全部条目 ${currentData.project._count.items}`} href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "overview", returnTo: overviewReturnTo })} />
-              <MetricCard label="项目资料" value={currentData.project._count.sources} detail={`文件 ${currentData.project._count.assets} 份`} href={buildProjectHref(projectId, "materials", { focus: "sources-heading", from: "overview", returnTo: overviewReturnTo })} />
+            <section className={styles.metrics} aria-label={t("项目关键指标")}>
+              <MetricCard label={t("进行中工作")} value={currentData.planError ? "—" : activeWorkCount ?? 0} detail={currentData.planError ? t("项目计划暂不可用") : currentData.plan ? `${blockedWorkCount ?? 0} ${t("项受阻")}` : t("项目计划尚未设置")} href={`/projects/${projectId}/plan`} />
+              <MetricCard label={t("待核对内容")} value={summary.pendingContent} detail={t("项目候选与 AI 审核队列")} href={pendingDetailHref} />
+              <MetricCard label={t("已确认事实")} value={summary.confirmed} detail={`${t("全部条目")} ${currentData.project._count.items}`} href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "overview", returnTo: overviewReturnTo })} />
+              <MetricCard label={t("项目资料")} value={currentData.project._count.sources} detail={`${t("文件")} ${currentData.project._count.assets} ${t("份")}`} href={buildProjectHref(projectId, "materials", { focus: "sources-heading", from: "overview", returnTo: overviewReturnTo })} />
             </section>
 
             {attentionVisible ? <Link href={buildProjectHref(projectId, "overview", { focus: "attention-details" })} className={styles.attentionBar}>
               <span className={styles.attentionMark} aria-hidden="true">!</span>
-              <span><strong>{currentData.world.status === "at_risk" ? "项目状态存在风险" : "有事项需要关注"}</strong><small>{attentionDetail}</small></span>
-              <span className={styles.attentionArrow}>查看详情 →</span>
+              <span><strong>{t(currentData.world.status === "at_risk" ? "项目状态存在风险" : "有事项需要关注")}</strong><small>{attentionDetail}</small></span>
+              <span className={styles.attentionArrow}><UiText text={"查看详情 →"} /></span>
             </Link> : null}
 
             <section className={styles.overviewGrid}>
               <div className={styles.mainColumn}>
-                <article id="current-state" tabIndex={-1} aria-label="项目当前状态" className={styles.goalPanel}>
-                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}>CURRENT OBJECTIVE</p><h2>当前目标</h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}>查看计划 →</Link></div>
-                  {currentData.planError ? <p className={styles.panelEmpty}>目标数据暂不可用。{currentData.planError}</p> : currentObjective ? <>
-                    <div className={styles.goalMeta}>{objectiveStatusLabel(currentObjective.status)}{currentObjective.targetDate ? ` · 目标日期 ${formatDate(currentObjective.targetDate)}` : " · 目标日期未设置"}</div>
+                <article id="current-state" tabIndex={-1} aria-label={translateUi("项目当前状态")} className={styles.goalPanel}>
+                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"CURRENT OBJECTIVE"} /></p><h2><UiText text={"当前目标"} /></h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}><UiText text={"查看计划 →"} /></Link></div>
+                  {currentData.planError ? <p className={styles.panelEmpty}><UiText text={"目标数据暂不可用。"} />{t(currentData.planError)}</p> : currentObjective ? <>
+                    <div className={styles.goalMeta}>{t(objectiveStatusLabel(currentObjective.status))}{currentObjective.targetDate ? ` · ${t("目标日期")} ${formatDate(currentObjective.targetDate, language)}` : ` · ${t("目标日期未设置")}`}</div>
                     <h3 className={styles.goalTitle}>{currentObjective.title}</h3>
-                    <p className={styles.goalDescription}>{currentObjective.description || "尚未填写目标说明。"}</p>
+                    <p className={styles.goalDescription}>{currentObjective.description || t("尚未填写目标说明。")}</p>
                     {objectiveWorkItems.length > 0 ? <div className={styles.progressRow}>
                       <span className={styles.progressTrack}><span style={{ width: `${Math.round(objectiveWorkItems.filter((item) => item.status === "completed").length / objectiveWorkItems.length * 100)}%` }} /></span>
-                      <span>{objectiveWorkItems.filter((item) => item.status === "completed").length} / {objectiveWorkItems.length} 项已完成</span>
-                    </div> : <p className={styles.panelEmpty}>还没有关联到此目标的工作项。</p>}
-                  </> : <div className={styles.emptyGoal}><h3>尚未设置当前目标</h3><p>项目目标可在计划中创建并启动。</p><Link href={`/projects/${projectId}/plan`}>前往项目计划 →</Link></div>}
+                      <span>{objectiveWorkItems.filter((item) => item.status === "completed").length} / {objectiveWorkItems.length} {" "}<UiText text={"项已完成"} /></span>
+                    </div> : <p className={styles.panelEmpty}><UiText text={"还没有关联到此目标的工作项。"} /></p>}
+                  </> : <div className={styles.emptyGoal}><h3><UiText text={"尚未设置当前目标"} /></h3><p><UiText text={"项目目标可在计划中创建并启动。"} /></p><Link href={`/projects/${projectId}/plan`}><UiText text={"前往项目计划 →"} /></Link></div>}
                   <div className={styles.worldSummary}>
-                    <span className={`${styles.statusPill} ${worldStatusMeta[currentData.world.status].tone}`}>{worldStatusMeta[currentData.world.status].label}</span>
-                    <p>{worldStatusMeta[currentData.world.status].detail}</p>
-                    <Link href={`/projects/${projectId}/world`}>高级状态治理 →</Link>
+                    <span className={`${styles.statusPill} ${worldStatusMeta[currentData.world.status].tone}`}>{t(worldStatusMeta[currentData.world.status].label)}</span>
+                    <p>{t(worldStatusMeta[currentData.world.status].detail)}</p>
+                    <Link href={`/projects/${projectId}/world`}><UiText text={"高级状态治理 →"} /></Link>
                   </div>
                 </article>
 
                 <section className={styles.nextTasks} aria-labelledby="next-work-heading">
-                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}>NEXT WORK</p><h2 id="next-work-heading">接下来推进</h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}>全部工作 →</Link></div>
-                  {currentData.planError ? <p className={styles.panelEmpty}>计划工作暂不可用，稍后重试。</p> : nextWorkItems.length === 0 ? <p className={styles.panelEmpty}>暂无待推进工作。</p> : <div className={styles.workList}>{nextWorkItems.map((item) => <Link key={item.id} href={`/projects/${projectId}/plan?focus=${encodeURIComponent(item.id)}&status=${encodeURIComponent(item.status)}`} className={styles.workItem}>
+                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"NEXT WORK"} /></p><h2 id="next-work-heading"><UiText text={"接下来推进"} /></h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}><UiText text={"全部工作 →"} /></Link></div>
+                  {currentData.planError ? <p className={styles.panelEmpty}><UiText text={"计划工作暂不可用，稍后重试。"} /></p> : nextWorkItems.length === 0 ? <p className={styles.panelEmpty}><UiText text={"暂无待推进工作。"} /></p> : <div className={styles.workList}>{nextWorkItems.map((item) => <Link key={item.id} href={`/projects/${projectId}/plan?focus=${encodeURIComponent(item.id)}&status=${encodeURIComponent(item.status)}`} className={styles.workItem}>
                     <span className={`${styles.workDot} ${item.status === "blocked" ? styles.workBlocked : item.status === "inProgress" ? styles.workActive : ""}`} aria-hidden="true" />
-                    <span className={styles.workCopy}><strong>{item.title}</strong><small>{workStatusLabels[item.status]} · {item.assignee?.displayName?.trim() || item.assignee?.username || "未分配"}{item.targetDate ? ` · ${formatDate(item.targetDate)}` : " · 未设置期限"}</small></span>
+                    <span className={styles.workCopy}><strong>{item.title}</strong><small>{t(workStatusLabels[item.status])} · {item.assignee?.displayName?.trim() || item.assignee?.username || t("未分配")}{item.targetDate ? ` · ${formatDate(item.targetDate, language)}` : ` · ${t("未设置期限")}`}</small></span>
                     <span className={styles.arrow} aria-hidden="true">→</span>
                   </Link>)}</div>}
                 </section>
 
                 <section className={styles.factsPanel} aria-labelledby="recent-facts-heading">
-                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}>SOURCE-GROUNDED FACTS</p><h2 id="recent-facts-heading">最近确认的项目事实</h2></div><Link href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "overview", returnTo: overviewReturnTo })} className={styles.textLink}>查看全部 →</Link></div>
-                  {currentData.factsError ? <p className={styles.panelEmpty}>{currentData.factsError}</p> : currentData.recentFacts.length === 0 ? <p className={styles.panelEmpty}>还没有已确认事实。</p> : <div className={styles.factList}>{currentData.recentFacts.map((fact) => <Link key={fact.id} href={`/projects/${projectId}/materials/sources/${fact.sourceId}`} className={styles.factItem}>
+                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"SOURCE-GROUNDED FACTS"} /></p><h2 id="recent-facts-heading"><UiText text={"最近确认的项目事实"} /></h2></div><Link href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "overview", returnTo: overviewReturnTo })} className={styles.textLink}><UiText text={"查看全部 →"} /></Link></div>
+                  {currentData.factsError ? <p className={styles.panelEmpty}>{t(currentData.factsError)}</p> : currentData.recentFacts.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有已确认事实。"} /></p> : <div className={styles.factList}>{currentData.recentFacts.map((fact) => <Link key={fact.id} href={`/projects/${projectId}/materials/sources/${fact.sourceId}`} className={styles.factItem}>
                     <span className={styles.factText}><strong>{fact.title}</strong><small>{fact.sourceExcerpt || fact.content}</small></span>
-                    <span className={styles.factSource}>{fact.source.kind} · {formatDate(fact.updatedAt)}</span>
+                    <span className={styles.factSource}>{t(fact.source.kind)} · {formatDate(fact.updatedAt, language)}</span>
                   </Link>)}</div>}
                 </section>
               </div>
 
               <aside className={styles.sideColumn}>
                 <section className={styles.activityPanel}>
-                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}>RECENT ACTIVITY</p><h2>最近动态</h2></div></div>
-                  {currentData.activityError && recentActivity.length === 0 ? <p className={styles.panelEmpty}>{currentData.activityError}</p> : recentActivity.length === 0 ? <p className={styles.panelEmpty}>还没有近期项目活动。</p> : <div className={styles.activityList}>{recentActivity.map((activity) => <Link key={activity.id} href={activity.href} className={styles.activityItem}>
+                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"RECENT ACTIVITY"} /></p><h2><UiText text={"最近动态"} /></h2></div></div>
+                  {currentData.activityError && recentActivity.length === 0 ? <p className={styles.panelEmpty}>{t(currentData.activityError)}</p> : recentActivity.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有近期项目活动。"} /></p> : <div className={styles.activityList}>{recentActivity.map((activity) => <Link key={activity.id} href={activity.href} className={styles.activityItem}>
                     <span className={styles.activityDot} aria-hidden="true" />
-                    <span><strong>{activity.label}</strong><small>{activity.detail}</small><time dateTime={activity.createdAt}>{formatDate(activity.createdAt)}</time></span>
+                    <span><strong>{activity.label}</strong><small>{activity.detail}</small><time dateTime={activity.createdAt}>{formatDate(activity.createdAt, language)}</time></span>
                   </Link>)}</div>}
-                  <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview", returnTo: overviewReturnTo })} className={styles.textLink}>查看任务运行记录 →</Link>
+                  <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview", returnTo: overviewReturnTo })} className={styles.textLink}><UiText text={"查看任务运行记录 →"} /></Link>
                 </section>
 
                 <section className={styles.continuePanel} aria-labelledby="continue-heading">
-                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}>CONTINUE</p><h2 id="continue-heading">从这里继续</h2></div></div>
-                  <Link href={buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo: overviewReturnTo })} className={styles.quickLink}><span>添加新的项目资料</span><span aria-hidden="true">→</span></Link>
-                  <Link href={`/ask?scope=project&projectId=${encodeURIComponent(projectId)}`} className={styles.quickLink}><span>打开智能问答</span><span aria-hidden="true">→</span></Link>
-                  <Link href={`/projects/${projectId}/plan`} className={styles.quickLink}><span>打开项目计划</span><span aria-hidden="true">→</span></Link>
-                  <Link href={nextStep.href} className={styles.recommendedStep}><span>推荐下一步</span><strong>{nextStep.title}</strong><small>{nextStep.detail}</small></Link>
+                  <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"CONTINUE"} /></p><h2 id="continue-heading"><UiText text={"从这里继续"} /></h2></div></div>
+                  <Link href={buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo: overviewReturnTo })} className={styles.quickLink}><span><UiText text={"添加新的项目资料"} /></span><span aria-hidden="true">→</span></Link>
+                  <Link href={`/ask?scope=project&projectId=${encodeURIComponent(projectId)}`} className={styles.quickLink}><span><UiText text={"打开智能问答"} /></span><span aria-hidden="true">→</span></Link>
+                  <Link href={`/projects/${projectId}/plan`} className={styles.quickLink}><span><UiText text={"打开项目计划"} /></span><span aria-hidden="true">→</span></Link>
+                  <Link href={nextStep.href} className={styles.recommendedStep}><span><UiText text={"推荐下一步"} /></span><strong>{nextStep.title}</strong><small>{nextStep.detail}</small></Link>
                 </section>
               </aside>
             </section>
 
             <details id="attention-details" tabIndex={-1} className={styles.governanceDetails} open={navigation.focus === "attention-details" || navigation.focus === "task-runs"}>
-              <summary>更多运行与治理信息 <span>待核对 {summary.pendingContent} · 失败任务 {summary.failedJobs} · 仓库问题 {summary.githubIssues}</span></summary>
+              <summary><UiText text={"更多运行与治理信息"} />{" "}<span><UiText text={"待核对"} />{" "}{summary.pendingContent} {" "}<UiText text={"· 失败任务"} />{" "}{summary.failedJobs} {" "}<UiText text={"· 仓库问题"} />{" "}{summary.githubIssues}</span></summary>
               <ProjectGovernanceSections projectId={projectId} navigation={navigation} />
             </details>
 
             <div className={styles.snapshotFooter}>
-              <span>{currentData.snapshot ? `最近状态快照：${formatDate(currentData.snapshot.generatedAt)}${currentData.snapshotStale ? " · 有新确认内容" : ""}` : "尚未生成项目状态快照"}</span>
-              <button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed === 0 || currentData.project.archivedAt !== null}>{snapshotPending ? "更新中…" : currentData.snapshot ? "更新状态快照" : "生成状态快照"}</button>
+              <span>{currentData.snapshot ? `${t("最近状态快照：")} ${formatDate(currentData.snapshot.generatedAt, language)}${currentData.snapshotStale ? ` · ${t("有新确认内容")}` : ""}` : t("尚未生成项目状态快照")}</span>
+              <button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed === 0 || currentData.project.archivedAt !== null}>{snapshotPending ? t("更新中…") : currentData.snapshot ? t("更新状态快照") : t("生成状态快照")}</button>
             </div>
           </>
         )}
@@ -419,7 +423,8 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
 }
 
 function OverviewSkeleton() {
-  return <div className={styles.skeletonPage} aria-label="正在加载项目概览"><div className={styles.skeletonHeading} /><div className={styles.skeletonMetrics}>{[1, 2, 3, 4].map((item) => <div key={item} />)}</div><div className={styles.skeletonMain}><div /><div /></div></div>;
+  const t = useTranslate();
+  return <div className={styles.skeletonPage} aria-label={t("正在加载项目概览")}><div className={styles.skeletonHeading} /><div className={styles.skeletonMetrics}>{[1, 2, 3, 4].map((item) => <div key={item} />)}</div><div className={styles.skeletonMain}><div /><div /></div></div>;
 }
 
 function MetricCard({ label, value, detail, href }: { label: string; value: number | string; detail: string; href: string }) {

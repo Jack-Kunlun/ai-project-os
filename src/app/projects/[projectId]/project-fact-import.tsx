@@ -1,5 +1,6 @@
 "use client";
 
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { buildProjectHref } from "@/lib/project-navigation";
 import { buildProjectQuestionHref } from "./materials/materials-navigation";
@@ -26,6 +27,7 @@ export function ProjectFactImport({ projectId, sourceIds, onChanged }: {
   sourceIds: string[];
   onChanged: () => Promise<unknown>;
 }) {
+  const translateUi = useTranslate();
   const sourceKey = JSON.stringify([...new Set(sourceIds)].sort());
   const [batches, setBatches] = useState<Batch[]>([]);
   const [preparing, setPreparing] = useState(false);
@@ -176,19 +178,19 @@ export function ProjectFactImport({ projectId, sourceIds, onChanged }: {
     const route = confirmation.safeSummary.route;
     return [route?.provider?.name ?? route?.provider?.kind ?? "项目配置的模型", route?.model].filter(Boolean).join(" · ");
   }))];
-  return <section ref={panelRef} tabIndex={-1} aria-label="导入资料自动整理" className="mt-5 scroll-mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
-    <h3 className="font-semibold text-indigo-950">资料已保存，继续交给 AI 整理</h3>
-    <p className="mt-2 text-sm leading-6 text-indigo-900">本次 {JSON.parse(sourceKey).length} 条资料将发送给{routes.length > 0 ? routes.join("、") : "当前项目模型"}。有逐字原文证据的内容会自动形成事实；冲突、改写或不确定内容单独待处理，每条记录保留来源与修改历史。</p>
-    {preparing ? <p role="status" className="mt-3 text-sm text-indigo-700">正在核对本次资料范围和模型…</p> : null}
-    {batches.length > 0 ? <button type="button" onClick={() => void organize()} disabled={running} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{running ? "正在提交后台任务…" : "确认发送并加入队列"}</button> : null}
-    {result ? <div role="status" className="mt-4 text-sm leading-6 text-indigo-900"><p>已提交 {result.jobs.length} 项任务 · {result.queued} 项处理中 · {result.completed} 项完成{result.failed > 0 ? ` · ${result.failed} 项失败` : ""}{result.unknown > 0 ? ` · ${result.unknown} 项待核实` : ""}{result.cancelled > 0 ? ` · ${result.cancelled} 项已取消` : ""}</p>{result.completed > 0 ? <p className="mt-1">自动形成 {result.confirmed} 条事实 · {result.review} 条待处理 · 跳过 {result.duplicates} 条重复记录</p> : null}<div className="mt-2 flex flex-wrap gap-4"><Link href={buildProjectHref(projectId, "materials", { view: "tasks", from: "materials" })} className="font-semibold underline">查看任务进度</Link>{result.completed > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", status: "confirmed", focus: "confirmed-facts", from: "materials" })} className="underline">查看整理结果</Link> : null}{result.review > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", from: "materials" })} className="underline">处理待核对内容</Link> : null}</div></div> : null}
+  return <section ref={panelRef} tabIndex={-1} aria-label={translateUi("导入资料自动整理")} className="mt-5 scroll-mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
+    <h3 className="font-semibold text-indigo-950"><UiText text={"资料已保存，继续交给 AI 整理"} /></h3>
+    <p className="mt-2 text-sm leading-6 text-indigo-900"><UiText text={"本次"} />{" "}{JSON.parse(sourceKey).length} {" "}<UiText text={"条资料将发送给"} />{routes.length > 0 ? routes.join("、") : <UiText text={"当前项目模型"} />}<UiText text={"。有逐字原文证据的内容会自动形成事实；冲突、改写或不确定内容单独待处理，每条记录保留来源与修改历史。"} /></p>
+    {preparing ? <p role="status" className="mt-3 text-sm text-indigo-700"><UiText text={"正在核对本次资料范围和模型…"} /></p> : null}
+    {batches.length > 0 ? <button type="button" onClick={() => void organize()} disabled={running} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{running ? <UiText text={"正在提交后台任务…"} /> : <UiText text={"确认发送并加入队列"} />}</button> : null}
+    {result ? <div role="status" className="mt-4 text-sm leading-6 text-indigo-900"><p><UiText text={"已提交"} />{" "}{result.jobs.length} {" "}<UiText text={"项任务 ·"} />{" "}{result.queued} {" "}<UiText text={"项处理中 ·"} />{" "}{result.completed} {" "}<UiText text={"项完成"} />{result.failed > 0 ? ` · ${result.failed} 项失败` : ""}{result.unknown > 0 ? ` · ${result.unknown} 项待核实` : ""}{result.cancelled > 0 ? ` · ${result.cancelled} 项已取消` : ""}</p>{result.completed > 0 ? <p className="mt-1"><UiText text={"自动形成"} />{" "}{result.confirmed} {" "}<UiText text={"条事实 ·"} />{" "}{result.review} {" "}<UiText text={"条待处理 · 跳过"} />{" "}{result.duplicates} {" "}<UiText text={"条重复记录"} /></p> : null}<div className="mt-2 flex flex-wrap gap-4"><Link href={buildProjectHref(projectId, "materials", { view: "tasks", from: "materials" })} className="font-semibold underline"><UiText text={"查看任务进度"} /></Link>{result.completed > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", status: "confirmed", focus: "confirmed-facts", from: "materials" })} className="underline"><UiText text={"查看整理结果"} /></Link> : null}{result.review > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", from: "materials" })} className="underline"><UiText text={"处理待核对内容"} /></Link> : null}</div></div> : null}
     {result && result.completed > 0 ? <div className="mt-4 border-t border-indigo-200 pt-4">
-      <p className="text-sm leading-6 text-indigo-900">整理结果已保存。需要继续提问时，可打开智能问答；待核对内容可在整理结果栏目处理。</p>
+      <p className="text-sm leading-6 text-indigo-900"><UiText text={"整理结果已保存。需要继续提问时，可打开智能问答；待核对内容可在整理结果栏目处理。"} /></p>
       <div className="mt-3 flex flex-wrap gap-3">
-        <Link href={buildProjectQuestionHref(projectId)} className="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">打开智能问答</Link>
-        {result.review > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", from: "materials" })} className="inline-flex min-h-11 items-center px-3 py-2 text-sm font-semibold text-indigo-700 underline">处理待核对内容</Link> : null}
+        <Link href={buildProjectQuestionHref(projectId)} className="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white"><UiText text={"打开智能问答"} /></Link>
+        {result.review > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", from: "materials" })} className="inline-flex min-h-11 items-center px-3 py-2 text-sm font-semibold text-indigo-700 underline"><UiText text={"处理待核对内容"} /></Link> : null}
       </div>
     </div> : null}
-    {error ? <div role="alert" className="mt-3 text-sm text-rose-700"><p>原始资料已保留。{error}</p>{!running ? <button type="button" onClick={() => setRetry((value) => value + 1)} className="mt-2 font-semibold underline">重新核对整理范围</button> : null}<Link href={`/projects/${projectId}/control`} className="ml-4 underline">查看模型配置</Link></div> : null}
+    {error ? <div role="alert" className="mt-3 text-sm text-rose-700"><p><UiText text={"原始资料已保留。"} />{error}</p>{!running ? <button type="button" onClick={() => setRetry((value) => value + 1)} className="mt-2 font-semibold underline"><UiText text={"重新核对整理范围"} /></button> : null}<Link href={`/projects/${projectId}/control`} className="ml-4 underline"><UiText text={"查看模型配置"} /></Link></div> : null}
   </section>;
 }

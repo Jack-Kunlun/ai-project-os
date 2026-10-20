@@ -539,7 +539,10 @@ async function queryEntries(
     result.push(...rows.map<UserTokenUsageEntry>((row) => ({
       id: row.id, source: "extraction", occurredAt: row.issuedAt.toISOString(), status: normalizedStatus(row.status),
       modelId: row.modelId, operation: row.operation, scope: null, project: null,
-      usage: usageFromInputOnlyRecord({ requestCount: row.requestCount, usageKnown: row.usageKnown, inputTokens: row.inputTokens }),
+      usage: summaryFromRequestBuckets([{
+        usageKnown: row.usageKnown,
+        _sum: { requestCount: row.requestCount, inputTokens: row.inputTokens, outputTokens: row.outputTokens },
+      }]),
     })));
   }
 

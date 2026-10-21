@@ -82,3 +82,9 @@
   .conversationPane .ranges{gap:8px}.conversationPane .ranges label{flex-basis:100%}.conversationPane .rangeHint{margin-top:0;line-height:1.6}.answer{margin-left:0}.compose{padding:10px}.composeFoot{flex-wrap:wrap}.composeFoot>button{margin-left:auto}.compose textarea{min-height:60px}.sendDisclosure{font-size:10px}.question{gap:6px}.speaker{width:22px;height:22px}.question p,.answerText{font-size:12px}
   .embedded .workspace:not([data-collapsed="true"]){grid-template-columns:minmax(100px,32%) minmax(0,1fr)}
 }
+
+@media(max-width:700px){
+  .conversationPane{overflow-y:auto}
+  .conversationPane>.chat{flex:0 0 auto}
+  .conversationPane .rounds{flex:0 0 clamp(160px,30dvh,260px);min-height:160px}
+}

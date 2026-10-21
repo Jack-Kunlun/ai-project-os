@@ -481,6 +481,24 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await expect(conversationRow(matrixHistory, newTitle)).toContainText(newTitle);
     await expectR02NoHorizontalOverflow(page, `conversation rail ${variant.language}/${variant.theme}/${variant.width}`);
     await expectR02NoAccessibilityViolations(page, `conversation rail ${variant.language}/${variant.theme}/${variant.width}`);
+    if (variant.width === 390) {
+      const transcript = page.getByLabel(english ? "Conversation content" : "会话内容", { exact: true });
+      await transcript.scrollIntoViewIfNeeded();
+      expect((await transcript.boundingBox())!.height).toBeGreaterThanOrEqual(160);
+      await expect.poll(() => transcript.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(2);
+      await expect(transcript.getByRole("article").last()).toBeInViewport();
+      await page.screenshot({ path: `test-results/unified-question/readable-${variant.language}-${variant.theme}-${variant.width}.png` });
+      const composer = page.getByRole("textbox", { name: english ? "Your question" : "输入问题", exact: true });
+      await composer.scrollIntoViewIfNeeded();
+      await expect(composer).toBeInViewport();
+      const send = page.getByRole("button", { name: english ? "Send" : "发送", exact: true });
+      await send.scrollIntoViewIfNeeded();
+      await expect(send).toBeInViewport();
+      const terms = page.getByText(english ? /Sending authorizes this question/u : /发送即表示同意/u);
+      await terms.scrollIntoViewIfNeeded();
+      await expect(terms).toBeInViewport();
+      await expect(send).toBeInViewport();
+    }
     await page.screenshot({ path: `test-results/unified-question/history-${variant.language}-${variant.theme}-${variant.width}.png` });
   }
   await page.context().addCookies([

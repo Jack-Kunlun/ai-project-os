@@ -24,4 +24,3 @@ export function translateUiErrorText(text: string, language: AppearanceLanguage,
     ? "This operation needs attention. Review the current status and contact an administrator if needed."
     : "操作需要核对。请查看当前状态，必要时联系管理员。";
 }
-

@@ -1,4 +1,5 @@
 import { UiText, useTranslate } from "@/components/appearance-provider";
+import { ShellIcon } from "@/components/shell-icon";
 import type { FormEvent } from "react";
 
 export type KnowledgeDraft = Readonly<{ title: string; content: string; isDefaultMemory: boolean }>;
@@ -39,7 +40,7 @@ export function PersonalKnowledgeEditor({
         <h2 id="knowledge-modal-title">{mode === "create" ? <UiText text={"新建知识"} /> : <UiText text={"编辑知识"} />}</h2>
         <span className="mt-2 inline-block rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600"><UiText text={"纯文本 / Markdown"} /></span>
       </div>
-      <button data-dialog-close type="button" onClick={onCancel} disabled={saving} className="knowledge-editor-button"><UiText text={"关闭"} /></button>
+      <button data-dialog-close type="button" onClick={onCancel} disabled={saving} aria-label={translateUi("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
     </header>
     <p className="knowledge-editor-intro"><UiText text={"内容保存在你的个人知识库中；保存后会保留版本历史。"} /></p>
     <div data-dialog-body className="knowledge-editor-body">

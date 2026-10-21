@@ -135,3 +135,16 @@ test("turn project guard retains every sent project even when the model cites no
   assert.match(insertGuard, /NEW\."projectId"\s*=\s*ANY\(NEW\."projectIds"\)/u);
   assert.match(insertGuard, /NEW\."scope"\s*=\s*'personal'[\s\S]*?cardinality\(NEW\."projectIds"\)\s*<>\s*0/u);
 });
+
+import { inquiryModelMatches } from "../src/lib/inquiry-send";
+test("direct Send authorizes only the public provider, model and billing terms already shown", () => {
+  const shown = { providerName: "DeepSeek", modelId: "deepseek-chat", quotaMultiplierBps: 10000, maxOutputTokens: 2048 };
+  const prepared = { providerName: shown.providerName, modelId: shown.modelId, billing: { quotaMultiplierBps: shown.quotaMultiplierBps, maxOutputTokens: shown.maxOutputTokens } };
+  assert.equal(inquiryModelMatches(shown, prepared), true);
+  for (const change of [{ providerName: "other" }, { modelId: "other" }, { billing: { ...prepared.billing, quotaMultiplierBps: 15000 } }, { billing: { ...prepared.billing, maxOutputTokens: 4096 } }]) {
+    assert.equal(inquiryModelMatches(shown, { ...prepared, ...change }), false);
+  }
+  assert.equal(unifiedQuestionPresentationSchema.safeParse({ expectedRevision: 1, archived: true }).success, true);
+  assert.equal(unifiedQuestionPresentationSchema.safeParse({ expectedRevision: 2, deleted: false }).success, true);
+  assert.equal(unifiedQuestionPresentationSchema.safeParse({ expectedRevision: 2, deleted: "false" }).success, false);
+});

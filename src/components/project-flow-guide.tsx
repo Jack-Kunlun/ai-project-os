@@ -33,5 +33,5 @@ export function projectFlowNextStep(input: { stage: FlowStage; sourceCount?: num
   if (input.stage === "review" || (input.stage === "materials" && (input.confirmedCount ?? 0) > 0)) return { label: "打开智能问答", route: "materials" as const, state: { view: "ask" }, detail: "直接输入问题，系统会引导准备资料。" };
   if (input.stage === "materials") return { label: "查看整理结果", route: "materials" as const, state: { view: "review" }, detail: "整理结果和待核对内容放在同一处。" };
   if (input.stage === "plan") return { label: "查看项目进展", route: "overview" as const, state: { focus: "current-state" }, detail: "手动创建工作项、指定负责人和验收标准；完成时关联证据。项目事实不会自动变成任务。" };
-  return { label: "打开智能问答", route: "materials" as const, state: { view: "ask" }, detail: "直接输入问题，发送前确认本次资料范围。" };
+  return { label: "打开智能问答", route: "materials" as const, state: { view: "ask" }, detail: "在输入框核对模型与资料范围，点击发送即授权本轮。" };
 }

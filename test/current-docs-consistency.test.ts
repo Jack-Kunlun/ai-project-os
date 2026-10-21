@@ -48,7 +48,7 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
   ].join("\n");
 
   assert.match(currentCorpus, /0\.4\.0-dev\.1/u);
-  assert.match(currentCorpus, /平台管理员与普通用户.*不同工作台|平台管理员.*普通用户.*完全分离|平台管理员与普通用户使用完全分开的工作台/u);
+  assert.match(currentCorpus, /平台管理员在独立管理工作台维护/u);
   assert.match(currentCorpus, /平台默认托管模型/u);
   assert.match(currentCorpus, /\/admin\/models.*能力配置/u);
   assert.match(currentCorpus, /测试通过后才能保存并启用|只有测试通过才能保存并启用/u);
@@ -56,9 +56,10 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
   assert.match(currentCorpus, /\/admin\/credits/u);
   assert.match(currentCorpus, /\/admin\/operations\/probes/u);
   assert.match(currentCorpus, /\/admin\/users/u);
-  assert.match(docs["README.md"], /个人语义索引与搜索可选平台默认向量模型或个人 BYOK/u);
-  assert.match(docs["README.md"], /平台托管模型消耗该用户的平台额度/u);
-  assert.match(docs["README.md"], /个人 BYOK 连接消耗用户自己的供应商额度并可能产生供应商费用/u);
+  assert.match(docs["README.md"], /符合会员条件的用户也可以配置个人模型，用于项目时还需要完成项目授权/u);
+  assert.match(docs["README.md"], /普通用户可以使用管理员配置的平台默认模型，账号需要有可用的平台额度/u);
+  assert.match(docs["README.md"], /展示模型和发送范围/u);
+  assert.match(docs["docs/user-operation-guide.md"], /个人模型不会自动替代平台默认模型/u);
   assert.doesNotMatch(docs["README.md"], /模型调用使用用户自己的供应商额度/u);
   assert.match(currentCorpus, /连接所有者与项目 Owner 双确认委托/u);
   assert.match(currentCorpus, /个人模型不会自动替代平台默认模型/u);
@@ -81,7 +82,7 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
     assert.doesNotMatch(currentCorpus, staleClaim);
   }
 
-  assert.match(docs["README.md"], /effective=false/u);
+  assert.match(docs["docs/admin-operation-guide.md"], /effective=false/u);
   assert.match(docs["docs/admin-operation-guide.md"], /平台管理员只负责平台配置、用户运营、安全审核和受限运维/u);
   assert.match(docs["docs/admin-operation-guide.md"], /无需另建默认工作区 Owner/u);
   assert.match(docs["docs/admin-operation-guide.md"], /\/admin\/users/u);

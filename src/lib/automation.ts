@@ -9,7 +9,7 @@ import { buildAutomationSchedulePreview } from "@/lib/automation-time";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { getProjectOperationsSummary } from "@/lib/project-operations";
-import { listUserNotifications as listNotificationService, markNotificationRead as markNotificationService, openNotification as openNotificationService, persistNotification, NotificationServiceError, type NotificationListOptions } from "@/lib/notification-service";
+import { listUserNotifications as listNotificationService, markAllUserNotificationsRead as markAllNotificationsService, markNotificationRead as markNotificationService, openNotification as openNotificationService, persistNotification, NotificationServiceError, type NotificationListOptions } from "@/lib/notification-service";
 import { summarizeTokenUsageBuckets } from "@/lib/token-usage";
 
 export { projectNotification, safeNotificationActionHref } from "@/lib/notification-service";
@@ -214,6 +214,14 @@ export async function openNotification(userIdInput: unknown, notificationIdInput
 export async function markNotificationRead(userIdInput: unknown, notificationIdInput: unknown, read: boolean, db: PrismaClient = getDb()) {
   try {
     return await markNotificationService(userIdInput, notificationIdInput, read, db);
+  } catch (error) {
+    return mapNotificationError(error);
+  }
+}
+
+export async function markAllUserNotificationsRead(userIdInput: unknown, db: PrismaClient = getDb()) {
+  try {
+    return await markAllNotificationsService(userIdInput, db);
   } catch (error) {
     return mapNotificationError(error);
   }

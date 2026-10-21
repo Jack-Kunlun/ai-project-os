@@ -17,6 +17,7 @@ import type {
 import { getDb } from "../src/lib/db";
 import {
   listUserNotifications,
+  markAllUserNotificationsRead,
   openNotification,
   type NotificationListOptions,
 } from "../src/lib/automation";
@@ -190,6 +191,7 @@ test(
     const suffix = randomUUID().slice(0, 8);
     const projectId = randomUUID();
     const otherProjectId = randomUUID();
+    const hiddenProjectId = randomUUID();
     const editorId = randomUUID();
     const secondOwnerId = randomUUID();
     const actionApprovalId = randomUUID();
@@ -216,6 +218,7 @@ test(
         data: [
           { id: projectId, workspaceId, name: `Notification ${suffix}`, slug: `notification-${suffix}` },
           { id: otherProjectId, workspaceId, name: `Notification other ${suffix}`, slug: `notification-other-${suffix}` },
+          { id: hiddenProjectId, workspaceId, name: `Notification hidden ${suffix}`, slug: `notification-hidden-${suffix}`, membershipInheritanceMode: "projectOnly" },
         ],
       });
       const admin = await db.appUser.findUniqueOrThrow({ where: { id: ownerId } });
@@ -339,6 +342,81 @@ test(
         body: "自动化失败",
         dedupeKey: `failed-run-notification-${suffix}`,
       });
+
+      for (let index = 0; index < 20; index += 1) {
+        await createNotification(db, {
+          userId: admin.id,
+          projectId: null,
+          subjectKind: "legacy",
+          subjectId: null,
+          attentionIntent: "informational",
+          kind: "system",
+          severity: "info",
+          title: `bulk-read-${suffix}-${index}`,
+          body: "批量已读范围验证",
+          actionHref: null,
+          dedupeKey: `bulk-read-notification-${suffix}-${index}`,
+        });
+      }
+      const otherUserNotification = await createNotification(db, {
+        userId: editorId,
+        projectId: null,
+        subjectKind: "legacy",
+        subjectId: null,
+        attentionIntent: "informational",
+        kind: "system",
+        severity: "info",
+        title: `bulk-read-other-${suffix}`,
+        body: "其他用户的通知",
+        actionHref: null,
+        dedupeKey: `bulk-read-other-notification-${suffix}`,
+      });
+      const hiddenProjectNotification = await db.notification.create({
+        data: {
+          userId: admin.id,
+          projectId: hiddenProjectId,
+          kind: "system",
+          severity: "info",
+          title: `bulk-read-hidden-${suffix}`,
+          body: "已不可见项目的通知",
+          actionHref: null,
+          dedupeKey: digest(`bulk-read-hidden-${suffix}`),
+        },
+      });
+      const afterCutoffNotification = await db.notification.create({
+        data: {
+          userId: admin.id,
+          projectId: null,
+          kind: "system",
+          severity: "info",
+          title: `bulk-read-after-cutoff-${suffix}`,
+          body: "截止时间之后的通知",
+          actionHref: null,
+          dedupeKey: digest(`bulk-read-after-cutoff-${suffix}`),
+          createdAt: new Date(databaseNow.getTime() + 24 * 60 * 60_000),
+        },
+      });
+
+      const beforeReadAll = await listUserNotifications(admin.id, db, { filter: "all", limit: 20 });
+      assert.equal(beforeReadAll.notifications.length, 20);
+      assert.notEqual(beforeReadAll.nextCursor, null, "there are more than one page of visible notifications");
+      assert.equal(beforeReadAll.unreadCount, 27, "visible future-created row is counted but excluded from the read cutoff");
+      assert.equal((await markAllUserNotificationsRead(admin.id, db)).markedReadCount, 26);
+      const afterReadAll = await listUserNotifications(admin.id, db, { filter: "all", limit: 20 });
+      assert.equal(afterReadAll.unreadCount, 1, "only the visible after-cutoff row remains in the unread count");
+      assert.equal((await markAllUserNotificationsRead(admin.id, db)).markedReadCount, 0, "mark-all-read is idempotent");
+      assert.equal((await db.notification.findUniqueOrThrow({ where: { id: otherUserNotification.id } })).readAt, null, "another user's notification remains unread");
+      assert.equal((await db.notification.findUniqueOrThrow({ where: { id: hiddenProjectNotification.id } })).readAt, null, "a notification in a project the user cannot see remains unread");
+      assert.equal((await db.notification.findUniqueOrThrow({ where: { id: afterCutoffNotification.id } })).readAt, null, "notifications after the database cutoff remain unread");
+      const stillPending = await projectNotification(
+        await db.notification.findUniqueOrThrow({ where: { id: approvalNotification.id } }),
+        admin.id,
+        db,
+        databaseNow,
+      );
+      assert.notEqual(stillPending.readAt, null);
+      assert.equal(stillPending.actionState, "pending", "marking a notification read does not complete its action");
+      assert.equal((await listPending(db, admin.id)).pendingCount, 5);
 
       const firstPage = await listPending(db, admin.id, { limit: 2 });
       assert.equal(firstPage.pendingCount, 5);

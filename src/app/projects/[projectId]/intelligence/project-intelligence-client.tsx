@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { OperationPanel } from "@/components/operation-panel";
+import { ParentPageLink } from "@/components/parent-page-link";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { parseProjectPageState } from "@/lib/project-navigation";
@@ -285,7 +286,7 @@ function ProjectIntelligenceWorkspace({ projectId, username, isSystemAdmin }: { 
           <div className="flex flex-wrap gap-2"><Link href={buildProjectQuestionHref(projectId)} className={styles.headerLink}><UiText text={"智能问答"} /></Link><Link href={`/personal/usage?projectId=${encodeURIComponent(projectId)}`} className={styles.headerLink}><UiText text={"用量记录"} /></Link><Link href={`/projects/${encodeURIComponent(projectId)}/configuration`} className={styles.headerLink}><UiText text={"配置 AI 路由"} /></Link></div>
         </header>
 
-        {navigation.returnTo ? <Link href={navigation.returnTo} className={styles.returnLink}><UiText text={"← 返回来源页面"} /></Link> : null}
+        {navigation.returnTo ? <ParentPageLink href={navigation.returnTo} label="返回来源页面" /> : null}
         {error ? <div role="alert" className={styles.errorNotice}>{error}</div> : null}
         {loading ? <div className={styles.loadingPanel} aria-label={translateUi("正在加载项目简报与调查")} /> : status === null ? <p className={styles.emptyState}><UiText text={"项目状态暂时无法读取，请稍后重试。"} /></p> : <>
           <section id="runtime-readiness" tabIndex={-1} className={styles.readinessDisclosure}>

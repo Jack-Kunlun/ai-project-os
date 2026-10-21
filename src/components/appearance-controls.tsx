@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useAppearance } from "@/components/appearance-provider";
+import { ShellIcon } from "@/components/shell-icon";
 
 export function AppearanceControls(): React.JSX.Element {
   const { language, theme, setLanguage, setTheme, languageLoading, languageError, t } = useAppearance();
@@ -43,16 +44,9 @@ export function AppearanceControls(): React.JSX.Element {
         aria-controls={popoverId}
         onClick={() => setOpen((wasOpen) => !wasOpen)}
       >
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
-          <path d="M10 2.4a7.6 7.6 0 1 0 0 15.2h1.1c1.2 0 1.9-1.3 1.3-2.3-.4-.6-.2-1.4.4-1.8.2-.1.5-.2.7-.2h1.2c1.7 0 3-1.3 3-3A7.9 7.9 0 0 0 10 2.4Z" stroke="currentColor" strokeWidth="1.4" />
-          <circle cx="6.3" cy="8" r="1" fill="currentColor" />
-          <circle cx="9.4" cy="5.8" r="1" fill="currentColor" />
-          <circle cx="13.2" cy="7" r="1" fill="currentColor" />
-        </svg>
+        <ShellIcon name="gear" className="app-icon--control" />
         <span>{language === "en" ? "English" : "中文"}</span>
-        <svg className="appearance-controls-chevron" aria-hidden="true" viewBox="0 0 16 16" fill="none">
-          <path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <ShellIcon name="down" className="appearance-controls-chevron app-icon--meta" />
       </button>
 
       {open ? (

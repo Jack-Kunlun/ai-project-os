@@ -7,6 +7,7 @@ import { adminNavigationItems, getAdminNavigationState } from "@/lib/admin-navig
 import { useTranslate } from "./appearance-provider";
 import { AppearanceControls } from "./appearance-controls";
 import { HeaderAccount } from "./header-account";
+import { ShellIcon } from "./shell-icon";
 const WorkspaceDialog = lazy(() => import("./workspace-dialog").then(module => ({ default: module.WorkspaceDialog })));
 
 export function AdminHeader({ username, onOpenNavigation, drawerOpen = false }: { username: string; onOpenNavigation?: () => void; drawerOpen?: boolean }) {
@@ -30,13 +31,13 @@ export function AdminHeader({ username, onOpenNavigation, drawerOpen = false }: 
   return <>
     <header className="admin-global-header">
       <div className="admin-breadcrumbs">
-        {onOpenNavigation ? <button className="admin-mobile-toggle admin-icon-button" type="button" aria-label={t("打开导航")} aria-expanded={drawerOpen} aria-haspopup="dialog" aria-disabled={searchOpen} onClick={() => { if (!searchOpen) onOpenNavigation(); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h16" /></svg></button> : null}
+        {onOpenNavigation ? <button className="admin-mobile-toggle admin-icon-button" type="button" aria-label={t("打开导航")} aria-expanded={drawerOpen} aria-haspopup="dialog" aria-disabled={searchOpen} onClick={() => { if (!searchOpen) onOpenNavigation(); }}><ShellIcon name="menu" className="app-icon--control" /></button> : null}
         <Link href="/admin">{t("平台管理")}</Link><span aria-hidden="true">›</span><span className="admin-current-crumb">{t(current?.label ?? "平台总览")}</span>
       </div>
       <div className="admin-header-actions">
-        <button type="button" className="admin-search-trigger admin-icon-button" aria-label={t("搜索功能页面")} disabled={drawerOpen} onClick={() => { setSearch(""); setSearchOpen(true); }}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4" /></svg><span>{t("搜索与跳转")}</span><kbd>⌘ K</kbd></button>
-        <Link className="admin-icon-button" href="/admin/operations/failures" aria-label={t("通知与任务")} title={t("通知与任务")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9 M10 21h4" /></svg></Link>
-        <Link className="admin-icon-button" href="/admin/guide" aria-label={t("帮助")} title={t("帮助")}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1.5 1-1.5 1-1.5 3 M12 17h.01" /></svg></Link>
+        <button type="button" className="admin-search-trigger admin-icon-button" aria-label={t("搜索功能页面")} disabled={drawerOpen} onClick={() => { setSearch(""); setSearchOpen(true); }}><ShellIcon name="search" className="app-icon--control" /><span>{t("搜索与跳转")}</span><kbd>⌘ K</kbd></button>
+        <Link className="admin-icon-button" href="/admin/operations/failures" aria-label={t("通知与任务")} title={t("通知与任务")}><ShellIcon name="bell" className="app-icon--control" /></Link>
+        <Link className="admin-icon-button" href="/admin/guide" aria-label={t("帮助")} title={t("帮助")}><ShellIcon name="help" className="app-icon--control" /></Link>
         <AppearanceControls />
         <HeaderAccount username={username} accountHref="/admin/account" />
       </div>

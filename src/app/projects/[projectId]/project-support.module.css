@@ -18,7 +18,7 @@
   width: 100%;
   max-width: 1500px;
   margin-inline: auto;
-  padding: 28px 32px;
+  padding: 31px 38px 48px;
 }
 
 .supportPage :global(h1),
@@ -173,12 +173,16 @@
 }
 
 @media (max-width: 700px) {
-  .supportPage > :global(div[class*="mx-auto"]) {
-    padding: 20px 16px;
-  }
-
   .supportPage :global(section[class*="bg-gradient-to-br"]),
   .supportPage :global(section[class*="bg-gradient-to-r"]) {
     padding: 16px;
   }
+}
+
+@media (max-width: 1120px) {
+  .supportPage > :global(div[class*="mx-auto"]) { padding-right: 27px; padding-left: 27px; }
+}
+
+@media (max-width: 600px) {
+  .supportPage > :global(div[class*="mx-auto"]) { padding: 22px 15px 32px; }
 }

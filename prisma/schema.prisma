@@ -5751,6 +5751,8 @@ model UnifiedQuestionPresentationRevision {
   revision       Int
   title          String?                     @db.VarChar(120)
   pinned         Boolean                     @default(false)
+  archived       Boolean                     @default(false)
+  deleted        Boolean                     @default(false)
   createdAt      DateTime                    @default(now())
   conversation   UnifiedQuestionConversation @relation(fields: [ownerUserId, conversationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
 

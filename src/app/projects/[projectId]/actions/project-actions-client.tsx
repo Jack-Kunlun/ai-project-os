@@ -10,6 +10,7 @@ import ui from "@/components/workspace-ui.module.css";
 import { ListPagination } from "@/components/list-pagination";
 import { OperationPanel } from "@/components/operation-panel";
 import { ProjectOverviewParentLink } from "@/components/project-parent-link";
+import { ParentPageLink } from "@/components/parent-page-link";
 
 type CapabilityId = "project.repository.sync" | "project.web-source.sync" | "project.memory-quality.scan" | "project.mcp.read-tool.invoke";
 type PolicyMode = "automatic" | "approvalRequired" | "denied";
@@ -222,7 +223,7 @@ function ProjectActionsContent({ username, projectId, isSystemAdmin, confirm, em
   return <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[var(--app-bg)] text-slate-950"}>
     {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="actions" isSystemAdmin={isSystemAdmin} /> : null}
     <div className={embedded ? "" : ui.page}>
-      {!embedded ? <>      <div className="mb-5 flex flex-wrap items-center gap-3">{fromNotifications ? <Link href={`/notifications?view=${notificationFilter}${notificationPageCursor ? `&cursor=${encodeURIComponent(notificationPageCursor)}` : ""}${notificationFocusId ? `&focus=${encodeURIComponent(notificationFocusId)}` : ""}`} className="inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700"><UiText text={"返回活动记录"} /></Link> : null}<ProjectOverviewParentLink projectId={projectId} /></div>
+      {!embedded ? <>      <div className="mb-5 flex flex-wrap items-center gap-3">{fromNotifications ? <ParentPageLink href={`/notifications?view=${notificationFilter}${notificationPageCursor ? `&cursor=${encodeURIComponent(notificationPageCursor)}` : ""}${notificationFocusId ? `&focus=${encodeURIComponent(notificationFocusId)}` : ""}`} label="返回活动记录" /> : null}<ProjectOverviewParentLink projectId={projectId} /></div>
       <section className={ui.heading}>
         <div><h1><UiText text="动作与审批" /></h1><p><UiText text="每个动作先固定能力、输入指纹和策略快照，再由 Owner 审批或按项目策略自动排队。Worker 只执行内置白名单能力，完整状态变化写入不可变审计。" /></p></div>
         <button type="button" onClick={() => void reload()} className={ui.button}><UiText text="刷新状态" /></button>

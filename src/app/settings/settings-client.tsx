@@ -12,6 +12,7 @@ import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { OperationPanel } from "@/components/operation-panel";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
+import { ShellIcon } from "@/components/shell-icon";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type ProviderKind = "openai" | "deepseek" | "qwen" | "glm";
@@ -470,7 +471,7 @@ function ProviderCreateDialog({
           <h2 id="provider-create-dialog-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text={"新增供应商"} /></h2>
           <p id="provider-create-dialog-description" className="mt-2 text-xs leading-5 text-slate-600"><UiText text={"使用官方固定端点先测试未保存凭据，测试成功后才能保存为已验证连接。"} /></p>
         </div>
-        <button ref={closeRef} type="button" aria-label={t("关闭新增供应商")} onClick={close} disabled={pending} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"><UiText text={"关闭"} /></button>
+        <button ref={closeRef} type="button" aria-label={t("关闭新增供应商")} onClick={close} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
       </header>
       <ProviderCreateForm catalog={catalog} onCreated={onCreated} onPendingChange={setPending} />
     </div>

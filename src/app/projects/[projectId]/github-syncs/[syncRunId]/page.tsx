@@ -1,4 +1,5 @@
 import { UiText } from "@/components/appearance-provider";
+import { ParentPageLink } from "@/components/parent-page-link";
 import Link from "next/link";
 import { z } from "zod";
 import { assertProjectAccess } from "@/lib/access-control";
@@ -81,7 +82,7 @@ export default async function ProjectGitHubSyncPage({
   return <main className="min-h-screen bg-slate-50 text-slate-950">
     <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="repositories" isSystemAdmin={user.role === "admin"} />
     <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
-      <Link href={backHref} className="text-sm font-semibold text-indigo-700 hover:underline">← {fromNotifications ? <UiText text={"返回通知中心"} /> : <UiText text={"返回上一级"} />}</Link>
+      <ParentPageLink href={backHref} label={fromNotifications ? "返回通知中心" : "返回上一级"} />
       <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-9">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

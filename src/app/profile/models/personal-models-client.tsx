@@ -2,11 +2,11 @@
 
 import formFields from "@/components/model-form-fields.module.css";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { HelpTooltip } from "@/components/help-tooltip";
 import { OperationPanel } from "@/components/operation-panel";
+import { ParentPageLink } from "@/components/parent-page-link";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import styles from "../../support-pages.module.css";
@@ -118,8 +118,7 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
   return (
     <div className={styles.content}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/personal/configuration" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-700">
-          <span aria-hidden="true">←</span> <UiText text={" 返回我的空间配置"} /></Link>
+        <ParentPageLink href="/personal/configuration" label="返回我的空间配置" />
         <span className="text-xs text-slate-400"><UiText text={"我的空间 / 我的模型"} /></span>
       </div>
 

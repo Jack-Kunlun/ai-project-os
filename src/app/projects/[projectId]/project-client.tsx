@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ParentPageLink } from "@/components/parent-page-link";
 import { OperationPanel } from "@/components/operation-panel";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
@@ -736,7 +737,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
 
   return (
     <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}>
-      {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700"><UiText text={"← 返回来源页面"} /></Link> : null}
+      {navigation.returnTo ? <div className="mb-6"><ParentPageLink href={navigation.returnTo} label="返回来源页面" /></div> : null}
       <div className={styles.pageHeader}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -1135,7 +1136,7 @@ function ProjectShell({ children, username, projectId, isSystemAdmin }: { childr
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-6xl px-6 pb-16 pt-10 sm:px-10 lg:px-12">{children}</div>
+      <div className={styles.content}>{children}</div>
     </main>
   );
 }

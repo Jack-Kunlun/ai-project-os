@@ -6,6 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { OperationPanel } from "@/components/operation-panel";
+import { ParentPageLink } from "@/components/parent-page-link";
 import { buildProjectHref, parseProjectPageState, PROJECT_PLAN_STATUS_VALUES } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import {
@@ -250,7 +251,7 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
       {message ? <p role="status" className={styles.success}>{message}</p> : null}
       {error && currentPlan ? <p role="alert" className={styles.error}>{error}</p> : null}
       {!pageLoading && currentPlan === null ? <div className={styles.errorPanel} role="alert"><p>{t(error ?? "项目计划加载失败")}</p><button type="button" onClick={() => void reload({ showLoading: true })}><UiText text={"重试"} /></button></div> : null}
-      {navigation.returnTo ? <Link href={navigation.returnTo} className={styles.returnLink}><UiText text={"← 返回来源页面"} /></Link> : null}
+      {navigation.returnTo ? <ParentPageLink href={navigation.returnTo} label="返回来源页面" /> : null}
 
       {currentPlan ? <>
         <section className={styles.goalBanner} aria-label={t("当前项目目标")}>

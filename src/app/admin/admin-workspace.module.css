@@ -21,7 +21,7 @@
 .workspace :global(.admin-navigation-group h2) { margin: 0 10px 7px; font-size: 10px; font-weight: 500; line-height: 1.6; color: var(--admin-muted); }
 .workspace :global(.admin-navigation-group + .admin-navigation-group) { padding-top: 15px; border-top: 1px solid var(--admin-line); }
 .workspace :global(.admin-primary-link) { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 7px 10px; border-radius: 4px; color: var(--admin-ink); font-size: 12px; font-weight: 500; line-height: 1.5; text-decoration: none; }
-.workspace :global(.admin-primary-link svg) { width: 15px; height: 15px; flex: 0 0 auto; color: var(--admin-muted); }
+.workspace :global(.admin-primary-link svg) { width: 16px; height: 16px; flex: 0 0 auto; color: var(--admin-muted); }
 .workspace :global(.admin-primary-link span) { min-width: 0; }
 .workspace :global(.admin-primary-link:hover) { background: color-mix(in srgb, var(--admin-ink) 4%, transparent); }
 .workspace :global(.admin-primary-link.is-current) { background: var(--admin-blue-soft); color: var(--admin-blue); box-shadow: inset 2px 0 var(--app-accent); }
@@ -43,7 +43,7 @@
 .workspace :global(.account-signout) { border-top: 1px solid var(--app-border); color: var(--app-danger, #bc514f); }
 .workspace :global(.admin-icon-button) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 32px; min-height: 34px; border: 0; border-radius: 4px; padding: 6px; background: transparent; color: var(--admin-muted); cursor: pointer; font-size: 11px; line-height: 1.5; }
 .workspace :global(.admin-icon-button:hover) { background: var(--app-surface-soft); color: var(--admin-blue); }
-.workspace :global(.admin-icon-button svg) { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.workspace :global(.admin-icon-button svg) { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .workspace :global(.admin-search-trigger kbd) { margin-left: 15px; border: 1px solid var(--admin-line); border-radius: 3px; padding: 0 4px; font-size: 10px; }
 .workspace :global(.admin-mobile-toggle) { display: none; }
 .workspace :global(.appearance-controls-row select) { min-height: 36px; padding: 8px 28px 8px 12px; font-size: 11px; }

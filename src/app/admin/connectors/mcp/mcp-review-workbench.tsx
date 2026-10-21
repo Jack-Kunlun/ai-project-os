@@ -5,6 +5,8 @@ import { UiText, useAppearance } from "@/components/appearance-provider";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { OperationPanel } from "@/components/operation-panel";
+import { PARENT_PAGE_LINK_CLASS_NAME } from "@/components/parent-page-link";
+import { ShellIcon } from "@/components/shell-icon";
 
 type ReviewState = "eligible" | "active";
 type ReviewConclusion = "read_only_verified" | "read_only_rejected" | "needs_research";
@@ -393,7 +395,7 @@ export function McpReviewWorkbench() {
 
     </> : null}
     {notice ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{t(notice)}</p> : null}
-    {selectedId !== "" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { setSelectedId(""); window.scrollTo(0, 0); }} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"← 返回审核列表"} /></button><button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"刷新详情"} /></button></div> : null}
+    {selectedId !== "" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { setSelectedId(""); window.scrollTo(0, 0); }} className={PARENT_PAGE_LINK_CLASS_NAME}><ShellIcon name="back" className="app-icon--compact" /><UiText text={"返回审核列表"} /></button><button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"刷新详情"} /></button></div> : null}
     <div className="mt-6 min-w-0">
       {selectedId === "" ? <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-list-title">
         <div className="flex flex-wrap items-start justify-between gap-3">

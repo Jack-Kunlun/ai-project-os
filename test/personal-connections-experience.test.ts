@@ -95,8 +95,8 @@ test("personal connection forms keep project automation boundary visible", async
   assert.match(guide, /“我的空间 → 配置 → Git 授权管理”维护个人凭据/u);
   assert.match(guide, /href="\/ask"/u);
   assert.match(guide, /同一会话可切换个人或项目范围/u);
-  assert.match(guide, /每轮提交前需确认范围/u);
-  assert.match(guide, /历史记录会保留该轮引用来源/u);
+  assert.match(guide, /在输入框核对范围、模型与计量条款，点击发送即授权本轮请求/u);
+  assert.match(guide, /历史记录保留该轮引用来源/u);
   assert.match(guide, /href="\/ask\?history=1"/u);
   assert.match(git, /api\/me\/git-connections/u);
   assert.match(mcp, /api\/me\/mcp-connections/u);

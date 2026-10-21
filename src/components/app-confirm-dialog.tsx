@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslate } from "./appearance-provider";
 import { useInquiryOperation } from "./inquiry-operation";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
+import { ShellIcon } from "./shell-icon";
 
 type ConfirmTone = "primary" | "warning" | "danger";
 
@@ -104,9 +105,14 @@ export function useAppConfirmDialog() {
   const dialog = request === null || options === undefined ? null : (
     <div className={`fixed inset-0 z-[80] flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onPointerDown={event=>{backdropStarted.current=event.target===event.currentTarget;}} onClick={(event) => { if (backdropStarted.current&&event.target === event.currentTarget) close(false); }}>
       <section data-inquiry-owned={String(owned)} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
-        <header data-dialog-header className={`${modalHeaderClassName} px-7 py-5 sm:px-8`}>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{t(options.eyebrow ?? "确认操作")}</p>
-          <h2 id={titleId} className="mt-2 text-lg font-semibold tracking-tight text-slate-950">{t(options.title)}</h2>
+        <header data-dialog-header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-7 py-5 sm:px-8`}>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{t(options.eyebrow ?? "确认操作")}</p>
+            <h2 id={titleId} className="mt-2 text-lg font-semibold tracking-tight text-slate-950">{t(options.title)}</h2>
+          </div>
+          <button type="button" className="app-icon-button" onClick={() => close(false)} aria-label={t("关闭窗口")}>
+            <ShellIcon name="close" className="app-icon--control" />
+          </button>
         </header>
         <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
           <p id={descriptionId} className={`whitespace-pre-wrap break-words text-sm leading-6 ${descriptionClass}`}>{t(options.description)}</p>

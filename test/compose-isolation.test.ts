@@ -37,6 +37,7 @@ test("Compose keeps stable defaults while allowing a fully isolated candidate st
     "AI_PROJECT_OS_SECURE_COOKIES",
   ]) {
     assert.match(environmentExample, new RegExp(`^${variable}=`, "mu"));
-    assert.match(readme, new RegExp(`\\b${variable}\\b`, "u"));
+    // User-facing README links to the authoritative, executable environment template.
+    assert.match(readme, /cp \.env\.example \.env/u);
   }
 });

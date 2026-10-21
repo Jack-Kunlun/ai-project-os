@@ -13,6 +13,7 @@ import {
   type AuditEvent,
 } from "@/app/admin/audit/audit-view-model";
 import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { ShellIcon } from "@/components/shell-icon";
 import { useAppearance } from "@/components/appearance-provider";
 
 const FOCUSABLE_SELECTOR = "button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])";
@@ -123,7 +124,7 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
         aria-labelledby={titleId}
         className={`flex h-full w-full max-w-xl flex-col overflow-y-auto ${modalSurfaceClassName}`}
       >
-        <div className={`sticky top-0 z-10 flex items-start justify-between gap-3 px-5 py-4 sm:px-6 ${modalHeaderClassName}`}>
+        <div data-dialog-header className={`sticky top-0 z-10 flex items-start justify-between gap-3 px-5 py-4 sm:px-6 ${modalHeaderClassName}`}>
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{t("审计详情")}</p>
             <h2 id={titleId} className="mt-2 text-lg font-semibold text-slate-950">
@@ -132,11 +133,13 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
           </div>
           <button
             ref={closeRef}
+            data-dialog-close
             type="button"
+            aria-label={t("关闭详情")}
             onClick={onClose}
-            className="whitespace-nowrap rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+            className="app-icon-button"
           >
-            {t("关闭详情")}
+            <ShellIcon name="close" className="app-icon--control"/>
           </button>
         </div>
 

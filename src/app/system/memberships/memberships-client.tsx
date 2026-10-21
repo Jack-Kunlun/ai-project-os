@@ -3,10 +3,10 @@
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { AdminPageHeader } from "@/components/admin-page-header";
+import { ParentPageLink } from "@/components/parent-page-link";
 import { OperationPanel } from "@/components/operation-panel";
 
 type Subscription = {
@@ -127,7 +127,7 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
   }, [load]);
 
   const content = <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
-      <AdminPageHeader title="会员资格管理" description="每次变更都会先生成影响预览，再由管理员确认执行；不会修改用户角色、工作区角色或连接配置。" actions={!adminMode ? <Link href="/profile" className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600"><UiText text={"返回个人中心"} /></Link> : undefined} />
+      <AdminPageHeader title="会员资格管理" description="每次变更都会先生成影响预览，再由管理员确认执行；不会修改用户角色、工作区角色或连接配置。" actions={!adminMode ? <ParentPageLink href="/profile" label="返回个人中心" /> : undefined} />
       <div className="mt-8 flex gap-4">
         <label className="min-w-0 flex-1">
           <span className="sr-only"><UiText text={"搜索会员"} /></span>

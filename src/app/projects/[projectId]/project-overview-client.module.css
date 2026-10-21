@@ -599,7 +599,7 @@
 @keyframes shimmer { to { background-position-x: -200%; } }
 
 @media (max-width: 1120px) {
-  .content { padding-right: 28px; padding-left: 28px; }
+  .content { padding-right: 27px; padding-left: 27px; }
   .overviewGrid { grid-template-columns: minmax(0, 1fr) 245px; gap: 16px; }
   .goalPanel,
   .nextTasks,
@@ -616,7 +616,6 @@
 }
 
 @media (max-width: 650px) {
-  .content { padding: 24px 18px 35px; }
   .heading { align-items: flex-start; flex-direction: column; gap: 11px; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
   .metricCard { min-height: 55px; padding: 0 11px; }
@@ -633,6 +632,10 @@
   .governanceDetails > summary { align-items: flex-start; flex-direction: column; }
   .snapshotFooter { align-items: flex-start; flex-direction: column; }
   .skeletonMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .content { padding: 22px 15px 32px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

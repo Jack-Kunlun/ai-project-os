@@ -249,7 +249,7 @@ export function PersonalSemanticIndexPanel({
       {state === "awaiting-confirmation" && confirmation !== null && summary !== undefined ? (
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4" role="dialog" aria-labelledby="personal-semantic-index-confirm-title">
           <h4 id="personal-semantic-index-confirm-title" className="text-sm font-semibold text-amber-950"><UiText text={"确认建立个人语义索引"} /></h4>
-          <p className="mt-2 text-xs leading-5 text-amber-900"><UiText text={"本次会向"} />{" "}{summary.provider.name} {" "}<UiText text={"的"} />{" "}{summary.provider.model} {" "}<UiText text={"发送"} />{" "}{summary.totalChunks} {" "}<UiText text={"个片段（"} />{formatBytes(summary.totalSourceBytes)}<UiText text={"），向量维度为"} />{" "}{summary.provider.dimensions}。</p>
+          <p className="mt-2 text-xs leading-5 text-amber-900">{translateUi("本次将向 {provider} 的 {model} 发送 {count} 个片段（{bytes}），向量维度为 {dimensions}。").replace("{provider}", summary.provider.name).replace("{model}", summary.provider.model).replace("{count}", String(summary.totalChunks)).replace("{bytes}", formatBytes(summary.totalSourceBytes)).replace("{dimensions}", String(summary.provider.dimensions))}</p>
           <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-amber-200 bg-white/70 p-2">
             <ul className="space-y-1.5" aria-label={translateUi("本次语义索引范围")}>
               {summary.documents.map((document) => (

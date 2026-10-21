@@ -6,6 +6,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { CursorPagination } from "@/components/list-pagination";
+import { ParentPageLink } from "@/components/parent-page-link";
 import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import { buildProjectHref, parseProjectPageState, type ProjectNavigationState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
@@ -357,7 +358,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
           <button type="button" onClick={() => void Promise.allSettled([reload(), fetchOperations()])} disabled={loading || operationsLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40"><UiText text={"刷新"} /></button>
         </section> : null}
 
-        {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700"><UiText text={"← 返回来源页面"} /></Link> : null}
+        {navigation.returnTo ? <div className="mb-6"><ParentPageLink href={navigation.returnTo} label="返回来源页面" /></div> : null}
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}

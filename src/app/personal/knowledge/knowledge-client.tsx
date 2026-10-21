@@ -6,9 +6,11 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
+import { ShellIcon } from "@/components/shell-icon";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { useInquiryOperation } from "@/components/inquiry-operation";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
+import { PARENT_PAGE_LINK_CLASS_NAME } from "@/components/parent-page-link";
 import { buildPersonalKnowledgeHistoryHref, PersonalKnowledgeQaPanel } from "./personal-knowledge-qa-panel";
 import { PersonalKnowledgeNextSteps } from "./personal-knowledge-next-steps";
 const PersonalProjectSearchPanel = dynamic(() => import("./personal-project-search-panel").then(module => module.PersonalProjectSearchPanel), { loading: () => <p role="status"><UiText text="正在加载…" /></p> });
@@ -404,6 +406,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   async function returnToList(): Promise<void> {
     if (saving || !await confirmDiscardDraft()) return;
     if (mode === "edit" || mode === "create") restoreSavedDraft();
+    // Only list-row selection creates this controlled same-route history entry; deep links fall back to deterministic list-state cleanup below.
     if (detailHistoryEntryRef.current) {
       detailHistoryEntryRef.current = false;
       router.back();
@@ -1147,7 +1150,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         {workspaceSection === "search" ? <section className={styles.searchTools}>
           <div className={styles.heading}>
             <div><h1><UiText text="智能检索与索引" /></h1><p><UiText text="搜索个人知识，管理语义索引，或查找项目来源。" /></p></div>
-            <button type="button" onClick={() => void openWorkspaceSection("library")} className={styles.button}><UiText text="返回知识列表" /></button>
+            <button type="button" onClick={() => void openWorkspaceSection("library")} className={PARENT_PAGE_LINK_CLASS_NAME}><ShellIcon name="back" className="app-icon--compact" /><UiText text="返回知识列表" /></button>
           </div>
           <nav className={styles.tabs} aria-label={t("智能检索工具")}>
             <button type="button" aria-current={searchTool === "semantic" ? "page" : undefined} onClick={() => setSearchTool("semantic")} className={`${styles.tab} ${searchTool === "semantic" ? styles.activeTab : ""}`}><UiText text="个人语义搜索" /></button>
@@ -1224,7 +1227,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           {knowledgeModal === "import" ? <div className="flex h-dvh max-h-dvh min-h-0 flex-col">
           <div data-dialog-header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7">
               <div><h2 id="knowledge-modal-title" className="text-xl font-semibold"><UiText text="导入知识" /></h2></div>
-              <button data-dialog-close type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} aria-label={t("关闭导入弹窗")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text="关闭" /></button>
+              <button data-dialog-close type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} aria-label={t("关闭导入弹窗")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
             </div>
             <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
               <p className="max-w-2xl text-sm leading-6 text-slate-500"><UiText text="选择文本、Markdown、JSON、PDF、DOCX 或图片。提取结果会转入编辑弹窗，核对后再保存。" /></p>
@@ -1331,7 +1334,7 @@ function DocumentDetail({
           <p className="mt-2 text-xs text-slate-400">{t("版本")} {document.version} · {formatBytes(document.byteCount)} · {t("更新于")} {formatDate(document.updatedAt, language)}</p>
         </div>
         <div className={styles.rowActions}>
-          <button type="button" onClick={onClose} data-dialog-close data-detail-close className={styles.button}><UiText text="关闭" /></button>
+          <button type="button" onClick={onClose} data-dialog-close data-detail-close aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
           <button type="button" onClick={onEdit} className={styles.buttonPrimary}><UiText text="编辑" /></button>
           <button type="button" onClick={onDelete} disabled={deleting} className={styles.buttonDanger}>{deleting ? t("删除中…") : t("删除")}</button>
         </div>

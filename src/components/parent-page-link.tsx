@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { UiText } from "./appearance-provider";
+import { ShellIcon } from "./shell-icon";
+
+export const PARENT_PAGE_LINK_CLASS_NAME = "parent-page-link";
 
 export function ParentPageLink({ href, label, scroll }: { href: string; label: string; scroll?: boolean }) {
   return (
     <Link
       href={href}
       scroll={scroll}
-      className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-indigo-300 hover:text-indigo-700"
+      className={PARENT_PAGE_LINK_CLASS_NAME}
     >
-      <span aria-hidden="true">←</span>
+      <ShellIcon name="back" className="app-icon--compact" />
       <UiText text={label} />
     </Link>
   );

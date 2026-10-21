@@ -23,7 +23,9 @@ export const unifiedQuestionPresentationSchema = z.object({
   expectedRevision: z.number().int().min(0).max(2_147_483_646),
   title: z.string().trim().min(1).max(120).regex(/^[^\u0000-\u001f\u007f-\u009f]+$/u).optional(),
   pinned: z.boolean().optional(),
-}).strict().refine(value => value.title !== undefined || value.pinned !== undefined);
+  archived: z.boolean().optional(),
+  deleted: z.boolean().optional(),
+}).strict().refine(value => value.title !== undefined || value.pinned !== undefined || value.archived !== undefined || value.deleted !== undefined);
 
 export const unifiedQuestionQuestionSchema = z.string()
   .trim()

@@ -496,4 +496,23 @@ export async function markNotificationRead(userIdInput: unknown, notificationIdI
   return projectNotification(notification, userId, db, now);
 }
 
+/**
+ * Mark the caller's currently visible unread notifications as read in one
+ * bounded database update. The database timestamp cutoff leaves later
+ * arrivals unread and this write does not change their subject action state.
+ */
+export async function markAllUserNotificationsRead(userIdInput: unknown, db: SubjectProjectionDb = getDb()) {
+  const userId = uuid(userIdInput);
+  const cutoff = await databaseNow(db);
+  const updated = await db.notification.updateMany({
+    where: {
+      ...visibilityWhere(userId),
+      readAt: null,
+      createdAt: { lte: cutoff },
+    },
+    data: { readAt: cutoff },
+  });
+  return Object.freeze({ markedReadCount: updated.count });
+}
+
 export type { NotificationRow };

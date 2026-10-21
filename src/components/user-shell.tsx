@@ -209,6 +209,19 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
   }, [closeMobileNavigation, closeSearch, mobileNavigationOpen, openSearch, searchOpen]);
 
+  useEffect(() => {
+    const viewport = window.matchMedia("(max-width: 760px)");
+    const handleViewportChange = (event: MediaQueryListEvent): void => {
+      if (event.matches) return;
+      setMobileNavigationPath(null);
+      if (document.activeElement === mobileCloseButtonRef.current) {
+        window.requestAnimationFrame(() => searchButtonRef.current?.focus());
+      }
+    };
+    viewport.addEventListener("change", handleViewportChange);
+    return () => viewport.removeEventListener("change", handleViewportChange);
+  }, []);
+
   const activeGlobalKey = getActiveGlobalNavigation(pathname);
   const routeProject = routeContext ? allAccessibleProjects.find((project) => project.id === routeContext.projectId) : undefined;
   const selectedProject = routeContext

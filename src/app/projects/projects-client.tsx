@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
+import { ShellIcon } from "@/components/shell-icon";
 import { ListPagination } from "@/components/list-pagination";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { useInquiryOperation } from "@/components/inquiry-operation";
@@ -154,7 +155,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             </div>
             <label className={styles.searchBox}>
               <span className="sr-only"><UiText text="搜索项目" /></span>
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+              <ShellIcon name="search" className="app-icon--control" />
               <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={t("搜索项目")} />
             </label>
           </div>
@@ -242,7 +243,7 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
     <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="create-project-title" className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
       <header data-dialog-header className={`${modalHeaderClassName} flex shrink-0 items-start justify-between gap-4 px-7 py-5 sm:px-8`}>
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"New project"} /></p><h2 id="create-project-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text="创建项目空间" /></h2></div>
-        <button data-dialog-close type="button" onClick={onClose} disabled={pending} className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200" aria-label={t("关闭")}>×</button>
+        <button data-dialog-close type="button" onClick={onClose} disabled={pending} className="app-icon-button" aria-label={t("关闭")}><ShellIcon name="close" className="app-icon--control" /></button>
       </header>
       <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
         <p className="text-sm leading-6 text-slate-600"><UiText text="项目会隔离自己的资料、仓库和智能记忆；模型能力由平台默认模型或个人双确认委托提供。" /></p>

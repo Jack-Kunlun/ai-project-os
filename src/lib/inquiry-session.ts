@@ -4,7 +4,7 @@ import { useCallback, useSyncExternalStore, type SetStateAction } from "react";
 export type Scope = "all" | "personal" | "project";
 export type Source = { id: string; scope: "personal" | "project"; projectId?: string; sourceId: string; revision: string; version?:number; contentHash: string; title: string; excerpt: string; content?: string };
 export type Turn = { id: string; sequence: number; scope: Scope; projectId?: string; contextName: string; question: string; answer: string; modelId: string; providerName: string; createdAt: string; citations: Source[]; usage?:TokenUsageSummary };
-export type Conversation = { id: string; title: string; turns: Turn[]; lastTurnId: string | null; pinned?: boolean; presentationRevision?: number; usage?: TokenUsageSummary; usageStale?: boolean };
+export type Conversation = { id: string; title: string; turns: Turn[]; lastTurnId: string | null; pinned?: boolean; archived?: boolean; deleted?: boolean; presentationRevision?: number; usage?: TokenUsageSummary; usageStale?: boolean };
 
 export type InquiryRequest=Readonly<{epoch:number;phase:"prepare"|"execute"}>;
 type Session={scope:Scope;projectId:string;focusDocumentId:string|undefined;conversation:Conversation|null;question:string;request:InquiryRequest|null;epoch:number;error:string|null};

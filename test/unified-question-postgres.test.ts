@@ -208,6 +208,27 @@ test("unified question migration installs guards and hides entire histories afte
     const pinnedList = await listUnifiedQuestionConversations({}, owner, db) as { conversations: Array<{ id: string }> };
     assert.equal(pinnedList.conversations[0]?.id, conversationId, "pinned histories precede newer unpinned histories");
 
+    const stableTurns = (await getUnifiedQuestionConversation(conversationId, owner, db) as { conversation: { turns: unknown[] } }).conversation.turns;
+    const lifecycleList = async (view: "active" | "archived" | "deleted") =>
+      (await listUnifiedQuestionConversations({ view }, owner, db) as { conversations: { id: string }[] }).conversations.map(row => row.id);
+    await updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 4, archived: true }, owner, db);
+    assert.ok(!(await lifecycleList("active")).includes(conversationId));
+    assert.ok((await lifecycleList("archived")).includes(conversationId));
+    await updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 5, deleted: true }, owner, db);
+    assert.ok(!(await lifecycleList("archived")).includes(conversationId));
+    assert.ok((await lifecycleList("deleted")).includes(conversationId));
+    await assert.rejects(() => prepareUnifiedQuestion({ phase: "prepare", conversationId, expectedLastTurnId: secondTurnId,
+      scope: "personal", question: "回收站会话不能继续外发", clientKey: `trash-${suffix}` }, owner, db),
+      (error: unknown) => unifiedCode(error) === "UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    await updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 6, deleted: false }, owner, db);
+    assert.ok((await lifecycleList("archived")).includes(conversationId), "restore preserves the prior archive state");
+    await updateUnifiedQuestionPresentation(conversationId, { expectedRevision: 7, archived: false }, owner, db);
+    assert.ok((await lifecycleList("active")).includes(conversationId));
+    assert.ok(!(await lifecycleList("deleted")).includes(conversationId));
+    assert.deepEqual(await db.unifiedQuestionConversation.findUniqueOrThrow({ where: { id: conversationId } }), original);
+    assert.deepEqual((await getUnifiedQuestionConversation(conversationId, owner, db) as { conversation: { turns: unknown[] } }).conversation.turns, stableTurns,
+      "archive, trash and restore never alter immutable questions, answers or citation snapshots");
+
     await db.$transaction((tx) => revokeProjectMembership(tx, projectId, ownerId, workspaceId, {
       actorId: adminId, reason: "unified_question_postgres_gate_revocation",
     }));

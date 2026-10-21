@@ -3,6 +3,7 @@ import Script from "next/script";
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 import { AppearanceProvider } from "@/components/appearance-provider";
+import { ShellIconSprite } from "@/components/shell-icon-sprite";
 import { FloatingInquiryLoader } from "@/components/floating-inquiry-loader";
 import { englishUiMessages, englishUiUrl } from "@/lib/ui-dictionary-server";
 import "./globals.css";
@@ -43,6 +44,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang={language} data-language={language} data-theme={theme === "dark" ? "dark" : "light"} data-theme-preference={theme} className="h-full antialiased" suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
+        <ShellIconSprite />
         <Script id="appearance-bootstrap" strategy="beforeInteractive">{appearanceBootstrap}</Script>
         <AppearanceProvider initialLanguage={language} initialTheme={theme} initialMessages={language === "en" ? englishUiMessages : null} dictionaryUrl={englishUiUrl}>
           {children}

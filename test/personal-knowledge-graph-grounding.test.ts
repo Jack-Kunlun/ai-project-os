@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { ApiError } from "@/lib/api-errors";
 import { parseGroundedGraphOutput } from "@/lib/personal-knowledge-graph";
@@ -28,4 +29,20 @@ test("rejects malformed and excessive model output", () => {
     subject: "张三", subjectKind: "person", predicate: "负责知识库",
     object: "昆仑公司", objectKind: "organization", evidence: "张三在昆仑公司负责知识库",
   })) }), source), (error: unknown) => error instanceof ApiError && error.code === "PERSONAL_GRAPH_RESPONSE_INVALID");
+});
+
+test("knowledge graph nodes open scoped detail drawers and keep source reading separate from Ask AI", async () => {
+  const [client, canvas] = await Promise.all([
+    readFile("src/app/personal/knowledge/graph/personal-knowledge-graph-client.tsx", "utf8"),
+    readFile("src/app/personal/knowledge/graph/knowledge-graph-canvas.tsx", "utf8"),
+  ]);
+
+  assert.match(client, /function activateNode\(id:string\).*setDetailOpen\(true\)/u);
+  assert.match(client, /WorkspaceDialog title=\{"知识点详情"\} open=\{detailOpen&&selected!==undefined\}/u);
+  assert.match(client, /node\.projectId===selected\.projectId&&node\.sourceId===selected\.sourceId/u);
+  assert.match(client, /sourceController\.current\?\.abort\(\)/u);
+  assert.match(client, /fetch\('\/api\/projects\/'\+source\.projectId\+'\/sources\/'\+source\.sourceId/u);
+  assert.doesNotMatch(client, /router\.push|\/ask\?/u);
+  assert.match(canvas, /onClick=\{\(\)=>activateNode\(node\)\}/u);
+  assert.match(canvas, /if\(node\.kind==="source"\|\|node\.kind==="fact"\)onActivate\(node\.id\)/u);
 });

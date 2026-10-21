@@ -7,11 +7,28 @@ import { adminNavigationGroups, getAdminNavigationState } from "@/lib/admin-navi
 import { useTranslate } from "./appearance-provider";
 import { BrandMark } from "./brand-mark";
 import { AdminHeader } from "./admin-header";
+import { ShellIcon, type ShellIconName } from "./shell-icon";
 const WorkspaceDialog = lazy(() => import("./workspace-dialog").then(module => ({ default: module.WorkspaceDialog })));
 
 export { getAdminNavigationState } from "@/lib/admin-navigation";
 /** Legacy section names remain compatible with the guarded redirect pages. */
 export type AdminSection = "overview" | "models" | "modelRoutes" | "credits" | "probes" | "sms" | "git" | "mcp" | "users" | "memberships" | "accountAccess" | "audit" | "operations" | "failures" | "guide" | "account";
+
+const navigationIcons: Record<string, ShellIconName> = {
+  "/admin": "dashboard",
+  "/admin/users": "team",
+  "/admin/users/memberships": "shield",
+  "/admin/credits": "credits",
+  "/admin/models": "server",
+  "/admin/connectors/mcp": "shield",
+  "/admin/sms": "message",
+  "/admin/audit": "file",
+  "/admin/operations/backups": "archive",
+  "/admin/operations/failures": "alert",
+  "/admin/operations/probes": "chart",
+  "/admin/account": "person",
+  "/admin/guide": "book",
+};
 
 function NavigationLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   const t = useTranslate();
@@ -20,7 +37,7 @@ function NavigationLinks({ pathname, onNavigate }: { pathname: string; onNavigat
     {adminNavigationGroups.map(group => <section key={group.key} className="admin-navigation-group">
       <h2>{t(group.label)}</h2>
       {group.links.map(item => <Link key={item.href} href={item.href} aria-current={currentLinks.includes(item.href) ? "page" : undefined} onClick={onNavigate} className={`admin-primary-link ${currentLinks.includes(item.href) ? "is-current" : ""}`}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={item.icon} /></svg>
+        <ShellIcon name={navigationIcons[item.href] ?? "grid"} className="app-icon--control" />
         <span>{t(item.label)}</span>
       </Link>)}
     </section>)}

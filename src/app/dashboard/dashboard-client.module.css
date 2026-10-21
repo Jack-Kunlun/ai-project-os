@@ -189,11 +189,7 @@
 .itemCopy small { font-size: 11px; }
 
 .arrow {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
   color: var(--app-muted);
-  font-size: 14px;
   transition: transform 140ms ease;
 }
 
@@ -280,27 +276,31 @@
 }
 
 .actionCard { align-items: center; gap: 12px; text-align: left; }
-.actionIcon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--app-link); }
+.actionIcon { --app-icon-size: var(--app-icon-feature); color: var(--app-link); }
 .attentionItem:hover,
 .actionCard:hover { border-color: var(--app-accent); }
 .actionCard:hover .arrow { transform: translateX(3px); }
 .actionCard strong { font-weight: 600; }
 .actionCard small { overflow-wrap: anywhere; }
 
-.guideLink {
+.cardAction {
   display: inline-flex;
-  align-self: flex-start;
-  min-height: 28px;
+  min-height: 36px;
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  margin-top: auto;
-  padding-top: 16px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  padding: 0 10px;
   color: var(--app-link);
+  background: var(--app-surface);
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
 }
-.guideLink:hover { color: var(--app-link); }
+.cardAction:hover { border-color: var(--app-accent); color: var(--app-link); }
+.actionArrow { color: inherit; }
 
 .quickLinks {
   margin-top: 12px;

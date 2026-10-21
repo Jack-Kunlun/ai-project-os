@@ -1,3 +1,9 @@
+.content {
+  width: min(100%, 1500px);
+  margin: 0 auto;
+  padding: 31px 38px 48px;
+}
+
 .pageHeader {
   border-bottom: 1px solid var(--app-border);
   padding-bottom: 1.25rem;
@@ -477,4 +483,12 @@
   .drawer {
     width: 100%;
   }
+}
+
+@media (max-width: 1120px) {
+  .content { padding-right: 27px; padding-left: 27px; }
+}
+
+@media (max-width: 600px) {
+  .content { padding: 22px 15px 32px; }
 }

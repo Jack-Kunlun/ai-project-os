@@ -2,6 +2,7 @@
 import "../app/inquiry.css";
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { ShellIcon } from "./shell-icon";
 import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { Suspense,useCallback,useEffect,useLayoutEffect,useRef,useState,type CSSProperties, type PointerEvent as ReactPointerEvent,type ReactNode } from 'react';
@@ -163,14 +164,14 @@ export function FloatingInquiry(){
     <div className="inquiry-panel-content"><InquiryOwnedContext.Provider value={true}><Suspense fallback={<p role="status" className="inquiry-loading"><UiText text="正在加载智能问答…"/></p>}><Inquiry key={sessionEpoch} embedded username="" isSystemAdmin={false} onConversationChange={conversationChanged} onBusyChange={busyChanged}/></Suspense></InquiryOwnedContext.Provider></div>
    </dialog>:null}
   </div>,target);
- const launcherPortal=createPortal(<><button type="button" ref={launcherRef} className={`inquiry-launcher ${operation?'in-operation-launcher':''}`} style={operation?{'--inquiry-entry-right':`${operation.entryRight}px`} as CSSProperties:undefined} hidden={(!allowed&&!keepActive)||(opened&&!operation)} onClick={toggle} aria-expanded={opened} aria-controls={mounted?'global-inquiry-panel':undefined}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M20 11a8 8 0 0 1-8 8H8l-4 2v-6a8 8 0 1 1 16-4Z"/><path d="M8 10h8M8 14h5"/></svg><span>{t(opened&&operation?'收起问答':'智能问答')}</span>{!operation?<kbd>⌥ J</kbd>:null}</button>{layerError?<span role="alert" className={`inquiry-layer-error ${operation?'inquiry-layer-error-operation':''}`}>{layerError}</span>:null}</>,launcherHost);
+ const launcherPortal=createPortal(<><button type="button" ref={launcherRef} className={`inquiry-launcher ${operation?'in-operation-launcher':''}`} style={operation?{'--inquiry-entry-right':`${operation.entryRight}px`} as CSSProperties:undefined} hidden={(!allowed&&!keepActive)||(opened&&!operation)} onClick={toggle} aria-expanded={opened} aria-controls={mounted?'global-inquiry-panel':undefined}><ShellIcon name="ask"/><span>{t(opened&&operation?'收起问答':'智能问答')}</span>{!operation?<kbd>⌥ J</kbd>:null}</button>{layerError?<span role="alert" className={`inquiry-layer-error ${operation?'inquiry-layer-error-operation':''}`}>{layerError}</span>:null}</>,launcherHost);
  return <>{panelPortal}{launcherPortal}</>;
 }
 
 function InquiryControl({label,children,disabled,pressed,onClick}:{label:string;children:ReactNode;disabled?:boolean;pressed?:boolean;onClick:()=>void}){
  return <button type="button" className="inquiry-tooltip-control" aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>{children}<span role="tooltip">{label}</span></button>;
 }
-function DockIcon(){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M14 4v16"/></svg>;}
-function ExpandIcon({expanded}:{expanded:boolean}){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d={expanded?'M9 4v5H4m11-5v5h5m-5 11v-5h5M9 20v-5H4':'M4 9V4h5m6 0h5v5m0 6v5h-5M9 20H4v-5'}/></svg>;}
-function PageIcon(){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M4 8h16m-6 3h5m-5 0 2-2m-2 2 2 2"/></svg>;}
-function CloseIcon(){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m6 6 12 12M18 6 6 18"/></svg>;}
+function DockIcon(){return <ShellIcon name="dock"/>;}
+function ExpandIcon({expanded}:{expanded:boolean}){return <ShellIcon name={expanded?"collapse":"expand"}/>;}
+function PageIcon(){return <ShellIcon name="page"/>;}
+function CloseIcon(){return <ShellIcon name="close"/>;}

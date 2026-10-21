@@ -5,9 +5,9 @@
 }
 
 .content {
-  width: min(100%, 72rem);
+  width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 1.75rem 1.5rem 4rem;
+  padding: 31px 38px 48px;
 }
 
 .pageHeader {
@@ -195,11 +195,6 @@
 }
 
 @media (max-width: 640px) {
-  .content {
-    padding-right: 1rem;
-    padding-left: 1rem;
-  }
-
   .pageHeader {
     align-items: flex-start;
     flex-direction: column;
@@ -208,6 +203,14 @@
   .contentSection {
     padding: 1rem;
   }
+}
+
+@media (max-width: 1120px) {
+  .content { padding-right: 27px; padding-left: 27px; }
+}
+
+@media (max-width: 600px) {
+  .content { padding: 22px 15px 32px; }
 }
 
 .pageHeader h1 { font-size: 25px; font-weight: 600; letter-spacing: 0; }

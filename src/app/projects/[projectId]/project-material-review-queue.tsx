@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CursorPagination } from "@/components/list-pagination";
+import { ParentPageLink } from "@/components/parent-page-link";
 import { ProjectFlowGuide } from "@/components/project-flow-guide";
 import { KnowledgeLifecycle } from "@/components/knowledge-lifecycle";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
@@ -174,7 +175,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged, embedded = fa
 
   return (
     <section id="review-queue" tabIndex={-1} aria-labelledby="review-queue-heading" className={`${styles.reviewSection} outline-none focus:ring-4 focus:ring-indigo-100`}>
-      {!embedded && navigation.returnTo ? <Link href={navigation.returnTo} className="mb-5 inline-flex text-sm font-semibold text-indigo-700"><UiText text={"← 返回来源页面"} /></Link> : null}
+      {!embedded && navigation.returnTo ? <div className="mb-5"><ParentPageLink href={navigation.returnTo} label="返回来源页面" /></div> : null}
       {!embedded ? <ProjectFlowGuide projectId={projectId} stage="review" /> : null}
       <div className={styles.sectionHeading}>
         <div><h2 id="review-queue-heading" className="text-lg font-semibold tracking-tight"><UiText text={"待核对内容"} /></h2><p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"对照原文证据，确认保留或驳回；来源和模型信息会随记录保存。"} /></p></div>

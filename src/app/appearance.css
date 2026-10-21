@@ -97,14 +97,14 @@ body {
 }
 
 .appearance-controls-trigger > svg:first-child {
-  width: 16px;
-  height: 16px;
+  width: var(--app-icon-control, 16px);
+  height: var(--app-icon-control, 16px);
   flex: 0 0 auto;
 }
 
 .appearance-controls-chevron {
-  width: 13px;
-  height: 13px;
+  width: var(--app-icon-meta, 12px);
+  height: var(--app-icon-meta, 12px);
   flex: 0 0 auto;
 }
 

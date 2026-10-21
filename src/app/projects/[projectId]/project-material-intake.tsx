@@ -1,6 +1,7 @@
 "use client";
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
+import { ShellIcon } from "@/components/shell-icon";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { modalBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
@@ -237,7 +238,7 @@ export function ProjectMaterialIntake({
           <h2 id="add-source-dialog-title" className="text-lg font-semibold tracking-tight text-slate-950"><UiText text={"添加资料"} /></h2>
           <p id="add-source-dialog-description" className="mt-1 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"资料会保留原文和来源。需要模型处理时，会先显示本次范围并等待确认。"} /></p>
         </div>
-        <button ref={closeButtonRef} data-dialog-close type="button" onClick={closeDrawer} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"关闭"} /></button>
+        <button ref={closeButtonRef} data-dialog-close type="button" onClick={closeDrawer} aria-label={translateUi("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
       </div>
 
       <div data-dialog-body className={`${styles.drawerBody} px-5 py-5 sm:px-7`}>

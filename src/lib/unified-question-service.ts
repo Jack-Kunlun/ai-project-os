@@ -704,7 +704,7 @@ async function conversationTokenUsage(db: Prisma.TransactionClient, actor: Actor
 async function presentation(db: Prisma.TransactionClient, ownerUserId: string, conversationId: string) {
   return db.unifiedQuestionPresentationRevision.findFirst({
     where: { ownerUserId, conversationId }, orderBy: { revision: "desc" },
-    select: { title: true, pinned: true, revision: true },
+    select: { title: true, pinned: true, archived: true, deleted: true, revision: true },
   });
 }
 
@@ -817,6 +817,7 @@ async function createOrReplayConfirmation(
     } else if (conversation.headTurnId !== input.expectedLastTurnId) {
       return fail("UNIFIED_QUESTION_CONFLICT");
     }
+    if (conversation && (await presentation(tx, actor.id, conversationId))?.deleted) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
     const historyMetadata = conversation === null ? [] : await tx.unifiedQuestionTurn.findMany({
       where: { ownerUserId: actor.id, conversationId }, select: { projectIds: true },
     });
@@ -915,6 +916,7 @@ async function admitExecution(actor: Actor, parsed: ExecuteInput, db: PrismaClie
     const current = await currentActor(tx, actor);
     const confirmation = await tx.unifiedQuestionConfirmation.findFirst({ where: { id: confirmationId, ownerUserId: actor.id } });
     if (confirmation === null) return fail("UNIFIED_QUESTION_CONFIRMATION_REQUIRED");
+    if ((await presentation(tx, actor.id, confirmation.conversationId))?.deleted) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
     const confirmationProjectIds = confirmation.scopeProjectIds;
     const historyMetadata = await tx.unifiedQuestionTurn.findMany({
       where: { ownerUserId: actor.id, conversationId: confirmation.conversationId }, select: { projectIds: true },
@@ -1154,7 +1156,7 @@ async function successfulConversation(snapshot: Snapshot, answer: string, citati
         modelId: true, providerName: true, createdAt: true, citations: true } });
     const display = await presentation(tx, snapshot.owner.id, snapshot.conversationId);
     return Object.freeze({ conversation: Object.freeze({ id: snapshot.conversationId, title: display?.title ?? conversation.title ?? snapshot.question,
-      pinned: display?.pinned ?? false, presentationRevision: display?.revision ?? 0,
+      pinned: display?.pinned ?? false, archived: display?.archived ?? false, deleted: display?.deleted ?? false, presentationRevision: display?.revision ?? 0,
       usage: (await conversationTokenUsage(tx, current, [snapshot.conversationId])).get(snapshot.conversationId),
       turns: await addTurnTokenUsage(tx, snapshot.owner.id, snapshot.conversationId, turns), lastTurnId: turnId }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
@@ -1259,7 +1261,7 @@ async function authorizedConversation(actor: Actor, conversationId: string, db: 
         modelId: true, providerName: true, createdAt: true, citations: true } });
     const display = await presentation(tx, actor.id, conversationId);
     return Object.freeze({ conversation: Object.freeze({ id: conversationId, title: display?.title ?? history.conversation.title ?? turns[0]?.question ?? "新会话",
-      pinned: display?.pinned ?? false, presentationRevision: display?.revision ?? 0,
+      pinned: display?.pinned ?? false, archived: display?.archived ?? false, deleted: display?.deleted ?? false, presentationRevision: display?.revision ?? 0,
       usage: (await conversationTokenUsage(tx, actor, [conversationId])).get(conversationId),
       turns: await addTurnTokenUsage(tx, actor.id, conversationId, turns), lastTurnId: history.conversation.headTurnId }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 });
@@ -1289,13 +1291,15 @@ export async function updateUnifiedQuestionPresentation(conversationIdInput: unk
     if ((previous?.revision ?? 0) !== parsed.data.expectedRevision) return fail("UNIFIED_QUESTION_CONFLICT");
     const title = parsed.data.title ?? previous?.title ?? null;
     const pinned = parsed.data.pinned ?? previous?.pinned ?? false;
+    const archived = parsed.data.archived ?? previous?.archived ?? false;
+    const deleted = parsed.data.deleted ?? previous?.deleted ?? false;
     let revision = previous?.revision ?? 0;
-    if (title !== (previous?.title ?? null) || pinned !== (previous?.pinned ?? false)) {
+    if (title !== (previous?.title ?? null) || pinned !== (previous?.pinned ?? false) || archived !== (previous?.archived ?? false) || deleted !== (previous?.deleted ?? false)) {
       await mutationContext(tx);
       revision += 1;
-      await tx.unifiedQuestionPresentationRevision.create({ data: { ownerUserId: actor.id, conversationId, revision, title, pinned, createdAt: await databaseNow(tx) } });
+      await tx.unifiedQuestionPresentationRevision.create({ data: { ownerUserId: actor.id, conversationId, revision, title, pinned, archived, deleted, createdAt: await databaseNow(tx) } });
     }
-    return Object.freeze({ presentation: Object.freeze({ id: conversationId, title: title ?? conversation.title ?? "新会话", pinned, presentationRevision: revision }) });
+    return Object.freeze({ presentation: Object.freeze({ id: conversationId, title: title ?? conversation.title ?? "新会话", pinned, archived, deleted, presentationRevision: revision }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 });
 }
 
@@ -1314,7 +1318,14 @@ export async function getUnifiedQuestionSources(input: Readonly<{ scope?: unknow
     await lockProjects(tx, projectRows.map((row) => row.id));
     const currentRows = await scopeProjectRows(actor, scope, scopeInput.projectId, tx, false);
     const directory = await directorySources(actor, scope, currentRows, scopeInput.focusDocumentId, tx);
-    return Object.freeze({ sources: directory.sources, total: directory.total,
+    let model = null;
+    try {
+      const provider = await readProvider(tx);
+      model = { providerName: provider.name, modelId: provider.defaultGenerationModelId!, quotaMultiplierBps: provider.billingRoute!.quotaMultiplierBps, maxOutputTokens: provider.billingRoute!.maxOutputTokens };
+    } catch (error) {
+      if (!(error instanceof UnifiedQuestionError) || error.code !== "UNIFIED_QUESTION_PROVIDER_UNAVAILABLE") throw error;
+    }
+    return Object.freeze({ model, sources: directory.sources, total: directory.total,
       truncated: directory.total > directory.sources.length, contextName: await contextName(scope, currentRows) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 });
 }
@@ -1329,17 +1340,26 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/gu, "\\$&");
 }
 
-export async function listUnifiedQuestionConversations(input: Readonly<{ search?: unknown; page?: unknown }>, actorValue: unknown, db: PrismaClient = getDb()): Promise<unknown> {
+export async function listUnifiedQuestionConversations(input: Readonly<{ search?: unknown; page?: unknown; view?: unknown }>, actorValue: unknown, db: PrismaClient = getDb()): Promise<unknown> {
   assertActorShape(actorValue);
   const search = typeof input.search === "string" ? input.search.trim().slice(0, 160) : "";
   const page = parsePage(input.page);
+  const view = input.view ?? "active";
+  if (!["active", "archived", "deleted"].includes(view as string)) return fail("UNIFIED_QUESTION_INVALID_INPUT");
   return db.$transaction(async (tx) => {
     await lockActorAccess(tx, actorValue.id);
     const actor = await currentActor(tx, actorValue);
     const needle = search.length === 0 ? null : `%${escapeLike(search)}%`;
     const candidateRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT c."id" FROM "UnifiedQuestionConversation" c
+      LEFT JOIN LATERAL (
+        SELECT r."archived", r."deleted" FROM "UnifiedQuestionPresentationRevision" r
+        WHERE r."ownerUserId" = c."ownerUserId" AND r."conversationId" = c."id" ORDER BY r."revision" DESC LIMIT 1
+      ) display ON true
       WHERE c."ownerUserId" = ${actor.id}::uuid AND c."headTurnId" IS NOT NULL
+        AND CASE WHEN ${view}::text = 'deleted' THEN COALESCE(display."deleted", false)
+          WHEN ${view}::text = 'archived' THEN NOT COALESCE(display."deleted", false) AND COALESCE(display."archived", false)
+          ELSE NOT COALESCE(display."deleted", false) AND NOT COALESCE(display."archived", false) END
         AND (${needle}::text IS NULL OR COALESCE((
           SELECT r."title" FROM "UnifiedQuestionPresentationRevision" r
           WHERE r."ownerUserId" = c."ownerUserId" AND r."conversationId" = c."id" ORDER BY r."revision" DESC LIMIT 1
@@ -1366,8 +1386,8 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
     if (safeIds.length === 0) return Object.freeze({ conversations: Object.freeze([]), pagination: Object.freeze({ page, totalPages: 1, total: 0 }) });
     const conversations = await tx.unifiedQuestionConversation.findMany({ where: { ownerUserId: actor.id, id: { in: safeIds }, headTurnId: { not: null } },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }], select: { id: true, title: true, updatedAt: true, headSequence: true } });
-    const displays = await tx.$queryRaw<Array<{ conversationId: string; title: string | null; pinned: boolean; revision: number }>>(Prisma.sql`
-      SELECT DISTINCT ON ("conversationId") "conversationId", "title", "pinned", "revision"
+    const displays = await tx.$queryRaw<Array<{ conversationId: string; title: string | null; pinned: boolean; archived: boolean; deleted: boolean; revision: number }>>(Prisma.sql`
+      SELECT DISTINCT ON ("conversationId") "conversationId", "title", "pinned", "archived", "deleted", "revision"
       FROM "UnifiedQuestionPresentationRevision"
       WHERE "ownerUserId" = ${actor.id}::uuid AND "conversationId" = ANY(${safeIds}::uuid[])
       ORDER BY "conversationId", "revision" DESC
@@ -1390,7 +1410,7 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
     const usageById = await conversationTokenUsage(tx, actor, pageRows.map(row => row.id));
     const selected = pageRows.map((conversation) => Object.freeze({
       id: conversation.id, title: displayById.get(conversation.id)?.title ?? conversation.title ?? "新会话", updatedAt: conversation.updatedAt.toISOString(),
-      pinned: displayById.get(conversation.id)?.pinned ?? false, presentationRevision: displayById.get(conversation.id)?.revision ?? 0,
+      pinned: displayById.get(conversation.id)?.pinned ?? false, archived: displayById.get(conversation.id)?.archived ?? false, deleted: displayById.get(conversation.id)?.deleted ?? false, presentationRevision: displayById.get(conversation.id)?.revision ?? 0,
       usage: usageById.get(conversation.id),
       turnCount: conversation.headSequence, ranges: Object.freeze([...(rangesById.get(conversation.id) ?? [])].slice(0, 8)),
     }));

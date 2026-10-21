@@ -39,7 +39,25 @@ type AskConversationFixture = Readonly<{
   title: string;
   turns: readonly AskTurnFixture[];
   lastTurnId: string | null;
+  pinned?: boolean;
+  archived?: boolean;
+  deleted?: boolean;
+  presentationRevision?: number;
 }>;
+
+function conversationRail(page: Page, english = false) {
+  return page.getByRole("complementary", { name: english ? "Recent conversations" : "最近会话", exact: true });
+}
+
+function conversationRow(rail: ReturnType<typeof conversationRail>, title: string) {
+  return rail.getByRole("button").filter({ hasText: title }).first();
+}
+
+async function openConversationActions(row: ReturnType<typeof conversationRow>, english = false) {
+  const item = row.locator("..");
+  await item.getByRole("button", { name: english ? /Conversation actions/u : /会话操作/u }).click();
+  return item.locator("[popover]");
+}
 
 async function personalCitation(page: Page, documentId: string): Promise<CitationSnapshot> {
   const [directoryResponse, detailResponse] = await Promise.all([
@@ -149,6 +167,18 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   let waitExecute: Promise<void> | null = null, waitPrepare: Promise<void> | null = null, waitRead: Promise<void> | null = null;
   let releaseExecute = () => {}, releasePrepare = () => {}, releaseRead = () => {};
   let delayedReads = 0;
+  const baseFixtureModel = { providerName: "隔离的客户端交互 fixture", modelId: "isolated-client-fixture-model", quotaMultiplierBps: 15_000, maxOutputTokens: 2_048 };
+  let currentModel = { ...baseFixtureModel };
+  let preparedModel = { ...baseFixtureModel };
+  let changeModelOnNextPrepare = false;
+
+  // Keep authenticated source-directory data real while supplying a stable,
+  // non-secret model disclosure for the direct-send client fixture.
+  await page.route("**/api/ask/sources*", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json() as Record<string, unknown>;
+    await route.fulfill({ response, json: { ...payload, model: currentModel } });
+  });
 
 
   // Only Ask conversation/turn HTTP responses are isolated fixtures. Project,
@@ -158,6 +188,11 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     const body = route.request().postDataJSON() as Record<string, unknown>;
     if (body.phase === "prepare") {
       prepareBodies.push(body);
+      if (changeModelOnNextPrepare) {
+        preparedModel = { ...baseFixtureModel, modelId: "updated-fixture-model" };
+        currentModel = { ...preparedModel };
+        changeModelOnNextPrepare = false;
+      }
       const scope = body.scope === "project" ? "project" : "personal";
       const turnProjectId = scope === "project" ? String(body.projectId) : undefined;
       const title = scope === "project" ? projectName : "个人空间";
@@ -171,9 +206,9 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
         confirmationId: id,
         conversationId: targetConversationId,
         expiresAt: new Date(Date.now() + 120_000).toISOString(),
-        modelId: "isolated-client-fixture-model",
-        providerName: "隔离的客户端交互 fixture",
-        billing: { mode: "platform", quotaMultiplierBps: 15_000, maxOutputTokens: 2_048, estimatedTokens: 24, estimatedRawTokens: 24, estimatedChargedTokens: 36 },
+        modelId: preparedModel.modelId,
+        providerName: preparedModel.providerName,
+        billing: { mode: "platform", quotaMultiplierBps: preparedModel.quotaMultiplierBps, maxOutputTokens: preparedModel.maxOutputTokens, estimatedTokens: 24, estimatedRawTokens: 24, estimatedChargedTokens: 36 },
         contextTurnCount: currentConversation?.turns.length ?? 0,
         contextName: title,
         sources: [source],
@@ -189,7 +224,6 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
         contextName: title,
         source,
       });
-      confirmationIds.push(id);
       if (waitPrepare) await waitPrepare;
       await route.fulfill({ json: { confirmation } });
       return;
@@ -212,6 +246,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
       challengeId,
       ...(prepared.projectId ? { projectId: prepared.projectId } : {}),
     });
+    confirmationIds.push(challengeId);
     pendingConfirmations.delete(challengeId);
     const turnId = randomUUID();
     const sequence = (currentConversation?.turns.length ?? 0) + 1;
@@ -223,12 +258,13 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
       contextName: prepared.contextName,
       question: prepared.question,
       answer: `隔离客户端交互 fixture 回复：第 ${sequence} 轮 ${prepared.contextName}。`,
-      modelId: "isolated-client-fixture-model",
-      providerName: "隔离的客户端交互 fixture",
+      modelId: preparedModel.modelId,
+      providerName: preparedModel.providerName,
       createdAt: new Date(Date.now() + sequence * 1_000).toISOString(),
       citations: [prepared.source],
     };
     currentConversation = {
+      ...(currentConversation ?? {}),
       id: prepared.conversationId,
       title: currentConversation?.title ?? conversationTitle,
       turns: [...(currentConversation?.turns ?? []), turn],
@@ -237,11 +273,11 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await route.fulfill({ json: { conversation: currentConversation } });
   });
 
-  let displayRevision = 0, pinned = false, forceRenameConflict = false;
+  let displayRevision = 0, pinned = false, archived = false, deleted = false, forceRenameConflict = false;
   await page.route("**/api/ask/conversations**", async (route) => {
     const url = new URL(route.request().url());
     if (route.request().method() === "PATCH" && url.pathname === `/api/ask/conversations/${conversationId}` && currentConversation) {
-      const body = route.request().postDataJSON() as { expectedRevision: number; title?: string; pinned?: boolean };
+      const body = route.request().postDataJSON() as { expectedRevision: number; title?: string; pinned?: boolean; archived?: boolean; deleted?: boolean };
       if (forceRenameConflict) { displayRevision++; forceRenameConflict = false; }
       if (body.expectedRevision !== displayRevision) {
         await route.fulfill({ status: 409, json: { error: { code: "UNIFIED_QUESTION_CONFLICT" } } }); return;
@@ -249,16 +285,21 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
       displayRevision++;
       if (body.title !== undefined) currentConversation = { ...currentConversation, title: body.title };
       if (body.pinned !== undefined) pinned = body.pinned;
-      await route.fulfill({ json: { presentation: { id: conversationId, title: currentConversation.title, pinned, presentationRevision: displayRevision } } }); return;
+      if (body.archived !== undefined) archived = body.archived;
+      if (body.deleted !== undefined) deleted = body.deleted;
+      currentConversation = { ...currentConversation, pinned, archived, deleted, presentationRevision: displayRevision };
+      await route.fulfill({ json: { presentation: { id: conversationId, title: currentConversation.title, pinned, archived, deleted, presentationRevision: displayRevision } } }); return;
     }
     if (route.request().method() !== "GET") { await route.fallback(); return; }
     if (url.pathname === "/api/ask/conversations") {
       const search = (url.searchParams.get("search") ?? "").toLocaleLowerCase();
+      const view = url.searchParams.get("view") ?? "active";
       const searchable = JSON.stringify(currentConversation ?? {}).toLocaleLowerCase();
-      const conversations = currentConversation !== null && (search.length === 0 || searchable.includes(search)) ? [{
+      const visibleInView = view === "deleted" ? deleted : view === "archived" ? archived && !deleted : !archived && !deleted;
+      const conversations = currentConversation !== null && visibleInView && (search.length === 0 || searchable.includes(search)) ? [{
         id: currentConversation.id,
         title: currentConversation.title,
-        pinned, presentationRevision: displayRevision,
+        pinned, archived, deleted, presentationRevision: displayRevision,
         usage: { status: "known", requestCount: 2, knownRequestCount: 2, unknownRequestCount: 0, inputTokens: 120, outputTokens: 40, totalTokens: 160 },
         updatedAt: currentConversation.turns.at(-1)?.createdAt ?? new Date().toISOString(),
         turnCount: currentConversation.turns.length,
@@ -271,7 +312,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
       await route.fulfill({ json: { conversation: { id: otherConversationId, title: "另一个会话", turns: [], lastTurnId: null } } }); return;
     }
     if (url.pathname === `/api/ask/conversations/${conversationId}` && currentConversation !== null) {
-      const snapshot = { ...currentConversation, pinned, presentationRevision: displayRevision };
+      const snapshot = { ...currentConversation, pinned, archived, deleted, presentationRevision: displayRevision };
       if (waitRead) { delayedReads++; await waitRead; }
       await route.fulfill({ json: { conversation: snapshot } });
       return;
@@ -298,6 +339,11 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     const englishRounds = page.getByLabel("Conversation content", { exact: true });
     await expect(englishRounds.getByRole("heading", { name: "What would you like to know?", exact: true })).toBeVisible();
     expect(await englishRounds.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
+    const englishRail = conversationRail(page, true);
+    await expect(englishRail).toBeVisible();
+    await expect(englishRail.getByRole("combobox", { name: "Conversation list", exact: true })).toBeVisible();
+    await expect(englishRail.getByRole("button", { name: "New conversation", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Conversation history", exact: true })).toHaveCount(0);
     await page.screenshot({ path: `test-results/unified-question/empty-en-${theme}-1280.png` });
   }
   await page.context().addCookies([
@@ -306,54 +352,56 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   ]);
   await page.reload();
   await page.setViewportSize({ width: 1440, height: 900 });
-  const sourceDirectory = page.locator("aside").filter({ has: page.getByRole("heading", { name: "范围内的内容", exact: true }) });
-  await expect(sourceDirectory.getByText(personalTitle, { exact: true })).toBeVisible();
-  await expect(sourceDirectory.getByText(/1\s*条内容/u)).toBeVisible();
+  const rail = conversationRail(page);
+  await expect(rail).toBeVisible();
+  await expect(rail.getByRole("combobox", { name: "会话列表", exact: true })).toHaveValue("active");
+  await expect(rail.getByRole("button", { name: "新建会话", exact: true })).toBeVisible();
 
-  async function prepareAndExecute(question: string, round: number, source: CitationSnapshot, contextName: string): Promise<void> {
-    await page.getByRole("textbox", { name: "输入问题", exact: true }).fill(question);
-    await page.getByRole("button", { name: "核对并提问", exact: true }).click();
-    const confirmation = page.getByRole("dialog", { name: "确认本轮提问", exact: true });
-    await expect(confirmation).toBeVisible();
-    await expect(confirmation).toContainText(contextName);
-    await expect(confirmation.getByText(source.content, { exact: true })).toBeVisible();
-    const consent = confirmation.getByRole("checkbox", { name: /我已核对本轮问题/u });
-    const submit = confirmation.getByRole("button", { name: "确认并提问", exact: true });
-    await expect(consent).not.toBeChecked();
-    await expect(submit).toBeDisabled();
-    expect(executeBodies).toHaveLength(round - 1);
-    if (round === 1) {
-      await expect(confirmation).toContainText(/预计预留\s*36\s*额度 Token/u);
-      await expect(confirmation).toContainText(/额度倍率\s*1\.5\s*倍/u);
-      await expect(confirmation).toContainText(/最多输出\s*2,048\s*Token/u);
+  async function prepareAndExecute(question: string, round: number, source: CitationSnapshot, contextName: string, sendByEnter = false, verifyLineBreak = false): Promise<void> {
+    const input = page.getByRole("textbox", { name: "输入问题", exact: true });
+    await input.fill(question);
+    if (verifyLineBreak) {
+      await input.press("Shift+Enter");
+      await expect(input).toHaveValue(`${question}\n`);
+      await input.fill(question);
     }
-    if (round === 3) {
-      await expect(confirmation).toContainText(/前\s*2\s*轮完整问答/u);
-      await confirmation.getByText("查看本轮携带的历史问答", { exact: true }).click();
-      await expect(confirmation).toContainText("个人空间");
-      await expect(confirmation).toContainText(projectName);
-    }
-    await consent.check();
-    await expect(submit).toBeEnabled();
-    await submit.click();
-    await expect(page.locator("dialog").filter({ hasText: "确认本轮提问" })).toBeHidden();
+    const prepareResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/turns" && response.request().postDataJSON()?.phase === "prepare");
+    const executeResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/turns" && response.request().postDataJSON()?.phase === "execute");
+    await expect(page.getByText(/发送即表示同意/u)).toBeVisible();
+    if (sendByEnter) await input.press("Enter");
+    else await page.getByRole("button", { name: "发送", exact: true }).click();
+    await prepareResponse;
+    await executeResponse;
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
     const turn = page.getByRole("article", { name: `第 ${round} 轮`, exact: true });
     await expect(turn).toBeVisible();
     await expect(turn).toContainText(question);
     await expect(turn).toContainText(contextName);
+    const versionLabel = source.version === undefined ? "当时版本" : `v${source.version}`;
+    await expect(turn.getByRole("button", { name: `[1] ${source.title} · ${versionLabel}`, exact: true })).toBeVisible();
+    expect(executeBodies).toHaveLength(round);
   }
 
   const firstQuestion = `统一问答验收 ${suffix} 的个人资料包含什么？`;
+  await page.getByRole("textbox", { name: "输入问题", exact: true }).fill(firstQuestion);
+  changeModelOnNextPrepare = true;
+  const mismatchedPrepare = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/turns" && response.request().postDataJSON()?.phase === "prepare");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await mismatchedPrepare;
+  await expect(page.getByRole("alert")).toContainText("默认模型已变更");
+  await expect(page.getByRole("textbox", { name: "输入问题", exact: true })).toHaveValue(firstQuestion);
+  expect(executeBodies).toHaveLength(0);
+  await expect(page.getByRole("article")).toHaveCount(0);
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
   await prepareAndExecute(firstQuestion, 1, personalV1, "个人空间");
 
   await page.getByRole("combobox", { name: "智能问答内容范围", exact: true }).selectOption("project");
   const askProjectPicker = page.getByRole("combobox", { name: "选择智能问答项目", exact: true });
   await expect(askProjectPicker.locator(`option[value="${projectId}"]`)).toHaveCount(1);
   await askProjectPicker.selectOption(projectId);
-  await expect(sourceDirectory.getByText(projectSource.title, { exact: true })).toBeVisible();
   await expect(page.getByText(new RegExp(`本轮检索：${projectName}`, "u"))).toBeVisible();
   const secondQuestion = `项目资料 ${suffix} 中记录了什么依据？`;
-  await prepareAndExecute(secondQuestion, 2, projectSource, projectName);
+  await prepareAndExecute(secondQuestion, 2, projectSource, projectName, true, true);
 
   const personalContentV2 = `个人知识原文版本二 ${suffix}：第三轮应显示更新后的新快照。`;
   const updateResponse = await page.request.patch(`/api/personal/knowledge/${encodeURIComponent(documentId)}`, {
@@ -366,19 +414,17 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   expect(personalV2.revision).not.toBe(personalV1.revision);
   expect(personalV2.content).toBe(personalContentV2);
 
-  await page.getByRole("button", { name: "历史会话", exact: true }).click();
-  const history = page.getByRole("dialog", { name: "历史会话", exact: true });
-  await expect(history).toBeVisible();
-  const historySearch = history.getByRole("textbox", { name: "搜索历史会话", exact: true });
+  const historySearch = rail.getByRole("textbox", { name: "搜索历史会话", exact: true });
   await historySearch.fill(suffix);
-  const historyResult = history.getByRole("button", { name: new RegExp(`统一问答验收 ${suffix}`, "u") });
+  const historyResult = conversationRow(rail, `统一问答验收 ${suffix}`);
   await expect(historyResult).toBeVisible();
   await expect(historyResult).toContainText("2 轮问答");
   // Conversation APIs are isolated client interaction fixtures, not persisted AI output.
   // PostgreSQL gates separately verify real owner access, revisions and persistence.
-  // Capture the reported hover state and verify it does not move the row.
+  // Hovering the row keeps its geometry stable in the open conversation rail.
   await historyResult.hover();
   await page.screenshot({ path: "test-results/unified-question/history-zh-CN-light.png" });
+  let displayedTitle = conversationTitle;
   for (const variant of [
     { language: "zh-CN", theme: "dark", width: 1440 },
     { language: "en", theme: "light", width: 1440 },
@@ -392,26 +438,30 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await page.setViewportSize({ width: variant.width, height: 900 });
     await page.reload();
     const english = variant.language === "en";
-    await page.getByRole("button", { name: english ? "Conversation history" : "历史会话", exact: true }).click();
-    const matrixHistory = page.getByRole("dialog", { name: english ? "Conversation history" : "历史会话", exact: true });
+    const matrixHistory = conversationRail(page, english);
+    await expect(matrixHistory).toBeVisible();
     await matrixHistory.getByRole("textbox", { name: english ? "Search conversation history" : "搜索历史会话", exact: true }).fill(suffix);
-    const row = matrixHistory.getByRole("button", { name: new RegExp(`统一问答验收 ${suffix}`, "u") });
+    const row = conversationRow(matrixHistory, `统一问答验收 ${suffix}`);
     await expect(row).toBeVisible();
     const before = await row.boundingBox();
     await row.hover();
     const after = await row.boundingBox();
     expect(after).toEqual(before);
-    await expect(row).toContainText("160");
-    const pin = matrixHistory.getByRole("button", { name: english ? (pinned ? "Unpin conversation" : "Pin conversation") : (pinned ? "取消置顶" : "置顶会话"), exact: true });
+    await expectR02NoHorizontalOverflow(page, `conversation rail ${variant.language}/${variant.theme}/${variant.width}`);
+    await expectR02NoAccessibilityViolations(page, `conversation rail ${variant.language}/${variant.theme}/${variant.width}`);
     const previousPin = pinned;
     const pinRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/conversations" && response.request().method() === "GET");
-    await pin.click();
+    let actions = await openConversationActions(row, english);
+    await actions.getByRole("button", { name: english ? (previousPin ? "Unpin conversation" : "Pin conversation") : (previousPin ? "取消置顶" : "置顶会话"), exact: true }).click();
     await pinRefresh;
-    await expect(matrixHistory.getByRole("button", { name: english ? (previousPin ? "Pin conversation" : "Unpin conversation") : (previousPin ? "置顶会话" : "取消置顶"), exact: true })).toHaveAttribute("aria-pressed", String(!previousPin));
-    await matrixHistory.getByRole("button", { name: english ? "Rename conversation" : "重命名会话", exact: true }).click();
+    const pinnedRow = conversationRow(matrixHistory, `统一问答验收 ${suffix}`);
+    actions = await openConversationActions(pinnedRow, english);
+    await expect(actions.getByRole("button", { name: english ? (previousPin ? "Pin conversation" : "Unpin conversation") : (previousPin ? "置顶会话" : "取消置顶"), exact: true })).toBeVisible();
+    await actions.getByRole("button", { name: english ? "Rename conversation" : "重命名会话", exact: true }).click();
     const rename = page.getByRole("dialog", { name: english ? "Rename conversation" : "重命名会话", exact: true });
     const nameInput = rename.getByRole("textbox", { name: english ? "Conversation name" : "会话名称", exact: true });
     const newTitle = `${conversationTitle} ${variant.language}-${variant.theme}`;
+    displayedTitle = newTitle;
     await nameInput.fill(newTitle);
     forceRenameConflict = true;
     await rename.getByRole("button", { name: english ? "Save" : "保存", exact: true }).click();
@@ -428,10 +478,9 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await rename.getByRole("button", { name: english ? "Save" : "保存", exact: true }).click();
     await expect(rename).toBeHidden();
     await renameRefresh;
-    await expect(matrixHistory.getByRole("button", { name: english ? "Rename conversation" : "重命名会话", exact: true })).toBeFocused();
-    await expect(row).toContainText(newTitle);
-    await expectR02NoHorizontalOverflow(page, `conversation history ${variant.language}/${variant.theme}/${variant.width}`);
-    await expectR02NoAccessibilityViolations(page, `conversation history ${variant.language}/${variant.theme}/${variant.width}`);
+    await expect(conversationRow(matrixHistory, newTitle)).toContainText(newTitle);
+    await expectR02NoHorizontalOverflow(page, `conversation rail ${variant.language}/${variant.theme}/${variant.width}`);
+    await expectR02NoAccessibilityViolations(page, `conversation rail ${variant.language}/${variant.theme}/${variant.width}`);
     await page.screenshot({ path: `test-results/unified-question/history-${variant.language}-${variant.theme}-${variant.width}.png` });
   }
   await page.context().addCookies([
@@ -440,10 +489,41 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   ]);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  await page.getByRole("button", { name: "历史会话", exact: true }).click();
-  await historySearch.fill(suffix);
-  await historyResult.click();
-  await expect(page.locator("dialog").filter({ hasText: "历史会话" })).toBeHidden();
+  const lifecycleRail = conversationRail(page);
+  await lifecycleRail.getByRole("combobox", { name: "会话列表", exact: true }).selectOption("active");
+  await lifecycleRail.getByRole("textbox", { name: "搜索历史会话", exact: true }).fill(suffix);
+  const lifecycleRow = conversationRow(lifecycleRail, displayedTitle);
+  await expect(lifecycleRow).toBeVisible();
+  let lifecycleActions = await openConversationActions(lifecycleRow);
+  const archiveRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/conversations" && response.request().method() === "GET");
+  await lifecycleActions.getByRole("button", { name: "归档会话", exact: true }).click();
+  await archiveRefresh;
+  await expect(conversationRow(lifecycleRail, displayedTitle)).toHaveCount(0);
+  await lifecycleRail.getByRole("combobox", { name: "会话列表", exact: true }).selectOption("archived");
+  const archivedRow = conversationRow(lifecycleRail, displayedTitle);
+  await expect(archivedRow).toBeVisible();
+  lifecycleActions = await openConversationActions(archivedRow);
+  const unarchiveRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/conversations" && response.request().method() === "GET");
+  await lifecycleActions.getByRole("button", { name: "取消归档", exact: true }).click();
+  await unarchiveRefresh;
+  await lifecycleRail.getByRole("combobox", { name: "会话列表", exact: true }).selectOption("active");
+  const activeRow = conversationRow(lifecycleRail, displayedTitle);
+  await expect(activeRow).toBeVisible();
+  lifecycleActions = await openConversationActions(activeRow);
+  const trashRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/conversations" && response.request().method() === "GET");
+  await lifecycleActions.getByRole("button", { name: "移至回收站", exact: true }).click();
+  await trashRefresh;
+  await expect(conversationRow(lifecycleRail, displayedTitle)).toHaveCount(0);
+  await lifecycleRail.getByRole("combobox", { name: "会话列表", exact: true }).selectOption("deleted");
+  const deletedRow = conversationRow(lifecycleRail, displayedTitle);
+  await expect(deletedRow).toBeVisible();
+  lifecycleActions = await openConversationActions(deletedRow);
+  const restoreRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/conversations" && response.request().method() === "GET");
+  await lifecycleActions.getByRole("button", { name: "恢复会话", exact: true }).click();
+  await restoreRefresh;
+  await lifecycleRail.getByRole("combobox", { name: "会话列表", exact: true }).selectOption("active");
+  await expect(conversationRow(lifecycleRail, displayedTitle)).toBeVisible();
+  await conversationRow(lifecycleRail, displayedTitle).click();
   await expect(page).toHaveURL(new RegExp(`/ask\\?conversation=${conversationId}$`, "u"));
   await expect(page.getByRole("article", { name: "第 1 轮", exact: true })).toBeVisible();
   await expect(page.getByRole("article", { name: "第 2 轮", exact: true })).toBeVisible();
@@ -457,21 +537,19 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await expectCitationDrawer(page, 2, projectSource, projectContent);
 
   await page.getByRole("combobox", { name: "智能问答内容范围", exact: true }).selectOption("personal");
-  const thirdSourceDirectory = page.locator("aside").filter({ has: page.getByRole("heading", { name: "范围内的内容", exact: true }) });
-  await expect(thirdSourceDirectory.getByText(personalTitle, { exact: true })).toBeVisible();
   await prepareAndExecute(thirdQuestion, 3, personalV2, "个人空间");
   await expectCitationDrawer(page, 3, personalV2, personalContentV2);
-  expect(prepareBodies).toHaveLength(3);
+  expect(prepareBodies).toHaveLength(4);
   expect(executeBodies).toHaveLength(3);
-  expect(prepareBodies[0]).toMatchObject({ scope: "personal", focusDocumentId: documentId, expectedLastTurnId: null });
-  expect(prepareBodies[0]).not.toHaveProperty("projectId");
+  expect(prepareBodies[1]).toMatchObject({ scope: "personal", focusDocumentId: documentId, expectedLastTurnId: null });
+  expect(prepareBodies[1]).not.toHaveProperty("projectId");
   const finalConversation = (() => currentConversation)() as AskConversationFixture | null;
   if (finalConversation === null) throw new Error("The client fixture must preserve its completed conversation.");
   expect(finalConversation.turns).toHaveLength(3);
-  expect(prepareBodies[1]).toMatchObject({ conversationId, scope: "project", projectId, expectedLastTurnId: finalConversation.turns[0]?.id });
-  expect(prepareBodies[1]).not.toHaveProperty("focusDocumentId");
-  expect(prepareBodies[2]).toMatchObject({ conversationId, scope: "personal", expectedLastTurnId: finalConversation.turns[1]?.id });
-  expect(prepareBodies[2]).not.toHaveProperty("projectId");
+  expect(prepareBodies[2]).toMatchObject({ conversationId, scope: "project", projectId, expectedLastTurnId: finalConversation.turns[0]?.id });
+  expect(prepareBodies[2]).not.toHaveProperty("focusDocumentId");
+  expect(prepareBodies[3]).toMatchObject({ conversationId, scope: "personal", expectedLastTurnId: finalConversation.turns[1]?.id });
+  expect(prepareBodies[3]).not.toHaveProperty("projectId");
   expect(executeBodies.map((body) => body.challengeId)).toEqual(confirmationIds);
   await page.screenshot({ path: "test-results/v110/ask-desktop.png" });
 
@@ -484,18 +562,23 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   const launcher = page.locator(".inquiry-launcher");
   await launcher.click();
   const floating = page.locator('[data-floating-inquiry-root]');
-  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
-  const floatingHistory = floating.getByRole("dialog", { name: "历史会话", exact: true });
-  await floatingHistory.getByRole("button", { name: "重命名会话", exact: true }).click();
+  const floatingRail = floating.getByRole("complementary", { name: "最近会话", exact: true });
+  await expect(floatingRail).toBeVisible();
+  await floatingRail.getByRole("textbox", { name: "搜索历史会话", exact: true }).fill(suffix);
+  const floatingRow = conversationRow(floatingRail, displayedTitle);
+  await expect(floatingRow).toBeVisible();
+  const floatingActions = await openConversationActions(floatingRow);
+  await floatingActions.getByRole("button", { name: "重命名会话", exact: true }).click();
   const nestedRename = floating.getByRole("dialog", { name: "重命名会话", exact: true });
   await expect(nestedRename).toBeVisible();
   await nestedRename.getByRole("textbox").press("Alt+j");
   await expect(nestedRename).toBeVisible();
   await nestedRename.getByRole("textbox").press("Escape");
   await expect(nestedRename).toBeHidden();
-  await expect(floatingHistory).toBeVisible();
-  await floatingHistory.getByRole("button", { name: "关闭窗口", exact: true }).press("Escape");
-  await expect(floatingHistory).toBeHidden();
+  await expect(floatingRail).toBeVisible();
+  await floatingRail.getByRole("button", { name: "收起最近会话", exact: true }).click();
+  await expect(floatingRail).toHaveAttribute("data-collapsed", "true");
+  await floatingRail.getByRole("button", { name: "展开最近会话", exact: true }).click();
   await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toBeVisible();
   await floating.getByRole("textbox", { name: "输入问题", exact: true }).press("Escape");
   await expect(launcher).toHaveAttribute("aria-expanded", "false");
@@ -503,16 +586,15 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toBeVisible();
 
   // Reopen first so the following full-page round carries the existing head.
-  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
-  await floatingHistory.getByRole("button", { name: new RegExp(conversationTitle, "u") }).click();
+  await floatingRail.getByRole("textbox", { name: "搜索历史会话", exact: true }).fill(suffix);
+  await conversationRow(floatingRail, displayedTitle).click();
   await expect(floating.getByRole("article", { name: "第 3 轮", exact: true })).toBeVisible();
   // Keep an older GET in flight in the floating instance while the full page
   // appends a new round. Releasing it later must not remove that round.
   waitRead = new Promise<void>(resolve => { releaseRead = resolve; });
-  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
-  await floatingHistory.getByRole("button", { name: new RegExp(conversationTitle, "u") }).click();
+  await conversationRow(floatingRail, displayedTitle).click();
   await expect.poll(() => delayedReads).toBe(1);
-  await floatingHistory.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await floatingRail.getByRole("button", { name: "收起最近会话", exact: true }).click();
   await floating.getByRole("button", { name: "收起问答", exact: true }).click();
   await page.getByRole("link", { name: "智能问答", exact: true }).first().click();
   await expect(page).toHaveURL(/\/ask$/u);
@@ -520,12 +602,9 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await page.getByRole("combobox", { name: "智能问答内容范围", exact: true }).selectOption("personal");
   const fourthQuestion = `后台继续问答 ${suffix}`;
   await page.getByRole("textbox", { name: "输入问题", exact: true }).fill(fourthQuestion);
-  await page.getByRole("button", { name: "核对并提问", exact: true }).click();
-  const backgroundConfirmation = page.getByRole("dialog", { name: "确认本轮提问", exact: true });
-  await backgroundConfirmation.getByRole("checkbox", { name: /我已核对本轮问题/u }).check();
   waitExecute = new Promise<void>(resolve => { releaseExecute = resolve; });
-  await backgroundConfirmation.getByRole("button", { name: "确认并提问", exact: true }).click();
-  await expect(backgroundConfirmation).toBeHidden();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(() => prepareBodies.length).toBe(5);
   await expect.poll(() => executeBodies.length).toBe(4);
   await page.getByRole("link", { name: "我的知识", exact: true }).first().click();
   await expect(page).toHaveURL(/\/personal\/knowledge$/u);
@@ -553,23 +632,25 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   expect(executeBodies).toHaveLength(4);
   await floating.getByRole("button", { name: "收起问答", exact: true }).click();
 
-  // Native History API is supported by the App Router. Simulate a saved
-  // conversation target arriving while the current confirmation owns the lock.
+  // Native History API is supported by the App Router. A prepared send keeps
+  // its frozen conversation head even if another route target arrives in flight.
   await page.getByRole("link", { name: "智能问答", exact: true }).first().click();
+  const fourthTurnHeadId = ((() => currentConversation)() as AskConversationFixture | null)?.lastTurnId;
   await page.getByRole("textbox", { name: "输入问题", exact: true }).fill(`确认历史快照 ${suffix}`);
-  await page.getByRole("button", { name: "核对并提问", exact: true }).click();
-  const frozenConfirmation = page.getByRole("dialog", { name: "确认本轮提问", exact: true });
-  await frozenConfirmation.getByText("查看本轮携带的历史问答", { exact: true }).click();
+  waitPrepare = new Promise<void>(resolve => { releasePrepare = resolve; });
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(() => prepareBodies.length).toBe(6);
+  expect(prepareBodies[5]).toMatchObject({ conversationId, expectedLastTurnId: fourthTurnHeadId, question: `确认历史快照 ${suffix}` });
   await page.evaluate(id => window.history.pushState(null, "", `/ask?conversation=${id}`), otherConversationId);
   await expect(page).toHaveURL(new RegExp(`conversation=${otherConversationId}$`, "u"));
-  await expect(frozenConfirmation).toContainText(fourthQuestion);
-  await expect(frozenConfirmation).not.toContainText("另一个会话");
-  await frozenConfirmation.getByRole("button", { name: "关闭窗口", exact: true }).click();
-  await expect(page.locator('[data-ask-page]')).toContainText("另一个会话");
-  expect(executeBodies).toHaveLength(4);
+  releasePrepare(); waitPrepare = null;
+  await expect.poll(() => executeBodies.length).toBe(5);
+  expect(executeBodies[4]).toMatchObject({ conversationId, expectedLastTurnId: fourthTurnHeadId, question: `确认历史快照 ${suffix}` });
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
+  await expect.poll(() => page.locator('[data-ask-page]').innerText()).toContain("另一个会话");
 
   // Public navigation disposes the old floating instance before a late prepare
-  // can open a native modal in a hidden ancestor.
+  // can continue into execution.
   await page.getByRole("link", { name: "帮助", exact: true }).click();
   await page.getByRole("link", { name: "联系作者", exact: true }).click();
   await expect(page).toHaveURL(/\/contact$/u);
@@ -578,15 +659,15 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await launcher.click();
   await floating.getByRole("textbox", { name: "输入问题", exact: true }).fill(`未发送确认 ${suffix}`);
   waitPrepare = new Promise<void>(resolve => { releasePrepare = resolve; });
-  await floating.getByRole("button", { name: "核对并提问", exact: true }).click();
-  await expect.poll(() => prepareBodies.length).toBe(6);
+  await floating.getByRole("button", { name: "发送", exact: true }).click();
+  await expect.poll(() => prepareBodies.length).toBe(7);
   await page.goForward();
   await expect(page).toHaveURL(/\/contact$/u);
   releasePrepare(); waitPrepare = null;
   await expect(page.locator("dialog[open]")).toHaveCount(0);
   await page.getByRole("link", { name: "隐私政策", exact: true }).click();
   await expect(page).toHaveURL(/\/privacy$/u);
-  expect(executeBodies).toHaveLength(4);
+  expect(executeBodies).toHaveLength(5);
 
   // An old account's delayed history response cannot populate the next account.
   await page.goBack();
@@ -595,10 +676,13 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await launcher.click();
   waitRead = new Promise<void>(resolve => { releaseRead = resolve; });
   const beforeDelayedReads = delayedReads;
-  await floating.getByRole("button", { name: "历史会话", exact: true }).click();
-  await floatingHistory.getByRole("button", { name: new RegExp(conversationTitle, "u") }).click();
+  const nextFloatingRail = floating.getByRole("complementary", { name: "最近会话", exact: true });
+  const expandRail = nextFloatingRail.getByRole("button", { name: "展开最近会话", exact: true });
+  if (await expandRail.isVisible()) await expandRail.click();
+  await nextFloatingRail.getByRole("textbox", { name: "搜索历史会话", exact: true }).fill(suffix);
+  await conversationRow(nextFloatingRail, displayedTitle).click();
   await expect.poll(() => delayedReads).toBe(beforeDelayedReads + 1);
-  await floatingHistory.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await nextFloatingRail.getByRole("button", { name: "收起最近会话", exact: true }).click();
   await floating.getByRole("button", { name: "收起问答", exact: true }).click();
   const nextUser = await seedBrowserPersonalUser(`browser-ask-next-${suffix}`, "BrowserAsk2026Password!");
   await signOutR02User(page);
@@ -639,7 +723,6 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
     data: { title: personalTitle, content: personalContent, isDefaultMemory: false },
   });
   expect(personalResponse.status()).toBe(201);
-  const personalPayload = await personalResponse.json() as { document: { id: string } };
 
   const projectContent = `真实项目图谱来源 ${suffix}：这是项目来源 API 保存的完整原文。`;
   const projectSourceResponse = await page.request.post(`/api/projects/${projectId}/sources`, {
@@ -705,6 +788,7 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   await expect.poll(async () => Number(await space.getAttribute("data-distance"))).toBeLessThan(wheelDistance);
   await page.getByRole("button", { name: "重置布局", exact: true }).click();
   await expect(space).toHaveAttribute("data-yaw", initialYaw!);
+  const graphUrl = page.url();
   const nodeBox = (await personalNode.boundingBox())!;
   const originalNodeX = await personalNode.locator("..").getAttribute("x");
   await page.mouse.move(nodeBox.x + nodeBox.width / 2, nodeBox.y + nodeBox.height / 2);
@@ -724,13 +808,20 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   await expect(personalNode.locator("..")).not.toHaveAttribute("x", beforeKeyboardMove!);
   await expectR02NoAccessibilityViolations(page, "3D personal graph on desktop");
   await page.screenshot({ path: "test-results/v110/graph-3d-desktop.png" });
-  // A click goes straight to the actual document detail; dragging above did not navigate.
+  // Activating a node opens its exact knowledge-point detail; source reading
+  // remains a separate action from that detail surface.
   await personalNode.click();
-  await expect(page).toHaveURL(`/personal/knowledge?document=${personalPayload.document.id}`);
-  const personalDetail = page.getByRole("dialog", { name: "个人知识详情", exact: true });
+  await expect(page).toHaveURL(graphUrl);
+  await expect(page.getByRole("button", { name: "在此范围提问", exact: true })).toHaveCount(0);
+  const personalDetail = page.getByRole("dialog", { name: "知识点详情", exact: true });
   await expect(personalDetail.getByRole("heading", { name: personalTitle, exact: true })).toBeVisible();
-  await expect(personalDetail).toContainText(personalContent);
-  await page.goto("/personal/knowledge/graph?scope=personal");
+  await expect(personalDetail).toContainText(personalContent.slice(0, 80));
+  await personalDetail.getByRole("button", { name: "打开来源", exact: true }).click();
+  const personalDetailSource = page.getByRole("dialog", { name: "来源内容", exact: true });
+  await expect(personalDetailSource.getByText(personalContent, { exact: true })).toBeVisible();
+  await personalDetailSource.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await expect(page.locator("dialog").filter({ hasText: "来源内容" })).toBeHidden();
+  await page.goto(graphUrl);
 
   await page.getByRole("combobox", { name: "图谱内容范围", exact: true }).selectOption("project");
   const graphProjectPicker = page.getByRole("combobox", { name: "选择图谱项目", exact: true });
@@ -741,19 +832,30 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   await expect(page.getByText("1 条关联事实", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: `来源：${projectNodeTitle}`, exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: projectNodeTitle, exact: true })).toBeVisible();
+  const projectGraphUrl = page.url();
   await page.getByRole("button", { name: "打开来源", exact: true }).click();
   const projectSourceDialog = page.getByRole("dialog", { name: "来源内容", exact: true });
   await expect(projectSourceDialog.getByText(projectContent, { exact: true })).toBeVisible();
   await projectSourceDialog.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await expect(page.locator("dialog").filter({ hasText: "来源内容" })).toBeHidden();
-  // Both the project source and its fact open the same real evidence detail.
+  // A source node opens its own detail drawer without changing routes.
   await page.getByRole("button", { name: `来源：${projectNodeTitle}`, exact: true }).click();
-  await expect(page).toHaveURL(`/projects/${projectId}/materials/sources/${sourcePayload.source.id}`);
-  await expect(page.getByText(projectContent, { exact: true }).first()).toBeVisible();
+  const projectNodeDetail = page.getByRole("dialog", { name: "知识点详情", exact: true });
+  await expect(page).toHaveURL(projectGraphUrl);
+  await expect(projectNodeDetail.getByRole("heading", { name: projectNodeTitle, exact: true })).toBeVisible();
+  await expect(projectNodeDetail).toContainText(projectContent);
+  await projectNodeDetail.getByRole("button", { name: "打开来源", exact: true }).click();
+  const projectDetailSource = page.getByRole("dialog", { name: "来源内容", exact: true });
+  await expect(projectDetailSource.getByText(projectContent, { exact: true })).toBeVisible();
+  await projectDetailSource.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await expect(page.locator("dialog").filter({ hasText: "来源内容" })).toBeHidden();
   await page.goto(`/personal/knowledge/graph?scope=project&projectId=${projectId}`);
   await page.getByRole("button", { name: `事实：${factTitle}`, exact: true }).press("Enter");
-  await expect(page).toHaveURL(`/projects/${projectId}/materials/sources/${sourcePayload.source.id}`);
-  await expect(page.getByText(projectContent, { exact: true }).first()).toBeVisible();
+  const factDetail = page.getByRole("dialog", { name: "知识点详情", exact: true });
+  await expect(page).toHaveURL(new RegExp(`/personal/knowledge/graph\\?scope=project&projectId=${projectId}$`, "u"));
+  await expect(factDetail.getByRole("heading", { name: factTitle, exact: true })).toBeVisible();
+  await expect(factDetail).toContainText(projectContent);
+  await expect(factDetail.getByText(projectNodeTitle, { exact: true })).toBeVisible();
   await page.goto(`/personal/knowledge/graph?scope=project&projectId=${projectId}`);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: "放大图谱", exact: true })).toBeVisible();

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslate } from "@/components/appearance-provider";
 import { modalNativeBackdropClassName, modalSurfaceClassName } from "./modal-styles";
+import { ShellIcon } from "./shell-icon";
 
 export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test" | "recover" | "bind" | "change-old" | "change-new" | "verify" | "password";
 export type GraphicCaptchaProof = Readonly<{ challengeId: string; answer: string }>;
@@ -204,9 +205,9 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
               type="button"
               onClick={() => onOpenChange(false)}
               aria-label={t("关闭图形验证码")}
-              className="-mr-2 -mt-2 rounded-lg px-2 py-1 text-xl leading-6 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              className="app-icon-button -mr-2 -mt-2"
             >
-              ×
+              <ShellIcon name="close" className="app-icon--control" />
             </button>
           </div>
 

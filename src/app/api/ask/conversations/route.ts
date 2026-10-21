@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   try {
     const actor = await requireApiSession(request);
     const query = new URL(request.url).searchParams;
-    return noStore(NextResponse.json(await listUnifiedQuestionConversations({ search: query.get("search"), page: query.get("page") }, actor)));
+    return noStore(NextResponse.json(await listUnifiedQuestionConversations({ search: query.get("search"), page: query.get("page"), view: query.get("view") ?? undefined }, actor)));
   } catch (error) {
     return errorResponse(error);
   }

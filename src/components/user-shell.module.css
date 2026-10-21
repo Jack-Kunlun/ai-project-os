@@ -116,8 +116,8 @@
 }
 
 .icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
 }
 
@@ -191,7 +191,8 @@
 }
 
 .projectPicker > .icon {
-  width: 13px;
+  width: 14px;
+  height: 14px;
   color: var(--shell-secondary);
 }
 
@@ -294,7 +295,8 @@
 }
 
 .accountLink > .icon {
-  width: 13px;
+  width: 14px;
+  height: 14px;
   margin-left: auto;
   color: var(--shell-secondary);
   transform: rotate(-90deg);

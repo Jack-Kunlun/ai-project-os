@@ -69,8 +69,15 @@ const nextConfig: NextConfig = {
           reuseExistingChunk: true,
           priority: 50,
         },
+        // Public pages and shared dialogs use icons without loading the user shell.
+        // Artwork is server-rendered; only the shared reference renderer hydrates.
+        staticIcons: {
+          test: /[\\/]src[\\/]components[\\/](?:shell-icon\.tsx|tabler-icon-data\.ts)$/,
+          name: "static-icons",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 45,
+        },
         userNavigation: {
-          test: /[\\/]src[\\/](?:components[\\/](?:(?:user-shell|shell-icon|workspace-scope|notification-bell|app-header)\.tsx|user-shell\.module\.css)|lib[\\/]user-navigation\.ts)$/,
+          test: /[\\/]src[\\/](?:components[\\/](?:(?:user-shell|workspace-scope|notification-bell|app-header)\.tsx|user-shell\.module\.css)|lib[\\/]user-navigation\.ts)$/,
           name: "user-navigation",
           chunks: "all",
           minChunks: 2,

@@ -2,6 +2,7 @@ import { UiText } from "@/components/appearance-provider";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
+import { ShellIcon } from "@/components/shell-icon";
 import { requirePageSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { ResourceCardStatus } from "./resource-card-status";
@@ -56,8 +57,10 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
         <section className={styles.note}>
           <p><UiText text={"个人资源的保存与项目授权分开。撤销授权后，项目不能继续使用该连接。"} /></p>
           <p><UiText text="保存个人资源不会自动成为任何项目的默认配置。" /></p>
-          <Link href="/projects"><UiText text={"查看项目并进入项目配置 →"} /></Link>
-          <Link href="/personal/usage" className="mt-3 inline-flex"><UiText text="查看模型 Token 记录 →" /></Link>
+          <div className={styles.noteLinks}>
+            <Link href="/projects" className={styles.noteLink}><UiText text={"查看项目并进入项目配置"} /><ShellIcon name="arrow" className="app-icon--compact" /></Link>
+            <Link href="/personal/usage" className={styles.noteLink}><UiText text="查看模型 Token 记录" /><ShellIcon name="arrow" className="app-icon--compact" /></Link>
+          </div>
         </section>
       </div>
     </main>
@@ -95,11 +98,6 @@ function ResourceCard({ href, kind, title, description, status, verificationLabe
 }
 
 function ResourceIcon({ kind }: Readonly<{ kind: "model" | "git" | "mcp" }>): React.JSX.Element {
-  if (kind === "model") {
-    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="4.5" width="17" height="6" rx="1.5" /><rect x="3.5" y="13.5" width="17" height="6" rx="1.5" /><path d="M7 7.5h.01M7 16.5h.01M11 7.5h5M11 16.5h5" /></svg>;
-  }
-  if (kind === "git") {
-    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="7" cy="5" r="2" /><circle cx="17" cy="7" r="2" /><circle cx="7" cy="19" r="2" /><path d="M7 7v10M9 6.5c4.5 0 3.5 6 6 6" /><circle cx="17" cy="17" r="2" /><path d="M15 17c-3 0-3-4.5-6-4.5" /></svg>;
-  }
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="2" /><circle cx="19" cy="5" r="2" /><circle cx="19" cy="19" r="2" /><path d="m7 11 10-5M7 13l10 5" /></svg>;
+  const name = kind === "model" ? "server" : kind === "git" ? "git" : "nodes";
+  return <ShellIcon name={name} className="app-icon--tile" />;
 }

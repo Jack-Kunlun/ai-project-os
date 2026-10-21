@@ -249,7 +249,7 @@ export function PersonalSemanticSearchPanel({
       {state === "awaiting-confirmation" && confirmation !== null && confirmationSummary !== undefined ? (
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4" role="dialog" aria-labelledby="personal-semantic-confirm-title">
           <h4 id="personal-semantic-confirm-title" className="text-sm font-semibold text-amber-950"><UiText text={"确认发送语义搜索请求"} /></h4>
-          <p className="mt-2 text-xs leading-5 text-amber-900"><UiText text={"本次会向"} />{" "}{confirmationSummary.provider.name} {" "}<UiText text={"的"} />{" "}{confirmationSummary.provider.model} {" "}<UiText text={"发送 1 条搜索向量请求。索引范围共"} />{" "}{confirmationSummary.documents.length} {" "}<UiText text={"个文档、"} />{confirmationSummary.totalChunks} {" "}<UiText text={"个片段（"} />{formatBytes(confirmationSummary.totalSourceBytes)}）。</p>
+          <p className="mt-2 text-xs leading-5 text-amber-900">{translateUi("本次将向 {provider} 的 {model} 发送 1 条搜索向量请求。索引范围共 {documents} 个文档、{chunks} 个片段（{bytes}）。").replace("{provider}", confirmationSummary.provider.name).replace("{model}", confirmationSummary.provider.model).replace("{documents}", String(confirmationSummary.documents.length)).replace("{chunks}", String(confirmationSummary.totalChunks)).replace("{bytes}", formatBytes(confirmationSummary.totalSourceBytes))}</p>
           <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-amber-200 bg-white/70 p-2">
             <ul className="space-y-1.5" aria-label={translateUi("本次语义搜索索引范围")}>
               {confirmationSummary.documents.map((document) => (

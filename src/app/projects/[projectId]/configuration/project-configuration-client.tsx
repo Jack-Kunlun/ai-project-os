@@ -6,6 +6,7 @@ import { notifyUserProjectsChanged } from "@/lib/user-navigation";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { ShellIcon } from "@/components/shell-icon";
 import { AppHeader } from "@/components/app-header";
 import { modalBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { useInquiryOperation } from "@/components/inquiry-operation";
@@ -674,9 +675,10 @@ function LifecycleDialog({ project, action, onClose, onChanged }: { project: Pro
 
   return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}>
     <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="project-management-dialog-title" className={`w-full max-w-lg rounded-md p-7 sm:p-8 ${modalSurfaceClassName}`}>
-      <div data-dialog-header>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Project lifecycle"} /></p>
-        <h2 id="project-management-dialog-title" className="mt-1 text-lg font-semibold text-slate-950">{title}</h2>
+      <div data-dialog-header className="flex items-start justify-between gap-4">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Project lifecycle"} /></p>
+        <h2 id="project-management-dialog-title" className="mt-1 text-lg font-semibold text-slate-950">{title}</h2></div>
+        <button data-dialog-close type="button" disabled={pending} onClick={onClose} aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control"/></button>
       </div>
       <div data-dialog-body>
         <p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-600"}`}>{description}</p>

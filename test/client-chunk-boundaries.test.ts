@@ -41,12 +41,15 @@ test("admin account menus do not pull user navigation through the same cache gro
   }
 });
 
-test("user shell icons and repeated memory-quality client use their existing shared chunks", () => {
+test("static icons load independently from user navigation while repeated memory-quality clients remain shared", () => {
   const cacheGroups = groups();
   for (const separator of ["/", "\\"]) {
     const path = (file: string) => `/app/src/${file}`.replaceAll("/", separator);
     const icon = path("components/shell-icon.tsx");
-    assert.equal(cacheGroups.userNavigation.test?.test(icon), true);
+    assert.equal(cacheGroups.userNavigation.test?.test(icon), false);
+    assert.equal(cacheGroups.staticIcons.test?.test(icon), true);
+    assert.equal(cacheGroups.staticIcons.test?.test(path("components/tabler-icon-data.ts")), true);
+    assert.equal(cacheGroups.staticIcons.test?.test(path("components/user-shell.tsx")), false);
     const qualityClient = path("app/projects/[projectId]/memory-quality/project-memory-quality-client.tsx");
     assert.equal(cacheGroups.sharedPresentation.test?.test(qualityClient), true);
     assert.deepEqual(Object.entries(cacheGroups).filter(([, group]) => group.test?.test(qualityClient)).map(([name]) => name), ["sharedPresentation"]);

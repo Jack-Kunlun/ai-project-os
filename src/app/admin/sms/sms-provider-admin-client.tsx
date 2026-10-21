@@ -1,6 +1,7 @@
 "use client";
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
+import { ShellIcon } from "@/components/shell-icon";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
@@ -432,7 +433,7 @@ export function SmsProviderAdminClient() {
           <button type="button" onClick={() => void changeEnabled(!state.config.enabled)} disabled={pending || loading} className="inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-40">{state.config.enabled ? t("停用服务") : t("启用服务")}</button>
         </div>
       </div> : state ? <div className="flex flex-col items-center px-5 py-12 text-center sm:py-14">
-        <div aria-hidden="true" className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-500"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-6 w-6"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="m4 7 8 6 8-6" /></svg></div>
+        <div aria-hidden="true" className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-500"><ShellIcon name="mail" className="app-icon--tile" /></div>
         <h3 className="text-sm font-semibold text-slate-800"><UiText text={"尚未配置短信供应商"} /></h3>
         <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500"><UiText text={"添加供应商并验证测试短信后，即可保存配置。"} /></p>
         <p className="mt-3 text-xs leading-5 text-slate-400"><UiText text={"支持阿里云号码认证、阿里云短信和腾讯云短信"} /></p>
@@ -465,7 +466,7 @@ export function SmsProviderAdminClient() {
     onPointerDown={(event) => { const rect = event.currentTarget.getBoundingClientRect(); editorBackdropStarted.current = event.target === event.currentTarget && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom); }}
     onClick={(event) => { if (!editorBackdropStarted.current || event.target !== event.currentTarget) return; const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeEditor(); }} className={`m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[740px] overflow-y-auto rounded-2xl p-0 ${modalSurfaceClassName} ${modalNativeBackdropClassName}`}>
     {editorOpen ? <div className="p-5 sm:p-6">
-      <div className="flex items-start justify-between gap-4"><div><h2 id="sms-provider-editor-title" className="text-lg font-semibold text-slate-950">{state?.config.configured ? t("编辑或更换供应商") : t("新增短信供应商")}</h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={"配置供应商 → 验证测试短信 → 保存启用"} /></p></div><button type="button" aria-label={t("关闭配置弹窗")} onClick={() => closeEditor()} disabled={pending} className="shrink-0 rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40">✕</button></div>
+      <div className="flex items-start justify-between gap-4"><div><h2 id="sms-provider-editor-title" className="text-lg font-semibold text-slate-950">{state?.config.configured ? t("编辑或更换供应商") : t("新增短信供应商")}</h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={"配置供应商 → 验证测试短信 → 保存启用"} /></p></div><button type="button" aria-label={t("关闭配置弹窗")} onClick={() => closeEditor()} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></div>
       <form onSubmit={requestTest} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
         <label className="text-xs font-semibold text-slate-600 sm:col-span-2"><UiText text={"短信供应商"} /><select value={candidate.provider} onChange={(event) => updateProvider(event.target.value as SmsProvider)} disabled={candidateFieldsDisabled} className={inputClass}>
             <option value="aliyun-pnvs">阿里云号码认证服务（PNVS）</option>

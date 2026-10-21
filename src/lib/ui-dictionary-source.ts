@@ -1,3 +1,4 @@
+import { uiPolishMessages } from "./ui-polish-messages";
 import { englishAdminMessages } from "./ui-admin-messages";
 import { englishAdminShellMessages } from "./ui-admin-shell-messages";
 import uiMessages from "./ui-messages.json";
@@ -16,6 +17,6 @@ export const englishUiMessages: Readonly<Record<string, string>> = Object.fromEn
   Object.entries({
     ...uiMessages, ...uiUserMessages, ...uiCoreMessages, ...uiProjectExtraMessages,
     ...uiProjectMiddleMessages, ...uiUserTailMessages, ...uiResourceMessages,
-    ...uiUsageMessages, ...uiAuthMessages, ...uiPersonalConnectionsMessages, ...englishAdminMessages, ...englishAdminShellMessages,
+    ...uiUsageMessages, ...uiAuthMessages, ...uiPersonalConnectionsMessages, ...englishAdminMessages, ...englishAdminShellMessages, ...uiPolishMessages,
   }).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0),
 );

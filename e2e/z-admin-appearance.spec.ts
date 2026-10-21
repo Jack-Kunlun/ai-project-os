@@ -188,6 +188,8 @@ test("admin navigation and search stay exclusive while the dialog chunk loads an
     });
     try {
       await page.goto("/admin");
+      // The shortcut is registered during hydration; a measured overview proves the client is ready.
+      await expect(page.getByText("测量于", { exact: false })).toBeVisible();
       const navigation = page.getByRole("button", { name: "打开导航", exact: true });
       const search = page.getByRole("button", { name: "搜索功能页面", exact: true });
       const opener = first === "search" ? search : navigation;

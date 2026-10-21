@@ -162,7 +162,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
           </div>
 
           {loading ? (
-            <div className={styles.projectGrid} aria-label={t("正在读取项目")}>{[1, 2, 3].map((item) => <div key={item} className={styles.projectSkeleton} />)}</div>
+            <div className={styles.projectGrid} role="status" aria-label={t("正在读取项目")}>{[1, 2, 3].map((item) => <div key={item} className={styles.projectSkeleton} />)}</div>
           ) : error ? (
             <div className={styles.emptyState}><h2><UiText text="项目列表暂不可用" /></h2><p><UiText text="请求失败时不会使用旧数据填充列表。" /></p><button type="button" onClick={() => void load({ showLoading: true })}><UiText text="重新读取" /></button></div>
           ) : payload.projects.length === 0 ? (

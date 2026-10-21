@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { UiText } from "@/components/appearance-provider";
 
 async function errorMessage(response: Response): Promise<string> {
   try {
@@ -51,22 +52,22 @@ export function SetupForm() {
         <section className="bg-slate-950 p-9 text-white sm:p-12">
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-400 text-sm font-black text-slate-950">OS</span>
           <p className="mt-10 text-xs font-semibold uppercase tracking-[0.25em] text-indigo-300">First-run setup</p>
-          <h1 className="mt-4 text-4xl font-semibold leading-tight tracking-[-0.04em]">先建立只有你能进入的项目记忆空间。</h1>
-          <p className="mt-6 max-w-lg text-sm leading-7 text-slate-300">管理员账号用于平台运营、安全治理和模型连接配置。供应商 API Key 将在页面录入并由服务端加密保存；普通用户登录后各自在“我的空间”管理个人资源。</p>
+          <h1 className="mt-4 text-4xl font-semibold leading-tight tracking-[-0.04em]"><UiText text="先建立只有你能进入的项目记忆空间。" /></h1>
+          <p className="mt-6 max-w-lg text-sm leading-7 text-slate-300"><UiText text="管理员账号用于平台运营、安全治理和模型连接配置。供应商 API Key 将在页面录入并由服务端加密保存；普通用户登录后各自在“我的空间”管理个人资源。" /></p>
         </section>
         <form onSubmit={submit} className="p-9 sm:p-12">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">本地管理员</p>
-          <h2 className="mt-3 text-2xl font-semibold tracking-tight">初始化 AI Project OS</h2>
-          <label className="mt-8 block text-sm font-medium" htmlFor="setup-username">用户名</label>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"><UiText text="本地管理员" /></p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-tight"><UiText text="初始化 AI Project OS" /></h2>
+          <label className="mt-8 block text-sm font-medium" htmlFor="setup-username"><UiText text="用户名" /></label>
           <input id="setup-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-          <label className="mt-5 block text-sm font-medium" htmlFor="setup-password">密码</label>
+          <label className="mt-5 block text-sm font-medium" htmlFor="setup-password"><UiText text="密码" /></label>
           <input id="setup-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-          <p className="mt-2 text-xs leading-5 text-slate-500">8–128 位，并同时包含字母和数字。</p>
-          <label className="mt-5 block text-sm font-medium" htmlFor="setup-password-confirm">再次输入密码</label>
+          <p className="mt-2 text-xs leading-5 text-slate-500"><UiText text="8–128 位，并同时包含字母和数字。" /></p>
+          <label className="mt-5 block text-sm font-medium" htmlFor="setup-password-confirm"><UiText text="再次输入密码" /></label>
           <input id="setup-password-confirm" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-          {error ? <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
-          <button type="submit" disabled={pending} className="mt-7 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-white">{pending ? "正在初始化…" : "创建管理员并进入"}</button>
-          <p className="mt-5 text-center text-xs text-slate-500">第一次使用？<Link href="/guide#first-run" className="ml-1 font-semibold text-indigo-600 hover:text-indigo-700">查看完整使用指南</Link></p>
+          {error ? <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiText text={error} /></p> : null}
+          <button type="submit" disabled={pending} className="mt-7 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-white"><UiText text={pending ? "正在初始化…" : "创建管理员并进入"} /></button>
+          <p className="mt-5 text-center text-xs text-slate-500"><UiText text="第一次使用？" /><Link href="/guide#first-run" className="ml-1 font-semibold text-indigo-600 hover:text-indigo-700"><UiText text="查看完整使用指南" /></Link></p>
         </form>
       </div>
     </main>

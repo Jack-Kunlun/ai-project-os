@@ -284,7 +284,7 @@ for (const appearance of APPEARANCE_CASES) {
         await expect(editor).toBeVisible();
         await expect(editor.getByRole("heading", { level: 2 })).toHaveCount(1);
         await expect(editor.locator("[data-operation-content] > section, [data-operation-content] > form")).toHaveCSS("padding-left", "0px");
-        await expect(editor.getByRole("button", { name: tr("返回查看"), exact: true })).toBeVisible();
+        await expect(editor.getByRole("button", { name: tr("关闭窗口"), exact: true })).toBeVisible();
         if (route.endsWith("/automations")) {
           await expect(editor.getByRole("textbox", { name: tr("规则名称"), exact: true })).toHaveValue(tr("每日记忆质量检查"));
         }
@@ -734,9 +734,13 @@ test("dashboard feedback keeps direct actions, title counts, independent graph a
   })));
   expect(surfaces[0]).toEqual(surfaces[1]);
   expect(surfaces[2]).toEqual(surfaces[3]);
-  const footerBounds = await Promise.all([attention.getByRole('link', { name: '通知中心', exact: true }).boundingBox(), common.getByRole('link', { name: '了解使用流程', exact: true }).boundingBox()]);
-  expect(Math.abs(footerBounds[0]!.y - footerBounds[1]!.y)).toBeLessThanOrEqual(1);
-  expect(Math.abs(footerBounds[0]!.x - bounds[0]!.x - footerBounds[1]!.x + bounds[1]!.x)).toBeLessThanOrEqual(1);
+  const cardActionBounds = await Promise.all([attention.getByRole('link', { name: '通知中心', exact: true }).boundingBox(), common.getByRole('link', { name: '了解使用流程', exact: true }).boundingBox()]);
+  expect(Math.abs(cardActionBounds[0]!.y - cardActionBounds[1]!.y)).toBeLessThanOrEqual(1);
+  const rightInsets = cardActionBounds.map((action, index) => bounds[index]!.x + bounds[index]!.width - action!.x - action!.width);
+  expect(Math.abs(rightInsets[0] - rightInsets[1])).toBeLessThanOrEqual(1);
+  for (let index = 0; index < cardActionBounds.length; index += 1) {
+    expect(cardActionBounds[index]!.y - bounds[index]!.y).toBeLessThanOrEqual(48);
+  }
   await expect(common.getByText("选择一个入口，开始今天的工作。", { exact: true })).toBeVisible();
   const actionCards = common.locator('a').filter({ has: page.locator('strong') });
   await expect(actionCards).toHaveCount(3);

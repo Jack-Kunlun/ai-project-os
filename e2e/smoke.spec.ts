@@ -603,7 +603,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?view=add&kind=all$`, "u"));
   const addSourceDialog = page.getByRole("dialog", { name: "添加资料" });
   await expect(addSourceDialog).toBeVisible();
-  const closeSourceDialog = addSourceDialog.getByRole("button", { name: "关闭", exact: true });
+  const closeSourceDialog = addSourceDialog.getByRole("button", { name: "关闭窗口", exact: true });
   await expect(closeSourceDialog).toBeFocused();
   const inquiryLauncher = addSourceDialog.getByRole("button", { name: "智能问答", exact: true });
   await expect(inquiryLauncher).toBeVisible();

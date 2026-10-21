@@ -1327,21 +1327,19 @@ function DocumentDetail({
   const t = useTranslate();
   return (
     <article>
-      <div data-dialog-header className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
+      <div data-dialog-header className="flex items-start justify-between gap-4 border-b border-slate-100 pb-5">
         <div className="min-w-0">
           <h2 id="personal-knowledge-detail-title" className="break-words text-xl font-semibold tracking-[-0.02em]">{document.title}</h2>
           {document.isDefaultMemory ? <span className="mt-2 inline-block rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700"><UiText text="个人通用记忆 · 项目 AI 可自动参考" /></span> : null}
           <p className="mt-2 text-xs text-slate-400">{t("版本")} {document.version} · {formatBytes(document.byteCount)} · {t("更新于")} {formatDate(document.updatedAt, language)}</p>
         </div>
-        <div className={styles.rowActions}>
-          <button type="button" onClick={onClose} data-dialog-close data-detail-close aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
-          <button type="button" onClick={onEdit} className={styles.buttonPrimary}><UiText text="编辑" /></button>
-          <button type="button" onClick={onDelete} disabled={deleting} className={styles.buttonDanger}>{deleting ? t("删除中…") : t("删除")}</button>
-        </div>
+        <button type="button" onClick={onClose} data-dialog-close data-detail-close aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
       </div>
 
       <div data-dialog-body>
       <div className="mt-5 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={onEdit} className={styles.buttonPrimary}><UiText text="编辑" /></button>
+        <button type="button" onClick={onDelete} disabled={deleting} className={styles.buttonDanger}>{deleting ? t("删除中…") : t("删除")}</button>
         <button type="button" onClick={() => onExport("markdown")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "markdown" ? "导出中…" : "导出 Markdown")}</button>
         <button type="button" onClick={() => onExport("text")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "text" ? "导出中…" : "导出纯文本")}</button>
         <button type="button" onClick={onHistory} disabled={historyLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(historyLoading ? "读取历史中…" : historyOpen ? "收起版本历史" : "查看版本历史")}</button>

@@ -97,7 +97,7 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await expect(editElement).toBeHidden();
   await expect(detail.getByRole("heading", { name: revisedTitle, exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
-  await detail.getByRole("button", { name: "关闭", exact: true }).click();
+  await detail.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await page.getByRole("button", { name: "导入文件", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "导入知识", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");

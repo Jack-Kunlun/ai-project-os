@@ -181,7 +181,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const inquiryLauncher = intake.getByRole("button", { name: "智能问答", exact: true });
   await expect(inquiryLauncher).toBeVisible();
   const launcherBounds = await inquiryLauncher.boundingBox();
-  const closeBounds = await intake.getByRole("button", { name: "关闭", exact: true }).boundingBox();
+  const closeBounds = await intake.getByRole("button", { name: "关闭窗口", exact: true }).boundingBox();
   expect(launcherBounds).not.toBeNull();
   expect(closeBounds).not.toBeNull();
   expect(launcherBounds!.x + launcherBounds!.width).toBeLessThanOrEqual(closeBounds!.x);
@@ -214,7 +214,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
   await expect(nextStep).toHaveAttribute("href", `/ask?scope=project&projectId=${projectId}`);
   expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(1);
   expect(extractCalls.filter((call) => call.phase === "execute")[0]?.sourceIds).toEqual([sourceId]);
-  await intake.getByRole("button", { name: "关闭", exact: true }).click();
+  await intake.getByRole("button", { name: "关闭窗口", exact: true }).click();
   const stableHeading = page.locator("main h1");
   await expect(stableHeading).toHaveText("项目资料");
   await expect(stableHeading).toHaveAttribute("aria-label", `${projectName} · 项目资料`);
@@ -230,7 +230,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const addButton = page.getByRole("button", { name: "添加资料", exact: true });
   await addButton.click();
   await expect(intake).toBeVisible();
-  await intake.getByRole("button", { name: "关闭", exact: true }).click();
+  await intake.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await expect(intake).toBeHidden();
   await expect(addButton).toBeFocused();
   await columns.getByRole("link", { name: "整理结果", exact: true }).click();

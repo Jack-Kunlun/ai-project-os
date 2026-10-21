@@ -35,6 +35,10 @@
 
 .headingActions,
 .toolbarActions,
+.detailDialog [data-inquiry-header] > :global(.in-operation-launcher) {
+  top: 0;
+}
+
 .rowActions {
   display: flex;
   flex-wrap: wrap;

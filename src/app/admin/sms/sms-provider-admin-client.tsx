@@ -76,8 +76,8 @@ function dateLabel(value: string | null, language: "zh-CN" | "en", missingDate: 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? missingDate : new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
-function providerLabel(provider: string | null | undefined): string {
-  return provider && provider in providerLabels ? providerLabels[provider as SmsProvider] : provider ?? "";
+function providerLabel(provider: string | null | undefined, t: (text: string) => string): string {
+  return provider && provider in providerLabels ? t(providerLabels[provider as SmsProvider]) : provider ?? "";
 }
 
 function providerDescription(provider: SmsProvider): string {
@@ -426,7 +426,7 @@ export function SmsProviderAdminClient() {
       </div>
       {loading && !state ? <p className="px-6 py-16 text-center text-sm text-slate-500"><UiText text={"正在读取供应商配置…"} /></p> : state?.config.configured ? <div className="px-5 sm:px-6">
         <table className="w-full table-fixed text-left text-sm"><caption className="sr-only"><UiText text={"当前生效短信供应商"} /></caption><thead><tr className="border-b border-slate-100 text-xs text-slate-500"><th className="w-2/5 py-3 pr-3 font-medium"><UiText text={"供应商"} /></th><th className="py-3 pr-3 font-medium"><UiText text={"签名与模板"} /></th><th className="w-20 py-3 font-medium"><UiText text={"状态"} /></th></tr></thead>
-          <tbody><tr><td className="break-words py-5 pr-3 font-medium text-slate-900">{providerLabel(state.config.provider) || t("未知供应商")}<p className="mt-1 text-xs font-normal text-slate-400"><UiText text={"配置版本"} />{" "}{state.config.version}</p></td><td className="break-words py-5 pr-3 text-slate-600">{state.config.signName ?? (state.config.canDecrypt ? t("未设置") : t("配置暂不可读取"))}<p className="mt-1 font-mono text-xs text-slate-400">{state.config.templateCode ?? "—"}</p></td><td className="py-5"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${state.config.enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${state.config.enabled ? "bg-emerald-500" : "bg-slate-400"}`} />{state.config.enabled ? t("已启用") : t("已停用")}</span></td></tr></tbody>
+          <tbody><tr><td className="break-words py-5 pr-3 font-medium text-slate-900">{providerLabel(state.config.provider, t) || t("未知供应商")}<p className="mt-1 text-xs font-normal text-slate-400"><UiText text={"配置版本"} />{" "}{state.config.version}</p></td><td className="break-words py-5 pr-3 text-slate-600">{state.config.signName ?? (state.config.canDecrypt ? t("未设置") : t("配置暂不可读取"))}<p className="mt-1 font-mono text-xs text-slate-400">{state.config.templateCode ?? "—"}</p></td><td className="py-5"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${state.config.enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${state.config.enabled ? "bg-emerald-500" : "bg-slate-400"}`} />{state.config.enabled ? t("已启用") : t("已停用")}</span></td></tr></tbody>
         </table>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 py-3">
           <p className="text-xs leading-5 text-slate-500"><UiText text={"最近验证："} />{dateLabel(state.config.verifiedAt, language, t("未记录"))}</p>
@@ -459,7 +459,7 @@ export function SmsProviderAdminClient() {
     </section>
     <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-700 sm:px-6"><UiText text={"配置变更记录"} /><span className="ml-2 text-xs font-normal text-slate-400">{state?.audits.length ? <>{t("最近")} {state.audits.length} {t("条")}</> : t("暂无记录")}</span></summary>
-      <ol className="mx-5 divide-y divide-slate-100 border-t border-slate-100 sm:mx-6">{state?.audits.length ? state.audits.map((audit) => <li key={audit.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><p className="text-sm text-slate-700">{providerLabel(audit.provider)} · {t(auditLabels[audit.action] ?? "短信服务状态变更")} · v{audit.configVersion}</p><p className="text-xs text-slate-400">{dateLabel(audit.createdAt, language, t("未记录"))} · {audit.enabled ? t("启用") : t("停用")}</p></li>) : <li className="py-5 text-center text-xs text-slate-400"><UiText text={"配置或启停服务后，变更记录会显示在这里。"} /></li>}</ol>
+      <ol className="mx-5 divide-y divide-slate-100 border-t border-slate-100 sm:mx-6">{state?.audits.length ? state.audits.map((audit) => <li key={audit.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><p className="text-sm text-slate-700">{providerLabel(audit.provider, t)} · {t(auditLabels[audit.action] ?? "短信服务状态变更")} · v{audit.configVersion}</p><p className="text-xs text-slate-400">{dateLabel(audit.createdAt, language, t("未记录"))} · {audit.enabled ? t("启用") : t("停用")}</p></li>) : <li className="py-5 text-center text-xs text-slate-400"><UiText text={"配置或启停服务后，变更记录会显示在这里。"} /></li>}</ol>
     </details>
   </div>
   <dialog ref={editorDialogRef} aria-labelledby="sms-provider-editor-title" onCancel={(event) => { event.preventDefault(); closeEditor(); }}
@@ -469,13 +469,13 @@ export function SmsProviderAdminClient() {
       <div className="flex items-start justify-between gap-4"><div><h2 id="sms-provider-editor-title" className="text-lg font-semibold text-slate-950">{state?.config.configured ? t("编辑或更换供应商") : t("新增短信供应商")}</h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={"配置供应商 → 验证测试短信 → 保存启用"} /></p></div><button type="button" aria-label={t("关闭配置弹窗")} onClick={() => closeEditor()} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></div>
       <form onSubmit={requestTest} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
         <label className="text-xs font-semibold text-slate-600 sm:col-span-2"><UiText text={"短信供应商"} /><select value={candidate.provider} onChange={(event) => updateProvider(event.target.value as SmsProvider)} disabled={candidateFieldsDisabled} className={inputClass}>
-            <option value="aliyun-pnvs">阿里云号码认证服务（PNVS）</option>
-            <option value="aliyun-sms">阿里云短信服务（SendSms）</option>
-            <option value="tencent-sms">腾讯云短信服务（SendSms）</option>
+            <option value="aliyun-pnvs">{t("阿里云号码认证服务（PNVS）")}</option>
+            <option value="aliyun-sms">{t("阿里云短信服务（SendSms）")}</option>
+            <option value="tencent-sms">{t("腾讯云短信服务（SendSms）")}</option>
           </select>
         </label>
 
-        <p className="-mt-1 text-xs leading-5 text-slate-500 sm:col-span-2">{providerLabel(candidate.provider)} {t(providerDescription(candidate.provider))} {t(providerTemplateInstruction)}</p>
+        <p className="-mt-1 text-xs leading-5 text-slate-500 sm:col-span-2">{providerLabel(candidate.provider, t)} {t(providerDescription(candidate.provider))} {t(providerTemplateInstruction)}</p>
         <div className="mt-1 flex items-center gap-3 sm:col-span-2"><span className="text-xs font-semibold text-slate-700"><UiText text={"供应商凭据与模板"} /></span><span className="h-px flex-1 bg-slate-100" /><span className="text-xs text-slate-400"><UiText text={"凭据加密保存，不会回显"} /></span></div>
         {candidate.provider === "aliyun-pnvs" ? <>
           <label className="text-xs font-semibold text-slate-600">AccessKey ID<input autoComplete="off" maxLength={128} value={candidate.accessKeyId} onChange={(event) => updateCandidate("accessKeyId", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>

@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { englishUiMessages } from "@/lib/ui-dictionary-source";
@@ -543,21 +544,18 @@ test("all page routes remain consistent across Chinese light and English dark de
       expect(new URL(outsiderPage.url()).pathname).toBe(path);
       guardResults.push({ path, role: "user", status: response?.status() ?? null, finalPath: new URL(outsiderPage.url()).pathname, expectedPath: path });
     }
-    const memberApiResponsePromise = outsiderPage.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === `/api/projects/${ids.projectId}/members` && response.request().method() === "GET";
-    });
     const memberPageResponse = await outsiderPage.goto(`/projects/${ids.projectId}/members`, { waitUntil: "domcontentloaded" });
-    expect(memberPageResponse?.status(), "member page shell may render before its API response").toBeLessThan(400);
-    expect((await memberApiResponsePromise).status(), "a valid project ID must not expose members to a non-member").toBe(404);
+    expect(memberPageResponse?.status(), "project layout must hide the members page from a non-member").toBe(404);
+    const memberApiResponse = await outsiderPage.request.get(`/api/projects/${ids.projectId}/members`);
+    expect(memberApiResponse.status(), "a valid project ID must not expose members to a non-member").toBe(404);
 
     await setAppearance(userPage, origin.value!, "zh-CN", "light");
     await assertUserShellInteractions(userPage);
     expect(matrix, "every discovered page route must be visited in each appearance/viewport mode").toHaveLength(routes.length * MATRIX_MODES.length);
     expect(routeFailures, "all discovered routes must satisfy each appearance, viewport, icon, translation, link and server-error assertion").toEqual([]);
   } finally {
-    await testInfo.attach("ui-consistency-matrix.json", {
-      body: Buffer.from(JSON.stringify({
+    const matrixPath = testInfo.outputPath("ui-consistency-matrix.json");
+    await writeFile(matrixPath, JSON.stringify({
         discoveredPageCount: routes.length,
         matrixModeCount: MATRIX_MODES.length,
         expectedRouteVisits: routes.length * MATRIX_MODES.length,
@@ -577,7 +575,9 @@ test("all page routes remain consistent across Chinese light and English dark de
         } : null,
         guards: guardResults,
         routes: matrix,
-      }, null, 2)),
+      }, null, 2));
+    await testInfo.attach("ui-consistency-matrix.json", {
+      path: matrixPath,
       contentType: "application/json",
     });
     await Promise.all([...contexts, ...extraContexts].map((context) => context.close()));

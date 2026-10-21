@@ -316,7 +316,7 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
     {message ? <p role="status" className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-xs leading-5 text-emerald-700">{t(message)}</p> : null}
     <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
       <p className="max-w-xl text-xs leading-5 text-slate-500"><UiText text={"提交后保留追加式审核记录；正向结论才会关联当前 V2 只读证据。"} /></p>
-      <button type="submit" disabled={pending || !confirmed} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">{pending ? "提交中…" : "提交审核结论"}</button>
+      <button type="submit" disabled={pending || !confirmed} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">{t(pending ? "提交中…" : "提交审核结论")}</button>
     </div>
   </form>;
 }

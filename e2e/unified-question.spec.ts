@@ -388,7 +388,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   const mismatchedPrepare = page.waitForResponse(response => new URL(response.url()).pathname === "/api/ask/turns" && response.request().postDataJSON()?.phase === "prepare");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await mismatchedPrepare;
-  await expect(page.getByRole("alert")).toContainText("默认模型已变更");
+  await expect(page.getByRole("alert").filter({ hasText: "默认模型已变更" })).toHaveCount(1);
   await expect(page.getByRole("textbox", { name: "输入问题", exact: true })).toHaveValue(firstQuestion);
   expect(executeBodies).toHaveLength(0);
   await expect(page.getByRole("article")).toHaveCount(0);
@@ -624,7 +624,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await expect(floating.locator('textarea[aria-label="输入问题"]')).toBeEnabled();
   await expect(editor.getByRole("textbox", { name: "标题", exact: true })).toHaveValue(untouchedDraft);
   await expect(page).toHaveURL(/\/personal\/knowledge$/u);
-  await editor.getByRole("button", { name: "关闭", exact: true }).click();
+  await editor.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await page.getByRole("dialog", { name: "离开编辑页面？", exact: true }).getByRole("button", { name: "放弃修改并离开", exact: true }).click();
   await launcher.click();
   await expect(floating.getByRole("article", { name: "第 4 轮", exact: true })).toContainText(fourthQuestion);

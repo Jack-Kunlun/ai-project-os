@@ -1,5 +1,8 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "错误代码": "Error code",
+  "当前账号没有执行此操作的权限。": "This account does not have permission to perform this operation.",
+  "返回项目并请项目 Owner 或管理员核对你的访问权限。": "Return to the project and ask its owner or an administrator to check your access.",
   "服务器资源读取失败": "Failed to read server resources",
   "保留上次读取的数据": "Previous data retained",
   "当前数据可能已过期。": "Current data may be out of date.",

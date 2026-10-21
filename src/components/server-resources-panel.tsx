@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UiText, useAppearance, type AppearanceLanguage } from "@/components/appearance-provider";
-import { safeResponseError } from "@/lib/safe-error-presentation";
+import { safeErrorPresentation, safeResponseError, type SafeErrorPresentation } from "@/lib/safe-error-presentation";
 import type { ServerFilesystemMetric, ServerResourcesSnapshot } from "@/lib/server-resources-types";
 
 const FIVE_GIBIBYTES = 5 * 1024 * 1024 * 1024;
@@ -70,7 +70,7 @@ export function ServerResourcesPanel() {
   const [snapshot, setSnapshot] = useState<ServerResourcesSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SafeErrorPresentation | null>(null);
   const inFlight = useRef(false);
   const hasSnapshot = useRef(false);
   const mounted = useRef(false);
@@ -93,17 +93,18 @@ export function ServerResourcesPanel() {
       const response = await fetch("/api/system/operations/resources", { cache: "no-store", signal: controller.signal });
       if (!isCurrentRequest()) return;
       if (!response.ok) {
-        const responseError = await safeResponseError(response, t("服务器资源读取失败"));
+        const responseError = await safeResponseError(response, "服务器资源读取失败");
         if (!isCurrentRequest()) return;
-        throw new Error(responseError.message);
+        setError(responseError);
+        return;
       }
       const nextSnapshot = await response.json() as ServerResourcesSnapshot;
       if (!isCurrentRequest()) return;
       setSnapshot(nextSnapshot);
       hasSnapshot.current = true;
       setError(null);
-    } catch (cause) {
-      if (isCurrentRequest()) setError(cause instanceof Error ? cause.message : t("服务器资源读取失败"));
+    } catch {
+      if (isCurrentRequest()) setError(safeErrorPresentation(null, "服务器资源读取失败"));
     } finally {
       if (activeController.current === controller) {
         activeController.current = null;
@@ -114,7 +115,7 @@ export function ServerResourcesPanel() {
         }
       }
     }
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
@@ -151,7 +152,7 @@ export function ServerResourcesPanel() {
       </div>
 
       <div className="px-5 py-5 sm:px-7">
-        {error ? <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}{snapshot ? <> <UiText text="保留上次读取的数据" />{language === "en" ? " (" : "（"}{formatTime(snapshot.readAt, language)}{language === "en" ? "), " : "），"}<UiText text="当前数据可能已过期。" /></> : <> <UiText text="暂无可展示的读取结果。" /></>}</div> : null}
+        {error ? <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{t(error.summary)} <UiText text="下一步：" />{t(error.nextStep)}{error.code ? <> (<UiText text="错误代码" />: {error.code})</> : null}{snapshot ? <> <UiText text="保留上次读取的数据" />{language === "en" ? " (" : "（"}{formatTime(snapshot.readAt, language)}{language === "en" ? "), " : "），"}<UiText text="当前数据可能已过期。" /></> : <> <UiText text="暂无可展示的读取结果。" /></>}</div> : null}
         {loading && snapshot === null ? <p role="status" className="py-8 text-center text-sm text-slate-500"><UiText text="正在读取服务器资源…" /></p> : null}
         {snapshot ? <>
           <p className="mb-4 text-xs text-slate-400"><UiText text="采集于" /> {formatTime(snapshot.readAt, language)}{refreshing ? <> · <UiText text="刷新中…" /></> : ""}</p>

@@ -13,9 +13,10 @@
 
 .heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px 12px;
 }
 
 .heading h3 {
@@ -27,6 +28,8 @@
 
 .status {
   flex: 0 0 auto;
+  max-width: 100%;
+  overflow-wrap: normal;
   border-radius: 999px;
   padding: 3px 8px;
   color: var(--app-muted, #607086);

@@ -429,6 +429,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     { language: "zh-CN", theme: "dark", width: 1440 },
     { language: "en", theme: "light", width: 1440 },
     { language: "en", theme: "dark", width: 1440 },
+    { language: "zh-CN", theme: "light", width: 390 },
     { language: "en", theme: "dark", width: 390 },
   ]) {
     await page.context().addCookies([
@@ -487,6 +488,8 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
       expect((await transcript.boundingBox())!.height).toBeGreaterThanOrEqual(160);
       await expect.poll(() => transcript.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(2);
       await expect(transcript.getByRole("article").last()).toBeInViewport();
+      const usageTitle = transcript.locator("[data-token-usage] h3").last();
+      expect((await usageTitle.boundingBox())!.height).toBeLessThanOrEqual(21);
       await page.screenshot({ path: `test-results/unified-question/readable-${variant.language}-${variant.theme}-${variant.width}.png` });
       const composer = page.getByRole("textbox", { name: english ? "Your question" : "输入问题", exact: true });
       await composer.scrollIntoViewIfNeeded();

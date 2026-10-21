@@ -116,16 +116,17 @@ test("新建使用弹窗、编辑使用抽屉且不让旧列表响应覆盖草�
   assert.match(source, /onEdit=\{\(\) => startEdit\(document\)\}/u);
 });
 
-test("知识列表提供三个栏目，新增用弹窗，编辑和导入用抽屉，检索按需打开", async () => {
+test("知识列表保留两个栏目并独立导航图谱，新增用弹窗，编辑和导入用抽屉", async () => {
   const source = await readFile("src/app/personal/knowledge/knowledge-client.tsx", "utf8");
 
   assert.match(source, /<UiText text="全部知识" \/>/u);
   assert.match(source, /<UiText text="通用记忆" \/>/u);
-  assert.match(source, /href="\/personal\/knowledge\/graph"/u);
+  assert.doesNotMatch(source, /href="\/personal\/knowledge\/graph"/u);
   assert.match(source, /aria-label=\{t\(knowledgeFilter === "memory" \? "通用记忆列表" : "全部知识列表"\)\}/u);
   assert.match(source, /params\.set\("isDefaultMemory", "true"\)/u);
   assert.match(source, /openSearchTool\("semantic"\)/u);
-  assert.match(source, /\/personal\/knowledge\/graph/u);
+  const graph = await readFile("src/app/personal/knowledge/graph/personal-knowledge-graph-client.tsx", "utf8");
+  assert.doesNotMatch(graph, /aria-label=\{t\("我的知识栏目"\)\}/u);
   assert.match(source, /<dialog[\s\S]*?aria-labelledby="knowledge-modal-title"/u);
   assert.match(source, /dialogElement\.showModal\(\)/u);
   assert.match(source, /onCancel=\{\(event\) => \{ event\.preventDefault\(\); void requestCloseKnowledgeModal\(\); \}\}/u);

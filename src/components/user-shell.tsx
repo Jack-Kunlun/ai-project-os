@@ -10,6 +10,7 @@ import { WorkspacePicker,selectWorkspace,useWorkspaceSelection } from "./workspa
 import { BrandMark } from "./brand-mark";
 import { useTranslate, UiText } from "./appearance-provider";
 import { NotificationBell } from "@/components/notification-bell";
+import { ShellIcon } from "./shell-icon";
 import {
   getActiveGlobalNavigation,
   getProjectNavigationHref,
@@ -19,7 +20,7 @@ import {
   USER_GLOBAL_NAVIGATION,
   USER_PROJECT_NAVIGATION,
   USER_PROJECTS_CHANGED_EVENT,
-  type UserProjectNavigationKey,
+  USER_CURRENT_PROJECT_CHANGED_EVENT,
 } from "@/lib/user-navigation";
 import styles from "./user-shell.module.css";
 
@@ -215,6 +216,10 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
     : accessibleProjects.find((project) => project.id === selectedProjectId) ?? null;
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent(USER_CURRENT_PROJECT_CHANGED_EVENT, { detail: { projectId: selectedProject?.id ?? null } }));
+  }, [selectedProject?.id]);
+
+  useEffect(() => {
     if (!routeContext) { synchronizedProjectRoute.current = null; return; }
     if (!routeProject?.workspaceId) return;
     const routeKey = `${routeProject.id}:${routeProject.workspaceId}`;
@@ -318,7 +323,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
             <span>AI Project OS</span>
           </Link>
             <button ref={mobileCloseButtonRef} type="button" className={`${styles.iconButton} ${styles.mobileClose}`} onClick={() => closeMobileNavigation(true)} aria-label={t("关闭导航")}>
-            <ShellIcon name="close" />
+            <ShellIcon className={styles.icon} name="close" />
           </button>
         </div>
 
@@ -335,7 +340,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
                 className={`${styles.navLink} ${active ? styles.navLinkActive : ""}`}
                 onClick={projectLinkClick}
               >
-                <ShellIcon name={item.key} />
+                <ShellIcon className={styles.icon} name={item.key} />
                 <span>{t(item.label)}</span>
               </Link>
             );
@@ -348,6 +353,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
           <label className={styles.projectPicker}>
             <span className={styles.projectDot} aria-hidden="true">{selectedProject?.name.slice(0, 1) ?? "·"}</span>
             <select
+              id="user-shell-project-picker"
               value={selectedProject?.id ?? ""}
               onChange={handleProjectSelect}
               disabled={projectList.status !== "ready" || accessibleProjects.length === 0}
@@ -359,7 +365,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
                 <option key={project.id} value={project.id}>{project.name}{project.archived ? t("（已归档）") : ""}</option>
               ))}
             </select>
-            <ShellIcon name="chevron" />
+            <ShellIcon className={styles.icon} name="chevron" />
           </label>
         </div>
         <p id="user-shell-project-status" className={styles.projectStatus} role={projectList.status === "error" ? "status" : undefined}>
@@ -379,12 +385,12 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
                 className={className}
                 onClick={projectLinkClick}
               >
-                <ShellIcon name={item.key} />
+                <ShellIcon className={styles.icon} name={item.key} />
                 <span>{t(item.label)}</span>
               </Link>
             ) : (
               <span key={item.key} className={`${className} ${styles.navLinkDisabled}`} aria-disabled="true" title={t("先选择一个可访问项目")}>
-                <ShellIcon name={item.key} />
+                <ShellIcon className={styles.icon} name={item.key} />
                 <span>{t(item.label)}</span>
               </span>
             );
@@ -394,7 +400,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
         <div className={styles.sidebarBottom}>
           <div className={styles.sectionDivider}/><div className={styles.sectionLabel}>{t('空间与资源')}</div>
           <nav aria-label={t('空间与资源')}>
-           {([['/personal/configuration',t('资源配置'),'resources'],['/credits',t('额度与账单'),'credits'],['/team',t('我的团队'),'team']] as const).map(([href,label,icon])=><Link key={href} href={href} className={`${styles.navLink} ${pathname===href?styles.navLinkActive:''}`} aria-current={pathname===href?'page':undefined} onClick={projectLinkClick}><ShellIcon name={icon}/><span>{t(label)}</span></Link>)}
+           {([['/personal/configuration',t('资源配置'),'resources'],['/credits',t('额度与账单'),'credits'],['/team',t('我的团队'),'team']] as const).map(([href,label,icon])=><Link key={href} href={href} className={`${styles.navLink} ${pathname===href?styles.navLinkActive:''}`} aria-current={pathname===href?'page':undefined} onClick={projectLinkClick}><ShellIcon className={styles.icon} name={icon}/><span>{t(label)}</span></Link>)}
           </nav>
         </div>
       </aside>
@@ -418,7 +424,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
             aria-controls="user-shell-navigation"
             aria-expanded={mobileNavigationOpen}
           >
-            <ShellIcon name="menu" />
+            <ShellIcon className={styles.icon} name="menu" />
           </button>
           {workspaceName?<><span className={styles.workspaceCrumb}>{workspaceName}</span><span className={styles.breadcrumbDivider} aria-hidden="true">›</span></>:null}
           <span className={styles.breadcrumbLabel}>{t(getUserPageLabel(pathname))}</span>
@@ -426,12 +432,12 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
         </div>
         <div className={styles.topActions}>
           <button ref={searchButtonRef} type="button" className={styles.searchButton} onClick={openSearch} aria-haspopup="dialog" aria-label={t("搜索与跳转")}>
-            <ShellIcon name="search" />
+            <ShellIcon className={styles.icon} name="search" />
             <span>{t("搜索与跳转")}</span>
             <kbd>⌘ K</kbd>
           </button>
           <NotificationBell active={pathname === "/notifications" || pathname.startsWith("/notifications/")} compact/>
-          <Link href="/guide" className={styles.iconButton} aria-label={t("帮助")} title={t("帮助")}><ShellIcon name="help"/></Link>
+          <Link href="/guide" className={styles.iconButton} aria-label={t("帮助")} title={t("帮助")}><ShellIcon className={styles.icon} name="help"/></Link>
           <AppearanceControls/>
           <HeaderAccount username={username} isSystemAdmin={isSystemAdmin}/>
         </div>
@@ -446,10 +452,10 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
                 <h2 id="user-shell-search-title"><UiText text="搜索与跳转"/></h2>
                 <p><UiText text="按页面名称或你有权访问的项目查找路由。"/></p>
               </div>
-              <button type="button" className={styles.iconButton} onClick={closeSearch} aria-label={t("关闭搜索")}><ShellIcon name="close" /></button>
+              <button type="button" className={styles.iconButton} onClick={closeSearch} aria-label={t("关闭搜索")}><ShellIcon className={styles.icon} name="close" /></button>
             </div>
             <label className={styles.searchInputWrap}>
-              <ShellIcon name="search" />
+              <ShellIcon className={styles.icon} name="search" />
               <input
                 ref={searchInputRef}
                 type="search"
@@ -482,31 +488,4 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
       ) : null}
     </div>
   );
-}
-
-type ShellIconName = UserProjectNavigationKey | "dashboard" | "ask" | "projects" | "knowledge" | "team" | "help" | "chevron" | "close" | "menu" | "search" | "graph" | "resources" | "credits";
-
-function ShellIcon({ name }: Readonly<{ name: ShellIconName }>): React.JSX.Element {
-  const paths: Record<ShellIconName, React.ReactNode> = {
-    dashboard: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
-    ask: <><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8 8 0 0 1-3.4-.75L4 20l1.3-3.3A7.2 7.2 0 0 1 4 12c0-4.4 3.6-8 8-8s8 3.1 8 7.5Z" /><path d="M8 11h8M8 14h5" /></>,
-    projects: <><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /><path d="M3 9h18" /></>,
-    knowledge: <><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v19H7.5A2.5 2.5 0 0 1 5 18.5Z" /><path d="M5 18.5A2.5 2.5 0 0 1 7.5 16H20M9 6h7M9 9h7" /></>,
-    plan: <><path d="M8 6h13M8 12h13M8 18h13" /><path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" /></>,
-    materials: <><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /><path d="M3 9h18" /></>,
-    overview: <><rect x="3" y="3" width="8" height="8" rx="1" /><rect x="13" y="3" width="8" height="5" rx="1" /><rect x="13" y="10" width="8" height="11" rx="1" /><rect x="3" y="13" width="8" height="8" rx="1" /></>,
-    intelligence: <><path d="M3 19h18M5 16l4-5 3 2 6-8" /><path d="M15 5h3v3" /></>,
-    automations: <><path d="m13 2-3 8h7l-6 12 2-9H6l7-11Z" /></>,
-    governance: <><path d="M12 3 4 7v5c0 5 3.4 8.2 8 10 4.6-1.8 8-5 8-10V7l-8-4Z" /><path d="m9 12 2 2 4-4" /></>,
-    team: <><circle cx="9" cy="8" r="3" /><path d="M3 20v-1a6 6 0 0 1 12 0v1M16 5a3 3 0 0 1 0 6M18 14a4 4 0 0 1 3 4v2" /></>,
-    help: <><circle cx="12" cy="12" r="9" /><path d="M9.7 9a2.4 2.4 0 1 1 3.8 1.9c-.9.6-1.5 1-1.5 2.3M12 17h.01" /></>,
-    chevron: <path d="m7 10 5 5 5-5" />,
-    close: <><path d="m6 6 12 12M18 6 6 18" /></>,
-    menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
-    graph: <><circle cx="5" cy="5" r="2"/><circle cx="19" cy="9" r="2"/><circle cx="7" cy="19" r="2"/><path d="m7 6 10 3M6 7l1 10m2 1 9-8"/></>,
-    resources: <><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/></>,
-    credits: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18m-7 5h4"/></>,
-    search: <><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></>,
-  };
-  return <svg aria-hidden="true" viewBox="0 0 24 24" className={styles.icon} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }

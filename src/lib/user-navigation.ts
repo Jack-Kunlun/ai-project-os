@@ -1,5 +1,6 @@
 /** Direct user-facing destinations shown in the persistent application shell. */
 export const USER_PROJECTS_CHANGED_EVENT = "ai-project-os:user-projects-changed";
+export const USER_CURRENT_PROJECT_CHANGED_EVENT = "ai-project-os:user-current-project-changed";
 
 export function notifyUserProjectsChanged(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(USER_PROJECTS_CHANGED_EVENT));

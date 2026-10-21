@@ -36,8 +36,7 @@
   font-size: 25px;
 }
 
-.subtitle,
-.commonIntro {
+.subtitle {
   margin: 8px 0 0;
   color: var(--app-muted);
   font-size: 13px;
@@ -72,7 +71,7 @@
 .featureGrid {
   display: grid;
   margin-top: 24px;
-  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 22px;
   align-items: stretch;
 }
@@ -87,10 +86,7 @@
   background: var(--app-surface);
 }
 
-.panel {
-  padding: 22px;
-}
-
+.panel,
 .commonPanel {
   padding: 24px;
   background: var(--app-surface-soft);
@@ -101,12 +97,18 @@
   align-items: center;
 }
 
+.headingTitle { min-width: 0; }
+.titleWithCount { display: flex; align-items: center; min-height: 31px; gap: 9px; }
+
 .sectionHeading h2,
 .commonPanel h2 {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0;
 }
+
+.titleWithCount h2,
+.commonPanel h2 { display: flex; min-height: 31px; align-items: center; }
 
 .count {
   display: grid;
@@ -116,25 +118,18 @@
   border-radius: 6px;
   padding: 0 7px;
   color: var(--app-muted);
-  background: var(--app-accent-soft);
+  background: var(--app-surface-soft);
   font-size: 11px;
   font-weight: 650;
 }
 
-.attentionList {
-  margin-top: 17px;
-  border-top: 1px solid var(--app-border);
-}
+.countActive { border: 1px solid var(--app-danger-border); color: var(--app-danger-ink); background: var(--app-danger-soft); }
 
 .attentionItem {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid var(--app-border);
-  padding: 14px 2px;
-  color: inherit;
-  text-decoration: none;
 }
 
 .attentionItem:hover .arrow,
@@ -143,21 +138,24 @@
 }
 
 .signal {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 1px solid #98a58e;
   border-radius: 50%;
   background: #aeb7a6;
 }
 
 .danger {
   color: var(--app-muted);
-  background: var(--app-danger-ink);
+  border-color: var(--app-danger-ink);
+  background: var(--app-danger-soft);
 }
 
 .warning {
   color: var(--app-muted);
-  background: var(--app-warning-ink);
+  border-color: var(--app-warning-ink);
+  background: var(--app-warning-soft);
 }
 
 .neutral {
@@ -175,7 +173,7 @@
 .itemCopy strong {
   overflow: hidden;
   color: var(--app-text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 570;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -188,7 +186,11 @@
   line-height: 1.6;
 }
 
+.itemCopy small { font-size: 11px; }
+
 .arrow {
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
   color: var(--app-muted);
   font-size: 14px;
@@ -244,66 +246,61 @@
   color: var(--app-link);
 }
 
+.panel,
 .commonPanel {
   display: flex;
   flex-direction: column;
 }
 
-.commonPanel > .textLink {
-  align-self: flex-start;
-  min-height: 34px;
-  gap: 10px;
-  margin-top: 18px;
-  border: 1px solid var(--app-border);
-  border-radius: 4px;
-  padding: 0 12px;
-  color: var(--app-text);
-}
-
-.commonIntro {
-  max-width: 420px;
-  margin-top: 9px;
+.actionDescription {
+  margin: 12px 0 16px;
+  color: var(--app-muted);
   font-size: 12px;
+  line-height: 1.7;
 }
 
-.nextStep {
+.attentionList,
+.commonActions {
+  display: grid;
+  gap: 8px;
+}
+
+.attentionItem,
+.actionCard {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 17px;
+  min-width: 0;
+  min-height: 66px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
-  padding: 14px;
-  color: inherit;
-  background: var(--app-surface-soft);
-  text-decoration: none;
-}
-
-.nextStep > span,
-.nextStep small {
-  color: var(--app-muted);
-  font-size: 10px;
-  line-height: 1.65;
-}
-
-.nextStep strong {
+  border-radius: 6px;
+  padding: 12px;
   color: var(--app-text);
-  font-size: 13px;
-  font-weight: 620;
+  background: var(--app-surface);
+  text-decoration: none;
+  cursor: pointer;
 }
 
-.nextStep b,
-.nextStep button {
+.actionCard { align-items: center; gap: 12px; text-align: left; }
+.actionIcon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--app-link); }
+.attentionItem:hover,
+.actionCard:hover { border-color: var(--app-accent); }
+.actionCard:hover .arrow { transform: translateX(3px); }
+.actionCard strong { font-weight: 600; }
+.actionCard small { overflow-wrap: anywhere; }
+
+.guideLink {
+  display: inline-flex;
   align-self: flex-start;
-  margin-top: 2px;
-  border: 0;
-  padding: 0;
-  color: var(--app-muted);
-  background: transparent;
-  font-size: 11px;
-  font-weight: 650;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 16px;
+  color: var(--app-link);
+  font-size: 12px;
+  font-weight: 600;
   text-decoration: none;
 }
+.guideLink:hover { color: var(--app-link); }
 
 .quickLinks {
   margin-top: 12px;
@@ -509,7 +506,7 @@
 
 @media (max-width: 1050px) {
   .content { padding-right: 28px; padding-left: 28px; }
-  .featureGrid { grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr); }
+  .featureGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .projectGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -517,6 +514,7 @@
   .content { padding: 25px 20px 36px; }
   .heading { align-items: flex-start; }
   .featureGrid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .panel,
   .commonPanel { padding: 20px; }
   .projectGrid { grid-template-columns: minmax(0, 1fr); gap: 11px; }
   .projectCard { min-height: 0; }
@@ -526,7 +524,8 @@
   .content { padding: 21px 15px 28px; }
   .heading { flex-direction: column; align-items: stretch; gap: 14px; }
   .primaryButton { align-self: flex-start; }
-  .panel { padding: 17px; }
+  .panel,
+  .commonPanel { padding: 17px; }
   .sectionHeading h2,
   .commonPanel h2 { font-size: 17px; }
   .itemCopy strong { white-space: normal; }

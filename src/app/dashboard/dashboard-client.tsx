@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/app-header";
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useWorkspaceSelection } from "@/components/workspace-scope";
 import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
+import { USER_CURRENT_PROJECT_CHANGED_EVENT } from "@/lib/user-navigation";
 import { jobStatusLabels, type DashboardPayload, type JobKind, type RecentJob, type WorkspaceProject } from "@/lib/workspace-summary";
 import styles from "./dashboard-client.module.css";
 
@@ -143,9 +144,11 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
   const t = useTranslate();
   const workspaceId = useWorkspaceSelection(username);
   const [payload, setPayload] = useState<DashboardPayload>(emptyPayload);
+  const [payloadWorkspaceId, setPayloadWorkspaceId] = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState<{ workspaceId: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const requestSequence = useRef(0);
   const activeController = useRef<AbortController | null>(null);
 
@@ -165,6 +168,7 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
       const next = await response.json() as DashboardPayload;
       if (sequence !== requestSequence.current) return;
       setPayload(next);
+      setPayloadWorkspaceId(workspaceId);
       setError(null);
     } catch (loadError) {
       if (controller.signal.aborted || sequence !== requestSequence.current) return;
@@ -200,7 +204,24 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
     return () => controller.abort();
   }, [workspaceId]);
 
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const picker = document.getElementById("user-shell-project-picker") as HTMLSelectElement | null;
+      setSelectedProjectId(picker?.value || null);
+    });
+    const onProjectChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string | null }>).detail;
+      setSelectedProjectId(typeof detail?.projectId === "string" ? detail.projectId : null);
+    };
+    window.addEventListener(USER_CURRENT_PROJECT_CHANGED_EVENT, onProjectChange);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener(USER_CURRENT_PROJECT_CHANGED_EVENT, onProjectChange);
+    };
+  }, []);
+
   const attentionItems = useMemo(() => buildAttentionItems(payload, t, language), [language, payload, t]);
+  const currentProject = payloadWorkspaceId === workspaceId ? payload.projects.find((project) => project.id === selectedProjectId && !project.archivedAt) ?? null : null;
 
   return (
     <main className={styles.page}>
@@ -222,24 +243,29 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
         <section className={styles.featureGrid} aria-label={t("工作台常用信息")}>
           <section className={styles.panel} aria-labelledby="attention-heading">
             <div className={styles.sectionHeading}>
-              <div><p className={styles.eyebrow}><UiText text={"ATTENTION"} /></p><h2 id="attention-heading"><UiText text="需要你关注" /></h2></div>
-              {!loading && !error ? <span className={styles.count}>{attentionItems.length}</span> : null}
-              <Link href="/notifications" className={styles.textLink}><UiText text="通知中心" /> →</Link>
+              <div className={styles.headingTitle}><p className={styles.eyebrow}><UiText text={"ATTENTION"} /></p><div className={styles.titleWithCount}><h2 id="attention-heading"><UiText text="需要你关注" /></h2>{!loading && !error ? <span className={`${styles.count} ${attentionItems.length > 0 ? styles.countActive : ""}`} aria-label={`${attentionItems.length} ${t("项待处理")}`}>{attentionItems.length}</span> : null}</div></div>
             </div>
+            <p className={styles.actionDescription}><UiText text="查看待处理事项，及时跟进项目进展。" /></p>
             {loading ? <LoadingRows t={t} /> : error ? <p className={styles.empty}><UiText text="状态读取失败，重试后再查看待办。" /></p> : attentionItems.length === 0 ? <p className={styles.empty}><UiText text="暂无待处理事项。" /></p> : (
               <div className={styles.attentionList}>{attentionItems.map((item) => <Link key={item.id} href={item.href} className={styles.attentionItem}>
                 <span className={`${styles.signal} ${styles[item.tone]}`} aria-hidden="true" />
                 <span className={styles.itemCopy}><strong>{item.title}</strong><small>{item.detail}</small></span>
-                <span className={styles.arrow} aria-hidden="true">→</span>
+                <DashboardActionIcon name="chevron" className={styles.arrow} />
               </Link>)}</div>
             )}
+            <Link href="/notifications" className={styles.guideLink}><UiText text="通知中心" /> <span aria-hidden="true">→</span></Link>
           </section>
 
           <aside className={styles.commonPanel} aria-labelledby="common-actions-heading">
             <p className={styles.eyebrow}><UiText text="工作入口" /></p>
             <h2 id="common-actions-heading"><UiText text="常用操作" /></h2>
-            <p className={styles.commonIntro}><UiText text="从资料与待处理内容继续工作。" /><br /><UiText text="在侧栏切换项目，再处理项目内的资料与工作。" /></p>
-            <Link href="/guide" className={styles.textLink}><UiText text="了解使用流程" /> <span aria-hidden="true">→</span></Link>
+            <p className={styles.actionDescription}><UiText text="选择一个入口，开始今天的工作。" /></p>
+            <div className={styles.commonActions}>
+              {currentProject ? <Link href={`/projects/${encodeURIComponent(currentProject.id)}/materials?view=add`} className={styles.actionCard}><DashboardActionIcon name="upload" className={styles.actionIcon} /><span className={styles.itemCopy}><strong><UiText text="添加项目资料" /></strong><small><UiText text="当前项目" /> · {currentProject.name}</small></span><DashboardActionIcon name="chevron" className={styles.arrow} /></Link> : <Link href="/projects" className={styles.actionCard}><DashboardActionIcon name="upload" className={styles.actionIcon} /><span className={styles.itemCopy}><strong><UiText text={selectedProjectId ? "选择其他项目" : "先选择项目"} /></strong><small><UiText text={selectedProjectId ? "当前项目无法用于添加资料，请选择其他项目。" : "选择或创建项目后，再将资料添加到当前项目。"} /></small></span><DashboardActionIcon name="chevron" className={styles.arrow} /></Link>}
+              <Link href="/personal/knowledge?new=1" className={styles.actionCard}><DashboardActionIcon name="book" className={styles.actionIcon} /><span className={styles.itemCopy}><strong><UiText text="新建个人知识" /></strong><small><UiText text="保存方法、经验与约定" /></small></span><DashboardActionIcon name="chevron" className={styles.arrow} /></Link>
+              <Link href="/ask" className={styles.actionCard}><DashboardActionIcon name="message" className={styles.actionIcon} /><span className={styles.itemCopy}><strong><UiText text="发起智能问答" /></strong><small><UiText text="基于可访问内容提问" /></small></span><DashboardActionIcon name="chevron" className={styles.arrow} /></Link>
+            </div>
+            <Link href="/guide" className={styles.guideLink}><UiText text="了解使用流程" /> <span aria-hidden="true">→</span></Link>
           </aside>
         </section>
 
@@ -255,6 +281,16 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
       </div>
     </main>
   );
+}
+
+function DashboardActionIcon({ name, className }: Readonly<{ name: "upload" | "book" | "message" | "chevron"; className: string }>) {
+  const paths = {
+    upload: "M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6",
+    book: "M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1Zm0 0v15",
+    message: "M21 11a8 8 0 0 1-8 8H8l-5 3V5a2 2 0 0 1 2-2h8a8 8 0 0 1 8 8ZM7 8h9m-9 4h6",
+    chevron: "m9 5 7 7-7 7",
+  };
+  return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>;
 }
 
 function LoadingRows({ t }: { t: (text: string) => string }) {

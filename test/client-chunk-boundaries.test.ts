@@ -41,6 +41,23 @@ test("admin account menus do not pull user navigation through the same cache gro
   }
 });
 
+test("user shell icons and repeated memory-quality client use their existing shared chunks", () => {
+  const cacheGroups = groups();
+  for (const separator of ["/", "\\"]) {
+    const path = (file: string) => `/app/src/${file}`.replaceAll("/", separator);
+    const icon = path("components/shell-icon.tsx");
+    assert.equal(cacheGroups.userNavigation.test?.test(icon), true);
+    const qualityClient = path("app/projects/[projectId]/memory-quality/project-memory-quality-client.tsx");
+    assert.equal(cacheGroups.sharedPresentation.test?.test(qualityClient), true);
+    assert.deepEqual(Object.entries(cacheGroups).filter(([, group]) => group.test?.test(qualityClient)).map(([name]) => name), ["sharedPresentation"]);
+    for (const unrelated of [
+      "app/projects/[projectId]/memory-quality/page.tsx",
+      "app/projects/[projectId]/memory/project-memory-client.tsx",
+      "app/projects/[projectId]/governance/project-management-client.tsx",
+    ]) assert.equal(cacheGroups.sharedPresentation.test?.test(path(unrelated)), false);
+  }
+});
+
 test("admin shared presentation groups include navigation without capturing page clients", () => {
   const cacheGroups = groups();
   for (const separator of ["/", "\\"]) {

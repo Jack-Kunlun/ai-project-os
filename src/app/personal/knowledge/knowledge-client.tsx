@@ -178,6 +178,8 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const [mode, setMode] = useState<EditorMode>("view");
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>("library");
   const [libraryScreen, setLibraryScreen] = useState<LibraryScreen>(requestedDocumentId === null ? "list" : "view");
+  const createFromQueryHandled = useRef(false);
+  const startCreateRef = useRef<() => void>(() => {});
   const [knowledgeModal, setKnowledgeModalState] = useState<KnowledgeModal>(null);
   const [queryReconcileVersion, setQueryReconcileVersion] = useState(0);
   const [searchTool, setSearchTool] = useState<SearchTool>("semantic");
@@ -744,6 +746,24 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     setMessage(null);
   }
 
+  useEffect(() => {
+    startCreateRef.current = startCreate;
+  });
+
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") {
+      createFromQueryHandled.current = false;
+      return;
+    }
+    if (createFromQueryHandled.current) return;
+    createFromQueryHandled.current = true;
+    startCreateRef.current();
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("new");
+    const query = next.toString();
+    router.replace(query ? `/personal/knowledge?${query}` : "/personal/knowledge", { scroll: false });
+  }, [router, searchParams]);
+
   function startEdit(documentToEdit: KnowledgeDocument): void {
     openKnowledgeModal("editor");
     setDraft({ title: documentToEdit.title, content: documentToEdit.content, isDefaultMemory: documentToEdit.isDefaultMemory });
@@ -1087,7 +1107,6 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           <nav className={styles.tabs} aria-label={t("知识栏目")}>
             <button type="button" aria-current={knowledgeFilter === "all" ? "page" : undefined} aria-pressed={knowledgeFilter === "all"} onClick={() => selectKnowledgeFilter("all")} className={`${styles.tab} ${knowledgeFilter === "all" ? styles.activeTab : ""}`}><UiText text="全部知识" /></button>
             <button type="button" aria-current={knowledgeFilter === "memory" ? "page" : undefined} aria-pressed={knowledgeFilter === "memory"} onClick={() => selectKnowledgeFilter("memory")} className={`${styles.tab} ${knowledgeFilter === "memory" ? styles.activeTab : ""}`}><UiText text="通用记忆" /></button>
-            <Link href="/personal/knowledge/graph" className={styles.tabLink}><UiText text="知识图谱" /></Link>
           </nav>
 
           {knowledgeFilter === "memory" ? <p className={styles.notice}><UiText text="仅显示你明确标记为通用记忆的内容；这些约定会用于你发起的项目 AI 请求。" /></p> : null}

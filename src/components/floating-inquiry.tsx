@@ -4,95 +4,127 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
-import { Suspense,useCallback,useEffect,useLayoutEffect,useRef,useState,type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { Suspense,useCallback,useEffect,useLayoutEffect,useRef,useState,type CSSProperties, type PointerEvent as ReactPointerEvent,type ReactNode } from 'react';
 import { useTranslate, UiText } from './appearance-provider';
 import { InquiryOwnedContext,INQUIRY_OPERATION_EVENT } from './inquiry-operation';
 import { useInquiryValue } from '@/lib/inquiry-session';
-import { inquiryPlacement } from '@/lib/inquiry-placement';
 const Inquiry=dynamic(()=>import('@/app/ask/ask-client').then(m=>m.AskClient),{ssr:false,loading:()=> <p role="status" className="inquiry-loading"><UiText text="正在加载智能问答…"/></p>});
-type Operation={host:HTMLElement;left:number;right:number;top:number;width:number;height:number;heading:number;entryRight:number};
+type Operation={host:HTMLElement;entryRight:number};
 const publicRoots=new Set(['','admin','system','login','register','recover','setup','accept-invitation','help','privacy','terms','contact']);
 /** A stable portal target preserves the question workspace while operations change. */
 export function FloatingInquiry(){
- const pathname=usePathname(),t=useTranslate(),[target,setTarget]=useState<HTMLDivElement|null>(null),[opened,setOpened]=useState(false),[mounted,setMounted]=useState(false),[wide,setWide]=useState(false),[docked,setDocked]=useState(false),[operation,setOperation]=useState<Operation|null>(null),[conversationId,setConversationId]=useState<string>(),[pending,setPending]=useState(false),[size,setSize]=useState({width:1280,height:800});
- const previousFocus=useRef<HTMLElement|null>(null),panel=useRef<HTMLElement>(null),latestOperation=useRef(''),latestHost=useRef<HTMLElement|null>(null),drag=useRef<{x:number;y:number;left:number;top:number}|null>(null),[position,setPosition]=useState<{left:number;top:number}|null>(null);
+ const pathname=usePathname(),t=useTranslate(),[target,setTarget]=useState<HTMLDivElement|null>(null),[opened,setOpened]=useState(false),[mounted,setMounted]=useState(false),[wide,setWide]=useState(false),[docked,setDocked]=useState(false),[operation,setOperation]=useState<Operation|null>(null),[conversationId,setConversationId]=useState<string>(),[pending,setPending]=useState(false),[layerError,setLayerError]=useState<string|null>(null),[ownedDialogVersion,setOwnedDialogVersion]=useState(0),[size,setSize]=useState({width:1280,height:800});
+ const previousFocus=useRef<HTMLElement|null>(null),panel=useRef<HTMLDialogElement>(null),launcherRef=useRef<HTMLButtonElement>(null),dialogMode=useRef<string|null>(null),focusWaitCleanup=useRef<()=>void>(()=>{}),backdropStarted=useRef(false),latestEntryRight=useRef<number|null>(null),latestHost=useRef<HTMLElement|null>(null),drag=useRef<{x:number;y:number;left:number;top:number}|null>(null),[position,setPosition]=useState<{left:number;top:number}|null>(null);
  const [activeRequest]=useInquiryValue('request'),[sessionEpoch]=useInquiryValue('epoch'),preparing=activeRequest?.phase==='prepare';
  const allowed=!publicRoots.has(pathname.split('/')[1])&&pathname!=='/ask';
  const keepActive=pending&&opened&&!publicRoots.has(pathname.split('/')[1]);
- useEffect(()=>{const node=document.createElement('div');node.dataset.floatingInquiryRoot='';document.body.append(node);const frame=requestAnimationFrame(()=>setTarget(node));return()=>{cancelAnimationFrame(frame);node.remove();};},[]);
+ useEffect(()=>{const node=document.createElement('div');node.dataset.floatingInquiryRoot='';document.body.append(node);const frame=requestAnimationFrame(()=>{setSize({width:document.documentElement.clientWidth||document.body.clientWidth,height:document.documentElement.clientHeight||document.body.clientHeight});setTarget(node);});return()=>{cancelAnimationFrame(frame);node.remove();};},[]);
  useEffect(() => {
    let frame = 0;
-   let observedHost: HTMLElement | null = null;
    let observedHeader: HTMLElement | null = null;
+   let observedClose: HTMLElement | null = null;
    function update() {
      cancelAnimationFrame(frame);
      frame = requestAnimationFrame(() => {
-       setSize(previous => previous.width === innerWidth && previous.height === innerHeight ? previous : { width: innerWidth, height: innerHeight });
+       const viewportWidth=document.documentElement.clientWidth||document.body.clientWidth,viewportHeight=document.documentElement.clientHeight||document.body.clientHeight;
+       setSize(previous => previous.width === viewportWidth && previous.height === viewportHeight ? previous : { width: viewportWidth, height: viewportHeight });
        const candidates = [...document.querySelectorAll<HTMLElement>('dialog[open], [role="dialog"][aria-modal="true"]')]
          .filter(el => !el.closest('[data-floating-inquiry-root]') && !el.closest('[hidden],[inert],[aria-hidden="true"]') && el.dataset.inquiryOwned !== 'true' && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
        const host = candidates.at(-1);
        if (!host) {
-         if (observedHost) { resizeObserver.disconnect(); observedHost = null; observedHeader = null; }
-         if (latestOperation.current) { latestOperation.current = ''; latestHost.current = null; setOperation(null); }
+         if (observedHeader || observedClose) { resizeObserver.disconnect(); observedHeader = null; observedClose = null; }
+         if (latestHost.current) { latestHost.current = null; latestEntryRight.current = null; setOperation(null); }
          return;
        }
        const header = host.querySelector<HTMLElement>('[data-dialog-header],[data-operation-header],header');
-       if (observedHost !== host || observedHeader !== header) {
-         resizeObserver.disconnect(); resizeObserver.observe(host);
-         if (header) resizeObserver.observe(header);
-         observedHost = host; observedHeader = header;
-       }
-       const r = host.getBoundingClientRect();
-       const heading = header?.getBoundingClientRect();
        const close = host.querySelector<HTMLElement>('[data-dialog-close],[data-operation-header] > button');
+       if (observedHeader !== header || observedClose !== close) {
+         resizeObserver.disconnect();
+         if (header) resizeObserver.observe(header);
+         if (close) resizeObserver.observe(close);
+         observedHeader = header; observedClose = close;
+       }
        // Reserve the close button's intrinsic width, never its flow position.
        // Measuring its left edge creates a padding/measurement feedback loop.
        const entryRight = close ? 36 + close.getBoundingClientRect().width : 60;
-       const signature = [r.left, r.right, r.top, r.height, heading?.height, entryRight].join(':');
-       if (latestHost.current !== host || latestOperation.current !== signature) {
-         latestHost.current = host; latestOperation.current = signature;
-         setOperation({ host, left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, heading: heading?.height || 76, entryRight });
+       if (latestHost.current !== host || latestEntryRight.current !== entryRight) {
+         latestHost.current = host; latestEntryRight.current = entryRight;
+         setOperation({ host, entryRight });
        }
      });
    }
    const resizeObserver = new ResizeObserver(update);
    const observer = new MutationObserver(update);
+   const updateInquiryLayer=()=>{setOwnedDialogVersion(version=>version+1);update();};
    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'data-inquiry-owned'] });
-   window.addEventListener('resize', update); window.addEventListener(INQUIRY_OPERATION_EVENT, update); update();
-   return () => { cancelAnimationFrame(frame); observer.disconnect(); resizeObserver.disconnect(); window.removeEventListener('resize', update); window.removeEventListener(INQUIRY_OPERATION_EVENT, update); };
+   window.addEventListener('resize', update); window.addEventListener(INQUIRY_OPERATION_EVENT, updateInquiryLayer); update();
+   return () => { cancelAnimationFrame(frame); observer.disconnect(); resizeObserver.disconnect(); window.removeEventListener('resize', update); window.removeEventListener(INQUIRY_OPERATION_EVENT, updateInquiryLayer); };
  }, []);
- const placement=operation?inquiryPlacement(operation,size,wide):null;
  useLayoutEffect(()=>{
-   if(!target)return;
-   return placeInquiryPortal(target,allowed?operation:null,opened,placement?.mode);
- },[target,operation,allowed,opened,placement?.mode]);
- const focusView=useRef<{opened:boolean;host:HTMLElement|null;mode:string|undefined}>({opened:false,host:null,mode:undefined});
+   const host=operation?.host;
+   const header=host?.querySelector<HTMLElement>('[data-dialog-header],[data-operation-header],header');
+   const closeButton=host?.querySelector<HTMLElement>('[data-dialog-close],[data-operation-header] > button');
+   if(!host||!header)return;
+   const previousEntryRight=header.style.getPropertyValue('--inquiry-entry-right');
+   header.setAttribute('data-inquiry-header','');
+   header.style.setProperty('--inquiry-entry-right',`${operation.entryRight}px`);
+   closeButton?.setAttribute('data-inquiry-close','');
+   return()=>{header.removeAttribute('data-inquiry-header');if(previousEntryRight)header.style.setProperty('--inquiry-entry-right',previousEntryRight);else header.style.removeProperty('--inquiry-entry-right');closeButton?.removeAttribute('data-inquiry-close');};
+ },[operation?.host,operation?.entryRight]);
  useLayoutEffect(()=>{
-   const previous=focusView.current;
-   focusView.current={opened:opened&&allowed,host:operation?.host||null,mode:placement?.mode};
-   const enteringBody=placement?.mode==='body'&&(previous.host!==operation?.host||previous.mode!=='body');
-   if(!opened||!allowed||(previous.opened&&!enteringBody))return;
-   const region=panel.current;if(!region)return;
-   const focusQuestion=()=>{
-     if(document.activeElement!==region)return;
-     region.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')?.focus();
-   };
-   const observer=new MutationObserver(focusQuestion);
-   observer.observe(region,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled']});
-   const frame=requestAnimationFrame(()=>{region.focus();focusQuestion();});
-   return()=>{cancelAnimationFrame(frame);observer.disconnect();};
- },[opened,allowed,operation?.host,placement?.mode]);
+   const dialog=panel.current;
+   if(!dialog)return;
+   const shouldOpen=mounted&&opened&&(allowed||keepActive);
+   if(!shouldOpen){focusWaitCleanup.current();if(dialog.open)dialog.close();dialogMode.current=null;return;}
+   const mode=operation&&allowed?'modal':'nonmodal';
+   const alreadyModal=dialog.open&&dialog.matches(':modal');
+   if(dialog.open&&alreadyModal===(mode==='modal'))return;
+   const ownedModalOpen=[...dialog.querySelectorAll<HTMLDialogElement>('dialog[open]')].some(child=>child!==dialog&&child.dataset.inquiryOwned==='true'&&child.matches(':modal'));
+   if(dialog.open&&ownedModalOpen)return;
+   const wasOpen=dialog.open;
+   if(wasOpen)dialog.close();
+   try{if(mode==='modal')dialog.showModal();else dialog.show();}
+   catch{
+     const errorFrame=requestAnimationFrame(()=>{setLayerError(t('无法打开智能问答窗口。请先关闭当前业务窗口后重试。'));setOpened(false);});
+     dialogMode.current=null;
+     return()=>cancelAnimationFrame(errorFrame);
+   }
+   const changedMode=dialogMode.current!==mode;
+   dialogMode.current=mode;
+   if(!wasOpen||changedMode){
+     focusWaitCleanup.current();
+     const active=document.activeElement;
+     const expectedFocus=active instanceof HTMLElement&&dialog.contains(active)?active:dialog;
+     let disposed=false;
+     let frame=0;
+     const observer=new MutationObserver(()=>tryFocusQuestion());
+     const cleanup=()=>{if(disposed)return;disposed=true;cancelAnimationFrame(frame);observer.disconnect();dialog.removeEventListener('focusin',onFocusIn);};
+     const onFocusIn=(event:FocusEvent)=>{if(event.target!==expectedFocus&&event.target!==dialog&&!(event.target instanceof HTMLTextAreaElement&&event.target.matches('textarea:not(:disabled)')))cleanup();};
+     const tryFocusQuestion=()=>{
+       if(disposed)return;
+       const current=document.activeElement;
+       if(current!==expectedFocus&&current!==dialog){cleanup();return;}
+       const input=dialog.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)');
+       if(input){cleanup();input.focus();}
+     };
+     focusWaitCleanup.current=cleanup;
+     observer.observe(dialog,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled']});
+     dialog.addEventListener('focusin',onFocusIn);
+     frame=requestAnimationFrame(tryFocusQuestion);
+   }
+ },[mounted,opened,allowed,keepActive,operation,ownedDialogVersion,t]);
+ useEffect(()=>()=>focusWaitCleanup.current(),[]);
 
- const close=useCallback(()=>{if(preparing)return;setOpened(false);requestAnimationFrame(()=>{if(previousFocus.current?.isConnected)previousFocus.current.focus();});},[preparing]);
- const toggle=useCallback(()=>{if(!allowed&&!keepActive){document.querySelector<HTMLTextAreaElement>('[data-ask-page] textarea')?.focus();return;}if(opened){close();return;}previousFocus.current=document.activeElement as HTMLElement;setMounted(true);setOpened(true);},[allowed,keepActive,opened,close]);
+ const close=useCallback(()=>{if(preparing)return;setOpened(false);requestAnimationFrame(()=>{const prior=previousFocus.current;if(prior?.isConnected&&!prior.closest('[hidden]'))prior.focus();else launcherRef.current?.focus();});},[preparing]);
+ const toggle=useCallback(()=>{if(!allowed&&!keepActive){document.querySelector<HTMLTextAreaElement>('[data-ask-page] textarea')?.focus();return;}if(opened){close();return;}setLayerError(null);previousFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;setMounted(true);setOpened(true);},[allowed,keepActive,opened,close]);
  useEffect(()=>{
    const host=operation?.host;
    const listener=(event:KeyboardEvent)=>{
-     if(event.altKey&&event.code==='KeyJ'&&!event.isComposing){event.preventDefault();if(target?.querySelector('dialog[open],[role="dialog"][aria-modal="true"]'))return;toggle();}
+     if(event.altKey&&event.code==='KeyJ'&&!event.isComposing){event.preventDefault();if(target&&[...target.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(node=>node!==panel.current&&node.dataset.inquiryOwned==='true'))return;toggle();}
      else if(event.key==='Escape'&&opened&&target?.contains(event.target as Node)){
        const modal=event.target instanceof Element?event.target.closest('dialog[open],[role="dialog"][aria-modal="true"]'):null;
        // The topmost inquiry-owned modal handles its native cancel first.
-       if(modal&&target.contains(modal))return;
+       if(modal&&target.contains(modal)&&modal.matches(':modal'))return;
        event.preventDefault();event.stopPropagation();close();
      }
      else if(event.key==='Tab'&&host&&event.target instanceof Element&&event.target.closest('dialog[open],[role="dialog"][aria-modal="true"]')===host){
@@ -118,31 +150,24 @@ export function FloatingInquiry(){
  }
  function moveDrag(event:ReactPointerEvent<HTMLElement>){
    if(!drag.current||!panel.current)return;
-   const rect=panel.current.getBoundingClientRect();setPosition({left:Math.max(12,Math.min(innerWidth-rect.width-12,drag.current.left+event.clientX-drag.current.x)),top:Math.max(12,Math.min(innerHeight-rect.height-12,drag.current.top+event.clientY-drag.current.y))});
+   const rect=panel.current.getBoundingClientRect(),viewportWidth=document.documentElement.clientWidth||document.body.clientWidth,viewportHeight=document.documentElement.clientHeight||document.body.clientHeight;setPosition({left:Math.max(12,Math.min(viewportWidth-rect.width-12,drag.current.left+event.clientX-drag.current.x)),top:Math.max(12,Math.min(viewportHeight-rect.height-12,drag.current.top+event.clientY-drag.current.y))});
  }
- const panelStyle=!operation&&!docked&&position?{left:Math.max(12,Math.min(size.width-(wide?650:450)-12,position.left)),top:Math.max(12,Math.min(size.height-Math.min(740,size.height-40)-12,position.top)),right:'auto',bottom:'auto'}:undefined;
- const style=operation&&placement?.mode==='beside'?{'--inquiry-left':`${placement.left}px`,'--inquiry-top':`${placement.top}px`,'--inquiry-width':`${placement.width}px`}:{};
- return createPortal(<div hidden={!allowed&&!keepActive} className={`inquiry-root ${operation?'in-operation':''} ${placement?.mode==='body'?'in-operation-body':''} ${docked&&!operation?'docked':''}`} style={style as CSSProperties}>
-   <button className="inquiry-launcher" hidden={opened&&!operation} onClick={toggle} aria-expanded={opened} aria-controls="global-inquiry-panel" title={t('智能问答')}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M20 11a8 8 0 0 1-8 8H8l-4 2v-6a8 8 0 1 1 16-4Z"/><path d="M8 10h8M8 14h5"/></svg><span>{t(opened&&operation?(placement?.mode==='body'?'返回表单':'收起问答'):'智能问答')}</span>{!operation?<kbd>⌥ J</kbd>:null}</button>
-   <section ref={panel} tabIndex={-1} id="global-inquiry-panel" style={panelStyle} className={`inquiry-panel ${wide?'wide':''}`} role="region" aria-label={t('智能问答悬浮窗')} hidden={!opened}>
-    <header className="inquiry-panel-header" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}><strong>{t('智能问答')}</strong><div>{!operation?<><button title={t('并排停靠')} aria-label={t('并排停靠')} aria-pressed={docked} disabled={size.width<1200} onClick={()=>setDocked(!docked)}>▥</button><button title={t('放大窗口')} aria-label={t('放大窗口')} aria-pressed={wide} onClick={()=>setWide(!wide)}>↗</button></>:null}<Link aria-label={t('在完整页面打开')} title={t('在完整页面打开')} href={conversationId?`/ask?conversation=${encodeURIComponent(conversationId)}`:'/ask'} aria-disabled={pending} onClick={e=>{if(pending)e.preventDefault();else close();}}>↗</Link><button disabled={preparing} onClick={close} title={t('收起问答')} aria-label={t('收起问答')}>−</button></div></header>
-    {mounted?<InquiryOwnedContext.Provider value={true}><Suspense fallback={<p role="status">{t('正在加载智能问答…')}</p>}><Inquiry key={sessionEpoch} embedded username="" isSystemAdmin={false} onConversationChange={conversationChanged} onBusyChange={busyChanged}/></Suspense></InquiryOwnedContext.Provider>:null}
-   </section>
- </div>,target);
+ const panelStyle:CSSProperties|undefined=operation?{left:'50%',top:'50%',right:'auto',bottom:'auto',width:'min(650px, calc(100% - 32px))',height:'min(740px, calc(100dvh - 48px))',maxWidth:'calc(100% - 32px)',maxHeight:'calc(100dvh - 48px)',margin:0,transform:'translate(-50%, -50%)'}:!docked&&position?{left:Math.max(12,Math.min(size.width-(wide?650:450)-12,position.left)),top:Math.max(12,Math.min(size.height-Math.min(740,size.height-40)-12,position.top)),right:'auto',bottom:'auto',margin:0}:undefined;
+ const launcherHost=operation?.host.querySelector<HTMLElement>('[data-dialog-header],[data-operation-header],header')??target;
+ const panelPortal=createPortal(<div hidden={!allowed&&!keepActive} className={`inquiry-root ${docked&&!operation?'docked':''}`}>
+   {mounted?<dialog ref={panel} id="global-inquiry-panel" tabIndex={-1} data-inquiry-owned="true" style={panelStyle} className={`inquiry-panel ${wide?'wide':''} ${operation?'in-operation-dialog':''}`} aria-label={t('智能问答悬浮窗')} onCancel={event=>{if(event.target!==event.currentTarget)return;event.preventDefault();close();}} onPointerDown={event=>{const rect=event.currentTarget.getBoundingClientRect();backdropStarted.current=event.target===event.currentTarget&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom);}} onPointerCancel={()=>{backdropStarted.current=false;}} onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();const outside=event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom;if(event.target===event.currentTarget&&backdropStarted.current&&outside)close();backdropStarted.current=false;}}>
+    <header className="inquiry-panel-header" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}><strong>{t('智能问答')}</strong><div>{!operation?<><InquiryControl label={t(docked?'恢复悬浮':'并排停靠')} disabled={size.width<1200} pressed={docked} onClick={()=>setDocked(!docked)}><DockIcon/></InquiryControl><InquiryControl label={t(wide?'缩小窗口':'放大窗口')} pressed={wide} onClick={()=>setWide(!wide)}><ExpandIcon expanded={wide}/></InquiryControl></>:null}<Link className="inquiry-tooltip-control" aria-label={t('在完整页面打开')} href={conversationId?`/ask?conversation=${encodeURIComponent(conversationId)}`:'/ask'} aria-disabled={pending} onClick={event=>{if(pending)event.preventDefault();else close();}}><PageIcon/><span role="tooltip">{t('在完整页面打开')}</span></Link><InquiryControl label={t('收起问答')} disabled={preparing} onClick={close}><CloseIcon/></InquiryControl></div></header>
+    <div className="inquiry-panel-content"><InquiryOwnedContext.Provider value={true}><Suspense fallback={<p role="status" className="inquiry-loading"><UiText text="正在加载智能问答…"/></p>}><Inquiry key={sessionEpoch} embedded username="" isSystemAdmin={false} onConversationChange={conversationChanged} onBusyChange={busyChanged}/></Suspense></InquiryOwnedContext.Provider></div>
+   </dialog>:null}
+  </div>,target);
+ const launcherPortal=createPortal(<><button type="button" ref={launcherRef} className={`inquiry-launcher ${operation?'in-operation-launcher':''}`} style={operation?{'--inquiry-entry-right':`${operation.entryRight}px`} as CSSProperties:undefined} hidden={(!allowed&&!keepActive)||(opened&&!operation)} onClick={toggle} aria-expanded={opened} aria-controls={mounted?'global-inquiry-panel':undefined}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M20 11a8 8 0 0 1-8 8H8l-4 2v-6a8 8 0 1 1 16-4Z"/><path d="M8 10h8M8 14h5"/></svg><span>{t(opened&&operation?'收起问答':'智能问答')}</span>{!operation?<kbd>⌥ J</kbd>:null}</button>{layerError?<span role="alert" className={`inquiry-layer-error ${operation?'inquiry-layer-error-operation':''}`}>{layerError}</span>:null}</>,launcherHost);
+ return <>{panelPortal}{launcherPortal}</>;
 }
 
-function placeInquiryPortal(target:HTMLDivElement,operation:Operation|null,opened:boolean,mode?:string){
- const host=operation?.host.isConnected?operation.host:document.body;
- if(target.parentElement!==host)host.append(target);
- if(host===document.body)return;
- const header=host.querySelector<HTMLElement>('[data-dialog-header],[data-operation-header],header');
- const close=host.querySelector<HTMLElement>('[data-dialog-close],[data-operation-header] > button');
- header?.setAttribute('data-inquiry-header','');close?.setAttribute('data-inquiry-close','');
- host.dataset.inquiryHost='';host.dataset.inquiryView=opened&&mode==='body'?'question':'content';
- host.style.setProperty('--inquiry-heading-height',`${header?.getBoundingClientRect().height||operation?.heading||76}px`);
- host.style.setProperty('--inquiry-entry-right',`${operation?.entryRight||60}px`);
- const body=host.querySelector<HTMLElement>('[data-dialog-body],[data-operation-content]'),footer=host.querySelector<HTMLElement>('[data-dialog-footer]');
- const priorBody=body?.inert,priorFooter=footer?.inert;
- if(opened&&mode==='body'){if(body)body.inert=true;if(footer)footer.inert=true;}
- return()=>{header?.removeAttribute('data-inquiry-header');close?.removeAttribute('data-inquiry-close');host.removeAttribute('data-inquiry-host');host.removeAttribute('data-inquiry-view');if(body)body.inert=!!priorBody;if(footer)footer.inert=!!priorFooter;};
+function InquiryControl({label,children,disabled,pressed,onClick}:{label:string;children:ReactNode;disabled?:boolean;pressed?:boolean;onClick:()=>void}){
+ return <button type="button" className="inquiry-tooltip-control" aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>{children}<span role="tooltip">{label}</span></button>;
 }
+function DockIcon(){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M14 4v16"/></svg>;}
+function ExpandIcon({expanded}:{expanded:boolean}){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d={expanded?'M9 4v5H4m11-5v5h5m-5 11v-5h5M9 20v-5H4':'M4 9V4h5m6 0h5v5m0 6v5h-5M9 20H4v-5'}/></svg>;}
+function PageIcon(){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M4 8h16m-6 3h5m-5 0 2-2m-2 2 2 2"/></svg>;}
+function CloseIcon(){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m6 6 12 12M18 6 6 18"/></svg>;}

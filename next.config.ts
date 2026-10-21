@@ -70,7 +70,7 @@ const nextConfig: NextConfig = {
           priority: 50,
         },
         userNavigation: {
-          test: /[\\/]src[\\/](?:components[\\/](?:(?:user-shell|workspace-scope|notification-bell|app-header)\.tsx|user-shell\.module\.css)|lib[\\/]user-navigation\.ts)$/,
+          test: /[\\/]src[\\/](?:components[\\/](?:(?:user-shell|shell-icon|workspace-scope|notification-bell|app-header)\.tsx|user-shell\.module\.css)|lib[\\/]user-navigation\.ts)$/,
           name: "user-navigation",
           chunks: "all",
           minChunks: 2,
@@ -151,7 +151,7 @@ const nextConfig: NextConfig = {
           chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
         },
         sharedPresentation: {
-          test: /[\\/]src[\\/]components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)$/,
+          test: /[\\/]src[\\/](?:components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)|app[\\/]projects[\\/]\[projectId\][\\/]memory-quality[\\/]project-memory-quality-client\.tsx)$/,
           name(module: { resource?: string }) {
             return `ui-${(module.resource?.split(/[\\/]/).pop() ?? "common").replace(/\.(?:tsx|ts|module\.css)$/u, "")}`;
           },

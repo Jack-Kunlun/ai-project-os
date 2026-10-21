@@ -398,7 +398,7 @@ test("knowledge and floating Ask AI preserve both drafts across tabs, modal tran
   await expect(page.locator("main h1").first()).toBeVisible();
 
   const launcher = page.locator(".inquiry-launcher");
-  const panel = page.getByRole("region", { name: "智能问答悬浮窗", exact: true });
+  const panel = page.getByRole("dialog", { name: "智能问答悬浮窗", exact: true });
   await expect(launcher).toBeVisible();
   await launcher.click();
   await expect(panel).toBeVisible();
@@ -436,9 +436,10 @@ test("knowledge and floating Ask AI preserve both drafts across tabs, modal tran
   await page.locator('header[class*="heading"]').getByRole("button", { name: "新建知识", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "新建知识", exact: true });
   await expect(editor).toBeVisible();
-  await expect(editor).toHaveAttribute("data-inquiry-view", "question");
+  await expect.poll(() => panel.evaluate(node => node.matches(":modal"))).toBe(true);
+  await expect(editor.locator("[data-dialog-body]")).toHaveCSS("visibility", "visible");
   await expect(question).toBeFocused();
-  await launcher.click();
+  await panel.getByRole("button", { name: "收起问答", exact: true }).click();
   await expect(panel).toBeHidden();
   const title = editor.getByRole("textbox", { name: "标题", exact: true });
   const body = editor.getByRole("textbox", { name: /^正文/u });
@@ -455,7 +456,7 @@ test("knowledge and floating Ask AI preserve both drafts across tabs, modal tran
   await launcher.click();
   await expect(panel).toBeVisible();
   await expect(question).toBeFocused();
-  await launcher.click();
+  await panel.getByRole("button", { name: "收起问答", exact: true }).click();
   await expect(panel).toBeHidden();
   await expect(launcher).toBeFocused();
   await expect(title).toHaveValue(titleDraft);
@@ -690,4 +691,153 @@ test("project memory shows its real project title while the index projection is 
     await page.getByRole("button", { name: "重试", exact: true }).click();
     await expect(page.getByRole("heading", { name: "项目语义索引", exact: true })).toBeVisible({ timeout: 15_000 });
   } finally { release(); }
+});
+
+test("dashboard feedback keeps direct actions, title counts, independent graph and top-layer Ask (isolated UI fixtures)", async ({ page }) => {
+  test.setTimeout(180_000);
+  page.setDefaultTimeout(15_000);
+  await page.setViewportSize({ width: 1680, height: 944 });
+  const suffix = randomUUID().slice(0, 8);
+  await signInIsolatedPersonalUser(page, `feedback-${suffix}`);
+  await expect(page.getByRole("link", { name: /先选择项目/u })).toHaveAttribute("href", "/projects");
+  const headers = { origin: new URL(page.url()).origin, "content-type": "application/json" };
+  const created = await page.request.post("/api/projects", { headers, data: { name: `UI feedback ${suffix}`, description: "Isolated browser acceptance" } });
+  expect(created.status()).toBe(201);
+  const { project } = await created.json() as { project: { id: string; name: string } };
+  await page.request.post("/api/personal/knowledge", { headers, data: { title: `UI source ${suffix}`, content: "This is a disposable source for client interaction checks.", isDefaultMemory: false } });
+  // Keep authenticated projects and workspace APIs real; only an attention
+  // signal is a presentation fixture, with no job or external model execution.
+  await page.route("**/api/dashboard?*", async route => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({ json: { ...payload, operations: [], worlds: [], projects: payload.projects.map((entry: { pendingReviewCount: number }) => ({ ...entry, pendingReviewCount: 0 })), recentJobs: [{ id: randomUUID(), kind: "autoExtract", status: "failed", stage: "failed", failureCode: "UI_FIXTURE", reconciliationRequired: false, createdAt: new Date().toISOString(), completedAt: new Date().toISOString(), attempts: [], project }] } });
+  });
+  await page.goto("/dashboard");
+  await page.locator("#user-shell-project-picker").selectOption(project.id);
+  await page.goto("/dashboard");
+  const addSource = page.getByRole("link", { name: /添加项目资料/u });
+  await expect(addSource).toHaveAttribute("href", `/projects/${project.id}/materials?view=add`);
+  const attention = page.locator('section[aria-labelledby="attention-heading"]');
+  const common = page.locator('aside[aria-labelledby="common-actions-heading"]');
+  const badge = attention.getByLabel("1 项待处理", { exact: true });
+  await expect(badge).toBeVisible();
+  expect(await badge.evaluate(node => node.parentElement?.contains(document.querySelector("#attention-heading")))).toBe(true);
+  const red = await badge.evaluate(node => getComputedStyle(node).color.match(/[\d.]+/g)?.map(Number));
+  expect(red![0]).toBeGreaterThan(red![1]);
+  const bounds = await Promise.all([attention.boundingBox(), common.boundingBox(), attention.locator("h2").boundingBox(), common.locator("h2").boundingBox()]);
+  expect(Math.abs(bounds[0]!.y - bounds[1]!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bounds[0]!.y + bounds[0]!.height - bounds[1]!.y - bounds[1]!.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bounds[2]!.y - bounds[3]!.y)).toBeLessThanOrEqual(1);
+  const surfaces = await Promise.all([attention, common, attention.locator('a').filter({ has: page.locator('strong') }).first(), common.getByRole('link', { name: /添加项目资料/u })].map(locator => locator.evaluate(node => {
+    const style = getComputedStyle(node);
+    return { background: style.backgroundColor, border: style.border, radius: style.borderRadius };
+  })));
+  expect(surfaces[0]).toEqual(surfaces[1]);
+  expect(surfaces[2]).toEqual(surfaces[3]);
+  const footerBounds = await Promise.all([attention.getByRole('link', { name: '通知中心', exact: true }).boundingBox(), common.getByRole('link', { name: '了解使用流程', exact: true }).boundingBox()]);
+  expect(Math.abs(footerBounds[0]!.y - footerBounds[1]!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(footerBounds[0]!.x - bounds[0]!.x - footerBounds[1]!.x + bounds[1]!.x)).toBeLessThanOrEqual(1);
+  await expect(common.getByText("选择一个入口，开始今天的工作。", { exact: true })).toBeVisible();
+  const actionCards = common.locator('a').filter({ has: page.locator('strong') });
+  await expect(actionCards).toHaveCount(3);
+  for (const card of await actionCards.all()) {
+    await expect(card.locator('svg[aria-hidden="true"]')).toHaveCount(2);
+    expect((await card.boundingBox())!.height).toBeGreaterThanOrEqual(66);
+  }
+  await expectR02NoAccessibilityViolations(page, "dashboard feedback actions and count");
+  await mkdir("test-results/ui-feedback", { recursive: true });
+  await page.screenshot({ path: "test-results/ui-feedback/dashboard.png" });
+
+  const shellHeader = page.locator("[data-user-shell-root] header");
+  const headerBefore = await shellHeader.boundingBox();
+  const accountBefore = await page.locator("[data-user-shell-root]").getByRole("button", { name: "账户菜单", exact: true }).boundingBox();
+  expect(headerBefore).not.toBeNull();
+  expect(accountBefore).not.toBeNull();
+  await page.locator(".inquiry-launcher").click();
+  const question = page.locator("#global-inquiry-panel");
+  await expect(question).toBeVisible();
+  await expect(question.getByRole("textbox", { name: "输入问题", exact: true })).toBeVisible();
+  await question.getByRole("button", { name: "并排停靠", exact: true }).click();
+  await expect.poll(() => page.locator("body").getAttribute("class")).toContain("inquiry-docked");
+  expect(await shellHeader.boundingBox()).toEqual(headerBefore);
+  expect(await page.locator("[data-user-shell-root]").getByRole("button", { name: "账户菜单", exact: true }).boundingBox()).toEqual(accountBefore);
+  await page.screenshot({ path: "test-results/ui-feedback/docked-header.png" });
+  await question.getByRole("button", { name: "恢复悬浮", exact: true }).click();
+  const expand = question.getByRole("button", { name: "放大窗口", exact: true });
+  const fullPage = question.getByRole("link", { name: "在完整页面打开", exact: true });
+  expect(await expand.locator("svg").innerHTML()).not.toBe(await fullPage.locator("svg").innerHTML());
+  await expand.hover();
+  await expect(expand.getByRole("tooltip")).toBeVisible();
+  await expand.focus();
+  await page.keyboard.press("Tab");
+  await expect(fullPage).toBeFocused();
+  await expect(fullPage.getByRole("tooltip")).toBeVisible();
+  const input = question.getByRole("textbox", { name: "输入问题", exact: true });
+  await input.fill("Discard this unsent question");
+  await question.getByRole("button", { name: "新建会话", exact: true }).click();
+  await expect(input).toHaveValue("");
+  await expect(input).toBeFocused();
+  await expect(question.getByRole("status").filter({ hasText: "新会话已准备好" })).toBeVisible();
+  await page.keyboard.press("Alt+j");
+  await expect(question).toBeHidden();
+
+  await common.getByRole("link", { name: /新建个人知识/u }).click();
+  const editor = page.getByRole("dialog", { name: "新建知识", exact: true });
+  await expect(editor).toBeVisible();
+  const title = editor.getByRole("textbox", { name: "标题", exact: true });
+  await title.fill("Isolated unsaved form draft");
+  await editor.locator(".inquiry-launcher").click();
+  await expect.poll(() => question.evaluate(node => node.matches(":modal"))).toBe(true);
+  await expect(editor.locator("[data-dialog-body]")).toHaveCSS("visibility", "visible");
+  await expectR02NoAccessibilityViolations(page, "Ask above personal knowledge editor");
+  await question.getByRole("textbox", { name: "输入问题", exact: true }).press("Escape");
+  await expect(question).toBeHidden();
+  await expect(title).toHaveValue("Isolated unsaved form draft");
+  await expect(editor.locator(".inquiry-launcher")).toBeFocused();
+  await editor.getByRole("button", { name: "取消", exact: true }).click();
+  await page.getByRole("dialog", { name: "离开编辑页面？", exact: true }).getByRole("button", { name: "放弃修改并离开", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "知识栏目", exact: true }).getByRole("link", { name: "知识图谱", exact: true })).toHaveCount(0);
+  await page.goto("/personal/knowledge/graph");
+  await expect(page.getByRole("heading", { name: "知识图谱", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "我的知识栏目", exact: true })).toHaveCount(0);
+
+  await page.goto(`/projects/${project.id}/memory-quality`);
+  await expect(page.getByRole("heading", { name: "记忆质量与生命周期", exact: true })).toBeVisible();
+  await expect(page.getByText("当前没有待处理质量问题", { exact: true })).toBeVisible();
+  await page.goto(`/projects/${project.id}/governance`);
+  await page.getByRole("tab", { name: "记忆质量", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "待处理问题", exact: true })).toBeVisible();
+  await expect(page.getByText("当前没有待处理质量问题", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "重新检查", exact: true })).toBeEnabled();
+  await expectR02NoAccessibilityViolations(page, "shared quality client in project management");
+
+  await page.goto("/personal/projects?create=1");
+  const projectModal = page.getByRole("dialog", { name: "创建项目空间", exact: true });
+  await projectModal.getByRole("textbox", { name: "项目名称", exact: true }).fill("Do not create this project");
+  await projectModal.locator(".inquiry-launcher").click();
+  await expect.poll(() => question.evaluate(node => node.matches(":modal"))).toBe(true);
+  await page.mouse.click(4, 4);
+  await expect(question).toBeHidden();
+  await expect(projectModal.getByRole("textbox", { name: "项目名称", exact: true })).toHaveValue("Do not create this project");
+  await projectModal.getByRole("button", { name: "取消", exact: true }).click();
+
+  await page.goto("/dashboard");
+  await selectAppearance(page, { language: "en", theme: "dark", closePopoverWith: "escape" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(common.getByText("Choose an entry to start your day.", { exact: true })).toBeVisible();
+  await expect(common.getByText("Save methods, experience, and agreements", { exact: true })).toBeVisible();
+  const narrowFooterBounds = await Promise.all([attention.getByRole('link', { name: 'Notifications', exact: true }).boundingBox(), common.getByRole('link', { name: 'Read the guide', exact: true }).boundingBox()]);
+  expect(Math.abs(narrowFooterBounds[0]!.x - narrowFooterBounds[1]!.x)).toBeLessThanOrEqual(1);
+  await expectR02NoHorizontalOverflow(page, "reference dashboard cards English dark at 390px");
+  await expectR02NoAccessibilityViolations(page, "reference dashboard cards English dark");
+  await page.screenshot({ path: "test-results/ui-feedback/dashboard-en-dark-mobile.png", fullPage: true });
+  await page.locator(".inquiry-launcher").click();
+  await expect(question).toBeVisible();
+  const mobile = await question.boundingBox();
+  const available = await page.evaluate(() => document.documentElement.clientWidth);
+  expect(mobile!.x).toBeGreaterThanOrEqual(0);
+  expect(mobile!.x + mobile!.width).toBeLessThanOrEqual(available);
+  await expectR02NoHorizontalOverflow(page, "feedback floating Ask at 390px");
+  await expectR02NoAccessibilityViolations(page, "feedback floating Ask English dark");
+  await page.screenshot({ path: "test-results/ui-feedback/question-en-dark-mobile.png" });
 });

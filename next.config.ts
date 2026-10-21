@@ -61,7 +61,7 @@ const nextConfig: NextConfig = {
       splitChunks.cacheGroups = {
         ...splitChunks.cacheGroups,
         appearance: {
-          test: /[\\/]src[\\/](?:components[\\/](?:appearance-provider|appearance-controls)\.tsx|lib[\\/]ui-core-messages\.json)$/,
+          test: /[\\/]src[\\/](?:components[\\/](?:appearance-provider|appearance-controls|ui-error-text)\.tsx|lib[\\/]ui-core-messages\.json)$/,
           name: "appearance",
           chunks: "all",
           minChunks: 2,

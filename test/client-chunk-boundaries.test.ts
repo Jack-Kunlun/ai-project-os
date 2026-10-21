@@ -95,3 +95,12 @@ test("Next lazy-loading remains under its upstream chunk configuration", () => {
     }
   }
 });
+
+
+test("feedback exports share the appearance chunk while the error interpreter stays on demand", () => {
+  const cacheGroups = groups();
+  for (const separator of ["/", "\\"]) {
+    assert.equal(cacheGroups.appearance.test?.test("/app/src/components/ui-error-text.tsx".replaceAll("/", separator)), true);
+    assert.equal(cacheGroups.appearance.test?.test("/app/src/lib/ui-error-text.ts".replaceAll("/", separator)), false);
+  }
+});

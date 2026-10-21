@@ -33,11 +33,14 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await page.getByRole("button", { name: "继续编辑", exact: true }).click();
   await expect(title).toHaveValue("未保存的验收草稿");
   await expect(modal.locator(".inquiry-launcher")).toBeVisible();
-  await modal.locator(".inquiry-launcher").focus();
+  const closeModal = modal.getByRole("button", { name: "关闭", exact: true });
+  await closeModal.focus();
   await page.keyboard.press("Shift+Tab");
-  await expect(modal.getByRole("button", { name: "关闭", exact: true })).toBeFocused();
-  await page.keyboard.press("Tab");
   await expect(modal.locator(".inquiry-launcher")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeModal).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(title).toBeFocused();
 
   const savedTitle = `个人知识弹窗验收 ${randomUUID().slice(0, 8)}`;
   await title.fill(savedTitle);

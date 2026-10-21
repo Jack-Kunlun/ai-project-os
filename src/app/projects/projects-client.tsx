@@ -1,9 +1,10 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
 
 import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
-import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 import { ListPagination } from "@/components/list-pagination";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
@@ -145,7 +146,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
           {payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={styles.primaryButton}>＋ <UiText text="新建项目" /></button> : null}
         </section>
 
-        {error ? <div className={styles.error} role="alert"><span>{error}</span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text="重试" /></button></div> : null}
+        {error ? <div className={styles.error} role="alert"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text="重试" /></button></div> : null}
         <section className={styles.listSection} aria-label={t("项目列表")}>
           <div className={styles.toolbar}>
             <div className={styles.filters} role="group" aria-label={t("项目状态")}>
@@ -253,7 +254,7 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
           <input id="projects-project-name" autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("例如：AI Project OS")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           <label htmlFor="projects-project-description" className="mt-5 block text-sm font-semibold text-slate-700"><UiText text="项目描述" /> <span className="font-normal text-slate-400"><UiText text="（可选）" /></span></label>
           <textarea id="projects-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder={t("这个项目在解决什么问题？当前最重要的目标是什么？")} className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-          {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
+          {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
         </form>
       </div>
       <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>

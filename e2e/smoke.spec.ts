@@ -1041,8 +1041,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(resources.getByText(/^采集于/u)).toBeVisible();
   await expect(resources.getByText("Linux 内核报告内存", { exact: true })).toBeVisible();
   await expect(resources.getByText("应用部署目录所属文件系统", { exact: true })).toBeVisible();
-  await resources.getByRole("button", { name: "刷新资源", exact: true }).click();
-  await expect(resources.getByRole("button", { name: "刷新资源", exact: true })).toBeEnabled();
+  await resources.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(resources.getByRole("button", { name: "刷新", exact: true })).toBeEnabled();
   const resourceViewport = adminPage.viewportSize();
   await adminPage.setViewportSize({ width: 390, height: 844 });
   expect(await adminPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth)).toBe(true);

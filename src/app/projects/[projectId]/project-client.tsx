@@ -1,6 +1,7 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -728,7 +729,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
   });
 
   if (error) {
-    return <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
+    return <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700"><UiErrorText text={error} /></div></ProjectShell>;
   }
 
   if (!project) {
@@ -753,7 +754,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       </div>
 
       <nav aria-label={translateUi("项目资料栏目")} className={styles.tabs}>
-        {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`${styles.tab} ${materialsView === tab.view ? styles.tabActive : ""}`}>{tab.label}{tab.view === "review" && itemCounts.candidate > 0 ? <span className={styles.countBadge}>{itemCounts.candidate}</span> : null}</Link>)}
+        {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`${styles.tab} ${materialsView === tab.view ? styles.tabActive : ""}`}><UiText text={tab.label} />{tab.view === "review" && itemCounts.candidate > 0 ? <span className={styles.countBadge}>{itemCounts.candidate}</span> : null}</Link>)}
       </nav>
 
       {materialsView === "tasks" ? <ProjectProcessingTasks key={projectId} projectId={projectId} onChanged={reloadProjectAndSources} /> : null}
@@ -769,12 +770,12 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
 
         <p className={styles.safetyNote} role="note"><strong><UiText text={"安全提示："} /></strong><UiText text={"资料不会自动成为已确认事实；请勿提交密码、Token 或带凭据的链接。"} /></p>
 
-        {sourceError ? <div className={styles.errorNotice} role="alert">{sourceError}</div> : null}
-        {sourceSuccess ? <div className={styles.successNotice} role="status" aria-live="polite">{sourceSuccess}</div> : null}
+        {sourceError ? <div className={styles.errorNotice} role="alert"><UiErrorText text={sourceError} /></div> : null}
+        {sourceSuccess ? <div className={styles.successNotice} role="status" aria-live="polite"><UiText text={sourceSuccess} /></div> : null}
 
         <div className={styles.sourceLayout}>
           <nav aria-label={translateUi("按资料类型筛选")} className={styles.categoryNav}>
-            {MATERIAL_SOURCE_CATEGORIES.map((category) => <button key={category.value} type="button" aria-pressed={sourceKind === category.value} onClick={() => replaceMaterialsQuery({ kind: category.value, page: 1 })} className={`${styles.categoryButton} ${sourceKind === category.value ? styles.categoryButtonActive : ""}`}>{category.label}</button>)}
+            {MATERIAL_SOURCE_CATEGORIES.map((category) => <button key={category.value} type="button" aria-pressed={sourceKind === category.value} onClick={() => replaceMaterialsQuery({ kind: category.value, page: 1 })} className={`${styles.categoryButton} ${sourceKind === category.value ? styles.categoryButtonActive : ""}`}><UiText text={category.label} /></button>)}
           </nav>
           <div className={styles.sourceContent}>
             <div className={styles.sourceTools}>
@@ -818,14 +819,14 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
         </div>
 
         {itemError ? (
-          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert" aria-live="polite">{itemError}</div>
+          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert" aria-live="polite"><UiErrorText text={itemError} /></div>
         ) : null}
         {itemSuccess ? (
-          <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{itemSuccess}</div>
+          <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite"><UiText text={itemSuccess} /></div>
         ) : null}
 
         <OperationPanel title={isEditingItem ? translateUi("编辑事实") : translateUi("手动补充事实")} triggerLabel={isEditingItem ? "继续编辑事实" : "手动补充"} open={itemEditorOpen} onOpenChange={setItemEditorOpen} className="mt-6" description="自动整理后的事实可在下方查看；只有需要手动补充或纠正时才使用此操作区。">
-          {itemError ? <p role="alert" className="mb-4 text-sm text-rose-700">{itemError}</p> : null}
+          {itemError ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={itemError} /></p> : null}
         <div className="mt-8 grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
           <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300"><UiText text={"Fact candidate"} /></p>

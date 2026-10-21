@@ -1,6 +1,7 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { WorkspaceDialog } from "@/components/workspace-dialog";
@@ -108,7 +109,7 @@ export function PersonalProjectHandoff({ content }: Readonly<{ content: string }
     >
       <p className="mb-5 text-sm leading-6 text-slate-600"><UiText text={"复制只会在你明确操作后发生，原内容仍保存在个人知识库。项目资料按项目权限共享；个人通用记忆是另一项设置，只供你发起的项目 AI 参考。"} /></p>
       {projectsLoading ? <p className="text-sm text-slate-600" role="status"><UiText text={"正在加载你可访问的进行中项目…"} /></p> : null}
-      {projectsError !== null ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700" role="alert"><p>{projectsError}</p><button type="button" onClick={loadProjects} className="mt-2 min-h-10 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700"><UiText text={"重新加载项目"} /></button></div> : null}
+      {projectsError !== null ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700" role="alert"><p><UiErrorText text={projectsError} /></p><button type="button" onClick={loadProjects} className="mt-2 min-h-10 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700"><UiText text={"重新加载项目"} /></button></div> : null}
       {!projectsLoading && projectsError === null && projects.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm leading-6 text-slate-600"><p><UiText text={"没有可访问的进行中项目。你可以先把内容留在个人知识库，或检查项目权限；归档项目不会显示在这里。"} /></p><Link href="/projects" onClick={() => setOpen(false)} className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"前往我的项目"} /></Link></div> : null}
       {!projectsLoading && projects.length > 0 ? (
         <div className="space-y-4">

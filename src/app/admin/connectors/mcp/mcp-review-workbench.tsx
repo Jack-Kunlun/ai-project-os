@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
@@ -312,8 +314,8 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
       <span><UiText text={"我确认审核内容只针对当前净化快照；提交只记录安全证据，不会触发远端操作。"} /></span>
     </label>
 
-    {error ? <p role="alert" className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700">{t(error)}</p> : null}
-    {message ? <p role="status" className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-xs leading-5 text-emerald-700">{t(message)}</p> : null}
+    {error ? <p role="alert" className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
+    {message ? <p role="status" className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-xs leading-5 text-emerald-700"><UiFeedbackText text={message} /></p> : null}
     <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
       <p className="max-w-xl text-xs leading-5 text-slate-500"><UiText text={"提交后保留追加式审核记录；正向结论才会关联当前 V2 只读证据。"} /></p>
       <button type="submit" disabled={pending || !confirmed} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">{t(pending ? "提交中…" : "提交审核结论")}</button>
@@ -406,14 +408,14 @@ export function McpReviewWorkbench() {
           </div>
           <button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"刷新"} /></button>
         </div>
-        {loading ? <div className="mt-5 space-y-3" role="status" aria-label={t("正在加载 MCP 审核候选")}><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /></div> : error ? <div role="alert" className="mt-5 rounded-2xl bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-700">{t(error)}</div> : data?.candidates.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700"><UiText text={"当前没有候选记录"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"可切换另一状态或稍后刷新安全快照。"} /></p></div> : <CandidateTable candidates={data?.candidates ?? []} onSelect={(id) => { setSelectedId(id); setNotice(null); window.scrollTo(0, 0); }} />}
+        {loading ? <div className="mt-5 space-y-3" role="status" aria-label={t("正在加载 MCP 审核候选")}><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /></div> : error ? <div role="alert" className="mt-5 rounded-2xl bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-700"><UiErrorText text={error} /></div> : data?.candidates.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700"><UiText text={"当前没有候选记录"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"可切换另一状态或稍后刷新安全快照。"} /></p></div> : <CandidateTable candidates={data?.candidates ?? []} onSelect={(id) => { setSelectedId(id); setNotice(null); window.scrollTo(0, 0); }} />}
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
           <button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"上一页"} /></button>
           <span className="text-xs text-slate-500"><UiText text={"第"} />{" "}{page} <UiText text={"页"} /></span>
           <button type="button" onClick={() => setPage((value) => value + 1)} disabled={!hasNextPage || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"下一页"} /></button>
         </div>
       </section> : <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-detail-title">
-        {loading ? <p role="status" className="py-12 text-center text-sm text-slate-500"><UiText text={"正在更新工具详情…"} /></p> : error ? <p role="alert" className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">{t(error)}</p> : selectedCandidate ? <>
+        {loading ? <p role="status" className="py-12 text-center text-sm text-slate-500"><UiText text={"正在更新工具详情…"} /></p> : error ? <p role="alert" className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : selectedCandidate ? <>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Sanitized candidate detail</p>

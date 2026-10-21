@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
@@ -328,8 +330,8 @@ export function PersonalOverviewClient(): React.JSX.Element {
         <Link href="/personal/configuration" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50"><UiText text={"管理个人资源"} /></Link>
       </section>
 
-      {state.error ? <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{state.error}</span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text={"重新加载"} /></button></div> : null}
-      {state.partialFailures.length > 0 ? <p role="status" className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800"><UiText text={"部分统计暂不可用："} />{state.partialFailures.join("、")}<UiText text={"。项目和其他已加载内容仍可继续使用。"} /></p> : null}
+      {state.error ? <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span><UiErrorText text={state.error} /></span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text={"重新加载"} /></button></div> : null}
+      {state.partialFailures.length > 0 ? <p role="status" className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800"><UiText text={"部分统计暂不可用："} />{state.partialFailures.map((label) => translateUi(label)).join(", ")}<UiText text={"。项目和其他已加载内容仍可继续使用。"} /></p> : null}
 
       <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label={translateUi("我的空间统计")}>
         <MetricCard label={translateUi("进行中项目")} value={state.loading ? "…" : String(state.activeProjects)} href="/personal/projects" />
@@ -479,7 +481,7 @@ function KnowledgeOverviewSection({
               <p className="text-sm font-semibold text-slate-800"><UiText text={"明确建立的关联"} /></p>
               {overview.graph.edges.length === 0 ? <p className="mt-5 text-sm text-slate-500"><UiText text={"暂无关联。选择两个知识节点即可建立第一条边。"} /></p> : <ul className="mt-4 space-y-3">{overview.graph.edges.map((edge) => <li key={edge.id} className="rounded-xl bg-slate-50 px-3 py-3"><div className="flex items-start justify-between gap-3"><p className="text-xs leading-5 text-slate-700">{graphTitle(nodeById.get(edge.fromDocumentId)?.title ?? "未知文档")} <span className="text-slate-400">↔</span> {graphTitle(nodeById.get(edge.toDocumentId)?.title ?? "未知文档")}</p><button type="button" disabled={submitting} onClick={() => void revokeRelation(edge.id)} className="shrink-0 text-xs font-semibold text-slate-500 underline underline-offset-2 hover:text-rose-700"><UiText text={"解除"} /></button></div>{edge.stale ? <p className="mt-2 text-xs font-semibold text-amber-700"><UiText text={"文档版本已变化，需要重新确认"} /></p> : null}</li>)}</ul>}
               {nodes.length >= 2 ? <div className="mt-5 border-t border-slate-200 pt-4"><p className="text-xs font-semibold text-slate-600"><UiText text={"建立新关联"} /></p><div className="mt-3 grid gap-2"><select aria-label={translateUi("关联起点")} value={resolvedFromDocumentId} onChange={(event) => setFromDocumentId(event.target.value)} className="min-h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700">{nodes.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select><select aria-label={translateUi("关联终点")} value={resolvedToDocumentId} onChange={(event) => setToDocumentId(event.target.value)} className="min-h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700">{nodes.filter((node) => node.id !== resolvedFromDocumentId).map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select><button type="button" disabled={submitting || resolvedFromDocumentId === "" || resolvedToDocumentId === ""} onClick={() => void createRelation()} className="min-h-10 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{submitting ? <UiText text={"保存中…"} /> : <UiText text={"建立关联"} />}</button></div></div> : null}
-              {actionError ? <p role="alert" className="mt-3 text-xs text-rose-700">{actionError}</p> : null}
+              {actionError ? <p role="alert" className="mt-3 text-xs text-rose-700"><UiErrorText text={actionError} /></p> : null}
             </div>
           </div>
         </>
@@ -496,7 +498,7 @@ function MetricCard({ label, value, href }: Readonly<{ label: string; value: str
 /** Show project state without duplicating lifecycle controls from `/projects`. */
 function ProjectCard({ project }: Readonly<{ project: PersonalProjectSummary }>): React.JSX.Element {
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+    <article className="flex h-full min-w-0 flex-col rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
       <div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="truncate text-lg font-semibold text-slate-900">{project.name}</h3><p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{project.description ?? <UiText text={"暂无项目描述。"} />}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${project.memoryReady ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{project.memoryReady ? <UiText text={"记忆就绪"} /> : <UiText text={"待建立记忆"} />}</span></div>
       <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600"><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"事实"} />{" "}{project.itemCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"仓库"} />{" "}{project.repositoryCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"更新于"} />{" "}{formatDate(project.updatedAt)}</span></div>
       <div className="mt-auto flex border-t border-slate-200/70 pt-4"><Link href={`/projects/${project.id}`} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-600"><UiText text={"进入项目 →"} /></Link></div>

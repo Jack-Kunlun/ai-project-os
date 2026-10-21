@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -65,7 +67,7 @@ export function SetupForm() {
           <p className="mt-2 text-xs leading-5 text-slate-500"><UiText text="8–128 位，并同时包含字母和数字。" /></p>
           <label className="mt-5 block text-sm font-medium" htmlFor="setup-password-confirm"><UiText text="再次输入密码" /></label>
           <input id="setup-password-confirm" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-          {error ? <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiText text={error} /></p> : null}
+          {error ? <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
           <button type="submit" disabled={pending} className="mt-7 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-white"><UiText text={pending ? "正在初始化…" : "创建管理员并进入"} /></button>
           <p className="mt-5 text-center text-xs text-slate-500"><UiText text="第一次使用？" /><Link href="/guide#first-run" className="ml-1 font-semibold text-indigo-600 hover:text-indigo-700"><UiText text="查看完整使用指南" /></Link></p>
         </form>

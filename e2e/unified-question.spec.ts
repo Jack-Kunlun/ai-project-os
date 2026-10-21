@@ -696,6 +696,7 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   await expect(floating.getByRole("textbox", { name: "输入问题", exact: true })).toHaveValue("");
   await expect(floating.getByRole("article")).toHaveCount(0);
   await expect(floating).not.toContainText(fourthQuestion);
+  await page.unrouteAll({ behavior: "wait" });
 });
 
 test("3D knowledge graph rotates, pans, zooms and drags without losing direct source details", async ({ page }) => {
@@ -855,7 +856,7 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   await expect(page).toHaveURL(new RegExp(`/personal/knowledge/graph\\?scope=project&projectId=${projectId}$`, "u"));
   await expect(factDetail.getByRole("heading", { name: factTitle, exact: true })).toBeVisible();
   await expect(factDetail).toContainText(projectContent);
-  await expect(factDetail.getByText(projectNodeTitle, { exact: true })).toBeVisible();
+  await expect(factDetail.getByRole("heading", { name: "关联来源", exact: true }).locator("..").getByText(projectNodeTitle, { exact: true })).toBeVisible();
   await page.goto(`/personal/knowledge/graph?scope=project&projectId=${projectId}`);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: "放大图谱", exact: true })).toBeVisible();

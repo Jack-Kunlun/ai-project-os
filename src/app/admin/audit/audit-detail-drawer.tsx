@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useEffect, useId, useRef, useState } from "react";
 import {
@@ -171,7 +173,7 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
 
           {error !== null ? (
             <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4">
-              <p className="text-sm font-semibold text-rose-700">{t(error)}</p>
+              <p className="text-sm font-semibold text-rose-700"><UiErrorText text={error} /></p>
               <p className="mt-1 text-xs text-rose-700/80">{t("详情读取失败，仍可关闭后继续使用列表。")}</p>
               <button
                 type="button"

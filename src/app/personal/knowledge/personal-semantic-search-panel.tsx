@@ -1,6 +1,7 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { useSemanticProviders } from "./use-semantic-providers";
@@ -62,11 +63,11 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
 }
 
-function formatExpiry(value: string): string {
+function formatExpiry(value: string, locale: string, translate: (text: string) => string): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" }).format(date)
-    : "稍后过期";
+    ? new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(date)
+    : translate("稍后过期");
 }
 
 function randomClientKey(): string {
@@ -88,6 +89,8 @@ export function PersonalSemanticSearchPanel({
   onManageIndex,
 }: Readonly<{ onError?: (message: string) => void; onManageIndex?: () => void }>): React.JSX.Element {
   const translateUi = useTranslate();
+  const { language } = useAppearance();
+  const locale = language === "en" ? "en-US" : "zh-CN";
   const [query, setQuery] = useState("");
   const [state, setState] = useState<SemanticSearchState>("idle");
   const [confirmation, setConfirmation] = useState<SemanticConfirmation | null>(null);
@@ -242,7 +245,7 @@ export function PersonalSemanticSearchPanel({
           <option value="">{providersLoading ? <UiText text={"正在读取已验证的向量模型…"} /> : <UiText text={"请选择向量模型"} />}</option>
           {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.billingMode === "platform" ? <UiText text={"平台默认"} /> : <UiText text={"个人 BYOK"} />} · {provider.name} · {provider.defaultEmbeddingModelId} · {provider.embeddingDimensions} {" "}<UiText text={"维"} /></option>)}
         </select>
-        {providersError !== null ? <div className="mt-1 text-xs text-rose-700" role="alert">{providersError} <button type="button" onClick={reloadProviders} className="font-semibold underline"><UiText text={"重新加载模型"} /></button></div> : null}
+        {providersError !== null ? <div className="mt-1 text-xs text-rose-700" role="alert"><UiErrorText text={providersError} /> <button type="button" onClick={reloadProviders} className="font-semibold underline"><UiText text={"重新加载模型"} /></button></div> : null}
         {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-500"><UiText text={"平台暂未开放可用的向量模型，请联系管理员配置。你也可以到“配置 · 我的模型”连接自己的向量模型。"} /></p> : null}
       </div>
 
@@ -261,9 +264,10 @@ export function PersonalSemanticSearchPanel({
               ))}
             </ul>
           </div>
-          <p className="mt-2 text-xs text-amber-800"><UiText text={"确认有效期至"} />{" "}{formatExpiry(confirmation.expiresAt)}<UiText text={"；知识内容或模型配置变化后需要重新准备。搜索结果只会引用执行时仍是当前版本的内容。"} /></p>
+          <p className="mt-2 text-xs text-amber-800"><UiText text={"确认有效期至"} />{" "}{formatExpiry(confirmation.expiresAt, locale, translateUi)}<UiText text={"；知识内容或模型配置变化后需要重新准备。搜索结果只会引用执行时仍是当前版本的内容。"} /></p>
           <p className="mt-2 text-xs font-semibold text-amber-900">{confirmationSummary.billing?.mode === "platform"
-            ? `使用平台额度：预计预占 ${(confirmationSummary.billing.estimatedCredits ?? 0).toLocaleString("zh-CN")}，按供应商返回的实际用量和当前倍率结算；用量不明时保留预占待核对。`
+            ? translateUi("使用平台额度：预计预占 {credits}，按供应商返回的实际用量和当前倍率结算；用量不明时保留预占待核对。")
+              .replace("{credits}", new Intl.NumberFormat(locale).format(confirmationSummary.billing.estimatedCredits ?? 0))
             : <UiText text={"BYOK 请求不扣平台额度。"} />}</p>
           <div className="mt-3 flex flex-wrap justify-end gap-2">
             <button type="button" onClick={resetConfirmation} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900"><UiText text={"取消"} /></button>
@@ -273,7 +277,7 @@ export function PersonalSemanticSearchPanel({
       ) : null}
 
       {state === "executing" ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-xs text-slate-600" role="status"><UiText text={"正在请求向量模型并校验当前版本引用…"} /></p> : null}
-      {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</div> : null}
+      {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert"><UiErrorText text={error} /></div> : null}
       {state === "success" && results.length === 0 ? <p className="mt-4 rounded-xl bg-white px-4 py-3 text-xs text-slate-600" role="status"><UiText text={"没有找到可验证的相关内容。"} /></p> : null}
       {results.length > 0 ? (
         <div className="mt-4 rounded-xl border border-emerald-200 bg-white px-4 py-4">

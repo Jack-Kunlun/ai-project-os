@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useAppearance } from "@/components/appearance-provider";
@@ -59,7 +61,7 @@ export function AppearanceControls(): React.JSX.Element {
             </select>
           </label>
           {languageLoading ? <p role="status" className="appearance-feedback">{t("正在加载语言…")}</p> : null}
-          {languageError ? <p role="alert" className="appearance-feedback">{t(languageError)}</p> : null}
+          {languageError ? <p role="alert" className="appearance-feedback"><UiErrorText text={languageError} /></p> : null}
           <label className="appearance-controls-row">
             <span>{t("主题")}</span>
             <select value={theme} onChange={(event) => setTheme(event.currentTarget.value as "light" | "dark" | "system")}>

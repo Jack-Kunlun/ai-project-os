@@ -1,3 +1,5 @@
+import { rememberSafeUiError } from "./safe-ui-error-cache";
+
 export type SafeErrorPresentation = Readonly<{
   code: string | null;
   summary: string;
@@ -165,5 +167,7 @@ export function safeErrorPresentation(payload: unknown, fallback: string): SafeE
 
 export async function safeResponseError(response: Response, fallback: string): Promise<SafeErrorPresentation> {
   const payload = await response.json().catch(() => null) as unknown;
-  return safeErrorPresentation(payload, fallback);
+  const presentation = safeErrorPresentation(payload, fallback);
+  rememberSafeUiError(presentation);
+  return presentation;
 }

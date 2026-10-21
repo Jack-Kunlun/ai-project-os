@@ -547,7 +547,10 @@ test("all page routes remain consistent across Chinese light and English dark de
     const memberPageResponse = await outsiderPage.goto(`/projects/${ids.projectId}/members`, { waitUntil: "domcontentloaded" });
     expect(memberPageResponse?.status(), "project layout must hide the members page from a non-member").toBe(404);
     const memberApiResponse = await outsiderPage.request.get(`/api/projects/${ids.projectId}/members`);
-    expect(memberApiResponse.status(), "a valid project ID must not expose members to a non-member").toBe(404);
+    expect(memberApiResponse.status(), "a valid project ID must not expose members to a non-member").toBe(403);
+    const forbiddenMembers = await memberApiResponse.json();
+    expect(Object.keys(forbiddenMembers)).toEqual(["error"]);
+    expect(forbiddenMembers.error.code).toBe("ACCESS_FORBIDDEN");
 
     await setAppearance(userPage, origin.value!, "zh-CN", "light");
     await assertUserShellInteractions(userPage);

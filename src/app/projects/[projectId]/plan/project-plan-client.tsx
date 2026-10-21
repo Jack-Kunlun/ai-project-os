@@ -1,6 +1,7 @@
 "use client";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -222,7 +223,7 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
         {currentPlan ? <div className={styles.headingActions}>
           <OperationPanel title={t("创建项目目标")} triggerLabel={t("新建目标")} open={objectiveOpen} onOpenChange={setObjectiveOpen} disabled={!currentPlan.canEdit} description={t("目标先保存为草稿，后续由项目成员明确决定何时启动或完成。")}>
             <form onSubmit={createObjective} className={styles.form}>
-              {error ? <p role="alert" className={styles.formError}>{t(error)}</p> : null}
+              {error ? <p role="alert" className={styles.formError}><UiErrorText text={error} /></p> : null}
               <label><UiText text={"目标名称"} /><input required maxLength={160} value={objectiveForm.title} onChange={(event) => setObjectiveForm((value) => ({ ...value, title: event.target.value }))} placeholder={t("目标名称")} /></label>
               <label><UiText text={"完成标准或背景"} /><textarea maxLength={20_000} rows={3} value={objectiveForm.description} onChange={(event) => setObjectiveForm((value) => ({ ...value, description: event.target.value }))} placeholder={t("可选")} /></label>
               <label><UiText text={"目标日期"} /><input type="date" value={objectiveForm.targetDate} onChange={(event) => setObjectiveForm((value) => ({ ...value, targetDate: event.target.value }))} /></label>
@@ -231,7 +232,7 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
           </OperationPanel>
           <OperationPanel title={t("添加人工工作项")} triggerLabel={t("新建工作项")} open={workItemOpen} onOpenChange={setWorkItemOpen} disabled={!currentPlan.canEdit} description={t("工作项先进入已计划状态；开始和完成仍需要成员明确操作。")}>
             <form onSubmit={createWorkItem} className={styles.form}>
-              {error ? <p role="alert" className={styles.formError}>{t(error)}</p> : null}
+              {error ? <p role="alert" className={styles.formError}><UiErrorText text={error} /></p> : null}
               <label><UiText text={"工作项名称"} /><input required maxLength={160} value={workItemForm.title} onChange={(event) => setWorkItemForm((value) => ({ ...value, title: event.target.value }))} placeholder={t("工作项名称")} /></label>
               <div className={styles.formGrid}><label><UiText text={"工作说明"} /><textarea maxLength={20_000} rows={3} value={workItemForm.description} onChange={(event) => setWorkItemForm((value) => ({ ...value, description: event.target.value }))} placeholder={t("范围与背景（可选）")} /></label><label><UiText text={"验收标准"} /><textarea maxLength={20_000} rows={3} value={workItemForm.acceptanceCriteria} onChange={(event) => setWorkItemForm((value) => ({ ...value, acceptanceCriteria: event.target.value }))} placeholder={t("可验证的验收标准")} /></label></div>
               <div className={styles.formGridFour}>
@@ -248,8 +249,8 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
 
       {pageLoading ? <div className={styles.loading} role="status" aria-label={translateUi("正在加载项目计划")}><div /><div /><div /></div> : null}
       {currentPlan?.project.archivedAt ? <p className={styles.archivedNotice}><UiText text={"项目已归档，计划保持只读，目标、工作项和依赖不会被修改。"} /></p> : null}
-      {message ? <p role="status" className={styles.success}>{message}</p> : null}
-      {error && currentPlan ? <p role="alert" className={styles.error}>{error}</p> : null}
+      {message ? <p role="status" className={styles.success}><UiFeedbackText text={message} /></p> : null}
+      {error && currentPlan ? <p role="alert" className={styles.error}><UiErrorText text={error} /></p> : null}
       {!pageLoading && currentPlan === null ? <div className={styles.errorPanel} role="alert"><p>{t(error ?? "项目计划加载失败")}</p><button type="button" onClick={() => void reload({ showLoading: true })}><UiText text={"重试"} /></button></div> : null}
       {navigation.returnTo ? <ParentPageLink href={navigation.returnTo} label="返回来源页面" /> : null}
 

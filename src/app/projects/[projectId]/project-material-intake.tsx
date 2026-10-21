@@ -1,6 +1,7 @@
 "use client";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
@@ -247,8 +248,8 @@ export function ProjectMaterialIntake({
         <Link href={`/projects/${projectId}/assets`} onClick={() => closeDrawer()} className="font-semibold text-indigo-700 underline underline-offset-4"><UiText text={"管理已上传文件"} /></Link>
       </div>
 
-      {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700">{error}</p> : null}
-      {message ? <p role="status" aria-live="polite" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800">{message}</p> : null}
+      {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700"><UiErrorText text={error} /></p> : null}
+      {message ? <p role="status" aria-live="polite" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800"><UiFeedbackText text={message} /></p> : null}
 
       <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-2">
         <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">

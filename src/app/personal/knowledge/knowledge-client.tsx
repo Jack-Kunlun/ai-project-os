@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
+
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1104,7 +1106,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           </div>
         </header>
 
-        {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`${styles.feedback} ${message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess}`}>{t(message.text)}</div> : null}
+        {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`${styles.feedback} ${message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess}`}><UiFeedbackText text={message.text} /></div> : null}
 
         {workspaceSection === "library" ? <>
           <nav className={styles.tabs} aria-label={t("知识栏目")}>
@@ -1128,7 +1130,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
               </div>
             </div>
 
-            {listError ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}><p>{t(listError)}</p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline"><UiText text="重新加载" /></button></div> : null}
+            {listError ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}><p><UiErrorText text={listError} /></p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline"><UiText text="重新加载" /></button></div> : null}
             {listLoading ? <p className="py-5 text-sm text-slate-500" role="status" aria-live="polite"><UiText text="正在加载知识…" /></p> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} filter={knowledgeFilter} onCreate={startCreate} /> : <div className={styles.list}>
               {documents.map((item) => <button key={item.id} type="button" aria-haspopup="dialog" aria-current={item.id === selectedId ? "true" : undefined} onClick={() => selectDocument(item.id)} className={`${styles.row} ${item.id === selectedId ? styles.selectedRow : ""}`}>
                 <span className={styles.rowBody}>
@@ -1179,7 +1181,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           {detailLoading ? <p role="status" className="py-8 text-sm text-slate-500"><UiText text="正在加载知识详情…" /></p> : document ? <>
             <DocumentDetail language={language} document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onClose={() => void returnToList()} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} />
             <PersonalKnowledgeNextSteps key={`${document.id}:${document.version}`} content={document.content} onOpenSemanticIndex={() => void openSearchTool("index")} />
-          </> : <>{message?.tone === "error" ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}>{message.text}</div> : null}<EmptyDetail onCreate={startCreate} /></>}
+          </> : <>{message?.tone === "error" ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}><UiFeedbackText text={message.text} /></div> : null}<EmptyDetail onCreate={startCreate} /></>}
         </div>
       </dialog>
 
@@ -1222,7 +1224,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           data-variant={knowledgeModal === "editor" ? mode : knowledgeModal ?? undefined}
         >
           {knowledgeModal === "editor" ? <div className={mode === "create" ? "h-[78dvh] max-h-[760px] min-h-0 max-sm:h-[88dvh]" : "h-dvh max-h-dvh min-h-0"}>
-            <PersonalKnowledgeEditor mode={mode === "create" ? "create" : "edit"} draft={draft} saving={saving} error={message?.tone === "error" ? t(message.text) : null} notice={message?.tone === "success" ? t(message.text) : null} onDraftChange={updateDraft} onCancel={() => void requestCloseKnowledgeModal()} onSubmit={saveDraft} />
+            <PersonalKnowledgeEditor mode={mode === "create" ? "create" : "edit"} draft={draft} saving={saving} error={message?.tone === "error" ? message.text : null} notice={message?.tone === "success" ? message.text : null} onDraftChange={updateDraft} onCancel={() => void requestCloseKnowledgeModal()} onSubmit={saveDraft} />
           </div> : null}
           {knowledgeModal === "import" ? <div className="flex h-dvh max-h-dvh min-h-0 flex-col">
           <div data-dialog-header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-7">
@@ -1231,7 +1233,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             </div>
             <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
               <p className="max-w-2xl text-sm leading-6 text-slate-500"><UiText text="选择文本、Markdown、JSON、PDF、DOCX 或图片。提取结果会转入编辑弹窗，核对后再保存。" /></p>
-              {message?.tone === "error" ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{t(message.text)}</div> : null}
+              {message?.tone === "error" ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiFeedbackText text={message.text} /></div> : null}
               <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
                 <label className="block text-sm font-semibold text-slate-700"><UiText text="选择文件" />
                   <input type="file" accept=".txt,.md,.json,.pdf,.docx,.png,.jpg,.jpeg,.webp" disabled={importing} onChange={(event) => void importFile(event)} className="mt-2 block w-full text-sm disabled:opacity-50" />
@@ -1247,7 +1249,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
                 </label>
                 <p className="mt-3 text-xs leading-5"><UiText text="遇到图片或扫描页时，会在发送前显示模型与页数，并请你单独确认。一次最多识别 3 页扫描内容；识别结果仅作为待核对预览，确认保存后才进入知识库。" /></p>
                 {visionProviderLoadState === "loading" ? <p role="status" className="mt-2 text-xs text-slate-500"><UiText text="正在读取可用视觉模型…" /></p> : null}
-                {visionProviderLoadState === "error" ? <div role="alert" className="mt-2 text-xs text-rose-700"><p>{t(visionProviderLoadError ?? "视觉模型列表加载失败")}</p><button type="button" onClick={() => { setVisionProviderLoadState("loading"); setVisionProviderLoadError(null); setVisionProviderReloadToken((value) => value + 1); }} className="mt-1 font-semibold underline"><UiText text="重新加载" /></button></div> : null}
+                {visionProviderLoadState === "error" ? <div role="alert" className="mt-2 text-xs text-rose-700"><p><UiErrorText text={visionProviderLoadError ?? "视觉模型列表加载失败"} /></p><button type="button" onClick={() => { setVisionProviderLoadState("loading"); setVisionProviderLoadError(null); setVisionProviderReloadToken((value) => value + 1); }} className="mt-1 font-semibold underline"><UiText text="重新加载" /></button></div> : null}
                 {visionProviderLoadState === "ready" && !visionProviders.some((provider) => provider.billingMode === "platform") ? <p className="mt-2 text-xs text-amber-700"><UiText text="平台视觉模型暂不可用，请管理员配置并验证 visionExtract 路由；你也可以选择个人 BYOK 模型。文本文件和可提取文字的 PDF 仍可导入。" /></p> : null}
                 {visionProviderLoadState === "ready" && visionProviders.length === 0 ? <p className="mt-2 text-xs text-amber-700"><UiText text="当前没有可用视觉模型。可先等待管理员配置平台路由，或添加个人视觉模型。" /></p> : null}
                 <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-700"><input type="checkbox" checked={forcePdfVision} onChange={(event) => setForcePdfVision(event.target.checked)} className="mt-0.5 shrink-0" /><span><UiText text="PDF 含扫描正文或图片时，使用视觉模型逐页补充识别（最多 3 页）。即使页眉有可复制文字，也建议勾选；发送前会再次确认。" /></span></label>
@@ -1361,7 +1363,7 @@ function DocumentDetail({
             <span className="text-xs text-slate-400">{revisions.length} {t("个版本")}</span>
           </div>
 
-          {historyError ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{t(historyError)}</p><button type="button" onClick={onReloadHistory} className="mt-2 font-semibold underline"><UiText text="重新加载历史" /></button></div> : null}
+          {historyError ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><p><UiErrorText text={historyError} /></p><button type="button" onClick={onReloadHistory} className="mt-2 font-semibold underline"><UiText text="重新加载历史" /></button></div> : null}
           {historyLoading && revisions.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-500"><UiText text="正在读取版本历史…" /></p> : null}
           {!historyLoading && !historyError && revisions.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-500"><UiText text="暂时没有版本记录。" /></p> : null}
 
@@ -1380,7 +1382,7 @@ function DocumentDetail({
                 </button>
                 {isExpanded ? <div className="border-t border-slate-100 px-4 py-4">
                   {revisionLoading && loadedBody === null ? <p className="text-xs text-slate-500"><UiText text="正在读取版本正文…" /></p> : null}
-                  {revisionError && loadedBody === null ? <div role="alert" className="text-xs text-rose-700"><p>{t(revisionError)}</p><button type="button" onClick={() => onToggleRevision(revision.version)} className="mt-2 font-semibold underline"><UiText text="重新读取正文" /></button></div> : null}
+                  {revisionError && loadedBody === null ? <div role="alert" className="text-xs text-rose-700"><p><UiErrorText text={revisionError} /></p><button type="button" onClick={() => onToggleRevision(revision.version)} className="mt-2 font-semibold underline"><UiText text="重新读取正文" /></button></div> : null}
                   {loadedBody ? <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-6 text-slate-600">{loadedBody.content}</pre> : null}
                 </div> : null}
               </div>;

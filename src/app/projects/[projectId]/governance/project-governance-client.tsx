@@ -1,6 +1,7 @@
 "use client";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
@@ -360,8 +361,8 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
 
         {navigation.returnTo ? <div className="mb-6"><ParentPageLink href={navigation.returnTo} label="返回来源页面" /></div> : null}
 
-        {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
-        {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
+        {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
+        {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800"><UiFeedbackText text={message} /></div> : null}
         {!embedded ? <nav aria-label={translateUi("项目管理功能")} className="mb-8 grid gap-3 sm:grid-cols-3">
           <Link href={`/projects/${projectId}/world`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold"><UiText text={"状态治理"} /></span><span className="mt-1 block text-xs text-slate-500"><UiText text={"管理事实关系、替代链与状态快照"} /></span></Link>
           <Link href={`/projects/${projectId}/actions`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold"><UiText text={"动作与审批"} /></span><span className="mt-1 block text-xs text-slate-500"><UiText text={"处理外部动作及人工审批"} /></span></Link>
@@ -380,7 +381,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
                 <SectionHeader eyebrow="AI routes & billing" title={translateUi("AI 用量与计费")} description="直接查看项目当前使用的模型路由、调用次数与 Token。供应商实际账单与本地调用审计分开显示。" border={false} />
                 <div className="flex flex-wrap items-center gap-3"><Link href={`/credits?projectId=${projectId}`} className="text-xs font-semibold text-indigo-700 hover:text-indigo-900"><UiText text={"查看平台额度流水 →"} /></Link><div className="flex rounded-xl bg-slate-100 p-1" aria-label={translateUi("用量统计周期")}>{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}>{days} {" "}<UiText text={"天"} /></button>)}</div></div>
               </div>
-              {usageError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{usageError}<button type="button" onClick={() => void fetchUsage(usageDays)} className="ml-3 font-semibold underline"><UiText text={"重试"} /></button></p> : usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
+              {usageError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700"><UiErrorText text={usageError} /><button type="button" onClick={() => void fetchUsage(usageDays)} className="ml-3 font-semibold underline"><UiText text={"重试"} /></button></p> : usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
                 <>
                   <div className="mt-6">
                     <h3 className="text-sm font-semibold text-slate-800"><UiText text={"当前 AI 路由"} /></h3>
@@ -412,7 +413,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
                             </article>
                           );
                         })}
-                        {billingError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">{billingError}</p> : null}
+                        {billingError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700"><UiErrorText text={billingError} /></p> : null}
                       </div>
                     </div>
                   </div>
@@ -437,7 +438,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
               <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Recoverable operations" title={translateUi("任务异常与人工收口")} description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
               <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only"><UiText text={"搜索任务记录"} /></span><input value={operationSearch} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ search: value, cursor: null }); }} placeholder={translateUi("搜索执行阶段或错误代码")} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only"><UiText text={"按任务类型筛选"} /></span><select value={operationKind} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ kind: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部任务类型"} /></option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></label><label><span className="sr-only"><UiText text={"按任务状态筛选"} /></span><select value={operationStatus} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ status: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部状态"} /></option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{translateUi(statusLabels[value])}</option>)}</select></label></div>
-              {operationsError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{operationsError}<button type="button" onClick={() => void fetchOperations()} className="ml-3 font-semibold underline"><UiText text={"重试"} /></button></p> : operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => {
+              {operationsError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700"><UiErrorText text={operationsError} /><button type="button" onClick={() => void fetchOperations()} className="ml-3 font-semibold underline"><UiText text={"重试"} /></button></p> : operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => {
                 const unknownOutcome = projectJobUnknownPresentation(operation);
                 return (
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">

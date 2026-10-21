@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
@@ -438,7 +440,7 @@ export function SmsProviderAdminClient() {
         <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500"><UiText text={"添加供应商并验证测试短信后，即可保存配置。"} /></p>
         <p className="mt-3 text-xs leading-5 text-slate-400"><UiText text={"支持阿里云号码认证、阿里云短信和腾讯云短信"} /></p>
       </div> : null}
-      {pageError ? <p role="alert" className="mx-5 mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700 sm:mx-6">{t(pageError)}</p> : null}
+      {pageError ? <p role="alert" className="mx-5 mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700 sm:mx-6"><UiErrorText text={pageError} /></p> : null}
       {!editorOpen && notice ? <p role="status" className="mx-5 mb-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800 sm:mx-6">{t(notice)}</p> : null}
     </section>
     <section className="rounded-2xl border border-slate-200 bg-white px-5 py-4 sm:px-6" aria-labelledby="sms-phone-auth-title">
@@ -522,7 +524,7 @@ export function SmsProviderAdminClient() {
 
       {probeId ? <form onSubmit={verifyTest} className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:flex sm:items-end sm:gap-3"><label className="block flex-1 text-xs font-semibold text-slate-600"><UiText text={"短信验证码"} /><input id="sms-provider-test-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required disabled={pending || verified} className={inputClass} /></label><button type="submit" disabled={pending || verified} className="mt-3 w-full rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50 sm:mt-0 sm:w-auto">{verified ? t("已验证") : pending ? t("验证中…") : t("验证验证码")}</button></form> : null}
       {verified ? <button type="button" onClick={() => void saveConfig()} disabled={pending} className="mt-4 inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{pending ? t("保存中…") : t("保存并启用短信服务")}</button> : null}
-      {formError ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{t(formError)}</p> : null}
+      {formError ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"><UiErrorText text={formError} /></p> : null}
       {notice ? <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm leading-6 text-emerald-800">{t(notice)}</p> : null}
     </div> : null}
   </dialog>

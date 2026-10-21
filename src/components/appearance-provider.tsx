@@ -25,6 +25,8 @@ type AppearanceContextValue = Readonly<{
   languageLoading: boolean;
   languageError: string | null;
   t: (text: string) => string;
+  messages: UiMessages | null;
+  dictionaryUrl: string;
 }>;
 
 export type AppearancePreference = Readonly<{
@@ -46,7 +48,7 @@ const CORE_MESSAGES: UiMessages = {
   "正在加载语言…": "Loading language…", "语言包加载失败，请重试。": "Could not load the language. Please try again.",
 };
 const englishRequests = new Map<string, Promise<UiMessages>>();
-function loadEnglishMessages(url: string): Promise<UiMessages> {
+export function loadEnglishMessages(url: string): Promise<UiMessages> {
   const cached = englishRequests.get(url);
   if (cached) return cached;
   const request = fetch(url, { cache: "force-cache", credentials: "same-origin" }).then(async (response) => {
@@ -251,7 +253,7 @@ export function AppearanceProvider({
   }, [language, theme]);
 
   const t = useCallback((text: string) => translateUiText(text, language, messages ?? CORE_MESSAGES), [language, messages]);
-  const value = useMemo<AppearanceContextValue>(() => ({ language, theme, resolvedTheme, setLanguage, setTheme, languageLoading, languageError, t }), [language, resolvedTheme, setLanguage, setTheme, languageLoading, languageError, t, theme]);
+  const value = useMemo<AppearanceContextValue>(() => ({ language, theme, resolvedTheme, setLanguage, setTheme, languageLoading, languageError, t, messages, dictionaryUrl }), [messages, dictionaryUrl, language, resolvedTheme, setLanguage, setTheme, languageLoading, languageError, t, theme]);
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

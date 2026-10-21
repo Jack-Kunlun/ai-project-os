@@ -1,8 +1,10 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type ProjectOption = Readonly<{
   id: string;
@@ -41,17 +43,15 @@ type ProjectListPayload = Readonly<{
   projects?: readonly ProjectOption[];
 }>;
 type PersonalResult = Readonly<{ id: string; title: string; excerpt?: string; updatedAt: string }>;
+type ProjectSearchPanelError = Readonly<{ message: string; suffix?: string }>;
 
 const MAX_SELECTED_PROJECTS = 5;
 
 async function responseError(response: Response, fallback: string): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-  return typeof payload?.error?.message === "string" && payload.error.message.trim().length > 0
-    ? payload.error.message
-    : fallback;
+  return (await safeResponseError(response, fallback)).message;
 }
 
-function sourceKindLabel(kind: string): string {
+function sourceKindLabel(kind: string, translate: (text: string) => string): string {
   const labels: Record<string, string> = {
     document: "文件",
     screenshot: "截图",
@@ -61,7 +61,7 @@ function sourceKindLabel(kind: string): string {
     manual: "手动资料",
     mcp: "MCP",
   };
-  return labels[kind] ?? "项目资料";
+  return translate(labels[kind] ?? "项目资料");
 }
 
 /**
@@ -79,7 +79,7 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
   const [personalResults, setPersonalResults] = useState<readonly PersonalResult[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [searching, setSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ProjectSearchPanelError | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const projectsRequestRef = useRef<AbortController | null>(null);
   const searchRequestRef = useRef<AbortController | null>(null);
@@ -148,11 +148,11 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
     event.preventDefault();
     const trimmed = query.trim();
     if (scope === "selected" && selectedIds.length === 0) {
-      setError("请先选择至少一个项目。");
+      setError({ message: "请先选择至少一个项目。" });
       return;
     }
     if (trimmed.length === 0) {
-      setError("请输入要搜索的内容。");
+      setError({ message: "请输入要搜索的内容。" });
       return;
     }
     searchRequestRef.current?.abort();
@@ -176,7 +176,7 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
       if (controller.signal.aborted) return;
       let nextProjects: readonly ProjectSearchResult[] = [];
       let nextPersonal: readonly PersonalResult[] = [];
-      let nextError: string | null = null;
+      let nextError: ProjectSearchPanelError | null = null;
       const projectSucceeded = projectOutcome.status === "fulfilled" && (projectOutcome.value === null || projectOutcome.value.ok);
       if (projectOutcome.status === "fulfilled" && projectOutcome.value === null) {
         nextProjects = [];
@@ -185,13 +185,13 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
         nextProjects = payload.results ?? [];
       } else {
         const reason = projectOutcome.status === "fulfilled" && projectOutcome.value !== null ? await responseError(projectOutcome.value, "项目搜索失败") : "项目搜索失败";
-        nextError = `${reason}；个人内容仍可查看。`;
+        nextError = { message: reason, suffix: "；个人内容仍可查看。" };
       }
       if (personalOutcome.status === "fulfilled" && personalOutcome.value.ok) {
         const payload = await personalOutcome.value.json() as { documents?: PersonalResult[] };
         nextPersonal = payload.documents ?? [];
       } else {
-        if (projectSucceeded) nextError = "个人知识搜索失败；项目结果仍可查看。";
+        if (projectSucceeded) nextError = { message: "个人知识搜索失败", suffix: "；项目结果仍可查看。" };
       }
       if (controller.signal.aborted || searchRequestRef.current !== controller) return;
       setResults(nextProjects);
@@ -201,7 +201,7 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
       if (controller.signal.aborted) return;
       setResults([]);
       setPersonalResults([]);
-      setError(cause instanceof Error ? cause.message : "项目搜索失败");
+      setError({ message: cause instanceof Error ? cause.message : "项目搜索失败" });
     } finally {
       if (searchRequestRef.current === controller) searchRequestRef.current = null;
       if (!controller.signal.aborted) setSearching(false);
@@ -230,7 +230,7 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
           <span className="text-xs text-slate-400"><UiText text={"已选"} />{" "}{selectedIds.length}/{MAX_SELECTED_PROJECTS}</span>
         </div>
         {loadingProjects ? <p className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-500"><UiText text={"正在读取可访问项目…"} /></p> : null}
-        {projectError ? <p className="mt-3 rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700" role="alert">{projectError}</p> : null}
+        {projectError ? <p className="mt-3 rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700" role="alert"><UiErrorText text={projectError} /></p> : null}
         {!loadingProjects && projectError === null && projects.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-slate-200 px-4 py-4 text-xs text-slate-500"><UiText text={"当前没有可选项目。"} /></p> : null}
         {scope === "selected" && projects.length > 0 ? (
           <div className="mt-3 flex max-h-36 flex-wrap gap-2 overflow-y-auto" aria-label={translateUi("可搜索项目")}>
@@ -253,13 +253,13 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
         <button type="submit" disabled={searching || (scope === "selected" && selectedIds.length === 0)} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50">{searching ? <UiText text={"搜索中…"} /> : <UiText text={"搜索工作台"} />}</button>
       </form>
 
-      {error ? <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</p> : null}
+      {error ? <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert"><UiErrorText text={error.message} />{error.suffix ? <UiText text={error.suffix} /> : null}</p> : null}
       {scope === "allAccessible" ? <p className="mt-4 text-xs text-slate-400"><UiText text={"当前范围：本次搜索时仍有权访问的未归档项目（最多 50 个）"} /></p> : selectedProjects.length > 0 ? <p className="mt-4 text-xs text-slate-400"><UiText text={"当前范围："} />{selectedProjects.map((project) => project.name).join("、")}</p> : null}
       {!searching && results.length === 0 && personalResults.length === 0 && (scope === "allAccessible" || selectedProjects.length > 0) && query.trim().length > 0 && error === null ? <p className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center text-xs text-slate-500"><UiText text={"没有找到匹配的内容。"} /></p> : null}
       {results.length > 0 ? <h3 className="mt-5 text-sm font-semibold text-slate-800"><UiText text={"所选范围的项目结果"} /></h3> : null}
       {results.length > 0 ? <ol className="mt-3 space-y-3" aria-label={translateUi("项目搜索结果")}>
         {results.map((result) => <li key={`${result.projectId}:${result.citation.chunkId}`} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500"><span className="font-semibold text-indigo-700">#{result.rank} {result.projectName}</span><span>·</span><span>{sourceKindLabel(result.citation.sourceKind)}</span><span>·</span><span><UiText text={"来源"} />{" "}{result.citation.sourceId.slice(0, 8)}…</span><span>·</span><span><UiText text={"当前索引"} />{" "}{result.snapshotId.slice(0, 8)}…</span></div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500"><span className="font-semibold text-indigo-700">#{result.rank} {result.projectName}</span><span>·</span><span>{sourceKindLabel(result.citation.sourceKind, translateUi)}</span><span>·</span><span><UiText text={"来源"} />{" "}{result.citation.sourceId.slice(0, 8)}…</span><span>·</span><span><UiText text={"当前索引"} />{" "}{result.snapshotId.slice(0, 8)}…</span></div>
           <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{result.citation.excerpt}</p>
           <p className="mt-2 text-xs text-slate-400"><UiText text={"内容指纹"} />{" "}{result.citation.contentHash.slice(0, 12)}<UiText text={"… · 片段"} />{" "}{result.citation.rangeStart}–{result.citation.rangeEnd}</p>
           <Link

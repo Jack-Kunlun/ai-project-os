@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -204,7 +206,7 @@ export function LoginForm({
 
             {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}>{t(notice)}</p> : null}
             {smsSuccessNotice ? <p role="status" className={`${styles.notice} ${styles.noticeSuccess}`}>{t(smsSuccessNotice)}</p> : null}
-            {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{t(error)}</p> : null}
+            {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
 
             <button type="submit" disabled={pending} className={styles.submitButton}>{pending ? t("登录中…") : t("登 录")}</button>
 

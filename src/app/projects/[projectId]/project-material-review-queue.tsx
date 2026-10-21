@@ -1,6 +1,7 @@
 "use client";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -186,8 +187,8 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged, embedded = fa
         <label><span className="sr-only"><UiText text={"搜索 AI 候选"} /></span><input value={search} onChange={(event) => { const value = event.target.value; setHistory([]); replaceReviewQuery({ search: value, cursor: null }); }} placeholder={translateUi("搜索候选标题、内容或证据")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" /></label>
         <label><span className="sr-only"><UiText text={"按候选类型筛选"} /></span><select value={itemType} onChange={(event) => { const value = isReviewType(event.target.value) ? event.target.value : "all"; setHistory([]); replaceReviewQuery({ type: value, cursor: null }); }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all"><UiText text={"全部类型"} /></option><option value="decision"><UiText text={"决策"} /></option><option value="progress"><UiText text={"进展"} /></option><option value="issue"><UiText text={"问题"} /></option><option value="risk"><UiText text={"风险"} /></option></select></label>
       </div>
-      {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
-      {message ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">{message}</p> : null}
+      {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
+      {message ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700"><UiFeedbackText text={message} /></p> : null}
       {loading ? <div className="mt-4 h-28 animate-pulse rounded-lg bg-slate-100" /> : error ? null : reviews.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">{search.trim() || itemType !== "all" ? <UiText text={"没有匹配的 AI 候选。"} /> : <UiText text={"当前没有待核对的整理结果。"} />}</p> : <div className="mt-4 space-y-2">{reviews.map((review) => (
         <article key={`${review.source}:${review.id}`} className={styles.reviewCard}>
           <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">{itemLabels[review.item.type]}</span><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{review.source === "web" ? <UiText text={"网页 AI"} /> : <UiText text={"受控 AI"} />}</span></div><h3 className="mt-3 text-base font-semibold">{review.item.title}</h3></div><span className="text-xs text-slate-400">{formatDate(review.createdAt)}</span></div>

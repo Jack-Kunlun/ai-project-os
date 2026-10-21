@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
@@ -136,7 +138,7 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
         <button type="button" onClick={() => void load()} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"><UiText text={"搜索"} /></button>
       </div>
       <p className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-6 text-indigo-800"><UiText text={"Git / MCP 私有连接与平台自动化属于独立配置，不会因会员撤销被修改。个人模型配置会保留，但会员失效期间不可使用。"} /></p>
-      {error ? <div role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{t(error)}</div> : null}
+      {error ? <div role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
       <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="membership-list-title">
         <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
           <h2 id="membership-list-title" className="text-lg font-semibold text-slate-900"><UiText text={"会员资格列表"} /></h2>

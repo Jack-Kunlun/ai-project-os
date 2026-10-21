@@ -1,9 +1,10 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 import { useWorkspaceSelection } from "@/components/workspace-scope";
 import { formatDashboardDate as formatDate, formatDashboardGreetingDate as formatGreetingDate } from "@/lib/dashboard-date";
@@ -232,7 +233,7 @@ export function DashboardClient({ username, initialNow, isSystemAdmin = false }:
 
         <p className={styles.subtitle}>{formatGreetingDate(initialNow, language)}<span aria-hidden="true"> / </span>{(workspaceName?.workspaceId === workspaceId ? workspaceName.name : null) ?? t("当前工作空间")}</p>
 
-        {error ? <div className={styles.error} role="alert"><span>{error}</span><button type="button" onClick={() => void load()}><UiText text="重试" /></button></div> : null}
+        {error ? <div className={styles.error} role="alert"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load()}><UiText text="重试" /></button></div> : null}
 
         <section className={styles.featureGrid} aria-label={t("工作台常用信息")}>
           <section className={styles.panel} aria-labelledby="attention-heading">

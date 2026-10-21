@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import { notifyUserProjectsChanged } from "@/lib/user-navigation";
@@ -531,7 +533,7 @@ function SnapshotPanel({
         </button>
       </div>
       {state.loading && state.data === null ? <div className="mt-5 space-y-3" aria-label={`${title}正在加载`}><div className="h-16 animate-pulse rounded-md bg-slate-100" /><div className="h-16 animate-pulse rounded-md bg-slate-100" /></div> : null}
-      {state.error ? <div role="alert" className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><p>{state.error}</p><button type="button" onClick={state.refresh} className="mt-2 font-semibold underline"><UiText text={"重新读取"} /></button></div> : null}
+      {state.error ? <div role="alert" className="mt-5 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><p><UiErrorText text={state.error} /></p><button type="button" onClick={state.refresh} className="mt-2 font-semibold underline"><UiText text={"重新读取"} /></button></div> : null}
       {state.loading && state.data !== null ? <p role="status" className="mt-4 text-xs text-slate-400"><UiText text={"正在刷新当前读取时快照…"} /></p> : null}
       {state.data !== null ? <div className="mt-5">{children}</div> : null}
       {!state.loading && state.error === null && state.data === null ? <p className="mt-5 rounded-md bg-slate-50 px-4 py-4 text-sm text-slate-500"><UiText text={"暂时没有可展示的配置快照。"} /></p> : null}
@@ -683,7 +685,7 @@ function LifecycleDialog({ project, action, onClose, onChanged }: { project: Pro
       <div data-dialog-body>
         <p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-600"}`}>{description}</p>
         {archive || remove ? <label className="mt-5 block text-sm font-semibold text-slate-700"><UiText text={"输入项目名称以确认"} /><input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className={`mt-2 w-full rounded-lg border bg-white px-4 py-3 text-sm outline-none focus:ring-4 ${remove ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-amber-300 focus:ring-amber-100"}`} /></label> : null}
-        {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{t(error)}</p> : null}
+        {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
       </div>
       <div data-dialog-footer className="mt-7 flex justify-end gap-3">
         <button data-dialog-close type="button" onClick={onClose} disabled={pending} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"><UiText text={"取消"} /></button>

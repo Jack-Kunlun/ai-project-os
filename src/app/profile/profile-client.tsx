@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -127,7 +129,7 @@ export function ProfileClient({
           </div>
         </section>
 
-        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{t(error)}</span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text="重试" /></button></div> : null}
+        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text="重试" /></button></div> : null}
         {githubStatus ? <Message {...(githubStatusMessages[githubStatus] ?? githubStatusMessages.failed)} /> : null}
         {oidcStatus ? <Message {...(oidcStatusMessages[oidcStatus] ?? oidcStatusMessages.failed)} /> : null}
 
@@ -185,7 +187,7 @@ export function ProfileClient({
               <AccountSettingRow title="登录密码" summary={profile ? <UiText text={profile.hasLocalPassword ? "已设置" : "未设置"} /> : <UiText text="读取中…" />} description="更新密码后会撤销全部登录会话，并要求重新登录。" disabled={!profile} open={openOperation === "password"} onOpenChange={(open) => setOpenOperation(open ? "password" : null)}>
                 <PasswordForm key={`${profile?.email ?? ""}:${profile?.emailVerifiedAt ?? ""}:${profile?.emailAuthStatus ?? "disabled"}`} hasLocalPassword={profile?.hasLocalPassword ?? true} email={profile?.email ?? null} emailVerifiedAt={profile?.emailVerifiedAt ?? null} emailAuthStatus={profile?.emailAuthStatus ?? "disabled"} />
               </AccountSettingRow>
-              <AccountSettingRow title="注销账户" summary="永久停用账户，封存独占个人空间" description="核对注销影响并完成身份验证。" danger disabled={!profile} open={openOperation === "closure"} onOpenChange={(open) => setOpenOperation(open ? "closure" : null)}>
+              <AccountSettingRow title="注销账户" summary={<UiText text="永久停用账户，封存独占个人空间" />} description="核对注销影响并完成身份验证。" danger disabled={!profile} open={openOperation === "closure"} onOpenChange={(open) => setOpenOperation(open ? "closure" : null)}>
                 {profile ? <AccountClosurePanel embedded hasLocalPassword={profile.hasLocalPassword} phoneE164={profile.phoneE164} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
               </AccountSettingRow>
             </div>

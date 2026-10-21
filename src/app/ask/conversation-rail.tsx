@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
+import { UiErrorText } from "@/components/ui-error-text";
 import { ShellIcon } from "@/components/shell-icon";
 import { useTranslate, UiText, useAppearance } from "@/components/appearance-provider";
 import type { TokenUsageSummary } from "@/lib/token-usage";
@@ -48,7 +49,7 @@ export function ConversationRail(props: {
     {!props.collapsed ? <>
       <label className={ui.field}><span className={styles.visuallyHidden}><UiText text="会话列表"/></span><select aria-label={t("会话列表")} value={props.view} onChange={e => props.setView(e.target.value as ConversationView)}><option value="active"><UiText text="最近会话"/></option><option value="archived"><UiText text="已归档"/></option><option value="deleted"><UiText text="回收站"/></option></select></label>
       <input className={ui.search} aria-label={t("搜索历史会话")} placeholder={t("搜索会话")} value={props.query} onChange={e => props.setQuery(e.target.value)}/>
-      {props.error ? <p className={ui.error} role="alert">{props.error}<button className={ui.link} onClick={props.refresh}><UiText text="重新加载"/></button></p> : null}
+      {props.error ? <p className={ui.error} role="alert"><UiErrorText text={props.error} /><button className={ui.link} onClick={props.refresh}><UiText text="重新加载"/></button></p> : null}
       <div className={styles.railList} aria-busy={props.loading}>
         {props.loading && !props.items.length ? <p role="status"><UiText text="正在查找会话…"/></p> : props.items.length ? props.items.map(item => <div className={styles.railItem} key={item.id} data-current={props.currentId === item.id}>
           <button className={styles.railMain} disabled={props.busy} aria-current={props.currentId === item.id ? "true" : undefined} onClick={() => props.open(item.id)}>

@@ -1,3 +1,4 @@
+import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 import type { FormEvent } from "react";
@@ -33,7 +34,7 @@ export function PersonalKnowledgeEditor({
 }): React.JSX.Element {
   const translateUi = useTranslate();
   const defaultMemoryTooLong = draft.isDefaultMemory && draft.content.length > 2_000;
-  const visibleError = error ? translateUi(error) : defaultMemoryTooLong ? translateUi("个人通用记忆已超出 2,000 字符，请缩短正文或取消标记。") : null;
+  const visibleError = error ? error : defaultMemoryTooLong ? "个人通用记忆已超出 2,000 字符，请缩短正文或取消标记。" : null;
   return <form onSubmit={onSubmit} className="knowledge-editor-form">
     <header data-dialog-header className="knowledge-editor-header">
       <div>
@@ -44,7 +45,7 @@ export function PersonalKnowledgeEditor({
     </header>
     <p className="knowledge-editor-intro"><UiText text={"内容保存在你的个人知识库中；保存后会保留版本历史。"} /></p>
     <div data-dialog-body className="knowledge-editor-body">
-      {notice ? <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">{notice}</p> : null}
+      {notice ? <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800"><UiFeedbackText text={notice} /></p> : null}
       <label className="knowledge-editor-field"><UiText text={"标题"} /><input value={draft.title} onChange={(event) => onDraftChange({ ...draft, title: event.target.value })} disabled={saving} required maxLength={240} placeholder={translateUi("例如：产品想法与待验证假设")} />
       </label>
       <label className="knowledge-editor-field"><UiText text={"正文"} /><textarea value={draft.content} onChange={(event) => onDraftChange({ ...draft, content: event.target.value })} disabled={saving} required maxLength={100000} rows={mode === "create" ? 9 : 16} aria-describedby="knowledge-content-count knowledge-default-memory-limit" aria-invalid={defaultMemoryTooLong} placeholder={translateUi("记录你的知识、摘要、规则或下一步想法……")} />
@@ -56,7 +57,7 @@ export function PersonalKnowledgeEditor({
       </label>
     </div>
     <div data-dialog-footer className="knowledge-editor-actions">
-      {visibleError ? <div id="knowledge-editor-error" role="alert" className="knowledge-editor-error">{visibleError}</div> : null}
+      {visibleError ? <div id="knowledge-editor-error" role="alert" className="knowledge-editor-error"><UiErrorText text={visibleError} /></div> : null}
       <button type="button" onClick={onCancel} disabled={saving} className="knowledge-editor-button"><UiText text={"取消"} /></button>
       <button type="submit" disabled={saving} aria-describedby={visibleError ? "knowledge-editor-error" : undefined} className="knowledge-editor-submit">{saving ? <UiText text={"保存中…"} /> : mode === "create" ? <UiText text={"创建知识"} /> : <UiText text={"保存新版本"} />}</button>
     </div>

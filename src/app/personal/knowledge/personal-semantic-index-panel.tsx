@@ -1,6 +1,7 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useRef, useState } from "react";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { useSemanticProviders } from "./use-semantic-providers";
@@ -59,16 +60,16 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
 }
 
-function formatDate(value: string | null | undefined): string {
+function formatDate(value: string | null | undefined, locale: string): string {
   if (value === undefined || value === null) return "—";
   const date = new Date(value);
   return Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" }).format(date)
+    ? new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(date)
     : "—";
 }
 
-function formatExpiry(value: string): string {
-  return formatDate(value);
+function formatExpiry(value: string, locale: string): string {
+  return formatDate(value, locale);
 }
 
 function randomClientKey(): string {
@@ -85,6 +86,8 @@ export function PersonalSemanticIndexPanel({
   onOpenSemanticSearch,
 }: Readonly<{ onError?: (message: string) => void; onOpenSemanticSearch?: () => void }>): React.JSX.Element {
   const translateUi = useTranslate();
+  const { language } = useAppearance();
+  const locale = language === "en" ? "en-US" : "zh-CN";
   const [state, setState] = useState<SemanticIndexState>("idle");
   const [confirmation, setConfirmation] = useState<SemanticConfirmation | null>(null);
   const [overview, setOverview] = useState<SemanticIndexOverview | null>(null);
@@ -206,7 +209,13 @@ export function PersonalSemanticIndexPanel({
 
   const busy = state === "preparing" || state === "executing";
   const summary = confirmation?.safeSummary;
-  const statusLabel = overviewLoading ? "读取中…" : overview?.label ?? "尚未建立/不可用";
+  const statusLabel = overviewLoading
+    ? translateUi("读取中…")
+    : overview?.status === "ready"
+      ? translateUi("可用于语义搜索")
+      : overview?.status === "building"
+        ? translateUi("正在建立")
+        : translateUi("尚未建立/不可用");
 
   return (
     <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="personal-semantic-index-title">
@@ -221,10 +230,10 @@ export function PersonalSemanticIndexPanel({
 
       <div className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3">
         <div className="rounded-xl bg-slate-50 px-3 py-3"><span className="block text-slate-400"><UiText text={"索引片段"} /></span><span className="mt-1 block text-sm font-semibold text-slate-900">{indexedEntryCount === null ? "—" : indexedEntryCount}</span></div>
-        <div className="rounded-xl bg-slate-50 px-3 py-3"><span className="block text-slate-400"><UiText text={"向量维度"} /></span><span className="mt-1 block text-sm font-semibold text-slate-900">{overview?.dimensions === undefined ? "—" : `${overview.dimensions} 维`}</span></div>
-        <div className="rounded-xl bg-slate-50 px-3 py-3"><span className="block text-slate-400"><UiText text={"最近完成"} /></span><span className="mt-1 block text-sm font-semibold text-slate-900">{formatDate(overview?.completedAt)}</span></div>
+        <div className="rounded-xl bg-slate-50 px-3 py-3"><span className="block text-slate-400"><UiText text={"向量维度"} /></span><span className="mt-1 block text-sm font-semibold text-slate-900">{overview?.dimensions === undefined ? "—" : `${overview.dimensions} ${translateUi("维")}`}</span></div>
+        <div className="rounded-xl bg-slate-50 px-3 py-3"><span className="block text-slate-400"><UiText text={"最近完成"} /></span><span className="mt-1 block text-sm font-semibold text-slate-900">{formatDate(overview?.completedAt, locale)}</span></div>
       </div>
-      {overviewError !== null ? <p className="mt-2 text-xs text-rose-700" role="alert">{overviewError}</p> : null}
+      {overviewError !== null ? <p className="mt-2 text-xs text-rose-700" role="alert"><UiErrorText text={overviewError} /></p> : null}
 
       <div className="mt-4">
         <label className="block text-xs font-semibold text-slate-600" htmlFor="personal-semantic-index-provider"><UiText text={"建立索引使用的向量模型"} /></label>
@@ -238,7 +247,7 @@ export function PersonalSemanticIndexPanel({
           <option value="">{providersLoading ? <UiText text={"正在读取已验证的向量模型…"} /> : <UiText text={"请选择向量模型"} />}</option>
           {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.billingMode === "platform" ? <UiText text={"平台默认"} /> : <UiText text={"个人 BYOK"} />} · {provider.name} · {provider.defaultEmbeddingModelId} · {provider.embeddingDimensions} {" "}<UiText text={"维"} /></option>)}
         </select>
-        {providersError !== null ? <div className="mt-1 text-xs text-rose-700" role="alert">{providersError} <button type="button" onClick={reloadProviders} className="font-semibold underline"><UiText text={"重新加载模型"} /></button></div> : null}
+        {providersError !== null ? <div className="mt-1 text-xs text-rose-700" role="alert"><UiErrorText text={providersError} /> <button type="button" onClick={reloadProviders} className="font-semibold underline"><UiText text={"重新加载模型"} /></button></div> : null}
         {!providersLoading && providersError === null && providers.length === 0 ? <p className="mt-1 text-xs text-slate-500"><UiText text={"平台暂未开放可用的向量模型，请联系管理员配置。你也可以到“配置 · 我的模型”连接自己的向量模型。"} /></p> : null}
       </div>
 
@@ -261,9 +270,9 @@ export function PersonalSemanticIndexPanel({
               ))}
             </ul>
           </div>
-          <p className="mt-2 text-xs text-amber-800"><UiText text={"确认有效期至"} />{" "}{formatExpiry(confirmation.expiresAt)}<UiText text={"；内容或模型配置变化后需要重新建立。"} /></p>
+          <p className="mt-2 text-xs text-amber-800"><UiText text={"确认有效期至"} />{" "}{formatExpiry(confirmation.expiresAt, locale)}<UiText text={"；内容或模型配置变化后需要重新建立。"} /></p>
           <p className="mt-2 text-xs font-semibold text-amber-900">{summary.billing?.mode === "platform"
-            ? `使用平台额度：预计预占 ${(summary.billing.estimatedCredits ?? 0).toLocaleString("zh-CN")}，按供应商返回的实际用量和当前倍率结算；用量不明时保留预占待核对。`
+            ? translateUi("使用平台额度：预计预占 {credits}，按供应商返回的实际用量和当前倍率结算；用量不明时保留预占待核对。").replace("{credits}", new Intl.NumberFormat(locale).format(summary.billing.estimatedCredits ?? 0))
             : <UiText text={"BYOK 请求不扣平台额度。"} />}</p>
           <div className="mt-3 flex flex-wrap justify-end gap-2">
             <button type="button" onClick={cancelConfirmation} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900"><UiText text={"取消"} /></button>
@@ -275,7 +284,7 @@ export function PersonalSemanticIndexPanel({
       {state === "executing" ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600" role="status"><UiText text={"正在请求向量模型并写入索引…"} /></p> : null}
       {state === "success" ? <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-xs text-emerald-800" role="status"><UiText text={"语义索引已建立，共写入"} />{" "}{indexedEntryCount ?? 0} {" "}<UiText text={"个片段，现在可以使用个人语义搜索。"} /></p> : null}
       {overview?.status === "ready" && onOpenSemanticSearch ? <button type="button" onClick={onOpenSemanticSearch} className="mt-3 min-h-10 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"><UiText text={"打开个人语义搜索"} /></button> : null}
-      {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</div> : null}
+      {error !== null ? <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert"><UiErrorText text={error} /></div> : null}
     </section>
   );
 }

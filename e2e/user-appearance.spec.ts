@@ -831,7 +831,7 @@ test("dashboard feedback keeps direct actions, title counts, independent graph a
   await expect(common.getByText("Choose an entry to start your day.", { exact: true })).toBeVisible();
   await expect(common.getByText("Save methods, experience, and agreements", { exact: true })).toBeVisible();
   const narrowFooterBounds = await Promise.all([attention.getByRole('link', { name: 'Notifications', exact: true }).boundingBox(), common.getByRole('link', { name: 'Read the guide', exact: true }).boundingBox()]);
-  expect(Math.abs(narrowFooterBounds[0]!.x - narrowFooterBounds[1]!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(narrowFooterBounds[0]!.x + narrowFooterBounds[0]!.width - narrowFooterBounds[1]!.x - narrowFooterBounds[1]!.width)).toBeLessThanOrEqual(1);
   await expectR02NoHorizontalOverflow(page, "reference dashboard cards English dark at 390px");
   await expectR02NoAccessibilityViolations(page, "reference dashboard cards English dark");
   await page.screenshot({ path: "test-results/ui-feedback/dashboard-en-dark-mobile.png", fullPage: true });

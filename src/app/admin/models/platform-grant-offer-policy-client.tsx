@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
@@ -190,7 +192,7 @@ export function PlatformGrantOfferPolicyPanel() {
           <div className="sm:col-span-2 flex items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"启用新版本会在同一事务内停用当前 active 版本；停用后不可恢复，需要新建策略版本。"} /></p><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{t(pending ? "处理中…" : "创建策略草稿")}</button></div>
         </form>
       </OperationPanel></div>
-      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{t(message)}</p> : null}
+      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}
       {policies.length > 0 ? <p className="mt-4 text-xs leading-5 text-slate-500"><UiText text={"最近审计："} />{t(actionLabels[policies[0]?.audits[0]?.action ?? "created"])}<UiText text={"于"} />{" "}{policies[0]?.audits[0] ? formatDate(policies[0].audits[0].createdAt, language) : t("暂无")}<UiText text={"；原因已记录但不在页面展示。"} /></p> : null}
     </section>
   );

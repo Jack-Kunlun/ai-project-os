@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -127,7 +129,7 @@ export function AdminFailureInboxClient() {
       </div>
       {data && data.partialSources.length > 0 ? <aside role="status" className="mx-4 mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-900 sm:mx-6">{t("安全查询上限提示：")} {data.partialSources.map((value) => t(SYSTEM_FAILURE_INBOX_SOURCE_LABELS[value])).join(", ")} {t("仅展示受控上限内的部分结果，不是完整清单；请结合实时测量时间继续复核。")}</aside> : null}
       <div aria-live="polite">
-        {loading ? <div className="px-6 py-16 text-center text-sm text-slate-500">{t("正在读取安全异常…")}</div> : error ? <div role="alert" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700">{t(error)}</p><p className="mt-2 text-xs text-slate-500">{t("请刷新页面或缩小筛选范围。")}</p></div> : data?.entries.length === 0 ? <div className="px-6 py-16 text-center text-sm text-slate-500">{t("当前测量没有符合条件的异常。")}</div> : <div className="grid gap-4 p-4 sm:p-6">{data?.entries.map((entry) => <FailureEntryCard key={entry.entryId} entry={entry} />)}</div>}
+        {loading ? <div className="px-6 py-16 text-center text-sm text-slate-500">{t("正在读取安全异常…")}</div> : error ? <div role="alert" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700"><UiErrorText text={error} /></p><p className="mt-2 text-xs text-slate-500">{t("请刷新页面或缩小筛选范围。")}</p></div> : data?.entries.length === 0 ? <div className="px-6 py-16 text-center text-sm text-slate-500">{t("当前测量没有符合条件的异常。")}</div> : <div className="grid gap-4 p-4 sm:p-6">{data?.entries.map((entry) => <FailureEntryCard key={entry.entryId} entry={entry} />)}</div>}
       </div>
     </section>
   </div>;

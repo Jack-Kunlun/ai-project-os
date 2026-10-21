@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import { useState, type FormEvent } from "react";
@@ -86,7 +88,7 @@ export function BrowserWebSourceForm({ projectId, onCreated }: { projectId: stri
       <label className="block text-xs font-medium text-slate-700"><UiText text={"站点用户名"} /><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required maxLength={512} className={inputClass} /></label>
       <label className="block text-xs font-medium text-slate-700"><UiText text={"站点密码"} /><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required maxLength={4096} className={inputClass} /></label>
     </div> : null}
-    {message ? <p role="status" className="mt-4 text-xs text-slate-600">{message}</p> : null}
+    {message ? <p role="status" className="mt-4 text-xs text-slate-600"><UiFeedbackText text={message} /></p> : null}
     <button disabled={pending} className="mt-5 w-full rounded-xl bg-cyan-700 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-600 disabled:opacity-50">{pending ? <UiText text={"安全保存中…"} /> : <UiText text={"保存浏览器来源"} />}</button>
   </form>
   </OperationPanel>;
@@ -137,7 +139,7 @@ export function BrowserWebSourceCard({ projectId, source, canManage, canReview, 
     <div className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><UiText text={"状态："} />{source.status === "disabled" ? <UiText text={"已停用"} /> : source.status === "error" ? <UiText text={"需要处理"} /> : <UiText text={"已启用"} />}</div><div><UiText text={"最近抓取："} />{time(source.lastFetchedAt)}</div><div>{source.authenticationMode === "siteForm" ? `私有预览：${source.pendingReview ? "可查看" : "暂无内容"}` : `发布：${source.pointer ? "已有活动版本" : source.pendingReview ? "等待审核" : "尚未发布"}`}</div></div>
     {source.pendingReview ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">{source.authenticationMode === "siteForm" ? <UiText text={"Owner 私有预览"} /> : <UiText text={"待审核"} />}：{source.pendingReview.title} · {time(source.pendingReview.fetchedAt)}</p> : null}
     {source.lastErrorCode ? <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700"><UiText text={"安全错误码："} />{source.lastErrorCode}</p> : null}
-    {message ? <p role="status" className="mt-4 text-xs text-slate-600">{message}</p> : null}
+    {message ? <p role="status" className="mt-4 text-xs text-slate-600"><UiFeedbackText text={message} /></p> : null}
     {canManage ? <OperationPanel title={translateUi("管理浏览器来源")} triggerLabel="管理来源" open={operationOpen} onOpenChange={setOperationOpen} disabled={pending} description="停用来源会退役已发布版本；手动抓取不会自动发布内容。">
       <div className="flex max-w-2xl flex-wrap justify-end gap-2">
         {source.authenticationMode === "siteForm" ? <form onSubmit={(event) => { event.preventDefault(); void action("/browser/credential", "PUT", { username, password }, "站点凭据已更新，旧预览已清除。"); }} className="w-full rounded-2xl bg-slate-50 p-4">

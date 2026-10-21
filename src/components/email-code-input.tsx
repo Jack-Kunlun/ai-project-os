@@ -1,5 +1,7 @@
 "use client";
 
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import dynamic from "next/dynamic";
 import type { GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
@@ -169,7 +171,7 @@ export function EmailCodeInput({ id, email, purpose, availability, code, onCodeC
         </button>
       </div>
       <p id={`${id}-message`} role={currentMessage ? "status" : undefined} className={`mt-1.5 text-xs leading-5 ${currentMessage?.tone === "error" || unavailable ? "text-amber-800" : "text-slate-500"}`}>
-        {t(currentMessage?.text ?? (unavailable ? "邮箱服务暂不可用，请稍后重试或联系管理员。" : "验证码有效期为 10 分钟。"))}
+        {currentMessage ? <UiFeedbackText text={currentMessage.text} /> : t(unavailable ? "邮箱服务暂不可用，请稍后重试或联系管理员。" : "验证码有效期为 10 分钟。")}
       </p>
       {captchaRequest ? <GraphicCaptchaDialog
         key={`email:${captchaRequest.email}:${captchaRequest.purpose}:${captchaRequest.sequence}`}

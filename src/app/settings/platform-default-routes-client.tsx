@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
@@ -419,7 +421,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation, 
         <div className="flex items-end gap-2"><button disabled={pending || providerId === ""} className="min-w-0 flex-1 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "处理中…" : editingRouteId === null ? "创建路由草稿" : "保存草稿修改"}</button>{editingRouteId !== null ? <button type="button" disabled={pending} onClick={cancelDraftEdit} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 disabled:opacity-40">取消编辑</button> : null}</div>
       </form> : <p className="mt-6 rounded-2xl border border-indigo-100 bg-white px-5 py-4 text-xs leading-5 text-slate-600">路由写入已关闭。请前往 <a href="/admin/models" className="font-semibold text-indigo-700 underline underline-offset-2">平台能力配置</a> 完成选择、真实测试和启用。</p>}
 
-      {message ? <p role="status" className="mt-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-700">{message}</p> : null}
+      {message ? <p role="status" className="mt-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-700"><UiFeedbackText text={message} /></p> : null}
 
       <div className="mt-7 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {OPERATIONS.map((entry) => {

@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText } from "@/components/appearance-provider";
 import Link from "next/link";
@@ -185,8 +187,8 @@ export function ProjectProcessingTasks({ projectId, onChanged }: {
       <button type="button" onClick={() => setRefreshToken((value) => value + 1)} className="min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700"><UiText text={"刷新"} /></button>
     </div>
     {pendingCount > 0 ? <p role="status" className="mt-3 text-xs text-indigo-700">{pendingCount} {" "}<UiText text={"项处理中"} />{polling ? <UiText text={"，每 5 秒更新一次"} /> : <UiText text={"，自动刷新已暂停，可手动刷新"} />}</p> : null}
-    {notice ? <p role="status" className="mt-3 text-sm text-emerald-700">{notice}</p> : null}
-    {error ? <p role="alert" className="mt-3 text-sm text-rose-700">{error}</p> : null}
+    {notice ? <p role="status" className="mt-3 text-sm text-emerald-700"><UiFeedbackText text={notice} /></p> : null}
+    {error ? <p role="alert" className="mt-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
     {loading ? <p className="mt-4 text-sm text-slate-500"><UiText text={"正在读取任务…"} /></p> : error ? null : jobs.length === 0 ? <p className="mt-4 rounded-lg bg-slate-50 px-4 py-5 text-sm text-slate-500"><UiText text={"目前没有识别或整理任务。可以回到资料栏目添加内容或确认 AI 整理。"} /></p> : <div className="mt-4 space-y-2">{jobs.map((job) => {
       const progress = job.progressTotal > 0 ? Math.min(100, Math.round(job.progressCurrent / job.progressTotal * 100)) : null;
       const canCancel = job.canCancel && canceling !== job.id;

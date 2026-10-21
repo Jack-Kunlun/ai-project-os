@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
@@ -120,7 +122,7 @@ export function PersonalKnowledgeGraphTools() {
     <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
       {dialog}
       <div className="mt-4"><h2 className="text-lg font-semibold"><UiText text={"个人知识关系维护"} /></h2><p className="mt-2 text-sm text-slate-600"><UiText text={"同时查看你手动确认的文档关联，以及从当前知识版本提取并经你审核的实体关系。"} /></p></div>
-      {message ? <p role={message.error ? "alert" : "status"} className={`mt-5 rounded-xl px-4 py-3 text-sm ${message.error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{t(message.text)}</p> : null}
+      {message ? <p role={message.error ? "alert" : "status"} className={`mt-5 rounded-xl px-4 py-3 text-sm ${message.error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}><UiFeedbackText text={message.text} /></p> : null}
       {loading ? <div role="status" className="mt-8 h-72 animate-pulse rounded-3xl bg-white" /> : graph === null ? <button type="button" onClick={() => void load()} className="mt-5 text-sm font-semibold text-indigo-700"><UiText text={"重新加载"} /></button> : <>
         <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
           <h2 className="text-xl font-semibold"><UiText text={"文档与来源关系"} /></h2><p className="mt-2 text-xs text-slate-500"><UiText text={"仅展示你明确建立的文档关联；虚线表示文档版本已变化。"} /></p>

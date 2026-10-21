@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -93,7 +95,7 @@ export function ConnectionsClient({ username, adminMode = false }: { username: s
 
         <GitConfigurationGuide />
 
-        {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
+        {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
 
         <div className="mt-8 grid gap-7 xl:grid-cols-[.82fr_1.18fr]">
           <ConnectionForm catalog={catalog} onCreated={(connection) => setConnections((current) => [...current, connection])} />
@@ -192,7 +194,7 @@ function ConnectionForm({ catalog, onCreated }: { catalog: CatalogEntry[]; onCre
       {transport === "ssh" ? <Field label={translateUi("SSH known_hosts 公钥记录")}><textarea className="field min-h-24 font-mono text-xs" value={sshKnownHost} onChange={(event) => setSshKnownHost(event.target.value)} placeholder="git.company.com ssh-ed25519 AAAA…" required /></Field> : null}
       <button type="button" onClick={() => setAdvanced((value) => !value)} className="mt-5 text-xs font-semibold text-indigo-600">{advanced ? <UiText text={"收起安全选项"} /> : <UiText text={"展开自建服务安全选项"} />}</button>
       {advanced ? <div className="mt-4 rounded-2xl bg-slate-50 p-4"><label className="flex items-start gap-3 text-sm text-slate-700"><input type="checkbox" checked={allowPrivateNetwork} onChange={(event) => setAllowPrivateNetwork(event.target.checked)} className="mt-1" /><span><strong className="block"><UiText text={"允许访问内网地址"} /></strong><span className="mt-1 block text-xs leading-5 text-slate-500"><UiText text={"仅用于明确受信的公司内网 Git 服务；云元数据地址始终禁止。"} /></span></span></label>{transport === "https" ? <Field label={translateUi("自定义 CA 证书（可选）")}><textarea className="field min-h-28 font-mono text-xs" value={tlsCaCertificate} onChange={(event) => setTlsCaCertificate(event.target.value)} placeholder="-----BEGIN CERTIFICATE-----" /></Field> : null}</div> : null}
-      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
+      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}
       <button disabled={pending || catalog.length === 0} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50">{pending ? <UiText text={"加密保存中…"} /> : <UiText text={"加密保存连接"} />}</button>
       <style jsx>{`.field{margin-top:.5rem;width:100%;border-radius:.75rem;border:1px solid #cbd5e1;background:white;padding:.72rem .9rem;font-size:.875rem;color:#0f172a;outline:none}.field:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.14)}.field:disabled{background:#f1f5f9;color:#64748b}`}</style>
     </form>
@@ -291,7 +293,7 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
       </div>
       <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p><UiText text={"内网访问："} />{connection.allowPrivateNetwork ? <UiText text={"已显式允许"} /> : <UiText text={"禁止"} />}</p><p><UiText text={"最近验证："} />{connection.lastTestedAt ? new Date(connection.lastTestedAt).toLocaleString("zh-CN") : <UiText text={"尚未验证"} />}</p>{connection.lastErrorCode ? <p className="sm:col-span-2 text-rose-600"><UiText text={"最近错误："} />{connection.lastErrorCode}</p> : null}</div>
       {connection.status !== "disabled" ? <form onSubmit={test} className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[1fr_8rem_auto]"><input value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder={translateUi("组织/仓库")} required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><input value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><button disabled={testing} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{testing ? <UiText text={"验证中…"} /> : <UiText text={"只读验证"} />}</button></form> : null}
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void toggleEnabled()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? <UiText text={"停用中…"} /> : <UiText text={"停用连接"} />}</button> : <div className="flex flex-wrap items-center gap-2"><button onClick={() => void toggleEnabled()} disabled={disabling} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text={"重新启用"} /></button><button onClick={() => void removeConnection()} disabled={disabling} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"永久删除"} /></button></div>}</div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void toggleEnabled()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? <UiText text={"停用中…"} /> : <UiText text={"停用连接"} />}</button> : <div className="flex flex-wrap items-center gap-2"><button onClick={() => void toggleEnabled()} disabled={disabling} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text={"重新启用"} /></button><button onClick={() => void removeConnection()} disabled={disabling} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"永久删除"} /></button></div>}</div>
       {connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiText text={"只有未被任何项目仓库关联的连接可以永久删除；仍有历史关联时系统会拒绝删除。"} /></p> : null}
     </article>{dialog}</>
   );

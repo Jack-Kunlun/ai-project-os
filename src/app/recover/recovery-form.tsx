@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
@@ -63,7 +65,7 @@ export function RecoveryForm({ phoneAuthStatus }: { phoneAuthStatus: "disabled" 
         <p className={styles.recoveryHint}>{t("重设成功后会退出所有设备。没有绑定手机号或号码已不可用时，请使用已绑定的其他登录方式；此处无法变更账号归属。")}</p>
         <button disabled={!challengeId || code.length !== 6 || !password || !confirmation} className={styles.submitButton}>{pending ? t("正在验证…") : t("验证并重设密码")}</button>
       </fieldset>
-      {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{t(error)}</p> : null}
+      {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
       <Link href="/login" className={styles.formReturnLink}>{t("返回登录")}</Link>
     </form>
   );

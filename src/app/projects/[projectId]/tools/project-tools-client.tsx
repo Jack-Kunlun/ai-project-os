@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
@@ -320,8 +322,8 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
         </section>
 
         <p className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-950"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p>
-        {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</p> : null}
-        {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load({ showLoading: true })} className={quietButtonClass}><UiText text={"重试"} /></button></div> : null}
+        {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}><UiFeedbackText text={message.text} /></p> : null}
+        {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span><UiErrorText text={loadError} /></span><button type="button" onClick={() => void load({ showLoading: true })} className={quietButtonClass}><UiText text={"重试"} /></button></div> : null}
 
         {loading ? <LoadingState /> : (
           <>
@@ -351,7 +353,7 @@ function ProposalPanel({ enabled, connections, pending, operationError, onErrorD
 
   if (!enabled) return <p className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600"><UiText text={"当前账户没有创建权限，或项目已归档。连接所有者确认和项目 Owner 确认仍由各自权限控制。"} /></p>;
   return <OperationPanel title={translateUi("提案只读 MCP 委托")} triggerLabel="提案只读 MCP 委托" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending} description="只能选择当前账户已验证的个人连接。提交后仍需连接所有者和项目 Owner 独立确认。">
-    {operationError ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{operationError}</p> : null}
+    {operationError ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={operationError} /></p> : null}
     {connections.length === 0 ? <p className="max-w-2xl rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"><UiText text={"当前没有可进入项目委托的合格个人 MCP 连接。请先在“我的 MCP 连接”完成受限地址解析、initialize 和 tools/list 只读测试，再返回创建委托。"} /></p> : <form onSubmit={submit} className="max-w-2xl space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5"><label className="block text-xs font-semibold text-slate-700"><UiText text={"个人 MCP 连接"} /><select className={connectionFieldClass} value={selectedConnectionId} onChange={(event) => setConnectionId(event.target.value)}>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label><label className="block text-xs font-semibold text-slate-700"><UiText text={"有效期截止"} /><input required type="datetime-local" className={connectionFieldClass} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label><div className="rounded-2xl bg-white/70 px-3 py-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-slate-800"><UiText text={"本期固定规则"} /></p><p className="mt-1"><UiText text={"委托只授予只读范围；外部调用需单独审批和派发，自动化仍关闭。"} /></p></div><button type="submit" disabled={pending || selectedConnectionId === ""} className={`${primaryButtonClass} min-h-11 w-full`}>{pending ? <UiText text={"提交中…"} /> : <UiText text={"提交委托提案"} />}</button></form>}
   </OperationPanel>;
 }

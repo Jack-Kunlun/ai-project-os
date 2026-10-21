@@ -396,7 +396,7 @@ export function McpReviewWorkbench() {
     </div>
 
     </> : null}
-    {notice ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{t(notice)}</p> : null}
+    {notice ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><UiFeedbackText text={notice} /></p> : null}
     {selectedId !== "" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { setSelectedId(""); window.scrollTo(0, 0); }} className={PARENT_PAGE_LINK_CLASS_NAME}><ShellIcon name="back" className="app-icon--compact" /><UiText text={"返回审核列表"} /></button><button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"刷新详情"} /></button></div> : null}
     <div className="mt-6 min-w-0">
       {selectedId === "" ? <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-list-title">

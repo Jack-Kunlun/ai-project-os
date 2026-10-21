@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { AuditDetailDrawer } from "@/app/admin/audit/audit-detail-drawer";
@@ -293,7 +295,7 @@ export function AdminAuditClient() {
           <button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("下一页")}</button>
         </div>
       </div>
-      {loading ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("正在读取审计快照…")}</div> : error ? <div role="status" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700">{t(error)}</p><p className="mt-2 text-xs text-slate-500">{t("请刷新页面或缩小筛选范围。")}</p></div> : data?.events.length === 0 ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("当前快照没有符合条件的记录。")}</div> : <div className="overflow-x-auto">
+      {loading ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("正在读取审计快照…")}</div> : error ? <div role="status" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700"><UiErrorText text={error} /></p><p className="mt-2 text-xs text-slate-500">{t("请刷新页面或缩小筛选范围。")}</p></div> : data?.events.length === 0 ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("当前快照没有符合条件的记录。")}</div> : <div className="overflow-x-auto">
         <table className="w-full min-w-[56.25rem] table-fixed text-left text-sm">
           <caption className="sr-only">{t("平台审计记录，按时间倒序")}</caption>
           <colgroup>{COLUMN_WIDTHS.map((width, index) => <col key={index} className={width} />)}</colgroup>

@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useState, type FormEvent } from "react";
 import { UiText, useTranslate } from "@/components/appearance-provider";
@@ -47,7 +49,7 @@ export function ConnectionEditDialog({ kind, connection, onClose, onSaved }: {
       <label className="block text-sm font-semibold text-slate-700"><UiText text={"连接名称"} /><input autoFocus value={name} onChange={(event) => setName(event.target.value)} required maxLength={80} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal outline-none focus:border-indigo-300" />
       </label>
       <p className="text-xs leading-5 text-slate-500"><UiText text={"凭据轮换、重新测试、停用等会影响安全证据的变更，请在连接详情中的安全治理区完成。"} /></p>
-      {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{t(error)}</p> : null}
+      {error ? <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700"><UiErrorText text={error} /></p> : null}
       <ConnectionDialogActions><button type="submit" form={formId} disabled={pending || !name.trim()} className="ml-auto min-h-10 rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : t("保存修改")}</button></ConnectionDialogActions>
     </form>
   </ConnectionCreateDialog>;

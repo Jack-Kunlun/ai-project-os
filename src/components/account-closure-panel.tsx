@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { SmsCodeInput } from "@/components/sms-code-input";
@@ -28,7 +30,7 @@ export function AccountClosurePanel({hasLocalPassword,phoneE164,phoneAuthStatus,
    {method==="password"&&hasLocalPassword?<label className="block text-sm font-semibold" htmlFor="closure-password"><UiText text="当前账号密码" /><input id="closure-password" type="password" value={password} onChange={e=>setPassword(e.target.value)} maxLength={128} autoComplete="current-password" required disabled={pending} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal"/></label>:phoneE164?<><p className="text-sm text-slate-600"><UiText text="验证已绑定手机号：" />+86 {phoneE164.slice(3,6)}****{phoneE164.slice(-4)}</p><fieldset disabled={pending}><SmsCodeInput id="account-closure-code" phoneE164={phoneE164} purpose="close" availability={smsAvailable?"available":"unavailable"} code={code} onCodeChange={setCode} onChallengeIdChange={setChallengeId}/></fieldset></>:<p className="text-sm text-amber-800"><UiText text="请先在上方「账号密码」设置密码并重新登录，再验证注销。" /></p>}
    {!available&&phoneE164?<p className="text-sm text-amber-800"><UiText text="短信验证暂不可用。已有账号密码可通过密码验证注销；仅短信登录的账号可先设置账号密码。" /></p>:null}
    <label className="block text-sm font-semibold" htmlFor="closure-confirmation"><UiText text="输入「注销账号」以确认" /><input id="closure-confirmation" value={confirmation} onChange={e=>setConfirmation(e.target.value)} required maxLength={4} autoComplete="off" disabled={pending} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal"/></label>
-   {error?<p role="alert" className="text-sm text-rose-700">{t(error)}</p>:null}
+   {error?<p role="alert" className="text-sm text-rose-700"><UiErrorText text={error} /></p>:null}
    <div className="flex gap-3"><button disabled={pending||!available||confirmation!=="注销账号"||(method==="sms"&&!challengeId)} className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><UiText text={pending?"正在注销…":"确认注销"} /></button>{!embedded?<button type="button" disabled={pending} onClick={()=>{setOpen(false);setPassword("");setCode("");setConfirmation("");setError(null);}} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm"><UiText text="取消" /></button>:null}</div>
   </form>}
  </section>;

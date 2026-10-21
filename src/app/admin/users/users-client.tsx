@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -108,7 +110,7 @@ export function AdminUsersClient({ username }: { username: string }) {
         </div>
       </section>
 
-      {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{t(error)}</p> : null}
+      {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
       <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="admin-users-list-title">
         <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
           <h2 id="admin-users-list-title" className="text-lg font-semibold text-slate-900">{t("普通用户")}</h2>

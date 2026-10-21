@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
@@ -191,6 +193,6 @@ export function ProjectFactImport({ projectId, sourceIds, onChanged }: {
         {result.review > 0 ? <Link href={buildProjectHref(projectId, "materials", { view: "review", from: "materials" })} className="inline-flex min-h-11 items-center px-3 py-2 text-sm font-semibold text-indigo-700 underline"><UiText text={"处理待核对内容"} /></Link> : null}
       </div>
     </div> : null}
-    {error ? <div role="alert" className="mt-3 text-sm text-rose-700"><p><UiText text={"原始资料已保留。"} />{error}</p>{!running ? <button type="button" onClick={() => setRetry((value) => value + 1)} className="mt-2 font-semibold underline"><UiText text={"重新核对整理范围"} /></button> : null}<Link href={`/projects/${projectId}/control`} className="ml-4 underline"><UiText text={"查看模型配置"} /></Link></div> : null}
+    {error ? <div role="alert" className="mt-3 text-sm text-rose-700"><p><UiText text={"原始资料已保留。"} /><UiErrorText text={error} /></p>{!running ? <button type="button" onClick={() => setRetry((value) => value + 1)} className="mt-2 font-semibold underline"><UiText text={"重新核对整理范围"} /></button> : null}<Link href={`/projects/${projectId}/control`} className="ml-4 underline"><UiText text={"查看模型配置"} /></Link></div> : null}
   </section>;
 }

@@ -392,7 +392,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
         </div>
       </div> : null}
       {rejectPreview ? <div className="mt-5 rounded-2xl border border-rose-100 bg-rose-50 p-5" role="dialog" aria-label={t("拒绝会员申请确认")}><p className="text-sm font-semibold text-rose-950"><UiText text={"确认拒绝会员申请"} /></p><p className="mt-2 text-xs leading-6 text-rose-800"><UiText text={"该预览有效至"} />{" "}{dateTime(rejectPreview.preview.expiresAt, language)}<UiText text={"，确认后申请将进入终态。"} /></p><div className="mt-4 flex flex-wrap justify-end gap-3"><button type="button" disabled={pending} onClick={() => setRejectPreview(null)} className="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-xs font-semibold text-rose-800"><UiText text={"取消"} /></button><button type="button" disabled={pending} onClick={() => void executeRejectPreview()} className="rounded-xl bg-rose-700 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"确认并执行"} /></button></div></div> : null}
-      {message ? <p role="alert" className="mt-4 text-sm leading-6 text-rose-600">{t(localizedMessage ?? "")}</p> : null}
+      {message ? <p role="alert" className="mt-4 text-sm leading-6 text-rose-600">{message === `请输入当前用户名“${item.username}”完成撤销确认` ? localizedMessage : <UiErrorText text={message} />}</p> : null}
     </div>
   </OperationPanel>;
 }

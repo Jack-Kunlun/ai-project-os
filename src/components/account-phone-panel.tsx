@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -65,7 +67,7 @@ export function AccountPhonePanel({ phoneE164, hasLocalPassword, phoneAuthStatus
             <p className="text-xs leading-6 text-slate-500"><UiText text={changing ? "需同时验证原号码和新号码。原号码不可用时，暂无法自助换绑。" : "绑定需要验证当前密码及手机号。"} /><UiText text="操作成功后，所有设备需重新登录。" /></p>
             <div className="flex flex-wrap gap-3"><button disabled={!challengeId || code.length !== 6 || (changing ? !oldChallengeId || oldCode.length !== 6 : !password)} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"><UiText text={pending ? "正在验证…" : changing ? "确认换绑并重新登录" : "确认绑定并重新登录"} /></button>{!embedded ? <button type="button" onClick={cancel} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600"><UiText text="取消" /></button> : null}</div>
           </fieldset>
-          {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800">{t(error)}</p> : null}
+          {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800"><UiErrorText text={error} /></p> : null}
         </form>
       )}
     </section>

@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
@@ -171,9 +173,9 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
       <h1 className="mt-2 text-2xl font-semibold"><UiText text={"向外部客户端提供 MCP"} /></h1>
       <p className="mt-3 text-sm leading-6 text-slate-600"><UiText text={"当前提供项目摘要、最多 10 条最近已确认事实与来源，以及最多 10 项最近目标和工作项。OAuth 授权绑定客户端标识、项目和只读范围；访问令牌仍是可转移的 Bearer 密钥。每次工具读取还需要项目 Owner 单独确认，批准 5 分钟内只能用一次。"} /></p>
       <p className="mt-2 text-xs text-slate-500"><UiText text={"服务地址：当前站点的"} />{" "}<code>/api/mcp</code></p>
-      {message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700">{message}</p> : null}
+      {message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700"><UiFeedbackText text={message} /></p> : null}
       {legacyBearerEnabled ? <div className="mt-5"><p className="mb-3 text-xs leading-5 text-amber-800"><UiText text={"本地兼容模式：可创建旧式可转移 Bearer 凭证；此方式在生产环境始终关闭。"} /></p><OperationPanel title={translateUi("创建 MCP 输出凭证")} triggerLabel="创建兼容凭证" open={issueOpen} onOpenChange={(open) => { setIssueOpen(open); if (open) setMessage(null); }} disabled={busy} description="凭证只显示一次。创建后请立即复制并妥善保存。">
-        {message ? <p role="status" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{message}</p> : null}
+        {message ? <p role="status" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700"><UiFeedbackText text={message} /></p> : null}
         <form onSubmit={(event) => void issue(event)} className="max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <label className="grid gap-2 text-sm font-medium"><UiText text={"客户端名称"} /><input required maxLength={80} value={label} onChange={(event) => setLabel(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder={translateUi("例如：桌面助手")} /></label>
           <label className="mt-4 grid gap-2 text-sm font-medium"><UiText text={"有效天数"} /><input type="number" min={1} max={30} value={lifetimeDays} onChange={(event) => setLifetimeDays(Number(event.target.value))} className="min-h-11 w-28 rounded-xl border border-slate-300 px-3" /></label>
@@ -191,7 +193,7 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
       <div className="mt-4 space-y-3">{grants.length === 0 ? <p className="text-sm text-slate-500"><UiText text={"暂无凭证。"} /></p> : grants.map((grant) => <div key={grant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
         <div><p className="break-words font-medium">{grant.oauthClientName ?? grant.label}</p><p className="mt-1 break-all text-xs text-slate-500">{grant.grantType === "oauth" ? `OAuth 客户端 ID：${grant.oauthClientId ?? "客户端标识不可用"}` : <UiText text={"旧式 Bearer 凭证"} />}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"到期："} />{new Date(grant.expiresAt).toISOString()} · {grant.revokedAt ? <UiText text={"已撤销"} /> : <UiText text={"未撤销"} />}</p></div>
         {!grant.revokedAt && <div className="flex flex-wrap gap-2"><OperationPanel title={translateUi("准备单次读取授权")} triggerLabel="批准下一次读取" open={operationGrantId === grant.id} onOpenChange={(open) => { setOperationGrantId(open ? grant.id : null); if (open) setMessage(null); }} disabled={busy} description="填写接收方声明的外部服务、模型和读取内容。确认前会展示本次外发内容，并要求再次输入确认语。">
-          {message ? <p role="status" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{message}</p> : null}
+          {message ? <p role="status" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700"><UiFeedbackText text={message} /></p> : null}
           <div className="max-w-2xl space-y-4 rounded-2xl border border-slate-200 bg-white p-5">
             <p className="text-sm text-slate-600"><UiText text={"授权对象："} /><strong className="text-slate-900">{grant.oauthClientName ?? grant.label}</strong>{grant.oauthClientId ? ` · OAuth 客户端 ID：${grant.oauthClientId}` : ""}</p>
             <div className="grid gap-3 sm:grid-cols-2">

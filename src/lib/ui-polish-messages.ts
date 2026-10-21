@@ -1,5 +1,10 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "邀请接受失败": "Could not accept the invitation",
+  "任务已取消，尚未发送的请求不会继续执行。": "The task was canceled. Requests that have not been sent will not continue.",
+  "请填写申请说明": "Enter a reason for the application",
+  "倍率请输入 0.0001 到 10.0000 之间的数字。 ": "Enter a multiplier between 0.0001 and 10.0000.",
+  "文件已从活动资料中移除；既有记忆索引会显示为待重建。重新上传同一文件可以恢复。 ": "The file was removed from active materials. Existing memory indexes will need rebuilding. Uploading the same file can restore it.",
   "原始资料已删除。": "The original material was deleted.",
   "条目已更新，已回到候选状态。": "The item was updated and returned to candidate status.",
   "候选条目已保存。": "The candidate item was saved.",

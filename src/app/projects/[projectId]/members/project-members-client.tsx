@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText } from "@/components/appearance-provider";
 import Link from "next/link";
@@ -76,7 +78,7 @@ export function ProjectMembersClient({ projectId, username, isSystemAdmin, embed
       {!embedded ? <div className="mb-5"><BackButton fallbackHref={`/projects/${projectId}`} /></div> : null}
       {!embedded ? <h1 className="text-3xl font-semibold"><UiText text={"成员权限"} /></h1> : null}
       <p className="mt-2 text-sm text-slate-600"><UiText text={"查看当前项目的有效权限并管理显式授权；团队级账号与邀请在团队空间处理。"} /></p>
-      {error ? <p role="alert" className="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
+      {error ? <p role="alert" className="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
       {loading ? <p role="status" className="mt-7 text-sm text-slate-500"><UiText text={"正在加载成员…"} /></p> : payload ? <>
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-5">
           <div><h2 className="text-lg font-semibold">{payload.project.name}</h2><p className="mt-1 text-xs text-slate-500">{payload.canManage ? <UiText text={"你拥有当前项目的 Owner 权限，可为已有团队成员设置 Editor 或 Viewer 权限。"} /> : <UiText text={"你可以查看当前项目已明确授权的成员。"} />}</p></div>
@@ -97,7 +99,7 @@ function MemberRoleEditor({ member, disabled, error, onSave }: { member: Member;
     <div className="max-w-xl rounded-md border border-slate-200 bg-white p-5">
       <label className="block text-sm font-semibold text-slate-700"><UiText text={"项目权限"} /><select value={role} onChange={(event) => setRole(event.target.value as typeof role)} disabled={disabled} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal"><option value=""><UiText text={"不单独授权"} /></option>{member.canGrant || member.projectRole === "viewer" ? <option value="viewer" disabled={!member.canGrant}><UiText text={"Viewer · 查看"} /></option> : null}{member.canGrant || member.projectRole === "editor" ? <option value="editor" disabled={!member.canGrant}><UiText text={"Editor · 编辑"} /></option> : null}</select></label>
       {!member.canGrant ? <p className="mt-3 text-xs text-amber-700"><UiText text={"该成员已离开团队或账号停用，只能撤销现有项目授权。"} /></p> : null}
-      {error ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{error}</p> : null}
+      {error ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
       <button type="button" disabled={disabled || (role || null) === member.projectRole} onClick={async () => { if (await onSave(role || null)) setOpen(false); }} className="mt-4 min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"保存权限"} /></button>
     </div>
   </OperationPanel>;

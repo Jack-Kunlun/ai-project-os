@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -261,7 +263,7 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
 
       {error ? (
         <div className={styles.card} role="alert">
-          <p className={styles.loadError}>{t(error)}<br />{t("读取失败时不会用旧数据替代。")}</p>
+          <p className={styles.loadError}><UiErrorText text={error} /><br />{t("读取失败时不会用旧数据替代。")}</p>
           <div className={styles.loadMore}>
             <span>{t("用量记录暂不可用")}</span>
             <button type="button" className={styles.retryButton} onClick={() => setRequestVersion((value) => value + 1)}>{t("重试")}</button>

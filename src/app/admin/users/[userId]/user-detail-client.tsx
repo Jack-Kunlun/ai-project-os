@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -395,7 +397,7 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
 
     </div>
     <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm" aria-labelledby="credits-summary-title"><div className="flex flex-wrap items-start justify-between gap-4"><div><h2 id="credits-summary-title" className="text-lg font-semibold">{t("额度摘要")}</h2><p className="mt-1 text-xs text-slate-500">{t(creditStatusLabel(summary.credits.difference))} · {summary.credits.activeGrantCount} {t("条有效记录")} · {t("可用")} {summary.credits.availableTokens.toLocaleString(language)} · {t("预留")} {summary.credits.reservedTokens.toLocaleString(language)}</p></div><Link href={`/admin/credits?userId=${encodeURIComponent(userId)}`} className="rounded-xl bg-indigo-700 px-3 py-2.5 text-xs font-semibold text-white">{t("进入额度操作")}</Link></div><RecordList records={detail.records.credits.map((record) => ({ label: record.event, value: `${record.status} · ${record.amount.toLocaleString(language)} / ${record.remainingTokens.toLocaleString(language)} · ${date(record.occurredAt, language)}` }))} empty={t("暂无额度变更记录")} /></section>
-    {message ? <p role="status" className="mt-4 rounded-2xl bg-slate-100 px-4 py-3 text-xs leading-5 text-slate-700">{t(message)}</p> : null}
+    {message ? <p role="status" className="mt-4 rounded-2xl bg-slate-100 px-4 py-3 text-xs leading-5 text-slate-700"><UiFeedbackText text={message} /></p> : null}
   </div>;
 }
 

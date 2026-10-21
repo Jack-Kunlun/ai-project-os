@@ -1,5 +1,5 @@
 "use client";
-import { UiErrorText } from "@/components/ui-error-text";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 
 import { useState, type FormEvent } from "react";
@@ -204,7 +204,7 @@ export function LoginForm({
               </div>
             ) : null}
 
-            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}>{t(notice)}</p> : null}
+            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}><UiFeedbackText text={notice} /></p> : null}
             {smsSuccessNotice ? <p role="status" className={`${styles.notice} ${styles.noticeSuccess}`}>{t(smsSuccessNotice)}</p> : null}
             {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
 

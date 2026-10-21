@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
@@ -332,8 +334,8 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
             </section>
 
             {currentData.project.archivedAt ? <p className={styles.archiveNotice}><UiText text={"项目已归档，当前概览为只读状态。"} /></p> : null}
-            {error ? <p role="alert" className={styles.inlineError}>{t(error)}</p> : null}
-            {message ? <p role="status" className={styles.inlineSuccess}>{t(message)}</p> : null}
+            {error ? <p role="alert" className={styles.inlineError}><UiErrorText text={error} /></p> : null}
+            {message ? <p role="status" className={styles.inlineSuccess}><UiFeedbackText text={message} /></p> : null}
 
             <section className={styles.metrics} aria-label={t("项目关键指标")}>
               <MetricCard label={t("进行中工作")} value={currentData.planError ? "—" : activeWorkCount ?? 0} detail={currentData.planError ? t("项目计划暂不可用") : currentData.plan ? `${blockedWorkCount ?? 0} ${t("项受阻")}` : t("项目计划尚未设置")} href={`/projects/${projectId}/plan`} />
@@ -352,7 +354,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
               <div className={styles.mainColumn}>
                 <article id="current-state" tabIndex={-1} aria-label={translateUi("项目当前状态")} className={styles.goalPanel}>
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"CURRENT OBJECTIVE"} /></p><h2><UiText text={"当前目标"} /></h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}><UiText text={"查看计划 →"} /></Link></div>
-                  {currentData.planError ? <p className={styles.panelEmpty}><UiText text={"目标数据暂不可用。"} />{t(currentData.planError)}</p> : currentObjective ? <>
+                  {currentData.planError ? <p className={styles.panelEmpty}><UiText text={"目标数据暂不可用。"} /><UiErrorText text={currentData.planError} /></p> : currentObjective ? <>
                     <div className={styles.goalMeta}>{t(objectiveStatusLabel(currentObjective.status))}{currentObjective.targetDate ? ` · ${t("目标日期")} ${formatDate(currentObjective.targetDate, language)}` : ` · ${t("目标日期未设置")}`}</div>
                     <h3 className={styles.goalTitle}>{currentObjective.title}</h3>
                     <p className={styles.goalDescription}>{currentObjective.description || t("尚未填写目标说明。")}</p>
@@ -379,7 +381,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
 
                 <section className={styles.factsPanel} aria-labelledby="recent-facts-heading">
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"SOURCE-GROUNDED FACTS"} /></p><h2 id="recent-facts-heading"><UiText text={"最近确认的项目事实"} /></h2></div><Link href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "overview", returnTo: overviewReturnTo })} className={styles.textLink}><UiText text={"查看全部 →"} /></Link></div>
-                  {currentData.factsError ? <p className={styles.panelEmpty}>{t(currentData.factsError)}</p> : currentData.recentFacts.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有已确认事实。"} /></p> : <div className={styles.factList}>{currentData.recentFacts.map((fact) => <Link key={fact.id} href={`/projects/${projectId}/materials/sources/${fact.sourceId}`} className={styles.factItem}>
+                  {currentData.factsError ? <p className={styles.panelEmpty}><UiErrorText text={currentData.factsError} /></p> : currentData.recentFacts.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有已确认事实。"} /></p> : <div className={styles.factList}>{currentData.recentFacts.map((fact) => <Link key={fact.id} href={`/projects/${projectId}/materials/sources/${fact.sourceId}`} className={styles.factItem}>
                     <span className={styles.factText}><strong>{fact.title}</strong><small>{fact.sourceExcerpt || fact.content}</small></span>
                     <span className={styles.factSource}>{t(fact.source.kind)} · {formatDate(fact.updatedAt, language)}</span>
                   </Link>)}</div>}
@@ -389,7 +391,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
               <aside className={styles.sideColumn}>
                 <section className={styles.activityPanel}>
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"RECENT ACTIVITY"} /></p><h2><UiText text={"最近动态"} /></h2></div></div>
-                  {currentData.activityError && recentActivity.length === 0 ? <p className={styles.panelEmpty}>{t(currentData.activityError)}</p> : recentActivity.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有近期项目活动。"} /></p> : <div className={styles.activityList}>{recentActivity.map((activity) => <Link key={activity.id} href={activity.href} className={styles.activityItem}>
+                  {currentData.activityError && recentActivity.length === 0 ? <p className={styles.panelEmpty}><UiErrorText text={currentData.activityError} /></p> : recentActivity.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有近期项目活动。"} /></p> : <div className={styles.activityList}>{recentActivity.map((activity) => <Link key={activity.id} href={activity.href} className={styles.activityItem}>
                     <span className={styles.activityDot} aria-hidden="true" />
                     <span><strong>{activity.label}</strong><small>{activity.detail}</small><time dateTime={activity.createdAt}>{formatDate(activity.createdAt, language)}</time></span>
                   </Link>)}</div>}

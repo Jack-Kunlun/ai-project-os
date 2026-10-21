@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
@@ -320,7 +322,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
           </form>}
         </OperationPanel>
       </div>
-      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{t(message)}</p> : null}
+      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}
     </section>
   );
 }

@@ -1,4 +1,6 @@
 "use client";
+import { UiFeedbackText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
@@ -144,7 +146,7 @@ export function PlatformProbeBudgetClient() {
           <div className="sm:col-span-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : budget === null ? t("创建测试预算周期") : t("更新测试额度")}</button></div>
         </form>
       </OperationPanel></div>
-      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{t(message)}</p> : null}
+      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}
     </section>
   );
 }

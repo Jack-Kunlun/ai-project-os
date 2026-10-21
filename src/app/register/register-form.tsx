@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -204,7 +206,7 @@ export function RegisterForm({ localRegistrationEnabled, phoneAuthStatus = "disa
       </fieldset>
 
       <p className={`${styles.notice} ${styles.noticeWarning}`}>{t(emailVerificationRequired ? "注册邮箱将作为验证邮箱；验证后的邮箱可用于密码登录，修改密码时需要验证当前邮箱。" : phoneVerificationRequired ? "注册手机号验证后可用于账号安全操作。" : "请妥善保管用户名和密码；当前没有可用的邮箱或手机号验证通道。")}</p>
-      {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}>{t(error)}</p> : null}
+      {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
 
       <button type="submit" disabled={pending || (emailVerificationRequired && emailAuthStatus !== "available") || (phoneVerificationRequired && phoneAuthStatus !== "available")} className={styles.submitButton}>{pending ? t("正在创建账号…") : t("创建账号")}</button>
       </form> : <p className={`${styles.notice} ${styles.noticeWarning}`}>{t("本地用户名和密码注册暂未开放。请返回登录页使用其他可用方式，或联系管理员。")}</p>}

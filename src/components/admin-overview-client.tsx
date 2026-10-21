@@ -1,4 +1,6 @@
 "use client";
+import { UiErrorText } from "@/components/ui-error-text";
+
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
@@ -166,7 +168,7 @@ export function AdminOverviewClient() {
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader title="平台总览" meta={overview ? <>{t("测量于")} {formatDate(overview.service.measuredAt, language, t)} · {overview.service.version}</> : loading ? t("正在读取最新状态…") : t("未取得最新状态")} />
 
-    {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{t(error)}</p> : null}
+    {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
 
     <section className="mt-5" aria-labelledby="admin-service-health-title">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">

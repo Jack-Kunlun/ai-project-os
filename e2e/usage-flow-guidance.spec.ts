@@ -178,6 +178,14 @@ test("personal knowledge hands off explicitly into project materials and guided 
   expect(projectSourcePosts).toHaveLength(0);
   expect(extractCalls).toHaveLength(0);
   await expectR02NoHorizontalOverflow(page, "project add source 390px");
+  const inquiryLauncher = intake.getByRole("button", { name: "智能问答", exact: true });
+  await expect(inquiryLauncher).toBeVisible();
+  const launcherBounds = await inquiryLauncher.boundingBox();
+  const closeBounds = await intake.getByRole("button", { name: "关闭", exact: true }).boundingBox();
+  expect(launcherBounds).not.toBeNull();
+  expect(closeBounds).not.toBeNull();
+  expect(launcherBounds!.x + launcherBounds!.width).toBeLessThanOrEqual(closeBounds!.x);
+  expect(launcherBounds!.height).toBeLessThanOrEqual(44);
   await expectR02NoAccessibilityViolations(page, "project add source 390px");
 
   await page.screenshot({ path: "test-results/usage-flow-guidance/project-import-mobile.png" });

@@ -69,6 +69,9 @@ export function FloatingInquiry(){
    header.setAttribute('data-inquiry-header','');
    header.style.setProperty('--inquiry-entry-right',`${operation.entryRight}px`);
    closeButton?.setAttribute('data-inquiry-close','');
+   // The portal appends by default; match the visible action order for Tab.
+   const launcher=launcherRef.current;
+   if(launcher?.parentElement===header&&closeButton?.parentElement===header)header.insertBefore(launcher,closeButton);
    return()=>{header.removeAttribute('data-inquiry-header');if(previousEntryRight)header.style.setProperty('--inquiry-entry-right',previousEntryRight);else header.style.removeProperty('--inquiry-entry-right');closeButton?.removeAttribute('data-inquiry-close');};
  },[operation?.host,operation?.entryRight]);
  useLayoutEffect(()=>{

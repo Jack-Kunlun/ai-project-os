@@ -605,6 +605,12 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(addSourceDialog).toBeVisible();
   const closeSourceDialog = addSourceDialog.getByRole("button", { name: "关闭", exact: true });
   await expect(closeSourceDialog).toBeFocused();
+  const inquiryLauncher = addSourceDialog.getByRole("button", { name: "智能问答", exact: true });
+  await expect(inquiryLauncher).toBeVisible();
+  await closeSourceDialog.press("Shift+Tab");
+  await expect(inquiryLauncher).toBeFocused();
+  await inquiryLauncher.press("Tab");
+  await expect(closeSourceDialog).toBeFocused();
   await closeSourceDialog.press("Tab");
   await expect(addSourceDialog.getByRole("link", { name: "管理已上传文件", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");

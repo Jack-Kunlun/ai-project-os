@@ -1,5 +1,16 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "账户或登录信息格式无效": "The account or sign-in details are invalid",
+  "应用已经完成初始化": "The application has already been initialized",
+  "用户名或密码错误": "Incorrect username or password",
+  "当前密码不正确": "The current password is incorrect",
+  "新密码不能与当前密码相同": "The new password must differ from the current password",
+  "该账户已经设置本地密码": "This account already has a local password",
+  "我的空间尚未就绪，请联系管理员完成成员治理": "Your space is not ready. Contact an administrator to complete membership setup",
+  "请先登录": "Sign in first",
+  "你没有执行此操作所需的权限": "You do not have permission to perform this operation",
+  "账户已停用": "This account is disabled",
+  "请求来源校验失败": "Request origin verification failed",
   "错误代码": "Error code",
   "当前账号没有执行此操作的权限。": "This account does not have permission to perform this operation.",
   "返回项目并请项目 Owner 或管理员核对你的访问权限。": "Return to the project and ask its owner or an administrator to check your access.",

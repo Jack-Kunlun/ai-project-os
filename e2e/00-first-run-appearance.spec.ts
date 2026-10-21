@@ -33,6 +33,12 @@ test("first-run setup supports Chinese light and English dark before an administ
   await create.click();
   await expect(page.locator("form").getByRole("alert")).toHaveText("The passwords do not match");
   await page.getByLabel("Enter your password again", { exact: true }).fill("SetupCheck2026");
+  await page.getByLabel("Username", { exact: true }).fill("invalid username");
+  const invalidInputResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/setup" && response.request().method() === "POST");
+  await create.click();
+  expect((await invalidInputResponse).status()).toBe(400);
+  await expect(page.locator("form").getByRole("alert")).toHaveText("The account or sign-in details are invalid");
+  await page.getByLabel("Username", { exact: true }).fill("bootstrap_check");
   // Exercise the translated server-error path without creating an account.
   await page.route("**/api/setup", (route) => route.fulfill({ status: 503, json: { error: { message: "初始化失败" } } }));
   await create.click();

@@ -38,7 +38,7 @@ type Provider = PersonalProviderRecord;
 type ProviderKind = PersonalProviderKind;
 type CatalogEntry = PersonalProviderCatalogEntry;
 
-type Message = Readonly<{ tone: "success" | "error" | "info"; text: string }>;
+type Message = Readonly<{ tone: "success" | "error" | "info"; text: string; draftRetained?: boolean }>;
 
 const membershipLabels: Record<MembershipStatus, string> = {
   active: "会员有效",
@@ -267,8 +267,7 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
           reportMessage({ tone: "error", text: "状态已刷新，请重新打开编辑" });
           return null;
         }
-        const editingMessage = editing === null ? error : `${error}；状态已刷新，非敏感字段草稿已保留；如填写过 API Key，需重新输入。若版本已变化，请放弃草稿后重新打开编辑。`;
-        reportMessage({ tone: "error", text: editingMessage });
+        reportMessage({ tone: "error", text: error, draftRetained: editing !== null });
         return null;
       }
       const payload = await response.json() as { provider: Provider };
@@ -276,8 +275,7 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : "连接更新失败";
       await onReload();
-      const editingMessage = editing === null ? error : `${error}；状态已刷新，非敏感字段草稿已保留；如填写过 API Key，需重新输入。若版本已变化，请放弃草稿后重新打开编辑。`;
-      reportMessage({ tone: "error", text: editingMessage });
+      reportMessage({ tone: "error", text: error, draftRetained: editing !== null });
       return null;
     } finally { clearDraftKey(); setPending(false); }
   }
@@ -378,7 +376,7 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
               {editing === "configuration" ? <><Field label={t("连接名称")}><input value={draft.name} onChange={(event) => updateDraft({ name: event.target.value })} required maxLength={80} className={`${formFields.field} field`} /></Field><Field label={t("固定 Base URL")}><input value={provider.baseUrl} readOnly aria-readonly="true" className={`${formFields.field} field bg-slate-100 text-slate-500`} /></Field><p className="rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600 sm:col-span-2"><UiText text={"生成模型或向量模型至少配置一项。"} /></p><ModelField label={t("生成模型（可选）")} value={draft.generationModelId} onChange={(value) => updateDraft({ generationModelId: value })} suggestions={definition?.generationModelSuggestions ?? []} /><ModelField label={t("图片识别模型（可选）")} value={draft.visionModelId} onChange={(value) => updateDraft({ visionModelId: value })} suggestions={definition?.visionModelSuggestions ?? []} disabled={!definition?.supportsVision} /><ModelField label={t("向量模型（可选）")} value={draft.embeddingModelId} onChange={(value) => updateDraft({ embeddingModelId: value, embeddingDimensions: definition?.embeddingModelSuggestions.find((item) => item.id === value)?.dimensions.toString() ?? draft.embeddingDimensions })} suggestions={definition?.embeddingModelSuggestions.map((item) => item.id) ?? []} disabled={!definition?.supportsEmbeddings} /><Field label={t("向量维度（可选）")}><input type="number" min={8} max={8192} step={1} value={draft.embeddingDimensions} onChange={(event) => updateDraft({ embeddingDimensions: event.target.value })} required={Boolean(draft.embeddingModelId)} disabled={!definition?.supportsEmbeddings || !draft.embeddingModelId} className={`${formFields.field} field disabled:bg-slate-100`} /></Field></> : <div className="sm:col-span-2 rounded-xl bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600"><UiText text={"当前资格只允许安全维护。轮换 API Key 不会恢复测试、启用或调用能力。"} /></div>}
               {editing === "key" ? <Field label={t("新的 API Key")}><input type="password" value={draft.apiKey} onChange={(event) => updateDraft({ apiKey: event.target.value })} autoComplete="new-password" placeholder={t("输入新的 API Key")} required minLength={8} maxLength={512} className={`${formFields.field} field`} /></Field> : null}
               <div className="flex items-center gap-2 sm:col-span-2"><button type="submit" disabled={pending} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : editing === "key" ? t("轮换 Key") : t("保存配置")}</button><button type="button" onClick={() => { setOperationOpen(false); setEditing(null); setDraft(null); }} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"><UiText text={"放弃草稿"} /></button></div>
-              {operationMessage ? <p role={operationMessage.tone === "error" ? "alert" : "status"} className={`text-sm sm:col-span-2 ${operationMessage.tone === "error" ? "text-rose-700" : "text-slate-700"}`}>{operationMessage.tone === "error" ? <UiErrorText text={operationMessage.text} /> : <UiFeedbackText text={operationMessage.text} />}</p> : null}
+              {operationMessage ? <p role={operationMessage.tone === "error" ? "alert" : "status"} className={`text-sm sm:col-span-2 ${operationMessage.tone === "error" ? "text-rose-700" : "text-slate-700"}`}>{operationMessage.tone === "error" ? <UiErrorText text={operationMessage.text} /> : <UiFeedbackText text={operationMessage.text} />}{operationMessage.draftRetained ? <><br /><UiText text="状态已刷新，非敏感字段草稿已保留；如填写过 API Key，需重新输入。若版本已变化，请放弃草稿后重新打开编辑。" /></> : null}</p> : null}
             </form>
           </div> : null}
         </OperationPanel>

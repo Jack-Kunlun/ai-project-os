@@ -18,13 +18,13 @@ test("credits and invitation compatibility screens localize failures without ech
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/credits");
-    await expect(page.getByRole("alert").first()).toContainText("ACCESS_FORBIDDEN");
-    await expect.poll(() => page.getByRole("alert").first().innerText()).not.toMatch(/\p{Script=Han}|private-value/u);
+    await expect(page.locator("main").getByRole("alert").first()).toContainText("ACCESS_FORBIDDEN");
+    await expect.poll(() => page.locator("main").getByRole("alert").first().innerText()).not.toMatch(/\p{Script=Han}|private-value/u);
     await expectR02NoHorizontalOverflow(page, `credits error en-dark-${width}`);
     await page.goto(`/accept-invitation?token=${"a".repeat(40)}`);
     await page.getByRole("button", { name: "Accept invitation", exact: true }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
-    await expect.poll(() => page.getByRole("alert").innerText()).not.toMatch(/\p{Script=Han}|private-value/u);
+    await expect(page.locator("main").getByRole("alert")).toBeVisible();
+    await expect.poll(() => page.locator("main").getByRole("alert").innerText()).not.toMatch(/\p{Script=Han}|private-value/u);
     await expectR02NoHorizontalOverflow(page, `invitation error en-dark-${width}`);
   }
   await page.unrouteAll({ behavior: "wait" });

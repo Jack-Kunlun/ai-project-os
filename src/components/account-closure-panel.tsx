@@ -4,11 +4,10 @@ import { UiErrorText } from "@/components/ui-error-text";
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { SmsCodeInput } from "@/components/sms-code-input";
-import { UiText, useAppearance } from "@/components/appearance-provider";
+import { UiText } from "@/components/appearance-provider";
 type Props={hasLocalPassword:boolean;phoneE164:string|null;phoneAuthStatus:"disabled"|"unavailable"|"available";embedded?:boolean};
 export function AccountClosurePanel({hasLocalPassword,phoneE164,phoneAuthStatus,embedded=false}:Props){
  const router=useRouter(),[open,setOpen]=useState(embedded),[method,setMethod]=useState<"password"|"sms">(hasLocalPassword?"password":"sms"),[password,setPassword]=useState(""),[code,setCode]=useState(""),[challengeId,setChallengeId]=useState<string|null>(null),[confirmation,setConfirmation]=useState(""),[pending,setPending]=useState(false),[error,setError]=useState<string|null>(null);
- const {t}=useAppearance();
  const smsAvailable=phoneE164!==null&&phoneAuthStatus==="available";
  const available=method==="password"?hasLocalPassword:smsAvailable;
  async function submit(event:FormEvent<HTMLFormElement>){

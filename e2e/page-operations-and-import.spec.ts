@@ -148,7 +148,8 @@ test("profile operations preserve a failed draft and return to the updated view 
     await route.fulfill({ status: 400, json: { error: { message: "Isolated profile retry error" } } });
   });
   await details.getByRole("button", { name: "保存个人资料", exact: true }).click();
-  await expect(details.getByText("Isolated profile retry error", { exact: true })).toBeVisible();
+  await expect(details.getByRole("alert")).toContainText("操作需要核对");
+  await expect(details.getByRole("alert")).not.toContainText("Isolated profile retry error");
   await details.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await edit.click();
   await expect(details.getByLabel("显示名称", { exact: true })).toHaveValue(displayName);

@@ -456,7 +456,7 @@ function KnowledgeOverviewSection({
           <div className="mt-6 grid gap-4 sm:grid-cols-3" aria-label={translateUi("知识库容量与索引状态")}>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"知识文档"} /></p><p className="mt-2 text-2xl font-semibold text-slate-950">{overview.capacity.documentCount}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"当前有效文档"} /></p></div>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"已用容量"} /></p><p className="mt-2 text-2xl font-semibold text-slate-950">{formatBytes(overview.capacity.usedBytes)}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"按当前版本正文 UTF-8 字节统计 ·"} />{" "}{overview.capacity.limitLabel}</p></div>
-            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"索引状态"} /></p><p className="mt-2 text-base font-semibold text-amber-700">{overview.index.label}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"统计时间"} />{" "}{formatDate(overview.capacity.measuredAt)}</p></div>
+            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"索引状态"} /></p><p className="mt-2 text-base font-semibold text-amber-700"><UiText text={overview.index.label} /></p><p className="mt-1 text-xs text-slate-500"><UiText text={"统计时间"} />{" "}{formatDate(overview.capacity.measuredAt)}</p></div>
           </div>
 
           <div className="mt-6 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">

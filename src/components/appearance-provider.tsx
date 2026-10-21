@@ -272,3 +272,23 @@ export function UiText({ text }: Readonly<{ text: string }>): React.JSX.Element 
   const { t } = useAppearance();
   return <>{t(text)}</>;
 }
+
+
+/** Keep the feedback shell shared; load its interpreter only when feedback appears. */
+export function UiErrorText({ text, kind = "error" }: Readonly<{ text: string; kind?: "error" | "status" }>): React.JSX.Element {
+  const { language, messages, dictionaryUrl } = useAppearance();
+  const key = `${language}\0${kind}\0${dictionaryUrl}\0${text}`;
+  const [resolved, setResolved] = useState<Readonly<{ key: string; value: string }> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([import("@/lib/ui-error-text"), messages ?? loadEnglishMessages(dictionaryUrl)]).then(([interpreter, dictionary]) => {
+      if (!cancelled) setResolved({ key, value: interpreter.translateUiErrorText(text, language, dictionary, kind) });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [dictionaryUrl, key, kind, language, messages, text]);
+  return <>{resolved?.key === key ? resolved.value : (language === "en" ? "Review the current status." : "请核对当前状态。")}</>;
+}
+
+export function UiFeedbackText({ text }: Readonly<{ text: string }>): React.JSX.Element {
+  return <UiErrorText text={text} kind="status" />;
+}

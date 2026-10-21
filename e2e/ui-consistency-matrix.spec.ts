@@ -267,7 +267,7 @@ async function assertUserShellInteractions(page: Page): Promise<void> {
   const appearanceTrigger = page.getByRole("button", { name: "语言与外观", exact: true });
   await appearanceTrigger.click();
   await expect(page.getByRole("dialog", { name: "语言与外观", exact: true })).toBeVisible();
-  await safeHeading.click({ force: true });
+  await safeHeading.click({ position: { x: 4, y: 10 } });
   await expect(page.getByRole("dialog", { name: "语言与外观", exact: true })).toHaveCount(0);
   await expect(page).toHaveURL(/\/dashboard$/u);
   await appearanceTrigger.click();
@@ -277,7 +277,7 @@ async function assertUserShellInteractions(page: Page): Promise<void> {
   const accountTrigger = page.getByRole("button", { name: "账户菜单", exact: true });
   await accountTrigger.click();
   await expect(page.getByRole("link", { name: "账户设置", exact: true })).toBeVisible();
-  await safeHeading.click({ force: true });
+  await safeHeading.click({ position: { x: 4, y: 10 } });
   await expect(page.getByRole("link", { name: "账户设置", exact: true })).toHaveCount(0);
   await expect(page).toHaveURL(/\/dashboard$/u);
   await accountTrigger.click();

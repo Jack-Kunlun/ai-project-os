@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { translateUiErrorText } from "../src/components/ui-error-text";
+import { translateUiErrorText } from "../src/lib/ui-error-text";
 import { safeResponseError } from "../src/lib/safe-error-presentation";
 
 const messages = { "项目搜索失败": "Project search failed" };
@@ -34,6 +34,21 @@ test("caller fallbacks remain untrusted even when a response has a whitelisted c
     const error = await safeResponseError(new Response(body), "internal secret=private-value（错误代码：FAKE_SECRET）");
     for (const language of ["zh-CN", "en"] as const) {
       assert.doesNotMatch(translateUiErrorText(error.message, language, {}), /internal|private-value|FAKE_SECRET/u);
+    }
+  }
+});
+
+
+test("feedback SSR uses neutral copy before the interpreter loads in both languages", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { AppearanceProvider, UiErrorText, UiFeedbackText } = await import("../src/components/appearance-provider");
+  for (const language of ["zh-CN", "en"] as const) {
+    for (const component of [UiErrorText, UiFeedbackText]) {
+      const markup = renderToStaticMarkup(createElement(AppearanceProvider, { initialLanguage: language, initialMessages: messages, children: createElement(component, { text: "内部错误 secret=private-value" }) }));
+      assert.doesNotMatch(markup, /private-value|secret=|内部错误/u);
+      assert.match(markup, language === "en" ? /current status/iu : /当前状态/u);
+      if (language === "en") assert.doesNotMatch(markup, /\p{Script=Han}/u);
     }
   }
 });

@@ -1,309 +1,181 @@
 # AI Project OS
 
-AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。它将人工资料、文件、网页与多 Git 仓库整理为可追溯、可审核的项目证据，并在此基础上提供项目状态、语义检索、引用式 RAG、自动化和受审批约束的只读操作。
+把资料、问题和下一步工作放在一起。
 
-外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证。项目上传文件、已核对图文和手工资料的抽取采用可追溯的自动准入：正文逐字来自原文、无未决措辞且无明确既有冲突时自动形成事实；改写、冲突和不确定内容进入待处理。来源陈述不代表对真实世界的独立核实，系统不会自动覆盖已有事实。网页、仓库与工具结果保持人工核对边界。导入文件或文本后，可在同一导入操作中确认本次模型与资料范围并继续整理，无需另选资料或逐条确认普通结果。图片、扫描件和 Office 内嵌图片仍先核对识别文字。识别和自动整理在确认后进入后台队列，进度和取消入口集中在项目资料的“识别任务”；提问需要准备资料时在同页确认，无需另找索引页面。查看页面保留数据、搜索和筛选，新增、编辑、配置和执行通过明确入口进入专用操作区。
+AI Project OS 是一个可自行部署的知识与项目工作台。你可以把文档、会议记录、网页和代码仓库中的内容汇集起来，围绕资料提问，查看回答的出处，再把需要推进的事情放进项目计划。
 
-项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
+它既可以作为个人知识库，也可以供团队共同维护项目资料、决策、进展与风险。
 
-当前源码版本为 `1.2.1`，范围见 [v1.2.1 版本说明](docs/releases/v1.2.1.md)。本次修正工作台卡片与入口对齐、新建问答会话、问答顶层窗口与停靠布局，并移除知识图谱重复页签；保留 1.2.0 的中英文、主题、会话管理和统一 Token 用量能力。迁移清单仍为 149 条，不新增依赖或数据库迁移；原始问答、引用快照及现有业务数据保持保留。正式部署状态以发布回执及公网健康为准，真实外部服务仍需按部署配置分别验证。
+[开始使用](#开始使用) · [本机部署](#本机部署) · [使用指南](docs/user-operation-guide.md) · [版本记录](CHANGELOG.md) · [许可](#许可与商业授权)
 
-维护模式只更新工具和缓存，不切换线上应用。CI 按生产源版本到候选提交的累计差异选择测试，构建并验证镜像；发布镜像后会从注册表拉回，核对运行配置、文件系统和容器镜像身份。用户手动点击「发布正式版本」后，生产复用同一摘要镜像并自动验收，不再构建。常规发布不执行备份/恢复流程，迁移清单未变则跳过迁移。验收成功后自动清理过期应用镜像和闲置构建缓存。当前实际线上版本以公网 `/api/health` 和生产回执为准；永久发布工具已安装，后续工具更新由受限 Workflow 完成。
+## 可以用它做什么
 
-`v0.5.0-dev.1` 的一次性 clean reset、`v0.5.0-dev.4` 的 preserve 通道和 `.6 → .7` 无迁移补丁都属于历史发布路径。`v0.6.0-dev.8` 从 `.7` 基线执行 107→116 条迁移，交付用户功能导航重构、个人额度页、知识库关系与语义能力、连接测试门禁和团队页面。
+**整理自己的知识。** 在“我的知识”中保存笔记和导入文件，检索已有内容，或打开一篇资料直接提问。个人资料可以独立使用，需要用于协作时再放入项目。
 
-`v0.6.0-dev.14` 是已完成的 0.7 首次生产升级源版本，该次升级通过专用迁移通道完成。旧源/目标标签现已删除，不能用历史无迁移的 **Deploy application** 通道替代，也不能重新运行首次迁移；下一次发布需另行核对新标签与当前生产来源的部署契约。
+**围绕资料讨论项目。** 将需求文档、会议记录、网页和只读仓库内容加入项目，整理其中的决策、进展、问题与风险。问答保留引用和会话历史，可以连续追问、置顶或重命名，也可以在其他页面打开悬浮问答。
 
-`v0.6.0-dev.4` 是未部署的历史失败候选：它的标签 CI 在 browser/accessibility 阶段失败，标签保持不可移动且不可复用。
+**把讨论落实到工作。** 为工作项指定负责人、期限、验收标准和相关证据，查看依赖、逾期与受阻情况。项目概览、简报和通知帮助团队了解进展，成员按各自权限访问内容。
 
-`v0.6.0-dev.5` 是未部署的历史失败候选：静态、覆盖率、PostgreSQL 和 OID10 门禁均通过，但填充数据 Dashboard 的 390px 浏览器门禁 document scrollWidth 首次运行是 406、重试是 398，均相对 innerWidth 390；该标签保持不可移动、不可复用。
+想查看资料之间的联系，可以打开“知识图谱”，在三维视图中浏览资料、已确认事实和已记录关系，点击节点回到详情。模型用量和平台额度可在用量与账单相关页面查看。
 
-0.5.0-dev.1 是历史受控生产基线，下述行为均描述当时状态，不代表当前 0.7.3；重点是移除默认工作区 Owner 初始化，并收紧普通用户个人工作区与 GitHub 登录的安全边界。平台管理员与普通用户进入不同工作台，权限边界由服务端角色检查保证。平台管理员在 `/admin/models` 管理供应商连接，并为每项能力选择已验证可用的模型；填写连接后可先测试，只有测试通过才能保存并启用，状态文案统一为“启用/停用”。平台默认托管模型按平台额度提供；有效会员可在个人中心维护个人模型，但必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用，个人模型不会自动替代平台默认模型。当时 Git 用户私有连接与双确认后的一次性手动只读读取已开放。MCP 个人连接与工具发现、管理员净化快照审核、项目连接委托和只读工具授权控制面已开放；当时远端动作调用、调用审批、派发、结果查看/导入和真实第三方联调仍冻结或未现场验证，不构成已验证的第三方实时能力。旧管理员 Git、旧会员和账号矩阵路径只保留受守卫的兼容跳转。
+界面支持中文、英文，以及浅色、深色和跟随系统的主题。资料正文、问题、回答和引用保留原文。
 
-0.5.0-dev.2 是供应商弹窗布局优化的受控升级候选：弹窗 Header 与 Footer 固定，表单内容区域独立滚动，且升级通道保留现有业务数据。它仍不是稳定版或已验收的生产部署。
+## 开始使用
 
-0.5.0-dev.3 是保留数据发布通道的修复候选：修复维护隔离阶段对完整 Docker 容器 ID 的 Bash 算术误判，并保留 `.2` 的供应商弹窗布局优化。它仍不是稳定版或已验收的生产部署。
+已有账号时，登录后从下面任一路径开始。需要自己搭建实例，请先看[本机部署](#本机部署)。
 
-0.5.0-dev.4 是保留数据发布通道的回滚制品修复候选：生产部署先从精确 `.1` 源 checkout 构建并固定服务级回滚镜像引用，再构建 `.4` 目标镜像；它不把已经无法由 Docker inspect 找到的旧容器镜像记录当作回滚前提。源代码重建的 `.1` 镜像不保证与历史丢失镜像字节级相同，仍需以隔离恢复和现场门禁为准。
+### 先试一篇自己的资料
 
-0.6.0-dev.8 曾将一级导航统一为 Dashboard、个人工作台、我的项目、我的团队，并加入连接测试门禁与额度页。`.11` 曾将“我的项目”纳入个人工作台子导航，后续入口曾名为“我的空间”；1.2.0 的常用入口为工作台、智能问答、我的项目、我的知识和知识图谱，资源配置、额度与账单及团队另分组展示。项目成员在项目内管理，团队邀请和账号仍留在团队空间；个人知识支持图片、扫描 PDF 和混合 PDF 的可选视觉提取、审核式知识图谱与显式标记的个人通用记忆。Git/MCP 已验证连接可重新测试后修改地址与认证。
+打开 **我的知识 → 新建或导入 → 保存 → 提问这篇**。确认本次发送的资料和模型后，就可以围绕这篇内容提问并查看引用，无需先创建项目或配置个人模型。平台管理员须已启用相应的默认模型，账号也需要有可用的平台额度。
 
-## 许可与商业授权
+### 用一个项目串起资料和工作
 
-本仓库中项目权利人有权授权的软件代码采用 [PolyForm Strict License 1.0.0](LICENSE.md)。这是源码可见许可，不是 OSI 开源许可；具体权利以许可证全文为准。
+1. **创建项目**：在“我的项目”中新建项目，填写名称和描述。当前工作区需要有创建项目的权限。
+2. **添加资料**：进入“项目资料”，点击“添加资料”，上传需求文档、会议记录等内容，或直接输入文字。
+3. **整理内容**：确认模型和资料范围后提交后台整理，在“识别任务”中查看进度。图片和扫描件先核对识别文字；冲突或不确定的整理结果留待人工处理。
+4. **围绕项目提问**：打开“智能问答”并选择该项目，例如：“还有哪些待解决的问题？请附上对应资料。”根据回答中的引用核对原文。
+5. **安排下一步**：进入“项目计划”，创建工作项并补充负责人、验收标准和证据。资料整理结果和 AI 建议需要由人决定如何纳入计划。
 
-项目作者署名：**风岚（笔名）**。
+之后可按需要邀请成员、生成简报或设置自动化。完整操作见[使用指南](docs/user-operation-guide.md)，应用内可从头部帮助入口查看操作说明。
 
-- **非商业使用**：可按许可证使用软件。该许可不授予修改、制作衍生作品或分发软件的权利；如需这些权利，须另行取得书面授权。
-- **商业使用**：不在上述许可范围内，须事先取得项目权利人的单独书面授权。授权申请邮箱：[1837115857@qq.com](mailto:1837115857@qq.com)。
-- **其他材料**：第三方组件适用其各自许可；文档等其他材料未另行授权。
+## 本机部署
 
-## 手机号认证与账号注销
+以下步骤用于**首次启动一个新的本地实例**。已有部署的更新请阅读[正式发布说明](docs/production-release.md)。
 
-`0.8.0-dev.1` 已补入账号找回、密码重设、手机号绑定与换绑；范围与实际验收状态见 [0.8.x 账号安全](docs/0.8x-account-security.md)。真实短信与完整浏览器认证流程单独验收。
+### 1. 准备环境
 
-已发布中国大陆 +86 短信验证注册、验证码登录、手机号与密码登录、后台短信配置和个人中心注销。提供阿里云个人短信认证 PNVS、阿里云企业标准短信 SendSms 和腾讯云短信 SendSms 适配，后台真实发送并核验测试短信后才允许保存加密配置。2026-10-06 已确认生产 PNVS 测试核验及保存启用通过；其他供应商、手机号注册、验证码登录和注销的真实流程仍须分别验收。注销后手机号可注册全新账号；旧账号永久停用、独占个人工作区封存，旧资料不会转移。启用步骤、现有限制及验证证据见 [手机号认证与注销](docs/phone-authentication.md)。
-
-## 从哪里开始
-
-- 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
-- 普通用户完整指南：[docs/user-operation-guide.md](docs/user-operation-guide.md)。
-- 平台管理员完整指南：[docs/admin-operation-guide.md](docs/admin-operation-guide.md)。
-- 兼容索引：[docs/operation-manual.md](docs/operation-manual.md)。
-- 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
-- 正式版本手动发布：[docs/production-release.md](docs/production-release.md)。
-- GitHub Actions 受控生产部署：[docs/production-deployment.md](docs/production-deployment.md)。
-- 单节点主机迁移与恢复：[docs/production-host-migration.md](docs/production-host-migration.md)。
-- 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
-- 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
-- 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
-- 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 当前版本：[v1.2.1](docs/releases/v1.2.1.md)；上一正式版本：[v1.2.0](docs/releases/v1.2.0.md)；历史受控预发布记录：[docs/releases/next.md](docs/releases/next.md)。
-- V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
-- V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
-- V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
-- V5.0.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
-- V5.0.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
-- V4.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)。
-- V4.0.0 内部研发里程碑记录（非正式发布）：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)。
-- V3.2.0 内部研发里程碑记录（非正式发布）：[docs/releases/v3.2.0.md](docs/releases/v3.2.0.md)。
-- V3.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v3.1.0.md](docs/releases/v3.1.0.md)。
-- V3.0.0 内部研发里程碑记录（非正式发布）：[docs/releases/v3.0.0.md](docs/releases/v3.0.0.md)。
-- 版本记录：[CHANGELOG.md](CHANGELOG.md)。
-- 历史 CLI 手册：[docs/v1-operations.md](docs/v1-operations.md)，仅用于兼容旧流程。
-
-推荐首次使用顺序：
-
-1. 启动 Docker Compose 并初始化平台管理员。配置 GitHub OAuth 后，普通用户首次登录会获得自己的个人工作区及 Owner 身份；平台管理员仍只进入管理工作台，无须创建全局默认工作区 Owner。
-2. 由平台管理员在“管理工作台 → 能力配置”（`/admin/models`）添加并测试 OpenAI、DeepSeek、Qwen 或 GLM，再为每项能力选择已验证模型并保存启用；不通过路由草稿或额外路由页面配置。
-3. 进入项目仓库页查看已有安全摘要；旧版项目 Git 连接、首次关联和同步入口已冻结。个人 Git 连接可在个人工作区配置，项目页支持一次性手动只读读取，以及单独双确认授权后的计划只读读取；写入/提交和旧 PAT 路径保持关闭，真实外部读取以运行记录为准。
-4. 在个人工作区创建 MCP 连接并发现工具；管理员在 MCP 审核工作台核对净化快照，项目 MCP 页面再管理连接委托和只读工具授权。受控环境的项目 Owner 可逐次审批、单次派发只读动作，并人工核对成功结果后导入未审核资料；生产启用和真实外部服务仍需验收。
-5. 在“我的项目”创建项目，通过侧栏切换当前项目。在“简报与调查”的能力说明及项目配置中查看可用能力；项目内不维护独立模型路由。
-6. 上传文件，或添加网页、本地文件夹；仓库来源的计划只读读取须先在项目 Git 页面完成独立双确认。
-7. 审核 AI 候选并建立语义索引。
-8. 在“项目管理”核对当前事实，人工建立关系、替代链并固化状态快照；在独立的“知识图谱”菜单查看来源与事实关系。
-9. 使用“智能问答”，每轮选择全量、个人空间或项目，确认实际外发内容后发送；历史会话可重新打开并继续追问。需要项目简报或只读调查时进入“简报与调查”。原有语义搜索工具继续保留。
-10. 在“项目自动化”、项目管理的“记忆质量”和“通知”中维护长期运行状态。
-11. 在“项目管理 → 动作与审批”中选择动作策略，核对待审批动作和执行审计。
-12. 受控环境的 MCP 只读动作须逐次审批和单次派发，成功结果须人工确认后才进入未审核项目资料；不会自动成为事实、索引或模型上下文。生产启用仍需浏览器与真实外部服务验收。
-13. 在“项目计划”中为工作项设置负责人、期限和验收标准，关联已确认事实、活动来源或仓库同步证据，再由人推进状态。
-14. 人工核对仓库变化信号并关联到相关工作项，或明确忽略；需要定期提醒时创建“项目计划健康提醒”自动化。
-15. 需要协作时，在“团队”中创建成员、邀请链接或 OIDC 身份源。
-
-## 当前能力
-
-下表描述当前源码能力与启用条件，不表示每个外部服务或供应商都已现场验收。既有现场验收记录见 [v1.0.0 版本说明](docs/releases/v1.0.0.md)；本次修正与验证边界见 [v1.2.1 版本说明](docs/releases/v1.2.1.md)，平台重构与迁移见 [v1.1.0 版本说明](docs/releases/v1.1.0.md)。历史生产记录仍保留在 [0.7.3 验收记录](docs/releases/v0.7.3-production-acceptance.md)。
-
-| 能力 | 应用能力与启用边界 |
-| --- | --- |
-| Dashboard | 汇总跨项目世界状态、配置就绪度、计划风险、运营提醒、推荐下一步和最近任务；项目入口位于“我的空间”内 |
-| 账号安全 | +86 短信绑定、找回与换绑；邮箱注册、已保存邮箱验证及改密邮件验证；短信发送前校验图形验证码；密码长度为 8–128 位且保留字母和数字要求；已验证邮箱密码登录、邮箱修改/移除锁定和改密后会话撤销；经验证的本地新注册按当前启用策略激活赠送权益 |
-| 个人知识库 | 主页面浏览已有知识与检索，新建/编辑及导入使用独立弹窗（手机全屏）；个人语义索引与搜索可选平台默认向量模型或个人 BYOK，发送前确认范围和预计额度；平台模型需管理员先验证并启用 embedding 能力 |
-| 项目与个人中心 | 项目搜索、创建、软归档、恢复和受限 JSON 导出；个人资料、登录名、密码和活动会话管理 |
-| 多用户与 RBAC | 工作区角色 Owner/Admin/Member/Viewer，项目角色 Owner/Editor/Viewer；服务端对页面和 API 统一鉴权 |
-| 邀请、GitHub 登录与 OIDC | 邮箱限定邀请；GitHub OAuth Authorization Code + PKCE 与个人中心显式绑定；OpenID Connect Authorization Code + PKCE、受控自动建号和企业内网显式授权 |
-| 模型供应商 | 页面配置 OpenAI、DeepSeek、Qwen、GLM 的 API Key、生成/视觉/向量模型并测试连接；密钥不回显 |
-| AI 能力与模型使用方式 | 平台默认托管模型由平台管理员维护；有效会员可维护个人模型，并在连接所有者与项目 Owner 双确认委托生效后按项目使用，个人模型不会自动替代平台默认模型 |
-| 文件与图片识别 | TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP；本地解析文本，图片和扫描 PDF 经当次授权后调用视觉模型并逐片段审核 |
-| 外部资料 | 抓取公开网页或经明确授权的内网页面；浏览器选择本地文件夹后按文件批量导入；来源版本原子发布 |
-| 多 Git 连接 | 个人只读连接、项目双确认委托、手动和自动同步；真实 Git 服务与生产开关仍需验收，不提供写入/提交，不暴露凭据、CA 或 known_hosts |
-| 受控 MCP | 连接与发现、管理员净化审核、项目双确认、逐次审批、单次只读派发和结果人工纳入；生产启用与真实外部服务仍需验收 |
-| 多仓库记忆 | 已关联仓库资料保留安全边界；双确认委托下的手动和自动同步生成版本化来源，不提供 Git 写入 |
-| GitHub 扩展资料 | 个人连接授权下的 Issue、PR、Release 读取与版本化资料；真实服务仍需现场验收 |
-| 自动抽取与审核 | 从本次确认范围内的资料抽取 decision、progress、issue、risk；项目上传文件、已核对图文及手工资料满足原文证据、无未决措辞且无明确冲突时自动形成事实，其余结果进入人工核对 |
-| 时态项目世界模型 | 只用当前有效、已确认事实计算项目状态；支持版本绑定的支持/冲突/依赖/阻断/因果/解决/相关关系、同类型事实替代链、陈旧关系提示、不可变状态快照和追加式治理审计 |
-| 统一向量记忆 | 对人工/文件/网页/仓库资料和代码快照确定性分块；支持增量构建与全量重建，完成后原子切换索引 |
-| 语义搜索与 RAG | 向量和关键词混合排序；回答只能引用本次检索命中的不可变证据记录 |
-| 项目简报与只读智能体 | 复用确定性项目状态、当前事实、关系、输入指纹、语义记忆和仓库状态；模型计划只能调用固定的项目内只读工具，不能覆盖系统状态 |
-| 自动化 Worker | Compose 独立 Worker 持久化领取规则、租约与运行结果；网页刷新、记忆质量、项目计划健康、Git 自动同步及模型任务待确认通知；外部任务生产启用仍需单独验收 |
-| 动作与审批 | 项目级策略控制内置只读能力；MCP 必须满足部署开关、连接/工具/项目授权和逐次人工审批，未知外部结果不自动重试 |
-| 对外只读 MCP | OAuth 同意、限定项目授权、单次读取与撤权；两个真实客户端互操作和代理限流仍需现场验收 |
-| 项目运营闭环 | 工作项维护可编辑负责人、期限、独立验收标准和证据关联；开始前校验负责人/验收标准，完成前强制至少一条活动证据；终态不可改写 |
-| 仓库变化与项目健康 | 从成功且完成对账的仓库同步生成确定性变化信号，由人关联或忽略；按逾期、受阻、依赖、负责人、验收、证据、建议、审批计算健康状态 |
-| 记忆质量 | 确定性识别重复、冲突、过期、证据不足和低置信度记忆；可维护置信度、重要性、有效期、置顶和人工复核时间 |
-| 通知中心 | 汇总自动化成功、失败、记忆质量、项目计划健康与模型外发待确认通知，支持已读状态 |
-| 治理与审核 | 候选审核、历史成员资格双人签名清单、异常任务收口、模型使用与平台默认能力历史和 7/30/90 天用量核对 |
-
-## 配置入口
-
-平台配置仅由平台管理员在管理工作台维护；旧设置、Git 连接器、会员和账号矩阵 URL 仅作服务端角色检查后的兼容跳转，不是当前正常入口。业务配置均位于页面：
-
-- `/admin/models`：平台供应商、模型连接和逐项能力配置；每项能力只能选择已经测试通过的可用模型（平台管理员）。
-- `/admin/credits`：新注册赠送策略、额度记录和人工治理（平台管理员）。
-- `/admin/operations/probes`：连接探测预算和告警阈值（平台管理员）。
-- `/admin/connectors/mcp`：MCP 净化快照、候选详情与管理员不可变安全审核（平台管理员），不接收用户 Bearer Token。
-- `/admin/users`：账号、会员和用户额度摘要；用户详情页处理账号停用、恢复和关联记录，停用账号仍可审计且有效结果为 `effective=false`（平台管理员）。
-- `/admin/audit`、`/admin/operations/failures`：审计证据、失败和待对账状态（平台管理员）。
-- `/admin/operations/backups`：备份/运维状态（按初始超级管理员规则）。
-- `/team`：成员、邀请和 OIDC。
-- `/projects/:projectId/control`：项目 AI 能力状态和模型使用方式（不维护独立项目路由）。
-- `/projects/:projectId/repositories`：个人 Git 委托安全摘要、双确认和一次性手动只读读取。
-- `/projects/:projectId/world`：当前项目状态、事实关系、替代链、冲突、快照与审计。
-- `/projects/:projectId/external-sources`：网页与本地文件夹资料。
-- `/projects/:projectId/automations`：自动化规则与运行记录。
-- `/projects/:projectId/actions`：动作策略、审批与执行审计。
-- `/projects/:projectId/tools`：项目 MCP 连接委托与只读工具授权控制面；工具发现从个人工作区进入，不提供远端调用、调用审批、派发或结果入口。
-- `/projects/:projectId/plan`：目标、负责人、期限、验收标准、证据、仓库变化、健康、依赖和审计。
-
-`.env` 只承载部署基础设施参数，例如数据库连接、端口和安全 Cookie 开关；模型 API Key、Git Token、SSH Key、MCP Bearer Token 与 OIDC Client Secret 不写入环境变量。
-
-## 安全与可信边界
-
-- 密码使用 scrypt 与随机盐；会话 Token 只保存 SHA-256；Cookie 为 HttpOnly、SameSite=Lax。
-- 模型、Git、MCP 和 OIDC Secret 使用 AES-256-GCM、随机 nonce、认证标签与用途绑定 AAD；API 不返回明文或密文。
-- 账号停用会递增访问代次、撤销活动会话并使旧个人模型、Git 与 MCP 授权链失效；恢复只允许新会话和经明确重新验证的新授权链进入。AI、Git 与 MCP 使用同一最终准入语义：停用先完成时后续调用失败关闭，最终准入记录先提交时该次已授权外发仍可收口，不承诺追溯撤回已经获准发送的数据。
-- Git HTTPS 执行固定验证过的 DNS 地址并拒绝重定向；SSH 固定解析地址，同时以原主机名校验 known_hosts。云元数据地址始终阻止，私网必须显式授权。
-- 网页与 OIDC 服务端请求固定 DNS 解析、限制响应大小并阻止云元数据地址；公网默认要求 HTTPS。
-- OIDC 校验 issuer、audience、nonce、过期时间和允许的 JWKS 签名算法；未知身份不会仅凭相同邮箱自动绑定到已有账户。
-- OIDC returnTo 只允许本站单斜杠路径，编码分隔符、绝对地址和协议相对地址会被拒绝或降级；每个身份源最多保留 200 条未消费流程，并在事务内清理/淘汰旧流程。匿名 churn 的速率限制仍需由部署层提供。
-- 历史工作区/项目成员默认进入 `pending` 隔离状态；只有覆盖全量待审核行、绑定盘点指纹并通过两个不同受信 Ed25519 签名者批准的离线清单才能确认或撤销。清单执行器使用专用数据库地址、单事务和不可变证据，详见[管理员操作指南](docs/admin-operation-guide.md#32-历史成员资格治理)。
-- 仓库扫描先固定远端 commit，再在隔离临时目录读取受控范围；Git 交互、系统/全局配置、钩子和非目标协议均关闭。
-- JSON 请求体和 multipart 上传均按实际流式字节数限制；上传文件核对扩展名与真实格式，限制压缩包条目、解压体积、图片像素和 PDF 页数。PDF 视觉渲染还会在分配画布前限制边长和像素预算。
-- 模型输出和网页内容一律视为不可信数据；抽取证据、RAG 引用与智能体工具结果均由服务端验证项目边界。
-- 索引、仓库快照和网页修订失败时不会替换上一代完整活动版本。
-- 项目归档会暂停活动自动化；运行中任务会阻止归档，恢复项目不会自动恢复原自动化规则。
-- 动作创建会固定能力、规范化输入、输入指纹和当时的项目策略。需要审批的动作仅由项目 Owner 决策，24 小时后自动过期。
-- 动作 Worker 使用持久化租约和心跳。租约过期会失败关闭，不自动重复外部读取；项目归档会取消尚未执行的动作并阻止新动作领取。
-- MCP 工具定义采用追加式快照。个人连接负责工具发现；远端 annotations 只保存为不可信提示，不能直接产生授权资格；管理员对精确工具定义执行净化审核并可追加撤销审计，审核绑定工具、网络和凭据指纹。项目 Owner 逐项管理连接委托与只读工具授权；生产开关关闭或未完成真实服务验收时，远端动作调用、调用审批、派发及结果流程保持关闭，不能通过内部 API 绕过权限与逐次审批。传输歧义进入 `unknown` 且不重试。
-- MCP 隔离门禁或内部服务中的结果证据不能替代第三方现场验收。0.7 源码已有调用审批、只读派发、结果查看与人工纳入，但必须满足生产开关、连接/工具认证、项目授权与逐次审批；结果不会自动成为项目来源、事实、索引或模型上下文。
-- 智能体建议纳入计划时固定建议索引、引用快照、运行输入清单指纹和证据指纹。建议只进入 `proposed`，状态推进与依赖调整必须由用户完成并留下追加式审计。
-- 工作项开始或完成前必须有当前可编辑负责人和验收标准；完成前还必须关联活动证据。证据以内容快照和 SHA-256 指纹固化，移除只做软移除，完成/取消后的工作项不可改写。
-- 仓库变化信号只来自成功且完成对账的同步记录，并明确不推断业务影响。关联或忽略必须由 Editor/Owner 人工决定，原始信号与计划审计保持可追溯。
-- 事实关系只允许连接同项目、当前已确认事实，并固定双方精确修订和证据清单。事实变化后旧关系标记为陈旧，不会静默迁移到新版本。
-- 事实替代只允许同类型、已确认事实建立单一无环链；旧事实保留确认时间、来源证据和修订历史。状态快照与世界模型审计只追加、不覆盖。
-- Dashboard、项目简报和只读智能体复用同一确定性项目状态与输入指纹。模型不能确认事实、建立关系、替代事实或修改状态。
-- 项目计划健康与提醒只读取本地数据库，不调用模型、不向外发送项目内容；通知发送前重新核对接收者当前项目访问权。
-
-## 当前限制
-
-- 当前源码版本为 `1.2.1`，上线须以同 SHA 主分支 CI、发布回执与线上健康版本共同确认。历史发布记录见[版本记录](CHANGELOG.md)。现仅有一台云主机，独立 S1b broker 未部署，近期不新增付费服务器。平台管理员只负责平台运营和安全治理，不进入项目、团队或用户工作区；普通用户负责自己的项目和个人连接。
-- 数据库 trigger 只约束正常应用写入的一致性，不是抵抗已取得应用数据库凭据或任意 SQL 能力的独立授权边界；生产需隔离 runtime 与 migrator 角色并限制网络访问。账号访问代次迁移不支持旧、新应用滚动并存，部署必须在维护窗口停止旧 app/worker、执行迁移，再启动新版本。
-- OIDC 不按相同邮箱自动合并账户。0.7 源码已有显式身份绑定入口；当前没有标准 OIDC 身份服务，用户已选择暂待配置，真实登录与绑定尚未验收。已登录的飞书 CLI 不能替代 OIDC 身份源。
-- 已完成单个受控仓库、独立分支与目录的 Git 自动增量现场验收，并撤销临时授权、归档验收项目；其他仓库、供应商及 GitHub Issue、PR、Release 读取仍须分别验收。
-- 当前可用网页抓取限于静态文本。S1b JavaScript/站点登录源码仍需独立 Linux broker 和授权站点验收；站点登录正文即使启用也仅供 Owner 私有预览，不进入项目通用来源。
-- 项目 Office 内嵌图片支持限定格式的显式视觉确认与人工审核；本轮已验证一份合成 Word 文档、DeepSeek 图片识别与人工发布，不能外推到所有文件格式或供应商。个人知识库 Office 导入继续只取正文，音视频识别未提供；单文件最大 25 MiB，其他细分限制见操作手册。
-- 平台额度归属于用户账号，个人知识库与项目中的平台模型调用共用该用户的余额，无需先创建项目才能使用个人知识库。完成邮箱或手机号验证的新注册（含短信登录自动注册）会在创建账号的同一事务中激活赠送权益；默认策略为每用户 500,000 Token、有效期 30 天，以管理员当前启用的赠送策略为准，策略停用或缺失时不发放，未验证的旧用户名注册路径及历史漏发账号不自动补发。平台托管模型消耗该用户的平台额度；个人 BYOK 连接消耗用户自己的供应商额度并可能产生供应商费用；系统不维护实时价格，因此不估算账单。
-- 自动化可以刷新网页和运行确定性质量检查；Git 自动同步已在本轮受控分支与目录完成一次真实计划运行，其他连接仍须单独验收。涉及向模型发送内容的索引与简报任务只创建待确认通知，不会绕过当次授权。
-- 动作中心不是通用 Agent 工具平台。MCP 接入源码已有逐次审批、单次只读派发和人工纳入链；对外 MCP 已有 OAuth 与单次读取链，但真实服务和两个客户端的互操作仍未验收。MCP 按实际部署开关和已有授权生效；本轮不新增真实第三方 MCP 验收或授权。开关启用不代表外部互操作已经通过，连接、委托及逐次审批约束仍然生效。
-- MCP 不支持 stdio、本地子进程、独立旧式 SSE、执行中继续索取输入、自动执行或任何写操作；同一 POST 的 request-scoped JSON/SSE 响应仍需严格匹配持久请求 ID。伪造或篡改服务端 annotations 不能绕过管理员认证；接入方仍需使用可信服务和最小权限只读凭据。
-- 隔离门禁中的 MCP 成功结果仅是受限、净化的内部证据，不构成第三方现场能力。0.7 的结果查看及人工纳入代码不意味着生产已启用；结果不会自动成为项目资料或事实、建立索引、进入模型上下文，也不会自动展开图片、音频和资源链接。
-- 项目计划不会自动生成执行动作。智能体建议、仓库变化信号和健康提醒都必须由人核对；系统不会因此修改代码、调用工具、创建分支/PR、合并或部署。
-- 项目世界模型不会自动推断或创建事实关系，也不会自动解决冲突。当前状态是确定性汇总，不代表业务真伪已经由系统证明；关系、替代和冲突处置仍需人工判断。
-- 智能体没有 Shell、任意文件系统、代码修改、Git 写入、部署或 MCP 工具调用权限。0.7 的受控 MCP 人工审批路径与智能体工具权限分开，不允许模型自行派发；生产启用仍需真实外部服务验收。
-- 受限 JSON 导出不是数据库备份，不包含凭据、向量、上传二进制和完整运行账本。
-
-## 本地 Docker 部署
-
-要求：Docker Desktop。
+安装并启动 Docker Desktop，使用 Docker Compose **2.30 或以上**，然后获取源码：
 
 ```bash
+git clone https://github.com/Jack-Kunlun/ai-project-os.git
+cd ai-project-os
 cp .env.example .env
-# 编辑 .env，至少设置 cluster-admin、migrator、runtime、writer 和
-# inventory-reader 密码；不要提交 .env
+```
+
+编辑 `.env`，填写六项数据库密码。每项使用独立的随机值，可分别运行 `openssl rand -hex 32` 生成。
+
+<details>
+<summary>查看需要填写的六项密码</summary>
+
+```dotenv
+POSTGRES_CLUSTER_ADMIN_PASSWORD=
+POSTGRES_MIGRATOR_PASSWORD=
+POSTGRES_RUNTIME_PASSWORD=
+POSTGRES_ENTITLEMENT_WRITER_PASSWORD=
+POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD=
+POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=
+```
+
+</details>
+
+本机试用时，再将 `LOCAL_REGISTRATION_ENABLED` 改为 `true`，便于创建普通账号；其他值先保留示例默认值。注册默认关闭，邮箱、短信和 GitHub 登录需要另外配置。`.env` 中的真实密码和密钥不要提交到仓库。
+
+### 2. 启动服务
+
+```bash
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps --all
 ```
 
-打开 <http://127.0.0.1:3000>。正常状态应为：
+首次启动会构建应用并初始化数据库。正常时，`postgres`、`app`、`worker`、`git-worker` 显示为 `healthy`，`principal-bootstrap`、`migrate`、`reconcile` 显示为 `Exited (0)`。
 
-- `postgres`：healthy
-- `principal-bootstrap`：Exited (0)
-- `migrate`：Exited (0)
-- `reconcile`：Exited (0)
-- `app`：healthy
-- `worker`：healthy
-
-`/api/health` 会分别报告数据库与 Worker 心跳；Worker 日志为单行 JSON，可按[运行监控基线](docs/monitoring.md)采集和告警。
-
-Compose 默认使用三个命名卷：`ai-project-os-pgdata`、`ai-project-os-secrets`、`ai-project-os-uploads`。不要执行 `docker compose down -v`，该命令会删除数据库、凭据主密钥和上传文件。需要并行运行一次性候选验收时，必须同时改用独立 `POSTGRES_PORT`、`APP_PORT`、`AI_PROJECT_OS_PGDATA_VOLUME`、`AI_PROJECT_OS_SECRETS_VOLUME` 和 `AI_PROJECT_OS_UPLOADS_VOLUME`；不要让候选栈复用正式卷。
-
-面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true` 与实际 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。本次 v0.7.11 从精确 v0.7.10 基线预构建后停写切换，核对既有 140 条迁移账本，不执行迁移；按用户的 0.7.x 决定，豁免备份、恢复、旧数据演练及重复完整 CI 等待，具体入口和边界见[版本说明](docs/releases/v0.7.11.md)。
-
-### 现有卷的数据库账号升级
-
-ENT-009 的 Compose 顺序是 `principal-bootstrap → migrate → reconcile → app/worker`。`ai_project_os_cluster_admin` 是 initdb/维护窗口专用的超级用户，`ai_project_os_migrator` 是实际迁移 owner；runtime、writer 和 inventory-reader 只获得各自最小权限。迁移不会在线滚动执行，必须先停止旧 app/worker 并在维护窗口完成。
-
-如果现有卷仍由旧 owner 持有，请先备份并停止旧 app/worker。在未提交的 `.env` 中保留 `POSTGRES_USER=ai_project_os_cluster_admin`、设置新的 `POSTGRES_CLUSTER_ADMIN_PASSWORD`/`POSTGRES_MIGRATOR_PASSWORD`，并临时设置 `DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL` 为旧 owner 的 owner-only PostgreSQL URL。启动并确认 `principal-bootstrap`、`migrate`、`reconcile` 均为 `Exited (0)` 后，bootstrap 会先创建独立 cluster-admin，再把旧 owner 的当前数据库对象迁移到 migrator。普通旧 owner 会在事务内封存为 `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`；官方 initdb 的 OID10 旧超级用户不能安全降级为 `NOSUPERUSER`，会保留 `SUPERUSER` 但设置 `NOLOGIN`、清除密码/成员关系并终止其会话。确认升级成功后从 `.env` 删除并轮换一次性 legacy URL（即使暂时保留，后续 admin-ready 重启也不会再次连接它）；不要把它放入 app/worker/migrate 环境、日志或仓库。只有在检查完外部依赖、成员关系和审计要求后，才可在单独维护窗口受控地 `DROP ROLE`；bootstrap 不会自动删除封存角色。若 bootstrap 缺失或凭据错误，流程会在迁移前 fail closed 并保留数据现场。
-
-需要运行 entitlement 历史盘点时，使用独立 reader URL 通过 `127.0.0.1` 或 SSH tunnel 执行 `pnpm db:account-entitlement-inventory`；该 reader 只能执行聚合函数，不能读取基础表，输出也不含用户标识或额度明细。详见[管理员操作指南](docs/admin-operation-guide.md)。
-
-## 本地开发
-
-要求：Node.js 24+、pnpm 10+、PostgreSQL 18 + pgvector。
+打开 [http://127.0.0.1:3000](http://127.0.0.1:3000)。也可以检查服务状态：
 
 ```bash
-pnpm install
-cp .env.example .env
+curl --fail http://127.0.0.1:3000/api/health
+```
+
+### 3. 完成首次配置
+
+1. **创建平台管理员**：首次访问会进入初始化页面。管理员负责配置模型、账号和额度。
+2. **配置模型**：在管理端的“模型与能力”中添加供应商，测试连接并启用所需能力。
+3. **创建普通账号**：退出管理员，在登录页注册普通账号。它会拥有自己的个人工作区，用于日常知识和项目操作；此步骤需要前面已开启本地注册。
+4. **配置试用权益和额度**：重新登录管理员，为刚创建的账号配置相应权益与平台额度。本地用户名注册不自动发放新用户赠送权益。
+
+完成后，用普通账号登录，按[开始使用](#开始使用)添加第一篇资料。若采用邮箱、短信或 GitHub 登录，请先按相应指南配置，再创建普通账号。
+
+本地数据保存在数据库、凭据主密钥和上传文件三个命名卷中。停止服务可使用 `docker compose down`；**不要添加 `-v`**，它会删除这些数据卷。对外提供访问前，按[部署安全说明](docs/deployment-security.md)配置 HTTPS、反向代理和入口限流。
+
+## 常见问题
+
+### 需要自己准备模型 API Key 吗？
+
+普通用户可以使用管理员配置的平台默认模型，账号需要有可用的平台额度。自行部署时，由管理员准备供应商凭据并启用模型。符合会员条件的用户也可以配置个人模型，用于项目时还需要完成项目授权。
+
+支持 OpenAI、DeepSeek、Qwen、GLM；可用的生成、视觉和向量能力取决于实际配置和连接测试。Git、GitHub 登录、OIDC、短信、邮箱和 MCP 各有启用条件，接入说明见[管理员指南](docs/admin-operation-guide.md)。
+
+### 资料会发送到哪里？
+
+自行部署时，资料保存在自己的部署中。识别、整理和问答需要调用外部模型时，页面会展示模型和发送范围，经你确认后再发送给对应供应商；问答范围也可能包括已有会话内容，发送前可以检查清单。自动化中的模型任务同样需要当次确认。Token 用量与平台额度分别展示。
+
+### 支持导入哪些资料？
+
+支持常见文本、PDF、Word、Excel、PowerPoint 和图片，也可导入网页、本地文件夹及配置好的只读 Git 仓库内容。图片、扫描件和项目 Office 内嵌图片的识别依赖视觉模型；个人知识库的 Office 导入只取正文，暂不支持音视频识别。
+
+网页导入目前以静态文本为主。需要执行 JavaScript 或登录站点的正文抓取尚未作为常规部署能力开放。
+
+### 整理结果还需要逐条确认吗？
+
+项目上传文件、已核对图文和手工资料中，直接摘自原文、表述明确且不与已有事实冲突的内容，可以自动记为项目事实。改写、冲突或不确定的内容，以及网页、仓库和工具结果，仍由人核对。整理结果保留来源，便于回到原文判断和修正。
+
+### 问答怎样找到资料？
+
+统一智能问答目前按关键词选择资料，再结合本轮确认的范围和会话历史回答。需要语义检索时，可使用个人知识或项目高级工具中的索引与检索功能。查看回答时，可以沿引用核对当时使用的资料版本。
+
+### 它能自动执行项目工作吗？
+
+项目智能体可以分析资料、生成简报和提出建议。创建工作项、接受建议、推进状态及确认完成仍由人操作；代码修改、Git 写入、Shell 执行、合并和部署不在其权限范围内。
+
+Git 和受控 MCP 工具只读。MCP 工具读取需要管理员审核、项目授权和逐次审批，成功结果经人工选择后才能纳入资料。真实外部服务须在自己的部署中验证。
+
+## 开发与检查
+
+应用使用 Next.js、React、TypeScript、Prisma 和 PostgreSQL + pgvector；后台 Worker 与应用在同一个仓库中维护。
+
+<details>
+<summary>展开本地开发配置与检查命令</summary>
+
+本地开发需要 Node.js 24、pnpm 10.14.0 和 PostgreSQL 18 + pgvector。先在独立开发库中完成数据库初始化与权限配置，在 `.env` 中设置宿主机可访问的 `DATABASE_URL`（运行账号）、`ENTITLEMENT_DATABASE_URL`（额度写入账号）和 `GIT_AUTOMATION_DATABASE_URL`（Git Worker 账号）。使用已有加密连接时，还需要与该数据库配套的凭据主密钥。数据库角色和配置见[管理员指南](docs/admin-operation-guide.md#2-首次启动与升级)。
+
+```bash
+pnpm install --frozen-lockfile
 pnpm db:generate
-pnpm exec prisma migrate deploy --config prisma.config.ts
 pnpm dev
-pnpm worker
 ```
 
-应用默认运行于 <http://localhost:3000>。直接运行时，凭据主密钥默认创建在 `~/.ai-project-os/master.key`，文件权限应为 `0600`。
+需要后台识别与自动化时，在另一个终端加载同一份开发环境变量后运行 `pnpm worker`。Git 自动同步使用独立的 `git-worker`；若直接运行其脚本，该进程的 `DATABASE_URL` 和 `GIT_AUTOMATION_DATABASE_URL` 必须同时指向专用 Git Worker 账号。Compose 已配置这两个后台服务。
 
-## 验证
+| 命令 | 用途 |
+| --- | --- |
+| `pnpm test` | 默认测试集，部分集成测试需独立环境 |
+| `pnpm lint` / `pnpm typecheck` | 代码规范与类型检查 |
+| `pnpm build` | 生产构建 |
+| `pnpm performance:check` | 检查已生成构建产物的性能预算 |
+| `pnpm db:validate` | 校验 Prisma Schema 和迁移文件 |
 
-```bash
-pnpm test
-pnpm test:coverage
-pnpm test:performance
-pnpm lint
-pnpm typecheck
-pnpm build
-pnpm db:validate
-git diff --check
+数据库集成、浏览器与容器验收的独立环境要求见[持续集成说明](docs/continuous-integration.md)和[本地候选验收](docs/local-release.md)。
 
-# 需要绑定 127.0.0.1:56432 的一次性 PostgreSQL 18 + pgvector 管理库
-pnpm test:postgres-gates
-pnpm exec playwright install chromium
-pnpm test:browser-e2e
-pnpm release:local
+</details>
 
-V3_POSTGRES_GATE=1 pnpm exec tsx --test test/v3-postgres.test.ts
-ACTION_ENGINE_POSTGRES_GATE=1 pnpm test:action-engine-postgres
-MCP_CAPABILITIES_POSTGRES_GATE=1 pnpm test:mcp-capabilities-postgres
-PROJECT_PLAN_POSTGRES_GATE=1 pnpm test:project-plan-postgres
-PROJECT_WORLD_POSTGRES_GATE=1 pnpm test:project-world-postgres
-PROJECT_INTELLIGENCE_POSTGRES_GATE=1 pnpm test:project-intelligence-postgres
-pnpm exec prisma migrate status --config prisma.config.ts
-```
+## 进一步阅读
 
-统一 PostgreSQL 与浏览器门禁的隔离环境变量、清理边界和 CI 顺序见[持续集成与浏览器门禁](docs/continuous-integration.md)。所有 PostgreSQL 门禁都必须使用名称可识别、可整体丢弃的专用测试数据库；不得对正式数据库运行。`pnpm build` 使用 Next.js Webpack 构建。真实 PostgreSQL V3 测试使用本地签名 OIDC 服务与隔离测试数据，不调用真实模型供应商。
+| 你需要了解 | 文档 |
+| --- | --- |
+| 日常使用、资料整理、问答与项目协作 | [普通用户指南](docs/user-operation-guide.md) |
+| 模型、账号、额度与平台管理 | [管理员指南](docs/admin-operation-guide.md) |
+| 邮箱或手机号登录的配置与限制 | [邮箱认证](docs/email-authentication.md) · [手机号认证](docs/phone-authentication.md) |
+| 公网部署与正式版本更新 | [部署安全](docs/deployment-security.md) · [正式发布](docs/production-release.md) |
+| 服务监控、备份与恢复 | [运行监控](docs/monitoring.md) · [备份](docs/production-backup.md) · [迁移与恢复](docs/production-host-migration.md) |
+| 验证自己接入的模型、Git、OIDC 或 MCP | [外部服务验收](docs/external-service-acceptance.md) |
+| 版本变化与历史记录 | [当前源码版本 1.2.1](docs/releases/v1.2.1.md) · [更新记录](CHANGELOG.md) |
 
-真实模型、Git、OIDC 和 MCP 验收不能由本地替代服务或 CI 冒充。按[外部服务现场验收](docs/external-service-acceptance.md)完成页面操作后，在同一部署数据库上运行 `pnpm external:acceptance`；命令只读取脱敏证据计数，不会读取或输出凭据。
+## 许可与商业授权
 
-## 主要页面
+项目作者：**风岚（笔名）**。
 
-- `/dashboard`：跨项目概览、就绪度和最近任务。
-- `/projects`：项目管理。
-- `/admin`：平台管理员管理工作台总览，不展示项目、团队或个人连接。
-- `/admin/models`：平台管理员配置平台模型连接，并为每项能力选择已验证模型。
-- `/admin/credits`：平台管理员管理赠送策略和额度记录。
-- `/admin/operations/probes`：平台管理员配置连接探测预算。
-- `/admin/connectors/mcp`：平台管理员执行 MCP 候选与不可变安全审核，不接收个人凭据。
-- `/admin/users`：平台管理员管理用户、会员、账号状态和额度摘要。
-- `/admin/operations/backups`：平台管理员查看受限备份/运维状态。
-- `/settings`、`/connections`、`/connections/mcp`：兼容跳转，非 admin 返回用户工作台。
-- `/team`：成员、邀请和 OIDC。
-- `/notifications`：通知中心。
-- `/profile`：个人资料与登录安全。
-- `/guide`：页面操作指南。
-- `/projects/:projectId/assets`：文件资料。
-- `/projects/:projectId/external-sources`：网页与本地文件夹。
-- `/projects/:projectId/repositories`：个人 Git 委托安全摘要、双确认和一次性手动只读读取。
-- `/projects/:projectId/world`：时态项目状态、事实关系、替代链、冲突、快照与审计。
-- `/projects/:projectId/automations`：自动化。
-- `/projects/:projectId/actions`：动作策略、审批和审计。
-- `/projects/:projectId/tools`：MCP 连接委托、只读工具授权及受控动作入口；工具发现从个人中心进入，派发与结果流程还受生产开关和逐次审批约束，真实外部能力须单独验收。
-- `/projects/:projectId/plan`：目标、负责人、期限、验收标准、证据、仓库变化、工作项、依赖、健康与计划审计。
-- `/projects/:projectId/control`：AI 能力状态和模型使用方式（不维护独立项目路由）。
-- `/projects/:projectId/memory`：抽取、索引、搜索和 RAG。
-- `/projects/:projectId/memory-quality`：记忆质量与生命周期。
-- `/projects/:projectId/intelligence`：简报和只读智能体。
-- `/projects/:projectId/governance`：审核、异常与用量。
+本仓库中项目权利人有权授权的软件代码采用 [PolyForm Strict License 1.0.0](LICENSE.md)，属于源码可见许可；具体权利以许可证全文为准。
 
-## 历史材料
-
-V1 CLI 手册和历史运行合同继续保留用于兼容与审计。0.7 源码、标签、GitHub Release 与生产部署须分别核对；发布与部署条件见 [补丁版本说明](docs/releases/v0.7.3.md) 和 [生产部署](docs/production-deployment.md)。
+- **非商业使用**：可按许可证使用软件。该许可不授予修改、制作衍生作品或分发软件的权利；如需这些权利，须另行取得书面授权。
+- **商业使用**：须事先取得单独书面授权。联系邮箱：[1837115857@qq.com](mailto:1837115857@qq.com)。
+- **其他材料**：第三方组件适用其各自许可；文档等其他材料未另行授权。

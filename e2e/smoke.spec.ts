@@ -587,7 +587,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.getByRole("button", { name: "提交仓库范围提案", exact: true }).click();
   const repositoryProposal = page.getByRole("dialog", { name: "提交仓库范围提案", exact: true });
   await expect(repositoryProposal.getByText("还没有已验证的个人 Git 连接。先添加连接并测试指定仓库和 ref，再回来提交范围提案。", { exact: true })).toBeVisible();
-  await repositoryProposal.getByRole("button", { name: "返回查看", exact: true }).click();
+  await repositoryProposal.getByRole("button", { name: "关闭窗口", exact: true }).click();
   const projectRepositoryViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   const repositoryDimensions = await readOverflowMeasurement(page);

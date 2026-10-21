@@ -29,6 +29,19 @@ type MatrixEntry = Readonly<{
   parentLinks: readonly string[];
   untranslatedSystemKeys: readonly string[];
   serverErrors: readonly Readonly<{ status: number; url: string }>[];
+  outcome: "passed" | "failed";
+  error?: string;
+}>;
+type ParentNavigationResult = Readonly<{
+  mode: MatrixMode["id"];
+  source: string;
+  pagePath: string;
+  role: MatrixRole;
+  href: string;
+  expectedUrl: string;
+  actualUrl: string | null;
+  outcome: "passed" | "failed";
+  error?: string;
 }>;
 
 const MATRIX_MODES: readonly MatrixMode[] = [
@@ -55,19 +68,24 @@ const KNOWN_TRANSLATED_SYSTEM_KEYS = Object.entries(englishUiMessages)
   .map(([key]) => key);
 
 const ROUTE_DESTINATIONS: Readonly<Record<string, Readonly<Partial<Record<MatrixRole, string>>>>> = {
-  "/": { user: "/dashboard" },
-  "/setup": { anonymous: "/login" },
-  "/profile/models": { user: "/personal/models" },
-  "/profile/connections/git": { user: "/personal/connections/git" },
-  "/profile/connections/mcp": { user: "/personal/connections/mcp" },
-  "/connections": { user: "/personal/connections/git" },
-  "/connections/mcp": { user: "/personal/connections/mcp" },
+  "/": { admin: "/admin", user: "/dashboard", anonymous: "/login" },
+  "/accept-invitation": { anonymous: "/login" },
+  "/setup": { admin: "/admin", user: "/dashboard", anonymous: "/login" },
+  "/login": { admin: "/admin", user: "/dashboard" },
+  "/register": { admin: "/admin", user: "/dashboard" },
+  "/profile/models": { admin: "/admin", user: "/personal/models", anonymous: "/login" },
+  "/profile/connections/git": { admin: "/admin", user: "/personal/connections/git", anonymous: "/login" },
+  "/profile/connections/mcp": { admin: "/admin", user: "/personal/connections/mcp", anonymous: "/login" },
+  "/projects": { admin: "/admin", user: "/personal/projects", anonymous: "/login" },
+  "/connections": { admin: "/admin", user: "/personal/connections/git", anonymous: "/login" },
+  "/connections/mcp": { admin: "/admin", user: "/personal/connections/mcp", anonymous: "/login" },
   "/settings": { admin: "/admin/models", user: "/dashboard", anonymous: "/login" },
   "/system/memberships": { admin: "/admin/users/memberships", user: "/dashboard", anonymous: "/login" },
   "/system/operations": { admin: "/admin/operations/backups", user: "/dashboard", anonymous: "/login" },
-  "/admin/connectors/git": { admin: "/admin" },
-  "/admin/models/routes": { admin: "/admin/models" },
-  "/admin/models/governance": { admin: "/admin/models" },
+  "/system/account-access": { admin: "/admin/users", user: "/dashboard", anonymous: "/login" },
+  "/admin/connectors/git": { admin: "/admin", user: "/dashboard", anonymous: "/login" },
+  "/admin/models/routes": { admin: "/admin/models", user: "/dashboard", anonymous: "/login" },
+  "/admin/models/governance": { admin: "/admin/models", user: "/dashboard", anonymous: "/login" },
 };
 
 function discoverAppPageRoutes(): MatrixRoute[] {
@@ -143,7 +161,7 @@ async function readIconMetrics(page: Page): Promise<readonly Readonly<{ width: n
 
 async function readParentLinks(page: Page): Promise<readonly string[]> {
   const current = new URL(page.url());
-  const links = page.locator("a.parent-page-link");
+  const links = page.locator("a.parent-page-link:visible");
   const values: string[] = [];
   for (let index = 0; index < await links.count(); index += 1) {
     const href = await links.nth(index).getAttribute("href");
@@ -155,6 +173,52 @@ async function readParentLinks(page: Page): Promise<readonly string[]> {
     values.push(href!);
   }
   return values;
+}
+
+async function exerciseParentLinks(input: Readonly<{
+  page: Page;
+  hrefs: readonly string[];
+  origin: string;
+  currentPath: string;
+  source: string;
+  role: MatrixRole;
+  mode: MatrixMode["id"];
+  results: ParentNavigationResult[];
+  failures: Array<Readonly<{ mode: MatrixMode["id"]; source: string; path: string; role: MatrixRole; phase: "route" | "parent-navigation"; error: string }>>;
+}>): Promise<void> {
+  const { page, hrefs, origin, currentPath, source, role, mode, results, failures } = input;
+  for (let index = 0; index < hrefs.length; index += 1) {
+    const href = hrefs[index]!;
+    const requested = new URL(href, origin);
+    const expectedPath = expectedDestination(requested.pathname, role);
+    const expectedUrl = `${expectedPath}${requested.search}${requested.hash}`;
+    let actualUrl: string | null = null;
+    try {
+      const link = page.locator("a.parent-page-link:visible").nth(index);
+      await expect(link, `${source}@${mode} parent link ${href} must remain visible`).toBeVisible();
+      await link.click();
+      await page.waitForURL((url) => `${url.pathname}${url.search}${url.hash}` === expectedUrl, { timeout: 15_000 });
+      const destination = new URL(page.url());
+      actualUrl = `${destination.pathname}${destination.search}${destination.hash}`;
+      expect(actualUrl, `${source}@${mode} parent link must navigate to ${expectedUrl}`).toBe(expectedUrl);
+      results.push({ mode, source, pagePath: currentPath, role, href, expectedUrl, actualUrl, outcome: "passed" });
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : String(cause);
+      actualUrl = `${new URL(page.url()).pathname}${new URL(page.url()).search}${new URL(page.url()).hash}`;
+      results.push({ mode, source, pagePath: currentPath, role, href, expectedUrl, actualUrl, outcome: "failed", error });
+      failures.push({ mode, source, path: currentPath, role, phase: "parent-navigation", error: `${href} → ${expectedUrl}: ${error}` });
+    }
+
+    if (index + 1 < hrefs.length) {
+      try {
+        await page.goto(currentPath, { waitUntil: "domcontentloaded" });
+        await expect(page.locator("body"), `${source}@${mode} must restore the source page before testing its next parent link`).toBeVisible();
+      } catch (cause) {
+        const error = cause instanceof Error ? cause.message : String(cause);
+        failures.push({ mode, source, path: currentPath, role, phase: "parent-navigation", error: `restore before ${hrefs[index + 1]}: ${error}` });
+      }
+    }
+  }
 }
 
 async function readUntranslatedSystemKeys(page: Page): Promise<readonly string[]> {
@@ -241,6 +305,8 @@ test("all page routes remain consistent across Chinese light and English dark de
   }
 
   const matrix: MatrixEntry[] = [];
+  const routeFailures: Array<Readonly<{ mode: MatrixMode["id"]; source: string; path: string; role: MatrixRole; phase: "route" | "parent-navigation"; error: string }>> = [];
+  const parentNavigationResults: ParentNavigationResult[] = [];
   const guardResults: Array<Readonly<{ path: string; role: MatrixRole; status: number | null; finalPath: string; expectedPath: string }>> = [];
   const contexts: readonly BrowserContext[] = [adminContext, userContext, anonymousContext];
   const extraContexts: BrowserContext[] = [];
@@ -278,89 +344,187 @@ test("all page routes remain consistent across Chinese light and English dark de
         const expectedPath = expectedDestination(route.path, route.role);
         const expectedFullPath = path === route.path ? expectedPath : expectedPath.replace(route.path, path);
         responseErrors.set(page, []);
-        const response = await page.goto(path, { waitUntil: "domcontentloaded" });
-        await expect(page.locator("body"), `${path} must render a body for ${route.role}/${mode.id}`).toBeVisible();
-        await page.waitForTimeout(80);
-        const finalUrl = new URL(page.url());
-        const finalPath = `${finalUrl.pathname}${finalUrl.search}`;
-        const gatedNotFound = route.path === "/projects/[projectId]/mcp-actions" || route.path === "/projects/[projectId]/mcp-export";
+        let status: number | null = null;
+        let finalPath = path;
+        let gatedNotFound = false;
+        let iconCount = 0;
+        let parentLinks: readonly string[] = [];
+        let untranslatedSystemKeys: readonly string[] = [];
+        let parentLinksAttempted = false;
+        try {
+          const response = await page.goto(path, { waitUntil: "domcontentloaded" });
+          status = response?.status() ?? null;
+          await expect(page.locator("body"), `${path} must render a body for ${route.role}/${mode.id}`).toBeVisible();
+          await page.waitForTimeout(80);
+          const finalUrl = new URL(page.url());
+          finalPath = `${finalUrl.pathname}${finalUrl.search}`;
+          gatedNotFound = route.path === "/projects/[projectId]/mcp-actions" || route.path === "/projects/[projectId]/mcp-export";
 
-        if (gatedNotFound && response?.status() === 404) {
-          // These surfaces intentionally return not-found while their server
-          // feature gates are disabled. Their projectId remains a real fixture.
-        } else {
-          expect(response?.status(), `${path} (${route.source}) must render or redirect successfully in ${mode.id}`).toBeLessThan(400);
-        }
-        expect(finalUrl.pathname, `${path} (${route.role}) must reach its declared destination in ${mode.id}`).toBe(new URL(expectedFullPath, finalUrl.origin).pathname);
-        expect(finalUrl.search, `${path} must preserve its destination query in ${mode.id}`).toBe(new URL(expectedFullPath, finalUrl.origin).search);
-        await expect(page.locator("html")).toHaveAttribute("data-language", mode.language);
-        await expect(page.locator("html")).toHaveAttribute("data-theme", mode.theme);
-        await expectR02NoHorizontalOverflow(page, `${path}@${mode.id}`);
+          if (!(gatedNotFound && status === 404)) {
+            expect(status, `${path} (${route.source}) must render or redirect successfully in ${mode.id}`).toBeLessThan(400);
+          }
+          expect(finalUrl.pathname, `${path} (${route.role}) must reach its declared destination in ${mode.id}`).toBe(new URL(expectedFullPath, finalUrl.origin).pathname);
+          expect(finalUrl.search, `${path} must preserve its destination query in ${mode.id}`).toBe(new URL(expectedFullPath, finalUrl.origin).search);
+          await expect(page.locator("html")).toHaveAttribute("data-language", mode.language);
+          await expect(page.locator("html")).toHaveAttribute("data-theme", mode.theme);
+          await expectR02NoHorizontalOverflow(page, `${path}@${mode.id}`);
 
-        const iconMetrics = await readIconMetrics(page);
-        for (const icon of iconMetrics) {
-          expect(Math.abs(icon.width - icon.height), `${path}@${mode.id} app-icon must be square`).toBeLessThanOrEqual(1.5);
-          expect(icon.width, `${path}@${mode.id} app-icon must be visible`).toBeGreaterThan(0);
-          expect(icon.spriteResolved, `every visible icon must resolve its server-rendered Tabler definition`).toBe(true);
-          expect(icon.strokeWidth, `${path}@${mode.id} Tabler app-icon stroke`).toBe("1.75");
-        }
-        const parentLinks = await readParentLinks(page);
-        const untranslatedSystemKeys = mode.language === "en" ? await readUntranslatedSystemKeys(page) : [];
-        expect(untranslatedSystemKeys, `${path}@${mode.id} must not leave exact translated dictionary keys in system UI`).toEqual([]);
-        const serverErrors = responseErrors.get(page) ?? [];
-        expect(serverErrors, `${path}@${mode.id} must not cause HTTP 5xx responses`).toEqual([]);
+          const iconMetrics = await readIconMetrics(page);
+          iconCount = iconMetrics.length;
+          for (const icon of iconMetrics) {
+            expect(Math.abs(icon.width - icon.height), `${path}@${mode.id} app-icon must be square`).toBeLessThanOrEqual(1.5);
+            expect(icon.width, `${path}@${mode.id} app-icon must be visible`).toBeGreaterThan(0);
+            expect(icon.spriteResolved, `every visible icon must resolve its server-rendered Tabler definition`).toBe(true);
+            expect(icon.strokeWidth, `${path}@${mode.id} Tabler app-icon stroke`).toBe("1.75");
+          }
+          parentLinks = await readParentLinks(page);
+          untranslatedSystemKeys = mode.language === "en" ? await readUntranslatedSystemKeys(page) : [];
+          expect(untranslatedSystemKeys, `${path}@${mode.id} must not leave exact translated dictionary keys in system UI`).toEqual([]);
 
-        matrix.push({
-          mode: mode.id,
-          source: route.source,
-          path,
-          role: route.role,
-          status: response?.status() ?? null,
-          finalPath,
-          expectedPath: expectedFullPath,
-          gatedNotFound: gatedNotFound && response?.status() === 404,
-          iconCount: iconMetrics.length,
-          parentLinks,
-          untranslatedSystemKeys,
-          serverErrors,
-        });
+          if (mode.id === "zh-light-1440" && path === "/dashboard") {
+            await testInfo.attach("ui-matrix-dashboard-zh-light-1440.png", { body: await page.screenshot(), contentType: "image/png" });
+          }
+          if (mode.id === "en-dark-390" && path === "/admin") {
+            await testInfo.attach("ui-matrix-admin-en-dark-390.png", { body: await page.screenshot(), contentType: "image/png" });
+          }
+          parentLinksAttempted = true;
+          await exerciseParentLinks({
+            page,
+            hrefs: parentLinks,
+            origin: origin.value!,
+            currentPath: path,
+            source: route.source,
+            role: route.role,
+            mode: mode.id,
+            results: parentNavigationResults,
+            failures: routeFailures,
+          });
+          const parentFailure = routeFailures.find((failure) => failure.mode === mode.id && failure.source === route.source && failure.phase === "parent-navigation");
+          if (parentFailure) throw new Error(parentFailure.error);
+          const serverErrors = responseErrors.get(page) ?? [];
+          expect(serverErrors, `${path}@${mode.id} and its parent links must not cause HTTP 5xx responses`).toEqual([]);
 
-        if (mode.id === "zh-light-1440" && path === "/dashboard") {
-          await testInfo.attach("ui-matrix-dashboard-zh-light-1440.png", { body: await page.screenshot(), contentType: "image/png" });
-        }
-        if (mode.id === "en-dark-390" && path === "/admin") {
-          await testInfo.attach("ui-matrix-admin-en-dark-390.png", { body: await page.screenshot(), contentType: "image/png" });
+          matrix.push({
+            mode: mode.id,
+            source: route.source,
+            path,
+            role: route.role,
+            status,
+            finalPath,
+            expectedPath: expectedFullPath,
+            gatedNotFound: gatedNotFound && status === 404,
+            iconCount,
+            parentLinks,
+            untranslatedSystemKeys,
+            serverErrors,
+            outcome: "passed",
+          });
+        } catch (cause) {
+          const error = cause instanceof Error ? cause.message : String(cause);
+          const finalUrl = new URL(page.url());
+          finalPath = `${finalUrl.pathname}${finalUrl.search}`;
+          const hasRecordedParentFailure = routeFailures.some((failure) => failure.mode === mode.id && failure.source === route.source && failure.phase === "parent-navigation");
+          if (!hasRecordedParentFailure) routeFailures.push({ mode: mode.id, source: route.source, path, role: route.role, phase: "route", error });
+          if (!parentLinksAttempted) {
+            try {
+              if (parentLinks.length === 0) parentLinks = await readParentLinks(page);
+              parentLinksAttempted = true;
+              await exerciseParentLinks({
+                page,
+                hrefs: parentLinks,
+                origin: origin.value!,
+                currentPath: path,
+                source: route.source,
+                role: route.role,
+                mode: mode.id,
+                results: parentNavigationResults,
+                failures: routeFailures,
+              });
+            } catch (parentCause) {
+              const parentError = parentCause instanceof Error ? parentCause.message : String(parentCause);
+              routeFailures.push({ mode: mode.id, source: route.source, path, role: route.role, phase: "parent-navigation", error: parentError });
+            }
+          }
+          matrix.push({
+            mode: mode.id,
+            source: route.source,
+            path,
+            role: route.role,
+            status,
+            finalPath,
+            expectedPath: expectedFullPath,
+            gatedNotFound: gatedNotFound && status === 404,
+            iconCount,
+            parentLinks,
+            untranslatedSystemKeys,
+            serverErrors: responseErrors.get(page) ?? [],
+            outcome: "failed",
+            error,
+          });
         }
       }
     }
 
     // Compatibility routes with role-dependent destinations and permission
     // guards are exercised against the real project and actual user fixtures.
-    const guardCases: readonly Readonly<{ page: Page; path: string; expectedPath: string; expectedStatus?: number }>[] = [
+    const validInvitationToken = "A".repeat(40);
+    const invitationPath = `/accept-invitation?token=${validInvitationToken}`;
+    const guardCases: readonly Readonly<{ page: Page; path: string; expectedPath: string; expectedSearch?: string; expectedStatus?: number }>[] = [
       { page: userPage, path: "/admin", expectedPath: "/dashboard" },
+      { page: adminPage, path: "/", expectedPath: "/admin" },
+      { page: anonymousPage, path: "/", expectedPath: "/login" },
+      { page: adminPage, path: "/login", expectedPath: "/admin" },
+      { page: userPage, path: "/login", expectedPath: "/dashboard" },
+      { page: adminPage, path: "/register", expectedPath: "/admin" },
+      { page: userPage, path: "/register", expectedPath: "/dashboard" },
+      { page: adminPage, path: "/setup", expectedPath: "/admin" },
+      { page: userPage, path: "/setup", expectedPath: "/dashboard" },
       { page: adminPage, path: "/settings", expectedPath: "/admin/models" },
+      { page: userPage, path: "/settings", expectedPath: "/dashboard" },
       { page: anonymousPage, path: "/settings", expectedPath: "/login" },
       { page: anonymousPage, path: "/dashboard", expectedPath: "/login" },
       { page: anonymousPage, path: "/projects", expectedPath: "/login" },
+      { page: adminPage, path: "/projects", expectedPath: "/admin" },
       { page: anonymousPage, path: "/profile/models", expectedPath: "/login" },
+      { page: adminPage, path: "/profile/models", expectedPath: "/admin" },
+      { page: anonymousPage, path: "/profile/connections/git", expectedPath: "/login" },
+      { page: adminPage, path: "/profile/connections/git", expectedPath: "/admin" },
+      { page: anonymousPage, path: "/profile/connections/mcp", expectedPath: "/login" },
+      { page: adminPage, path: "/profile/connections/mcp", expectedPath: "/admin" },
       { page: anonymousPage, path: "/connections", expectedPath: "/login" },
+      { page: adminPage, path: "/connections", expectedPath: "/admin" },
+      { page: anonymousPage, path: "/connections/mcp", expectedPath: "/login" },
+      { page: adminPage, path: "/connections/mcp", expectedPath: "/admin" },
+      { page: adminPage, path: "/system/account-access", expectedPath: "/admin/users" },
+      { page: userPage, path: "/system/account-access", expectedPath: "/dashboard" },
+      { page: anonymousPage, path: "/system/account-access", expectedPath: "/login" },
+      { page: anonymousPage, path: "/system/memberships", expectedPath: "/login" },
+      { page: anonymousPage, path: "/system/operations", expectedPath: "/login" },
+      { page: adminPage, path: "/admin/connectors/git", expectedPath: "/admin" },
+      { page: userPage, path: "/admin/connectors/git", expectedPath: "/dashboard" },
+      { page: anonymousPage, path: "/admin/connectors/git", expectedPath: "/login" },
       { page: userPage, path: "/admin/models/routes", expectedPath: "/dashboard" },
+      { page: anonymousPage, path: "/admin/models/routes", expectedPath: "/login" },
       { page: userPage, path: "/admin/models/governance", expectedPath: "/dashboard" },
+      { page: anonymousPage, path: "/admin/models/governance", expectedPath: "/login" },
       { page: userPage, path: "/system/memberships", expectedPath: "/dashboard" },
       { page: userPage, path: "/system/operations", expectedPath: "/dashboard" },
       { page: userPage, path: `/admin/users/${ids.userId}`, expectedPath: "/dashboard" },
       { page: anonymousPage, path: `/projects/${ids.projectId}`, expectedPath: "/login" },
+      { page: anonymousPage, path: invitationPath, expectedPath: "/login", expectedSearch: `?returnTo=${encodeURIComponent(invitationPath)}` },
     ];
     for (const guard of guardCases) {
       const response = await guard.page.goto(guard.path, { waitUntil: "domcontentloaded" });
       expect(response?.status(), `${guard.path} must preserve its access guard`).toBeLessThan(400);
-      await expect(guard.page).toHaveURL(new RegExp(`${guard.expectedPath.replaceAll("/", "\\/")}$`, "u"));
+      const actualUrl = new URL(guard.page.url());
+      expect(actualUrl.pathname, `${guard.path} must redirect to its role-appropriate path`).toBe(guard.expectedPath);
+      expect(actualUrl.search, `${guard.path} must preserve or omit its query as declared`).toBe(guard.expectedSearch ?? "");
       guardResults.push({
         path: guard.path,
         role: guard.page === adminPage ? "admin" : guard.page === anonymousPage ? "anonymous" : "user",
         status: response?.status() ?? null,
-        finalPath: new URL(guard.page.url()).pathname,
-        expectedPath: guard.expectedPath,
+        finalPath: `${actualUrl.pathname}${actualUrl.search}`,
+        expectedPath: `${guard.expectedPath}${guard.expectedSearch ?? ""}`,
       });
     }
 
@@ -389,6 +553,8 @@ test("all page routes remain consistent across Chinese light and English dark de
 
     await setAppearance(userPage, origin.value!, "zh-CN", "light");
     await assertUserShellInteractions(userPage);
+    expect(matrix, "every discovered page route must be visited in each appearance/viewport mode").toHaveLength(routes.length * MATRIX_MODES.length);
+    expect(routeFailures, "all discovered routes must satisfy each appearance, viewport, icon, translation, link and server-error assertion").toEqual([]);
   } finally {
     await testInfo.attach("ui-consistency-matrix.json", {
       body: Buffer.from(JSON.stringify({
@@ -396,6 +562,13 @@ test("all page routes remain consistent across Chinese light and English dark de
         matrixModeCount: MATRIX_MODES.length,
         expectedRouteVisits: routes.length * MATRIX_MODES.length,
         actualRouteVisits: matrix.length,
+        successfulRouteVisits: matrix.filter((entry) => entry.outcome === "passed").length,
+        failedRouteVisits: matrix.filter((entry) => entry.outcome === "failed").length,
+        routeFailures,
+        parentNavigationCount: parentNavigationResults.length,
+        parentNavigationSuccesses: parentNavigationResults.filter((entry) => entry.outcome === "passed").length,
+        parentNavigationFailures: parentNavigationResults.filter((entry) => entry.outcome === "failed").length,
+        parentNavigationResults,
         dynamicIds: fixtureIds.value,
         dynamicFixtureIds: fixtureDetails.value ? {
           sourceId: fixtureDetails.value.sourceId,

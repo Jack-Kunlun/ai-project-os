@@ -68,7 +68,7 @@ test("materials keep editing separate, retain drafts, and chain text import into
   await expect(editTrigger).toBeFocused();
   await editTrigger.click();
   await expect(editor.locator("#item-title")).toHaveValue("保留草稿");
-  await editor.getByRole("button", { name: "返回查看", exact: true }).click();
+  await editor.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await page.screenshot({ path: "test-results/page-workflows-auto-facts/materials-view.png" });
   await page.locator("#add-source-trigger").click();
   const intake = page.getByRole("dialog", { name: "添加资料", exact: true });
@@ -149,7 +149,7 @@ test("profile operations preserve a failed draft and return to the updated view 
   });
   await details.getByRole("button", { name: "保存个人资料", exact: true }).click();
   await expect(details.getByText("Isolated profile retry error", { exact: true })).toBeVisible();
-  await details.getByRole("button", { name: "返回查看", exact: true }).click();
+  await details.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await edit.click();
   await expect(details.getByLabel("显示名称", { exact: true })).toHaveValue(displayName);
   await expectR02NoAccessibilityViolations(page, "profile operation workspace");

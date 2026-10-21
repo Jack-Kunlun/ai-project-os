@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/app-header";
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 import { useWorkspaceSelection } from "@/components/workspace-scope";
+import { formatDashboardDate as formatDate, formatDashboardGreetingDate as formatGreetingDate } from "@/lib/dashboard-date";
 import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import { USER_CURRENT_PROJECT_CHANGED_EVENT } from "@/lib/user-navigation";
 import { jobStatusLabels, type DashboardPayload, type JobKind, type RecentJob, type WorkspaceProject } from "@/lib/workspace-summary";
@@ -67,14 +68,6 @@ async function readError(response: Response, fallback: string): Promise<string> 
   } catch {
     return fallback;
   }
-}
-
-function formatDate(value: string, language: "zh-CN" | "en"): string {
-  return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
-}
-
-function formatGreetingDate(value: Date, language: "zh-CN" | "en"): string {
-  return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(value);
 }
 
 function jobHref(job: Pick<RecentJob, "id" | "project">): string {
@@ -140,7 +133,7 @@ function buildAttentionItems(payload: DashboardPayload, t: (text: string) => str
   return items.slice(0, 4);
 }
 
-export function DashboardClient({ username, isSystemAdmin = false }: { username: string; isSystemAdmin?: boolean }) {
+export function DashboardClient({ username, initialNow, isSystemAdmin = false }: { username: string; initialNow: string; isSystemAdmin?: boolean }) {
   const { language } = useAppearance();
   const t = useTranslate();
   const workspaceId = useWorkspaceSelection(username);
@@ -237,7 +230,7 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
           <Link href="/projects?create=1" className={styles.primaryButton}><ShellIcon name="plus" className="app-icon--control" /> <UiText text="新建项目" /></Link>
         </section>
 
-        <p className={styles.subtitle}>{formatGreetingDate(new Date(), language)}<span aria-hidden="true"> / </span>{(workspaceName?.workspaceId === workspaceId ? workspaceName.name : null) ?? t("当前工作空间")}</p>
+        <p className={styles.subtitle}>{formatGreetingDate(initialNow, language)}<span aria-hidden="true"> / </span>{(workspaceName?.workspaceId === workspaceId ? workspaceName.name : null) ?? t("当前工作空间")}</p>
 
         {error ? <div className={styles.error} role="alert"><span>{error}</span><button type="button" onClick={() => void load()}><UiText text="重试" /></button></div> : null}
 

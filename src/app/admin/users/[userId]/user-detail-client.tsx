@@ -1,5 +1,5 @@
 "use client";
-import { UiFeedbackText } from "@/components/ui-error-text";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 
 import Link from "next/link";
@@ -360,7 +360,7 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
   }
 
   if (loading && detail === null) return <div className="w-full px-4 py-8 text-sm text-slate-500 sm:px-5 lg:px-6">{t("读取中…")}</div>;
-  if (error || summary === null || detail === null) return <div className="w-full px-4 py-8 sm:px-5 lg:px-6"><p role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{t(error ?? "普通用户不存在")}</p><Link href="/admin/users" className="mt-5 inline-flex text-sm font-semibold text-indigo-700">{t("返回用户运营")}</Link></div>;
+  if (error || summary === null || detail === null) return <div className="w-full px-4 py-8 sm:px-5 lg:px-6"><p role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error ?? "普通用户不存在"} /></p><Link href="/admin/users" className="mt-5 inline-flex text-sm font-semibold text-indigo-700">{t("返回用户运营")}</Link></div>;
 
   return <div className="w-full px-4 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader translateTitle={false} title={summary.user.displayName ?? summary.user.username} description={`${summary.user.username} · ${t("统一处理账号状态、会员和额度；危险变更会先预览并在执行前重新校验。")}`} actions={<span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${summary.user.state === "enabled" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{t(summary.user.closedAt ? "账号已注销" : summary.user.state === "enabled" ? "账号已启用" : "账号已停用")}</span>} />

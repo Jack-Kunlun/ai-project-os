@@ -251,7 +251,7 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
       {currentPlan?.project.archivedAt ? <p className={styles.archivedNotice}><UiText text={"项目已归档，计划保持只读，目标、工作项和依赖不会被修改。"} /></p> : null}
       {message ? <p role="status" className={styles.success}><UiFeedbackText text={message} /></p> : null}
       {error && currentPlan ? <p role="alert" className={styles.error}><UiErrorText text={error} /></p> : null}
-      {!pageLoading && currentPlan === null ? <div className={styles.errorPanel} role="alert"><p>{t(error ?? "项目计划加载失败")}</p><button type="button" onClick={() => void reload({ showLoading: true })}><UiText text={"重试"} /></button></div> : null}
+      {!pageLoading && currentPlan === null ? <div className={styles.errorPanel} role="alert"><p><UiErrorText text={error ?? "项目计划加载失败"} /></p><button type="button" onClick={() => void reload({ showLoading: true })}><UiText text={"重试"} /></button></div> : null}
       {navigation.returnTo ? <ParentPageLink href={navigation.returnTo} label="返回来源页面" /> : null}
 
       {currentPlan ? <>

@@ -1,5 +1,7 @@
 "use client";
 
+import { UiErrorText } from "@/components/ui-error-text";
+
 import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslate } from "@/components/appearance-provider";
@@ -235,7 +237,7 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
             className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 text-base uppercase tracking-[0.2em] outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50"
           />
           <p id="graphic-captcha-error" role={error ? "alert" : undefined} aria-live="polite" className={`mt-2 min-h-5 text-xs leading-5 ${error ? "text-rose-700" : "text-slate-500"}`}>
-            {t(error ?? "验证码区分字母和数字，不区分大小写。")}
+            {error ? <UiErrorText text={error} /> : t("验证码区分字母和数字，不区分大小写。")}
           </p>
 
           <div className="mt-3 flex gap-3">

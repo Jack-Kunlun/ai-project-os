@@ -1,5 +1,5 @@
 "use client";
-import { UiErrorText } from "@/components/ui-error-text";
+import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 
 
 import Link from "next/link";
@@ -147,7 +147,7 @@ export function ProfileClient({
           </div>
         </section>
 
-        {operationMessage ? <p role="status" className="mt-3 text-sm text-emerald-700">{t(operationMessage)}</p> : null}
+        {operationMessage ? <p role="status" className="mt-3 text-sm text-emerald-700"><UiFeedbackText text={operationMessage} /></p> : null}
 
         <div className={profileStyles.settingsColumns}>
           <section className={profileStyles.settingsColumn}>
@@ -427,7 +427,7 @@ function PasswordField({ id, label, value, onChange, autoComplete }: { id: strin
 }
 
 function Message({ tone, text }: { tone: "success" | "error"; text: string }) {
-  return <p role={tone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl px-4 py-3 text-sm ${tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}><UiText text={text} /></p>;
+  return <p role={tone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl px-4 py-3 text-sm ${tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{tone === "error" ? <UiErrorText text={text} /> : <UiFeedbackText text={text} />}</p>;
 }
 
 function AccountSettingRow({ title, summary, description, children, disabled, danger = false, open, onOpenChange }: Readonly<{

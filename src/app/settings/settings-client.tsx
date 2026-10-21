@@ -395,7 +395,7 @@ function PlatformOperationCards() {
         </article>;
       })}
     </div>
-    {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{localizedMessage ?? t(message)}</p> : null}
+    {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{localizedMessage ?? <UiFeedbackText text={message} />}</p> : null}
   </section>{dialog}</>;
 }
 
@@ -778,7 +778,7 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
       <dl className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400"><UiText text={"生成模型"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultGenerationModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"图片识别"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultVisionModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"向量模型"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} ${t("维")}` : t("未配置")}</dd></div></dl>
       <div className="mt-5"><ScopeEvidenceCard title="供应商配置边界" evidence={{ scope: t("平台供应商连接"), owner: t("平台管理员"), payer: t("使用平台默认路由时由当前发起人扣减平台额度"), affectedProjects: provider._count.platformDefaultAiRoutes > 0 ? `${t("项目影响需经活动默认路由影响预览核实；当前有")} ${provider._count.platformDefaultAiRoutes} ${t("条活动默认路由引用")}` : t("尚无活动默认路由引用；暂无项目影响证据"), latestSuccess: provider.lastTestedAt ? `${t("最近连接测试")}：${dateLabel(provider.lastTestedAt, language, t)}` : t("尚未完成连接测试") }} /></div>
       {provider.status === "disabled" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700"><UiText text={"永久删除仅适用于没有活动平台默认路由或历史审计引用的连接，并会同时删除加密凭据。"} /></p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><UiText text={"永久删除"} /></button></div> : null}
-      {(checkResult || message) && !editing ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{checkResult ? describeProviderCheck(checkResult, t) : t(message ?? "")}{probeBudgetHref ? <> <a href={probeBudgetHref} className="font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"配置探测预算"} /></a></> : null}</p> : null}
+      {(checkResult || message) && !editing ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{checkResult ? describeProviderCheck(checkResult, t) : <UiFeedbackText text={message ?? ""} />}{probeBudgetHref ? <> <a href={probeBudgetHref} className="font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"配置探测预算"} /></a></> : null}</p> : null}
       {provider.lastErrorCode ? <p className="mt-2 text-xs text-rose-600"><UiText text={"最近一次连接测试未通过："} />{describeProviderCheck({ attempt: { status: "failed", safeErrorCode: provider.lastErrorCode, capabilities: { generation: "notConfigured", embedding: "notConfigured", vision: "notConfigured" }, embeddingDimensions: null } }, t)}</p> : null}
     </article>{dialog}</>
   );

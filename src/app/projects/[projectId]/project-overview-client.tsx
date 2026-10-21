@@ -321,7 +321,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="overview" isSystemAdmin={isSystemAdmin} />
       <div className={styles.content}>
         {loading && currentData === null ? <OverviewSkeleton /> : currentData === null || summary === null || nextStep === null ? (
-          <div className={styles.error} role="alert"><span>{t(error ?? "项目概览加载失败")}</span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text={"重试"} /></button></div>
+          <div className={styles.error} role="alert"><span><UiErrorText text={error ?? "项目概览加载失败"} /></span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text={"重试"} /></button></div>
         ) : (
           <>
             <section className={styles.heading}>

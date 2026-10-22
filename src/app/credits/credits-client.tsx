@@ -200,7 +200,7 @@ export function CreditsClient({ username, isSystemAdmin = false, initialProjectI
 
   const summary=account?.summary, membership=summary?.membership;
   const membershipLabel=!account?"暂无记录":membership?.status==="active"?"有效":membership?.status==="expired"?"已到期":membership?.status==="revoked"?"已撤销":"未开通";
-  return <main><AppHeader username={username} active="profile" isSystemAdmin={isSystemAdmin}/><div className={`${ui.page} ${credit.page}`}>
+  return <main><AppHeader username={username} active="profile" isSystemAdmin={isSystemAdmin}/><div data-page-content className={`${ui.page} ${credit.page}`}>
     <header className={ui.heading}><div><h1><UiText text="额度与账单"/></h1><p><UiText text="查看可用额度、用量趋势和额度记录。"/></p></div><div className={ui.actions}><Link href="/personal/usage" className={ui.button}><UiText text="模型 Token 记录"/> <span aria-hidden="true">↗</span></Link><button className={ui.link} onClick={()=>setMembershipOpen(true)}><UiText text="查看会员资格"/> <span aria-hidden="true">→</span></button></div></header>
     {error?<div className={ui.error} role="alert"><UiErrorText text={error} /> <button className={ui.link} onClick={()=>setRequestVersion(value=>value+1)}><UiText text="重试"/></button></div>:null}
     <div className={credit.summaryGrid} aria-label={t("额度概览")} aria-busy={!account && loading}>

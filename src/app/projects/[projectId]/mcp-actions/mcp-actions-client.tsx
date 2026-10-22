@@ -440,7 +440,7 @@ export function ProjectMcpActionsClient({ username, projectId, isSystemAdmin }: 
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={isSystemAdmin} />
       {dialog}
-      <div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">
+      <div data-page-content className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">
         <div className="mb-5"><ProjectOverviewParentLink projectId={projectId} /></div>
         <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl sm:px-8 sm:py-9 lg:px-10">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300"><UiText text={"Project MCP actions"} /></p>

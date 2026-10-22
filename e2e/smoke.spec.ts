@@ -803,10 +803,10 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page).toHaveURL(/\/dashboard$/u);
   if (mobileViewport !== null) await page.setViewportSize(mobileViewport);
 
-  await expectNoHorizontalOverflow(page, "/notifications", "活动记录", "notifications");
+  await expectNoHorizontalOverflow(page, "/notifications", "通知中心", "notifications");
   await page.goto("/notifications");
   await expect(page).toHaveURL(/\/notifications$/u);
-  await expect(page.getByRole("heading", { name: "活动记录", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "通知中心", exact: true })).toBeVisible();
   const unreadActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.unreadTitle });
   const pendingActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.pendingTitle });
   const automationActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.automationTitle });
@@ -969,7 +969,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(modelsResource.getByRole("heading", { name: "个人模型", exact: true })).toBeVisible();
   await modelsResource.click();
   await expect(page).toHaveURL(/\/personal\/models$/u);
-  await expect(page.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "模型与额度", exact: true })).toBeVisible();
   await expect(page.getByText("会员有效", { exact: true })).toBeVisible();
   await expect(page.getByText(/固定官方端点不可修改/u)).toBeVisible();
   await expect(page.getByLabel("连接名称", { exact: true })).toHaveCount(0);

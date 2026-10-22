@@ -74,7 +74,7 @@ export function ProjectMembersClient({ projectId, username, isSystemAdmin, embed
   return <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[#f5f7fb] text-slate-950"}>
     {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="members" isSystemAdmin={isSystemAdmin} /> : null}
     {dialog}
-    <div className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10"}>
+    <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10"}>
       {!embedded ? <div className="mb-5"><BackButton fallbackHref={`/projects/${projectId}`} /></div> : null}
       {!embedded ? <h1 className="text-3xl font-semibold"><UiText text={"成员权限"} /></h1> : null}
       <p className="mt-2 text-sm text-slate-600"><UiText text={"查看当前项目的有效权限并管理显式授权；团队级账号与邀请在团队空间处理。"} /></p>

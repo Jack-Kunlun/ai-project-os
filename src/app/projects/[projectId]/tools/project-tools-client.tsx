@@ -300,7 +300,7 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={isSystemAdmin} />
       {dialog}
-      <div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">
+      <div data-page-content className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">
         <div className="mb-5"><ProjectOverviewParentLink projectId={projectId} /></div>
         <section className="grid gap-7 rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-9 lg:grid-cols-[1.2fr_.8fr] lg:px-10">
           <div>

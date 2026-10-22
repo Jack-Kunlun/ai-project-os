@@ -81,7 +81,7 @@ export default async function ProjectGitHubSyncPage({
 
   return <main className="min-h-screen bg-slate-50 text-slate-950">
     <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="repositories" isSystemAdmin={user.role === "admin"} />
-    <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
+    <div data-page-content className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
       <ParentPageLink href={backHref} label={fromNotifications ? "返回通知中心" : "返回上一级"} />
       <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-9">
         <div className="flex flex-wrap items-start justify-between gap-4">

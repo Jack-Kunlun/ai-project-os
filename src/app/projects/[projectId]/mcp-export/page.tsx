@@ -21,7 +21,7 @@ export default async function ProjectMcpExportPage({ params }: { params: Promise
   }
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
     <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={user.role === "admin"} />
-    <div className="mx-auto max-w-4xl px-5 py-7 sm:px-8 lg:px-10">
+    <div data-page-content className="mx-auto max-w-4xl px-5 py-7 sm:px-8 lg:px-10">
       <ProjectOverviewParentLink projectId={projectId} />
       <McpExportClient projectId={projectId} legacyBearerEnabled={isMcpExportLegacyBearerEnabled()} />
     </div>

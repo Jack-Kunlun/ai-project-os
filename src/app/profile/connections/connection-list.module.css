@@ -1,0 +1,286 @@
+.pageHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 24px;
+}
+
+.pageTitle {
+  color: var(--app-text);
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.description {
+  margin-top: 8px;
+  max-width: 760px;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.primaryAction {
+  display: inline-flex;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--app-accent);
+  padding: 0 16px;
+  color: var(--app-on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  transition: filter 140ms ease;
+}
+
+.primaryAction:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.primaryAction:focus-visible,
+.manageAction:focus-visible,
+.editAction:focus-visible,
+.filterInput:focus-visible,
+.filterSelect:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.primaryAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.section {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.sectionTitle {
+  color: var(--app-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sectionDescription {
+  margin-top: 4px;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.count {
+  flex: 0 0 auto;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);
+  gap: 10px;
+  padding: 0 20px 16px;
+}
+
+.filterInput,
+.filterSelect {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-input);
+  padding: 0 12px;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.filterInput::placeholder {
+  color: var(--app-muted);
+  opacity: 0.8;
+}
+
+.connectionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(170px, 0.8fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  border-top: 1px solid var(--app-border);
+  padding: 15px 20px;
+}
+
+.connectionIdentity {
+  min-width: 0;
+}
+
+.connectionNameLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.connectionName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.connectionAddress {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.connectionMeta {
+  min-width: 0;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.manageAction,
+.editAction {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
+  padding: 0 13px;
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.manageAction:hover,
+.editAction:hover {
+  border-color: var(--app-accent);
+  color: var(--app-link);
+}
+
+.editAction {
+  min-height: 44px;
+}
+
+.details {
+  display: grid;
+  gap: 16px;
+}
+
+.detailsActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.delegationSection {
+  margin-top: 24px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+}
+
+.delegationCard {
+  min-width: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  padding: 16px;
+}
+
+.boundaryNote {
+  margin-top: 18px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-soft);
+  padding: 14px 16px;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.boundaryTitle {
+  margin-bottom: 4px;
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.emptyState {
+  border-top: 1px solid var(--app-border);
+  padding: 32px 20px;
+  color: var(--app-muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+@media (max-width: 700px) {
+  .pageHeader {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .primaryAction {
+    width: 100%;
+  }
+
+  .sectionHeader {
+    padding: 14px 15px;
+  }
+
+  .filters {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 15px 14px;
+  }
+
+  .connectionRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 12px;
+    padding: 14px 15px;
+  }
+
+  .connectionIdentity {
+    grid-column: 1;
+  }
+
+  .connectionMeta {
+    grid-column: 1;
+  }
+
+  .manageAction {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .delegationCard {
+    padding: 14px;
+  }
+}

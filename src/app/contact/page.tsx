@@ -3,25 +3,26 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { InfoSection, PublicInfoPage } from "@/components/public-info-page";
+import styles from "@/components/public-info-page.module.css";
 
 export const metadata: Metadata = { title: "联系作者 · AI Project OS" };
 
 export default function ContactPage() {
   return (
     <PublicInfoPage eyebrow="Contact" title="联系作者" description="使用反馈、问题建议，欢迎通过微信联系。">
-      <div className="grid items-start gap-8 md:grid-cols-2">
-        <figure className="mx-auto w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className={styles.contactLayout}>
+        <figure className={styles.qrFigure}>
           <Image
             src="/contact/author-wechat.jpg"
             alt=""
             width={888}
             height={1131}
             unoptimized
-            className="h-auto w-full"
+            className={styles.qrImage}
           />
-          <figcaption className="border-t border-slate-100 px-4 py-3 text-center text-xs text-slate-500"><UiText text={"使用微信扫描二维码，添加作者为好友。"} /></figcaption>
+          <figcaption className={styles.qrCaption}><UiText text={"使用微信扫描二维码，添加作者为好友。"} /></figcaption>
         </figure>
-        <div className="space-y-7 self-center">
+        <div className={styles.contactSections}>
           <InfoSection title="微信交流">
             <p><UiText text={"欢迎分享 AI Project OS 的使用体验、反馈遇到的问题或提出改进建议。"} /></p>
             <p><UiText text={"电脑访问时，可用手机微信扫描页面中的二维码；手机访问时，可保存二维码图片，再通过微信识别。"} /></p>

@@ -349,7 +349,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
   return (
     <RootElement aria-label={embedded ? translateUi("项目用量与任务运行") : undefined} className={embedded ? "text-slate-950" : "min-h-screen bg-[#f5f7fb] text-slate-950"}>
       {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="governance" isSystemAdmin={isSystemAdmin} /> : null}
-      <div className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-10 sm:px-8 lg:px-10"}>
+      <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-10 sm:px-8 lg:px-10"}>
         {!embedded ? <section className="flex flex-wrap items-end justify-between gap-5 pb-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600"><UiText text={"Project management"} /></p>

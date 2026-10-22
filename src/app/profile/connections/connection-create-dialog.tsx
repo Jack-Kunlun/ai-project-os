@@ -29,12 +29,17 @@ export function ConnectionCreateDialog({ title, onClose, children }: { title: st
     document.body.style.overflow = "hidden";
     closeRef.current?.focus();
     function onKeyDown(event: KeyboardEvent) {
-      // The confirmation dialog is rendered inside this panel. Let its own
-      // keyboard handler close it without also dismissing the edit form.
-      if (panelRef.current?.querySelector('[role="dialog"]')) return;
-      if (event.key === "Escape") onClose();
+      // Nested confirmations and Ask AI own their keyboard events. Cancel only
+      // this editor, without invoking the enclosing native drawer's cancel.
+      if (event.defaultPrevented || !(event.target instanceof Element) || event.target.closest('[role="dialog"], dialog[open]') !== panelRef.current) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
       if (event.key !== "Tab" || panelRef.current === null) return;
-      const focusable = [...panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]')];
+      const focusable = [...panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]')].filter(element => element.getClientRects().length > 0 && !element.closest('[hidden], [inert], [aria-hidden="true"]') && getComputedStyle(element).visibility !== "hidden");
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];

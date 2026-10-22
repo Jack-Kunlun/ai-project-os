@@ -68,7 +68,13 @@ export function useAppConfirmDialog() {
       firstFocusable?.focus();
     }, 0);
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") close(false);
+      if (event.defaultPrevented || !(event.target instanceof Element) || event.target.closest('[role="dialog"], dialog[open]') !== dialogRef.current) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close(false);
+        return;
+      }
       if (event.key !== "Tab" || dialogRef.current === null) return;
       const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>("button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])")].filter((element) => !element.hasAttribute("disabled") && element.getClientRects().length > 0 && !element.closest("[hidden], [inert], [aria-hidden='true']") && getComputedStyle(element).visibility !== "hidden");
       if (focusable.length === 0) return;

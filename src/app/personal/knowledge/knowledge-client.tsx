@@ -1093,7 +1093,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     <main className={styles.page} onClickCapture={handleInternalNavigation}>
       <AppHeader username={username} active="personalKnowledge" isSystemAdmin={isSystemAdmin} />
       <PersonalWorkspaceNav active="knowledge" />
-      <div className={styles.content}>
+      <div data-page-content className={styles.content}>
         <header className={styles.heading}>
           <div>
             <h1><UiText text="我的知识" /></h1>

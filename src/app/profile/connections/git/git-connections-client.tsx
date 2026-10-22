@@ -5,9 +5,9 @@ import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { HelpTooltip } from "@/components/help-tooltip";
-import { OperationPanel } from "@/components/operation-panel";
 import { ParentPageLink } from "@/components/parent-page-link";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
+import { WorkspaceDialog } from "@/components/workspace-dialog";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import {
@@ -21,6 +21,7 @@ import {
 import { ConnectionGovernancePanel, connectionBlockerText } from "../governance-panel";
 import { ConnectionCreateDialog, ConnectionDialogActions } from "../connection-create-dialog";
 import { ConnectionEditDialog } from "../connection-edit-dialog";
+import listStyles from "../connection-list.module.css";
 import styles from "../../../support-pages.module.css";
 import {
   createDefaultGitDraft,
@@ -72,6 +73,14 @@ export function GitConnectionsClient() {
   const [ownerDelegationsError, setOwnerDelegationsError] = useState<string | null>(null);
   const [message, setMessage] = useState<ConnectionMessage | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<GitConnection["status"] | "all">("all");
+
+  const filteredConnections = connections.filter((connection) => {
+    const query = search.trim().toLocaleLowerCase();
+    const searchable = `${connection.name} ${connection.baseUrl} ${gitProviderLabels[connection.providerKind]}`.toLocaleLowerCase();
+    return (query === "" || searchable.includes(query)) && (statusFilter === "all" || connection.status === statusFilter);
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,45 +117,48 @@ export function GitConnectionsClient() {
   }, [load, loadOwnerDelegations]);
 
   return (
-    <div className={styles.content}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div data-page-content className={styles.content}>
+      <div className="mb-4">
         <ParentPageLink href="/personal/configuration" label="返回我的空间配置" />
-        <span className="text-xs text-slate-400"><UiText text={"我的空间 / 授权管理 / Git"} /></span>
       </div>
 
-      <section className={`${styles.pageHeader} mt-6`}>
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Git authorization management</p>
-            <h1 className={`${styles.pageTitle} mt-2`}><UiText text={"Git 授权管理"} /></h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600"><UiText text={"Git 凭据由你个人持有并加密保存。项目代码仓库从项目配置发起连接和范围提案；此处用于维护个人连接、查看受影响项目，并撤销或拒绝项目授权。"} /></p>
-          </div>
-          <div className={styles.safetyNote}>
-            <p className="font-semibold"><UiText text={"当前使用边界"} /></p>
-            <p className="mt-1 text-xs leading-5"><UiText text={"个人连接不会自动开放给任何项目。项目页支持一次性手动只读委托和单独的自动读取双确认授权；写入/提交和旧 PAT 路径保持关闭。新建连接会先测试指定仓库和 ref；后续变更仍必须通过安全影响预览。"} /></p>
-          </div>
+      <section className={listStyles.pageHeader}>
+        <div className="min-w-0">
+          <h1 className={listStyles.pageTitle}><UiText text={"Git 授权管理"} /></h1>
+          <p className={listStyles.description}><UiText text={"Git 凭据由你个人持有并加密保存。项目代码仓库从项目配置发起连接和范围提案；此处用于维护个人连接、查看受影响项目，并撤销或拒绝项目授权。"} /></p>
         </div>
+        <button type="button" disabled={loading || catalog.length === 0} onClick={() => setCreateOpen(true)} className={listStyles.primaryAction}><UiText text={"添加 Git 服务"} /></button>
       </section>
 
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : message.tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}`}><UiFeedbackText text={message.text} /></p> : null}
       {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span><UiErrorText text={loadError} /></span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline"><UiText text={"重试"} /></button></div> : null}
 
-      <section className="mt-6 border-y border-amber-200/80 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">{t("Delegation safety")}</p><h2 className="mt-2 text-xl font-semibold text-slate-900"><UiText text={"项目委托安全管理"} /></h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"这里列出你作为连接所有者的未终态委托。即使你已失去项目访问，或项目已归档，仍可撤销后续使用或拒绝尚未生效的委托。"} /></p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-amber-800">{ownerDelegationsLoading ? t("读取中…") : `${ownerDelegations.length}${t(" 条")}`}</span></div>
-        {ownerDelegationsError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-xs text-rose-700"><span><UiErrorText text={ownerDelegationsError} /></span><button type="button" onClick={() => void loadOwnerDelegations()} className="font-semibold underline"><UiText text={"重试"} /></button></div> : null}
-        {ownerDelegationsLoading ? <div className="mt-4 h-24 animate-pulse rounded-2xl bg-white/70" role="status" aria-label={t("正在加载项目委托安全记录")} /> : ownerDelegations.length === 0 && ownerDelegationsError === null ? <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/60 px-5 py-7 text-center text-xs text-slate-600"><UiText text={"当前没有需要你处理的项目委托安全记录。"} /></div> : <div className="mt-4 grid gap-3 lg:grid-cols-2">{ownerDelegations.map((delegation) => <OwnerDelegationCard key={delegation.id} delegation={delegation} onReload={loadOwnerDelegations} onMessage={setMessage} />)}</div>}
+      {createOpen ? <ConnectionCreateDialog title={t("添加 Git 服务")} onClose={() => setCreateOpen(false)}><GitCreateForm catalog={catalog} onCreated={(connection) => { setConnections((current) => [...current, connection]); setCreateOpen(false); setMessage({ tone: "success", text: "Git 连接已保存。" }); }} /></ConnectionCreateDialog> : null}
+      <section className={`${listStyles.section} mt-6`}>
+        <header className={listStyles.sectionHeader}>
+          <div><h2 className={listStyles.sectionTitle}><UiText text={"已有连接"} /></h2><p className={listStyles.sectionDescription}><UiText text={"只显示地址、状态与密钥掩码，不显示完整秘密。"} /></p></div>
+          <span className={listStyles.count}>{loading ? t("读取中…") : `${filteredConnections.length}${t(" 条")}`}</span>
+        </header>
+        <div className={listStyles.filters}>
+          <label><span className="sr-only">{t("搜索")}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("搜索")} className={listStyles.filterInput} /></label>
+          <label><span className="sr-only"><UiText text={"状态"} /></span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as GitConnection["status"] | "all")} className={listStyles.filterSelect}><option value="all"><UiText text={"全部状态"} /></option>{Object.entries(gitStatusLabels).map(([value, label]) => <option key={value} value={value}><UiText text={label} /></option>)}</select></label>
+        </div>
+        {loading ? <div className="px-5 pb-5" role="status" aria-label={t("正在加载 Git 连接")}><div className="h-20 animate-pulse rounded-md bg-slate-100" /></div> : connections.length === 0 ? <div className={listStyles.emptyState}><p className="font-semibold"><UiText text={"还没有个人 Git 连接"} /></p><p className="mt-2"><UiText text={"点击“添加服务”，先测试指定仓库和 ref，确认结果后再保存。"} /></p></div> : filteredConnections.length === 0 ? <div className={listStyles.emptyState}><UiText text={"没有找到匹配的内容。"} /></div> : filteredConnections.map((connection) => <GitConnectionCard key={connection.id} connection={connection} catalog={catalog} onRemoved={() => { setConnections((current) => current.filter((item) => item.id !== connection.id)); setMessage({ tone: "success", text: "Git 连接已删除。" }); }} onReload={load} />)}
       </section>
 
-      {createOpen ? <ConnectionCreateDialog title={t("添加 Git 服务")} onClose={() => setCreateOpen(false)}><GitCreateForm catalog={catalog} onCreated={(connection) => { setConnections((current) => [...current, connection]); setCreateOpen(false); setMessage({ tone: "success", text: "Git 连接已保存。" }); }} /></ConnectionCreateDialog> : null}
-      <div className="mt-6 min-w-0">
-        <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h2 className="text-xl font-semibold"><UiText text={"已有连接"} /></h2><p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"只显示地址、状态与密钥掩码，不显示完整秘密。"} /></p></div>
-            <div className="flex items-center gap-3"><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{loading ? t("读取中…") : `${connections.length}${t(" 个连接")}`}</span><button type="button" disabled={loading || catalog.length === 0} onClick={() => setCreateOpen(true)} className={`${styles.primaryAction} min-h-10 rounded-xl px-4 py-2 text-sm font-semibold text-white`}><UiText text={"添加服务"} /></button></div>
-          </div>
-          {loading ? <div className="mt-5 space-y-3" role="status" aria-label={t("正在加载 Git 连接")}><div className="h-48 animate-pulse rounded-2xl bg-slate-100" /><div className="h-48 animate-pulse rounded-2xl bg-slate-100" /></div> : connections.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-9 text-center"><p className="text-sm font-semibold text-slate-700"><UiText text={"还没有个人 Git 连接"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"点击“添加服务”，先测试指定仓库和 ref，确认结果后再保存。"} /></p></div> : <div className="mt-5 space-y-4">{connections.map((connection) => <GitConnectionCard key={connection.id} connection={connection} catalog={catalog} onRemoved={() => { setConnections((current) => current.filter((item) => item.id !== connection.id)); setMessage({ tone: "success", text: "Git 连接已删除。" }); }} onReload={load} />)}</div>}
-        </section>
-      </div>
+      <section className={`${listStyles.delegationSection} mt-6`}>
+        <header className={listStyles.sectionHeader}>
+          <div><h2 className={listStyles.sectionTitle}><UiText text={"项目委托安全管理"} /></h2><p className={listStyles.sectionDescription}><UiText text={"这里列出你作为连接所有者的未终态委托。即使你已失去项目访问，或项目已归档，仍可撤销后续使用或拒绝尚未生效的委托。"} /></p></div>
+          <span className={listStyles.count}>{ownerDelegationsLoading ? t("读取中…") : `${ownerDelegations.length}${t(" 条")}`}</span>
+        </header>
+        {ownerDelegationsError ? <div role="alert" className="mx-5 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-rose-50 px-4 py-3 text-xs text-rose-700"><span><UiErrorText text={ownerDelegationsError} /></span><button type="button" onClick={() => void loadOwnerDelegations()} className="min-h-10 font-semibold underline"><UiText text={"重试"} /></button></div> : null}
+        {ownerDelegationsLoading ? <div className="mx-5 mb-5 h-20 animate-pulse rounded-md bg-slate-100" role="status" aria-label={t("正在加载项目委托安全记录")} /> : ownerDelegations.length === 0 && ownerDelegationsError === null ? <div className={listStyles.emptyState}><UiText text={"当前没有需要你处理的项目委托安全记录。"} /></div> : <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2">{ownerDelegations.map((delegation) => <OwnerDelegationCard key={delegation.id} delegation={delegation} onReload={loadOwnerDelegations} onMessage={setMessage} />)}</div>}
+      </section>
+
+      <aside className={listStyles.boundaryNote}>
+        <p className={listStyles.boundaryTitle}><UiText text={"当前使用边界"} /></p>
+        <p><UiText text={"个人连接不会自动开放给任何项目。项目页支持一次性手动只读委托和单独的自动读取双确认授权；写入/提交和旧 PAT 路径保持关闭。新建连接会先测试指定仓库和 ref；后续变更仍必须通过安全影响预览。"} /></p>
+      </aside>
     </div>
   );
 }
@@ -187,7 +199,7 @@ function OwnerDelegationCard({ delegation, onReload, onMessage }: { delegation: 
     } finally { setPending(null); }
   }
 
-  return <article className="min-w-0 rounded-2xl border border-amber-200 bg-white p-4">{dialog}<div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-sm font-semibold text-slate-900">{delegation.project.name}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{statusLabel}</span>{delegation.project.archivedAt ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[12px] font-semibold text-amber-800"><UiText text={"项目已归档"} /></span> : null}</div><p className="mt-2 break-all text-xs text-slate-500">{delegation.connection.name} · {delegation.connection.providerKind} · {delegation.connection.transport.toUpperCase()}</p><p className="mt-1 break-all text-xs text-slate-500">{delegation.scope.repositoryPath} · {delegation.scope.trackedRef}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p><UiText text={"版本 "} />{delegation.version}</p><p className="mt-1"><UiText text={"有效至 "} />{formatConnectionDate(delegation.expiresAt, language)}</p></div></div><div className="mt-3 flex flex-wrap gap-2 text-[12px] text-slate-700"><span>{t(delegation.scope.manualSyncAllowed && !delegation.scope.automationAllowed ? "一次性手动只读" : "受限范围")}</span><span aria-hidden="true">·</span><span>{t(delegation.scope.automationAllowed ? "自动化范围需单独开放" : "自动化关闭")}</span></div><div className="mt-4 flex flex-wrap gap-2">{delegation.capabilities.canReject ? <button type="button" onClick={() => void terminal("rejection")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "rejection" ? t("处理中…") : t("拒绝委托")}</button> : null}{delegation.capabilities.canRevoke ? <button type="button" onClick={() => void terminal("revocation")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "revocation" ? t("处理中…") : t("撤销委托")}</button> : null}</div></article>;
+  return <article className={listStyles.delegationCard}>{dialog}<div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-sm font-semibold text-slate-900">{delegation.project.name}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{statusLabel}</span>{delegation.project.archivedAt ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[12px] font-semibold text-amber-800"><UiText text={"项目已归档"} /></span> : null}</div><p className="mt-2 break-all text-xs text-slate-500">{delegation.connection.name} · {delegation.connection.providerKind} · {delegation.connection.transport.toUpperCase()}</p><p className="mt-1 break-all text-xs text-slate-500">{delegation.scope.repositoryPath} · {delegation.scope.trackedRef}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p><UiText text={"版本 "} />{delegation.version}</p><p className="mt-1"><UiText text={"有效至 "} />{formatConnectionDate(delegation.expiresAt, language)}</p></div></div><div className="mt-3 flex flex-wrap gap-2 text-[12px] text-slate-700"><span>{t(delegation.scope.manualSyncAllowed && !delegation.scope.automationAllowed ? "一次性手动只读" : "受限范围")}</span><span aria-hidden="true">·</span><span>{t(delegation.scope.automationAllowed ? "自动化范围需单独开放" : "自动化关闭")}</span></div><div className="mt-4 flex flex-wrap gap-2">{delegation.capabilities.canReject ? <button type="button" onClick={() => void terminal("rejection")} disabled={pending !== null} className={`${connectionButtonClass} min-h-11 text-rose-700 hover:bg-rose-50`}>{pending === "rejection" ? t("处理中…") : t("拒绝委托")}</button> : null}{delegation.capabilities.canRevoke ? <button type="button" onClick={() => void terminal("revocation")} disabled={pending !== null} className={`${connectionButtonClass} min-h-11 text-rose-700 hover:bg-rose-50`}>{pending === "revocation" ? t("处理中…") : t("撤销委托")}</button> : null}</div></article>;
 }
 
 export function GitCreateForm({ catalog, onCreated, onProjectSaved, initialRepositoryPath, initialTrackedRef, requireCredential = false, editing, onEdited }: {
@@ -322,12 +334,54 @@ export function GitCreateForm({ catalog, onCreated, onProjectSaved, initialRepos
 function GitConnectionCard({ connection, catalog, onRemoved, onReload }: { connection: GitConnection; catalog: readonly GitCatalogEntry[]; onRemoved: () => void; onReload: () => Promise<void> }) {
   const t = useTranslate();
   const { language } = useAppearance();
-
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editingConfig, setEditingConfig] = useState(false);
-  const [governanceOpenFor, setGovernanceOpenFor] = useState<string | null>(null);
-  const governanceOpen = governanceOpenFor === connection.updatedAt;
-  return <><article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5"><div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><button type="button" onClick={() => setEditing(true)} className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"编辑名称"} /></button><button type="button" onClick={() => setEditingConfig(true)} className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"编辑地址与认证"} /></button><OperationPanel key={`${connection.id}:${connection.updatedAt}`} title={`${t("管理 ")}${connection.name}${t(" 的连接安全")}`} triggerLabel={t("安全管理")} open={governanceOpen} onOpenChange={(open) => setGovernanceOpenFor(open ? connection.updatedAt : null)} description={t("连接状态与影响范围在详情中查看；凭据轮换、启停、删除和重新测试须在这里先预览再确认。")}><ConnectionGovernancePanel kind="git" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} /></OperationPanel><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{t(gitStatusLabels[connection.status])}</span></div><p className="mt-2 break-all text-xs text-slate-500">{t(gitProviderLabels[connection.providerKind])} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? t("无凭据") : `${t(gitAuthKindLabels[connection.authKind])} (${t("已加密")})`}</p><p className="mt-1"><UiText text={"更新于 "} />{formatConnectionDate(connection.updatedAt, language)}</p></div></div><details className="mt-4 border-t border-slate-200 pt-3"><summary className="cursor-pointer text-xs font-semibold text-indigo-700"><UiText text={"展开只读详情"} /></summary>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiText text={"最近错误："} />{connection.lastErrorCode}<UiText text={"。请通过安全治理预览管理后续变更；重新测试会先执行一次只读 ls-remote，再继续影响预览。"} /></p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-2"><div><dt className="text-slate-400"><UiText text={"最近测试"} /></dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastTestedAt, language)}</dd></div><div><dt className="text-slate-400"><UiText text={"内网访问"} /></dt><dd className="mt-1 font-medium">{t(connection.allowPrivateNetwork ? "已显式允许" : "禁止")}</dd></div></dl><div className="mt-4"><ScopeEvidenceCard title={t("个人 Git 连接边界")} evidence={{ scope: t("个人连接"), owner: t("当前账户"), payer: t("不适用（Git 连接不产生平台模型费用）"), affectedProjects: t("尚未取得项目委托证据；仅按当前账户的项目权限与明确委托判断，不以仓库数量代替项目影响"), latestSuccess: connection.lastTestedAt ? `${t("最近测试：")}${formatConnectionDate(connection.lastTestedAt, language)}` : t("尚未完成连接测试") }} /></div><p className="mt-3 text-xs leading-5 text-slate-500"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p>{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600"><UiText text={"连接已停用；重新启用后必须重新测试。重新测试会先执行一次只读 ls-remote，再继续影响预览。"} /></p> : null}</details></article>{editing ? <ConnectionEditDialog kind="git" connection={connection} onClose={() => setEditing(false)} onSaved={() => void onReload()} /> : null}{editingConfig ? <ConnectionCreateDialog title={t("编辑 Git 地址与认证")} onClose={() => setEditingConfig(false)}><GitCreateForm catalog={catalog} editing={connection} onEdited={() => { setEditingConfig(false); void onReload(); }} /></ConnectionCreateDialog> : null}</>;
+
+  function closeDetails() {
+    setDetailsOpen(false);
+    setEditing(false);
+    setEditingConfig(false);
+  }
+
+  return <>
+    <article className={listStyles.connectionRow}>
+      <div className={listStyles.connectionIdentity}>
+        <div className={listStyles.connectionNameLine}>
+          <h3 className={listStyles.connectionName}>{connection.name}</h3>
+          <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{t(gitStatusLabels[connection.status])}</span>
+        </div>
+        <p className={listStyles.connectionAddress}>{t(gitProviderLabels[connection.providerKind])} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p>
+      </div>
+      <div className={listStyles.connectionMeta}>
+        <p>{connection.authKind === "none" ? t("无凭据") : `${t(gitAuthKindLabels[connection.authKind])} (${t("已加密")})`}</p>
+        <p><UiText text={"更新于 "} />{formatConnectionDate(connection.updatedAt, language)}</p>
+      </div>
+      <button type="button" onClick={() => setDetailsOpen(true)} className={listStyles.manageAction}><UiText text={"安全管理"} /></button>
+    </article>
+
+    <WorkspaceDialog title={`${t("管理 ")}${connection.name}${t(" 的连接安全")}`} open={detailsOpen} drawer onClose={closeDetails}>
+      <div className={listStyles.details}>
+        <p className="text-sm leading-6 text-slate-600"><UiText text={"连接状态与影响范围在详情中查看；凭据轮换、启停、删除和重新测试须在这里先预览再确认。"} /></p>
+        {connection.lastErrorCode ? <p role="status" className="break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiText text={"最近错误："} />{connection.lastErrorCode}<UiText text={"。请通过安全治理预览管理后续变更；重新测试会先执行一次只读 ls-remote，再继续影响预览。"} /></p> : null}
+        <dl className="grid gap-3 text-xs text-slate-600 sm:grid-cols-2">
+          <div><dt className="text-slate-400"><UiText text={"最近测试"} /></dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastTestedAt, language)}</dd></div>
+          <div><dt className="text-slate-400"><UiText text={"内网访问"} /></dt><dd className="mt-1 font-medium">{t(connection.allowPrivateNetwork ? "已显式允许" : "禁止")}</dd></div>
+          <div><dt className="text-slate-400"><UiText text={"认证方式"} /></dt><dd className="mt-1 font-medium">{connection.authKind === "none" ? t("无凭据") : `${t(gitAuthKindLabels[connection.authKind])} (${t("已加密")})`}</dd></div>
+        </dl>
+        <ScopeEvidenceCard title={t("个人 Git 连接边界")} evidence={{ scope: t("个人连接"), owner: t("当前账户"), payer: t("不适用（Git 连接不产生平台模型费用）"), affectedProjects: t("尚未取得项目委托证据；仅按当前账户的项目权限与明确委托判断，不以仓库数量代替项目影响"), latestSuccess: connection.lastTestedAt ? `${t("最近测试：")}${formatConnectionDate(connection.lastTestedAt, language)}` : t("尚未完成连接测试") }} />
+        <p className="text-xs leading-5 text-slate-500"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p>
+        {connection.status === "disabled" ? <p className="rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600"><UiText text={"连接已停用；重新启用后必须重新测试。重新测试会先执行一次只读 ls-remote，再继续影响预览。"} /></p> : null}
+        <div className={listStyles.detailsActions}>
+          <button type="button" onClick={() => setEditing(true)} className={listStyles.editAction}><UiText text={"编辑名称"} /></button>
+          <button type="button" onClick={() => setEditingConfig(true)} className={listStyles.editAction}><UiText text={"编辑地址与认证"} /></button>
+        </div>
+        <ConnectionGovernancePanel kind="git" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} />
+      </div>
+      {editing ? <ConnectionEditDialog kind="git" connection={connection} onClose={() => setEditing(false)} onSaved={() => void onReload()} /> : null}
+      {editingConfig ? <ConnectionCreateDialog title={t("编辑 Git 地址与认证")} onClose={() => setEditingConfig(false)}><GitCreateForm catalog={catalog} editing={connection} onEdited={() => { setEditingConfig(false); void onReload(); }} /></ConnectionCreateDialog> : null}
+    </WorkspaceDialog>
+  </>;
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   const t = useTranslate();

@@ -2,6 +2,7 @@
 import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 
+import { PersonalModelOverview } from "./personal-model-overview";
 import formFields from "@/components/model-form-fields.module.css";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
@@ -118,7 +119,7 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
   const canMaintain = membership.status === "active" || membership.status === "expired" || membership.status === "revoked" || membership.status === "none";
 
   return (
-    <div className={styles.content}>
+    <div data-page-content className={styles.content}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ParentPageLink href="/personal/configuration" label="返回我的空间配置" />
         <span className="text-xs text-slate-400"><UiText text={"我的空间 / 我的模型"} /></span>
@@ -127,19 +128,23 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
       <section className={`${styles.pageHeader} mt-6`}>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">My models</p>
-          <h1 className={`${styles.pageTitle} mt-2`}><UiText text={"我的模型"} /></h1>
+          <h1 className={`${styles.pageTitle} mt-2`}><UiText text={"模型与额度"} /></h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600"><UiText text={"只管理你自己的模型连接。平台默认模型由管理员统一维护，个人连接不会自动替代项目路由。"} /></p>
         </div>
-        <div className={`w-full min-w-0 text-xs leading-5 sm:w-auto sm:max-w-sm sm:shrink-0 ${canConfigure ? "text-emerald-700" : "text-amber-700"}`}>
+              <OperationPanel title={t("添加个人模型连接")} triggerLabel={t("添加连接")} description={t("连接仅保存到当前账户。API Key 会加密保存，保存后请在连接卡片中测试。")} open={createOpen} onOpenChange={setCreateOpen} disabled={loading || !canConfigure || catalog.length === 0}>
+                <CreateProviderForm catalog={catalog} onCreated={(provider) => { setProviders((current) => [...current, provider]); setCreateOpen(false); setMessage({ tone: "success", text: "个人模型连接已保存。首次使用前请先测试连接。" }); }} />
+              </OperationPanel>
+      </section>
+
+      <PersonalModelOverview><h2><UiText text="个人模型"/></h2>        <div className={`w-full min-w-0 text-xs leading-5 sm:w-auto sm:max-w-sm sm:shrink-0 ${canConfigure ? "text-emerald-700" : "text-amber-700"}`}>
           <p className="font-semibold">{t(membershipLabels[membership.status])}</p>
           <p className="mt-1 text-xs leading-5">{membershipDescription(membership, language, t)}</p>
-        </div>
-      </section>
+        </div><p><a href="#personal-model-connections" className={styles.noteLink}><UiText text="查看与配置"/></a></p></PersonalModelOverview>
 
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : message.tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}`}><UiFeedbackText text={message.text} /></p> : null}
       {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span><UiErrorText text={loadError} /></span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text={"重试"} /></button></div> : null}
 
-      <section className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
+      <section id="personal-model-connections" className="mt-6 min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-xl font-semibold"><UiText text={"已有连接"} /></h2>
@@ -147,9 +152,7 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
             </div>
             <div className="flex items-center gap-3">
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{providers.length}{t(" 个连接")}</span>
-              {canConfigure && catalog.length > 0 ? <OperationPanel title={t("添加个人模型连接")} triggerLabel={t("添加连接")} description={t("连接仅保存到当前账户。API Key 会加密保存，保存后请在连接卡片中测试。")} open={createOpen} onOpenChange={setCreateOpen} disabled={loading}>
-                <CreateProviderForm catalog={catalog} onCreated={(provider) => { setProviders((current) => [...current, provider]); setCreateOpen(false); setMessage({ tone: "success", text: "个人模型连接已保存。首次使用前请先测试连接。" }); }} />
-              </OperationPanel> : null}
+
             </div>
           </div>
           {canConfigure && catalog.length === 0 ? <div className="mt-5"><CreateProviderPlaceholder loading={loading} loadError={loadError} onRetry={load} /></div> : null}

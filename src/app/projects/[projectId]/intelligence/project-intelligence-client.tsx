@@ -11,7 +11,6 @@ import { ParentPageLink } from "@/components/parent-page-link";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { parseProjectPageState } from "@/lib/project-navigation";
-import { buildProjectQuestionHref } from "../materials/materials-navigation";
 import styles from "./project-intelligence-client.module.css";
 import type {
   ProjectIntelligenceNextAction,
@@ -281,10 +280,10 @@ function ProjectIntelligenceWorkspace({ projectId, username, isSystemAdmin }: { 
   return (
     <main className={styles.page}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="intelligence" isSystemAdmin={isSystemAdmin} />
-      <div className={styles.content}>
+      <div data-page-content className={styles.content}>
         <header className={styles.pageHeader}>
           <div><p className="text-xs font-semibold text-slate-400">{projectName}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950"><UiText text={"简报与调查"} /></h1></div>
-          <div className="flex flex-wrap gap-2"><Link href={buildProjectQuestionHref(projectId)} className={styles.headerLink}><UiText text={"智能问答"} /></Link><Link href={`/personal/usage?projectId=${encodeURIComponent(projectId)}`} className={styles.headerLink}><UiText text={"用量记录"} /></Link><Link href={`/projects/${encodeURIComponent(projectId)}/configuration`} className={styles.headerLink}><UiText text={"配置 AI 路由"} /></Link></div>
+          <div className="flex flex-wrap gap-2"><Link href={`/personal/usage?projectId=${encodeURIComponent(projectId)}`} className={styles.headerLink}><UiText text={"用量记录"} /></Link><Link href={`/projects/${encodeURIComponent(projectId)}/configuration`} className={styles.headerLink}><UiText text={"配置 AI 路由"} /></Link></div>
         </header>
 
         {navigation.returnTo ? <ParentPageLink href={navigation.returnTo} label="返回来源页面" /> : null}

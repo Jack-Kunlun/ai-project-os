@@ -98,7 +98,7 @@ export function ProjectMemoryQualityClient({ username, projectId, isSystemAdmin,
   return (
     <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[var(--app-bg)] text-slate-950"}>
       {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="memoryQuality" isSystemAdmin={isSystemAdmin} /> : null}
-      <div className={embedded ? "" : ui.page}>
+      <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : ui.page}>
         {!embedded ? <>        <div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div>
         <section className={ui.heading}>
           <div><h1><UiText text="记忆质量与生命周期" /></h1><p><UiText text="用确定性规则识别重复、冲突、过期、证据不足和低置信度记忆。检查本身不会调用模型，也不会把项目内容发送到外部服务。" /></p></div>

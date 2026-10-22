@@ -1,5 +1,18 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "管理员指南目录": "Administrator guide contents",
+  "模型与额度": "Models and quota",
+  "平台默认模型": "Platform default models",
+  "无需填写 API Key。每次调用仍需核对模型、输入范围与额度。": "No API key is needed. Check the model, input scope, and quota before each request.",
+  "我的平台额度": "My platform quota",
+  "生成与问答": "Generation and Q&A",
+  "图像识别": "Image recognition",
+  "语义向量": "Embeddings",
+  "累计发放": "Total granted",
+  "暂时无法读取": "Temporarily unavailable",
+  "平台模型信息加载失败": "Failed to load platform model information",
+  "额度信息加载失败": "Failed to load quota information",
+  "新建动作": "New action",
   "平台默认路由加载失败": "Failed to load platform default routes",
   "平台默认路由状态更新失败": "Failed to update the platform default route status",
   "影响预览加载失败": "Failed to load the impact preview",

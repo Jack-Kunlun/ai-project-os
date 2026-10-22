@@ -119,7 +119,7 @@ test("project material and repository pages return to their immediate parent", a
   assert.match(repositories, /返回项目配置/u);
 });
 
-test("AI workbench spacing and project overview keep AI usage visible", async () => {
+test("AI workbench spacing avoids duplicate question entry and project overview keeps AI usage visible", async () => {
   const [intelligence, governance] = await Promise.all([
     readFile("src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),
@@ -128,7 +128,7 @@ test("AI workbench spacing and project overview keep AI usage visible", async ()
   assert.match(intelligence, /className=\{styles\.tabPanel\}/u);
   assert.match(intelligence, /项目简报/u);
   assert.match(intelligence, /只读调查/u);
-  assert.match(intelligence, /智能问答/u);
+  assert.doesNotMatch(intelligence, /AskLink|buildProjectQuestionHref/u);
   assert.doesNotMatch(intelligence, /id="project-brief" className="mt-8/u);
   assert.doesNotMatch(intelligence, /id="agent-investigation" className="mt-8/u);
   assert.match(governance, /AI 用量与计费/u);

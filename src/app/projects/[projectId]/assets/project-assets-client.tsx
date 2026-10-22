@@ -431,7 +431,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   return (
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="assets" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
+      <div data-page-content className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <ProjectMaterialsParentLink projectId={projectId} />
         <section className="pb-8 pt-10">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600"><UiText text={"Project files"} /></p>

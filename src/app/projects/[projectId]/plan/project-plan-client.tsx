@@ -1,4 +1,5 @@
 "use client";
+import { ShellIcon } from "@/components/shell-icon";
 import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
@@ -217,7 +218,7 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
 
   return <main className={styles.page}>
     <AppHeader username={username} active="projects" projectId={projectId} projectSection="plan" isSystemAdmin={isSystemAdmin} />
-    <div className={styles.content}>
+    <div data-page-content className={styles.content}>
       <header className={styles.heading}>
         <div><p className={styles.eyebrow}><UiText text={"PROJECT PLAN"} /></p><h1>{currentPlan?.project.name ?? <UiText text={"项目计划"} />}</h1><p className={styles.subtitle}><UiText text={"维护目标、工作项、负责人、期限和验收证据。"} /></p></div>
         {currentPlan ? <div className={styles.headingActions}>
@@ -275,8 +276,8 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
           <div className={styles.sectionHeading}><div><p className={styles.eyebrow}><UiText text={"WORK ITEMS"} /></p><h2><UiText text={"项目计划"} /></h2></div><span className={styles.totalCount}>{visibleWorkItems.length} {" "}<UiText text={"项工作"} /></span></div>
           <div className={styles.toolbar}>
             <div className={styles.viewSwitch} role="group" aria-label={t("项目计划视图")}>
-              <button type="button" aria-pressed={view === "board"} className={view === "board" ? styles.activeView : ""} onClick={() => setView("board")}><span aria-hidden="true">▦</span> {" "}<UiText text={"看板"} /></button>
-              <button type="button" aria-pressed={view === "list"} className={view === "list" ? styles.activeView : ""} onClick={() => setView("list")}><span aria-hidden="true">☷</span> {" "}<UiText text={"列表"} /></button>
+              <button type="button" aria-pressed={view === "board"} className={view === "board" ? styles.activeView : ""} onClick={() => setView("board")}><ShellIcon name="grid" className="app-icon--control"/> {" "}<UiText text={"看板"} /></button>
+              <button type="button" aria-pressed={view === "list"} className={view === "list" ? styles.activeView : ""} onClick={() => setView("list")}><ShellIcon name="plan" className="app-icon--control"/> {" "}<UiText text={"列表"} /></button>
             </div>
             <div className={styles.filters}>
               <label><UiText text={"状态"} /><select value={navigation.status ?? "all"} onChange={(event) => setStatusFilter(event.target.value)}><option value="all"><UiText text={"全部工作项"} /></option>{PROJECT_PLAN_STATUS_VALUES.map((status) => <option key={status} value={status}>{t(workItemStatusLabels[status])}</option>)}</select></label>

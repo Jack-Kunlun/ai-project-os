@@ -320,7 +320,7 @@ export function PersonalOverviewClient(): React.JSX.Element {
   }, [load]);
 
   return (
-    <div className={styles.content}>
+    <div data-page-content className={styles.content}>
       <section className={styles.pageHeader}>
         <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Personal workspace"} /></p>

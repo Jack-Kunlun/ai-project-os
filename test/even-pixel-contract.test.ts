@@ -8,6 +8,10 @@ const EXPLICIT_PIXEL = /(?<!\d)(\d+)px/gu;
 
 // Prototype CSS keeps its approved type and spacing scale outside the legacy sweep.
 const APPROVED_PROTOTYPE_STYLES = new Set([
+  "src/app/guide/guide-page.module.css",
+  "src/app/profile/connections/connection-list.module.css",
+  "src/app/profile/models/personal-model-overview.module.css",
+  "src/components/public-info-page.module.css",
   "src/app/admin/admin-workspace.module.css",
   "src/app/ask/ask-client.module.css",
   "src/app/credits/credits-client.module.css",

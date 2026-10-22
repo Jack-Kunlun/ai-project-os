@@ -459,7 +459,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
 
       {searchOpen ? (
         <div className={styles.searchOverlay} onMouseDown={(event) => { if (event.target === event.currentTarget) closeSearch(); }}>
-          <div className={styles.searchDialog} role="dialog" aria-modal="true" aria-labelledby="user-shell-search-title" onKeyDown={handleSearchKeyDown}>
+          <div data-inquiry-disabled className={styles.searchDialog} role="dialog" aria-modal="true" aria-labelledby="user-shell-search-title" onKeyDown={handleSearchKeyDown}>
             <div className={styles.searchDialogHeader}>
               <div>
                 <h2 id="user-shell-search-title"><UiText text="搜索与跳转"/></h2>

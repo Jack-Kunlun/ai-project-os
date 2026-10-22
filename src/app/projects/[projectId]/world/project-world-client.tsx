@@ -242,7 +242,7 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
   return (
     <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[var(--app-bg)] text-slate-950"}>
       {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="world" isSystemAdmin={isSystemAdmin} /> : null}
-      <div className={embedded ? "" : ui.page}>
+      <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : ui.page}>
         {!embedded ? <>        <div className="mb-5"><ProjectOverviewParentLink projectId={projectId} /></div>
         <section className={ui.heading}>
           <div><h1>{world?.project.name ? <>{world.project.name} · <UiText text="状态治理" /></> : <UiText text="项目状态治理" />}</h1><p><UiText text="这里仅处理事实关系、替代链和不可变状态快照等高级管理操作；日常状态、风险与计划信号已经汇总到项目概览。" /></p></div>

@@ -136,7 +136,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
   return (
     <main className={styles.page}>
       <AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />
-      <div className={styles.content}>
+      <div data-page-content className={styles.content}>
         <section className={styles.heading}>
           <div>
             <p className={styles.eyebrow}><UiText text={"PROJECTS"} /></p>

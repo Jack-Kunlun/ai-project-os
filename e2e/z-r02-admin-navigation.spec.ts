@@ -529,7 +529,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     const modelsResource = freePage.locator('a[href="/personal/models"]');
     await expect(modelsResource.getByRole("heading", { name: "个人模型", exact: true })).toBeVisible();
     await freePage.goto("/personal/models");
-    await expect(freePage.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
+    await expect(freePage.getByRole("heading", { name: "模型与额度", exact: true })).toBeVisible();
     await expect(freePage.getByText("普通用户", { exact: true })).toBeVisible();
     await expect(freePage.getByRole("button", { name: "保存个人连接", exact: true })).toHaveCount(0);
     const freeProviderAttempt = await postR02PersonalProvider(freePage);

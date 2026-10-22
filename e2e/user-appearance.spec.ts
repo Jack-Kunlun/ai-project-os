@@ -501,7 +501,7 @@ test("knowledge and floating Ask AI preserve both drafts across tabs, modal tran
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
 });
 
-test("usage details keep native modal focus, close on Escape and backdrop, and place Ask AI in the header", async ({ page }) => {
+test("usage details keep native modal focus, close on Escape and backdrop, and place Ask AI in the secondary footer", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 960 });
   const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
   await signInIsolatedPersonalUser(page, `appearance-usage-${suffix}`);
@@ -527,11 +527,12 @@ test("usage details keep native modal focus, close on Escape and backdrop, and p
   await expect(ask).toBeVisible();
   const bounds = await ask.boundingBox();
   const header = await details.locator("[data-dialog-header]").boundingBox();
-  const close = await details.locator("[data-dialog-close]").boundingBox();
-  expect(bounds).not.toBeNull(); expect(header).not.toBeNull(); expect(close).not.toBeNull();
-  expect(bounds!.y).toBeGreaterThanOrEqual(header!.y);
-  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(header!.y + header!.height);
-  expect(bounds!.x + bounds!.width).toBeLessThan(close!.x);
+  const footer = await details.locator("[data-inquiry-footer]").boundingBox();
+  expect(bounds).not.toBeNull(); expect(header).not.toBeNull(); expect(footer).not.toBeNull();
+  expect(bounds!.y).toBeGreaterThanOrEqual(footer!.y);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(footer!.y + footer!.height);
+  expect(bounds!.y).toBeGreaterThanOrEqual(header!.y + header!.height);
+  await expect(details.locator("[data-dialog-header] .inquiry-launcher")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(details).toBeHidden();
   await expect(trigger).toBeFocused();

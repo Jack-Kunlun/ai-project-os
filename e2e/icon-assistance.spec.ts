@@ -43,6 +43,11 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expect(title).toHaveValue("Unsaved work item");
     await expect(launcher).toBeFocused();
     await dialog.getByRole("button",{name:en?"Close dialog":"关闭窗口",exact:true}).click();
+    await page.getByRole("button",{name:en?"Search and navigate":"搜索与跳转",exact:true}).click();
+    const search=page.getByRole("dialog",{name:en?"Search and navigate":"搜索与跳转",exact:true});
+    await expect(search).toBeVisible();
+    await expect(search.locator("[data-inquiry-footer],.inquiry-launcher")).toHaveCount(0);
+    await search.getByRole("button",{name:en?"Close search":"关闭搜索",exact:true}).click();
     await page.goto("/ask");
     const create=page.getByRole("complementary",{name:en?"Recent conversations":"最近会话",exact:true}).getByRole("button",{name:en?"New conversation":"新建会话",exact:true});
     const alignment=await readIconLabelAlignment(create);
@@ -50,4 +55,39 @@ test("operation assistance stays in the secondary footer and icons align with re
     expect(Math.abs(alignment[0].verticalDelta)).toBeLessThanOrEqual(.5);
     await testInfo.attach(`conversation-${name}.png`,{body:await page.screenshot({path:testInfo.outputPath(`conversation-${name}.png`)}),contentType:"image/png"});
   }
+});
+
+test("model quota uses the real report envelope and Ask Escape preserves a confirmation input (isolated provider display fixture)", async ({page})=>{
+  await signInR02Admin(page);await signOutR02User(page);
+  const user=await seedBrowserPersonalUser(`confirm-ui-${randomUUID().slice(0,8)}`,"IconAssist2026Password!");
+  await signInR02PersonalUser(page,user);
+  const creditResponse=await page.request.get('/api/credits?range=7d&timezone=UTC&page=1&pageSize=1');
+  expect(creditResponse.ok()).toBe(true);
+  const {report}=await creditResponse.json() as {report:{summary:{availableCredits:number}}};
+  const providersResponse=await page.request.get('/api/me/ai-providers');
+  const catalog=(await providersResponse.json() as {catalog:unknown[]}).catalog;
+  const provider={id:randomUUID(),name:'Icon confirmation fixture',kind:'openai',protocol:'openai',baseUrl:'https://api.openai.com/v1',defaultGenerationModelId:'gpt-4.1-mini',defaultVisionModelId:null,defaultEmbeddingModelId:null,embeddingDimensions:null,configurationVersion:1,status:'disabled',lastTestedAt:null,lastErrorCode:null,disabledAt:new Date().toISOString(),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),credential:{maskedSuffix:'test',rotatedAt:null,updatedAt:new Date().toISOString()}};
+  await page.route('**/api/me/ai-providers',async route=>{
+    expect(route.request().method()).toBe('GET');
+    await route.fulfill({json:{providers:[provider],catalog}});
+  });
+  await page.goto('/personal/models');
+  const overview=page.locator('[data-model-overview]');
+  await expect(overview).toHaveAttribute('aria-busy','false');
+  await expect(overview.getByRole('heading',{name:'我的平台额度',exact:true}).locator('..').locator('..').locator('strong')).toContainText(new Intl.NumberFormat('zh-CN').format(report.summary.availableCredits));
+  const card=page.getByRole('article').filter({has:page.getByRole('heading',{name:provider.name,exact:true})});
+  await card.getByRole('button',{name:'删除',exact:true}).click();
+  const confirmation=page.getByRole('dialog',{name:`删除“${provider.name}”？`,exact:true});
+  const input=confirmation.getByRole('textbox');
+  await input.fill('Partial confirmation draft');
+  const launcher=confirmation.locator('[data-inquiry-footer] .inquiry-launcher');
+  await launcher.click();
+  const ask=page.getByRole('dialog',{name:'智能问答悬浮窗',exact:true});
+  await expect(ask).toBeVisible();
+  await ask.getByRole('textbox',{name:'输入问题',exact:true}).press('Escape');
+  await expect(ask).toBeHidden();
+  await expect(confirmation).toBeVisible();
+  await expect(input).toHaveValue('Partial confirmation draft');
+  await expect(launcher).toBeFocused();
+  await confirmation.getByRole('button',{name:'取消',exact:true}).click();
 });

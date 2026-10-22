@@ -251,7 +251,7 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
   };
 
   return (
-    <div className={styles.page}>
+    <div data-page-content className={styles.page}>
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}><UiText text={"个人用量"} /></p>

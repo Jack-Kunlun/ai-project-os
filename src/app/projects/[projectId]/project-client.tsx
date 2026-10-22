@@ -747,7 +747,6 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600"><UiText text={"查看有来源的资料、整理结果和后台识别任务。"} /></p>
           </div>
           <div className="flex flex-wrap gap-2" aria-label={translateUi("资料主要操作")}>
-            <Link href={buildProjectQuestionHref(projectId)} className={styles.secondaryAction}><UiText text={"智能问答"} /></Link>
             <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} disabled={Boolean(project.archivedAt)} className={styles.primaryAction}><UiText text={"添加资料"} /></button>
           </div>
         </div>
@@ -1137,7 +1136,7 @@ function ProjectShell({ children, username, projectId, isSystemAdmin }: { childr
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" isSystemAdmin={isSystemAdmin} />
-      <div className={styles.content}>{children}</div>
+      <div data-page-content className={styles.content}>{children}</div>
     </main>
   );
 }

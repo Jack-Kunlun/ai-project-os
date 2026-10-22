@@ -5,9 +5,9 @@ import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { HelpTooltip } from "@/components/help-tooltip";
-import { OperationPanel } from "@/components/operation-panel";
 import { ParentPageLink } from "@/components/parent-page-link";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
+import { WorkspaceDialog } from "@/components/workspace-dialog";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import {
@@ -21,6 +21,7 @@ import {
 import { ConnectionGovernancePanel, connectionBlockerText } from "../governance-panel";
 import { ConnectionCreateDialog, ConnectionDialogActions } from "../connection-create-dialog";
 import { ConnectionEditDialog } from "../connection-edit-dialog";
+import listStyles from "../connection-list.module.css";
 import styles from "../../../support-pages.module.css";
 import {
   createDefaultMcpDraft,
@@ -87,6 +88,15 @@ export function McpConnectionsClient() {
   const [ownerDelegationsError, setOwnerDelegationsError] = useState<string | null>(null);
   const [message, setMessage] = useState<ConnectionMessage | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<McpConnection["status"] | "all">("all");
+
+  const filteredConnections = connections.filter((connection) => {
+    const query = search.trim().toLocaleLowerCase();
+    const toolText = connection.toolDefinitions.flatMap((tool) => [tool.name, tool.title ?? "", tool.description ?? ""]).join(" ");
+    const searchable = `${connection.name} ${connection.endpointUrl} ${toolText}`.toLocaleLowerCase();
+    return (query === "" || searchable.includes(query)) && (statusFilter === "all" || connection.status === statusFilter);
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,41 +137,41 @@ export function McpConnectionsClient() {
   }, [load, loadOwnerDelegations]);
 
   return (
-    <div className={styles.content}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div data-page-content className={styles.content}>
+      <div className="mb-4">
         <ParentPageLink href="/personal/configuration" label="返回我的空间配置" />
-        <span className="text-xs text-slate-400"><UiText text={"我的空间 / 我的连接 / MCP"} /></span>
       </div>
 
-      <section className={`${styles.pageHeader} mt-6`}>
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">My MCP connections</p>
-            <h1 className={`${styles.pageTitle} mt-2`}><UiText text={"我的 MCP 连接"} /></h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600"><UiText text={"连接只属于当前账户。工具目录和安全摘要只读展示；重新发现、重信任、轮换凭据、停用、启用和删除都必须先完成治理预览与独立确认。"} /></p>
-          </div>
-          <div className={styles.safetyNote}>
-            <p className="font-semibold"><UiText text={"当前使用边界"} /></p>
-            <p className="mt-1 text-xs leading-5"><UiText text={"项目委托控制面已开放；只读动作在受控环境逐次审批，生产开放仍需验收；自动化保持关闭。新建连接会先执行受限 DNS/地址安全解析，再完成 initialize 和 tools/list 只读测试。"} /></p>
-          </div>
+      <section className={listStyles.pageHeader}>
+        <div className="min-w-0">
+          <h1 className={listStyles.pageTitle}><UiText text={"我的 MCP 连接"} /></h1>
+          <p className={listStyles.description}><UiText text={"连接只属于当前账户。工具目录和安全摘要只读展示；重新发现、重信任、轮换凭据、停用、启用和删除都必须先完成治理预览与独立确认。"} /></p>
         </div>
+        <button type="button" onClick={() => setCreateOpen(true)} className={listStyles.primaryAction}><UiText text={"添加 MCP 服务"} /></button>
       </section>
 
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : message.tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}`}><UiFeedbackText text={message.text} /></p> : null}
       {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span><UiErrorText text={loadError} /></span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"><UiText text={"重试"} /></button></div> : null}
 
+      {createOpen ? <ConnectionCreateDialog title={t("添加 MCP 服务")} onClose={() => setCreateOpen(false)}><McpCreateForm onCreated={(connection) => { setConnections((current) => [...current, connection]); setCreateOpen(false); setMessage({ tone: "success", text: "MCP 连接已保存。" }); }} /></ConnectionCreateDialog> : null}
+      <section className={`${listStyles.section} mt-6`}>
+        <header className={listStyles.sectionHeader}>
+          <div><h2 className={listStyles.sectionTitle}><UiText text={"已有连接"} /></h2><p className={listStyles.sectionDescription}><UiText text={"展示连接状态和工具安全摘要，不提供管理员审核或项目授权按钮。"} /></p></div>
+          <span className={listStyles.count}>{loading ? t("读取中…") : `${filteredConnections.length}${t(" 条")}`}</span>
+        </header>
+        <div className={listStyles.filters}>
+          <label><span className="sr-only">{t("搜索")}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("搜索")} className={listStyles.filterInput} /></label>
+          <label><span className="sr-only"><UiText text={"状态"} /></span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as McpConnection["status"] | "all")} className={listStyles.filterSelect}><option value="all"><UiText text={"全部状态"} /></option>{Object.entries(mcpStatusLabels).map(([value, label]) => <option key={value} value={value}><UiText text={label} /></option>)}</select></label>
+        </div>
+        {loading ? <div className="px-5 pb-5" role="status" aria-label={t("正在加载 MCP 连接")}><div className="h-20 animate-pulse rounded-md bg-slate-100" /></div> : connections.length === 0 ? <div className={listStyles.emptyState}><p className="font-semibold"><UiText text={"还没有个人 MCP 连接"} /></p><p className="mt-2"><UiText text={"点击“添加服务”创建远程连接。先测试 initialize 和 tools/list，确认结果后再保存；不会调用工具。"} /></p></div> : filteredConnections.length === 0 ? <div className={listStyles.emptyState}><UiText text={"没有找到匹配的内容。"} /></div> : filteredConnections.map((connection) => <McpConnectionCard key={connection.id} connection={connection} onRemoved={() => { setConnections((current) => current.filter((item) => item.id !== connection.id)); setMessage({ tone: "success", text: "MCP 连接已删除。" }); }} onReload={load} />)}
+      </section>
+
       <McpOwnerDelegationQueue delegations={ownerDelegations} loading={ownerDelegationsLoading} error={ownerDelegationsError} onReload={loadOwnerDelegations} onMessage={setMessage} />
 
-      {createOpen ? <ConnectionCreateDialog title={t("添加 MCP 服务")} onClose={() => setCreateOpen(false)}><McpCreateForm onCreated={(connection) => { setConnections((current) => [...current, connection]); setCreateOpen(false); setMessage({ tone: "success", text: "MCP 连接已保存。" }); }} /></ConnectionCreateDialog> : null}
-      <div className="mt-6 min-w-0">
-        <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h2 className="text-xl font-semibold"><UiText text={"已有连接"} /></h2><p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"展示连接状态和工具安全摘要，不提供管理员审核或项目授权按钮。"} /></p></div>
-            <div className="flex items-center gap-3"><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{loading ? t("读取中…") : `${connections.length}${t(" 个连接")}`}</span><button type="button" onClick={() => setCreateOpen(true)} className={`${styles.primaryAction} min-h-10 rounded-xl px-4 py-2 text-sm font-semibold text-white`}><UiText text={"添加服务"} /></button></div>
-          </div>
-          {loading ? <div role="status" className="mt-5 space-y-3" aria-label={t("正在加载 MCP 连接")}><div className="h-56 animate-pulse rounded-2xl bg-slate-100" /><div className="h-56 animate-pulse rounded-2xl bg-slate-100" /></div> : connections.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-9 text-center"><p className="text-sm font-semibold text-slate-700"><UiText text={"还没有个人 MCP 连接"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"点击“添加服务”创建远程连接。先测试 initialize 和 tools/list，确认结果后再保存；不会调用工具。"} /></p></div> : <div className="mt-5 space-y-4">{connections.map((connection) => <McpConnectionCard key={connection.id} connection={connection} onRemoved={() => { setConnections((current) => current.filter((item) => item.id !== connection.id)); setMessage({ tone: "success", text: "MCP 连接已删除。" }); }} onReload={load} />)}</div>}
-        </section>
-      </div>
+      <aside className={listStyles.boundaryNote}>
+        <p className={listStyles.boundaryTitle}><UiText text={"当前使用边界"} /></p>
+        <p><UiText text={"项目委托控制面已开放；只读动作在受控环境逐次审批，生产开放仍需验收；自动化保持关闭。新建连接会先执行受限 DNS/地址安全解析，再完成 initialize 和 tools/list 只读测试。"} /></p>
+      </aside>
     </div>
   );
 }
@@ -169,7 +179,7 @@ export function McpConnectionsClient() {
 function McpOwnerDelegationQueue({ delegations, loading, error, onReload, onMessage }: { delegations: readonly OwnerDelegation[]; loading: boolean; error: string | null; onReload: () => Promise<void>; onMessage: (message: ConnectionMessage) => void }) {
   const t = useTranslate();
 
-  return <section className="mt-6 border-y border-amber-200/80 py-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">{t("Delegation safety")}</p><h2 className="mt-2 text-xl font-semibold text-slate-900"><UiText text={"MCP 项目委托队列"} /></h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"这里列出你作为连接所有者的待确认、已确认、当前有效和终态记录。项目名称和项目标识不会在个人页面展示；没有项目访问权时仍只保留最小安全信息。"} /></p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-amber-800">{loading ? t("读取中…") : `${delegations.length}${t(" 条")}`}</span></div>{error ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-xs text-rose-700"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void onReload()} className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"><UiText text={"重试"} /></button></div> : null}{loading ? <div className="mt-4 h-24 animate-pulse rounded-2xl bg-white/70" role="status" aria-label={t("正在加载 MCP 委托安全记录")} /> : delegations.length === 0 && error === null ? <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/60 px-5 py-7 text-center text-xs text-slate-600"><UiText text={"当前没有 MCP 项目委托记录。"} /></div> : <div className="mt-4 grid gap-3 lg:grid-cols-2">{delegations.map((delegation) => <McpOwnerDelegationCard key={delegation.id} delegation={delegation} onReload={onReload} onMessage={onMessage} />)}</div>}</section>;
+  return <section className={listStyles.delegationSection}><header className={listStyles.sectionHeader}><div><h2 className={listStyles.sectionTitle}><UiText text={"MCP 项目委托队列"} /></h2><p className={listStyles.sectionDescription}><UiText text={"这里列出你作为连接所有者的待确认、已确认、当前有效和终态记录。项目名称和项目标识不会在个人页面展示；没有项目访问权时仍只保留最小安全信息。"} /></p></div><span className={listStyles.count}>{loading ? t("读取中…") : `${delegations.length}${t(" 条")}`}</span></header>{error ? <div role="alert" className="mx-5 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-rose-50 px-4 py-3 text-xs text-rose-700"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void onReload()} className="min-h-10 font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"><UiText text={"重试"} /></button></div> : null}{loading ? <div className="mx-5 mb-5 h-20 animate-pulse rounded-md bg-slate-100" role="status" aria-label={t("正在加载 MCP 委托安全记录")} /> : delegations.length === 0 && error === null ? <div className={listStyles.emptyState}><UiText text={"当前没有 MCP 项目委托记录。"} /></div> : <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2">{delegations.map((delegation) => <McpOwnerDelegationCard key={delegation.id} delegation={delegation} onReload={onReload} onMessage={onMessage} />)}</div>}</section>;
 }
 
 function McpOwnerDelegationCard({ delegation, onReload, onMessage }: { delegation: OwnerDelegation; onReload: () => Promise<void>; onMessage: (message: ConnectionMessage) => void }) {
@@ -217,7 +227,7 @@ function McpOwnerDelegationCard({ delegation, onReload, onMessage }: { delegatio
     }
   }
 
-  return <article className="min-w-0 rounded-2xl border border-amber-200 bg-white p-4">{dialog}<div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-sm font-semibold text-slate-900">{delegation.connection?.name ?? t("个人连接")}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{statusLabel}</span></div><p className="mt-2 text-xs text-slate-500"><UiText text={"范围："} />{delegation.mcp.access} · {delegation.mcp.protocol} <UiText text={" · 版本 "} />{delegation.version}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p><UiText text={"有效至 "} />{formatConnectionDate(delegation.expiresAt, language)}</p><p className="mt-1">{reason}</p></div></div><p className="mt-3 text-xs leading-5 text-slate-600">{delegation.mcp.description}<UiText text={"。项目名称与项目标识仅在项目授权页面按权限展示。"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p><div className="mt-4 flex flex-wrap gap-2">{delegation.capabilities.canOwnerConfirm ? <button type="button" onClick={() => void confirmOwner()} disabled={pending !== null} className={`${connectionButtonClass} bg-indigo-600 text-white hover:bg-indigo-500`}>{pending === "owner-confirmation" ? t("处理中…") : t("确认连接使用")}</button> : null}{delegation.capabilities.canReject ? <button type="button" onClick={() => void terminal("rejection")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "rejection" ? t("处理中…") : t("拒绝委托")}</button> : null}{delegation.capabilities.canRevoke ? <button type="button" onClick={() => void terminal("revocation")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "revocation" ? t("处理中…") : t("撤销委托")}</button> : null}</div></article>;
+  return <article className={listStyles.delegationCard}>{dialog}<div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-sm font-semibold text-slate-900">{delegation.connection?.name ?? t("个人连接")}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{statusLabel}</span></div><p className="mt-2 text-xs text-slate-500"><UiText text={"范围："} />{delegation.mcp.access} · {delegation.mcp.protocol} <UiText text={" · 版本 "} />{delegation.version}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p><UiText text={"有效至 "} />{formatConnectionDate(delegation.expiresAt, language)}</p><p className="mt-1">{reason}</p></div></div><p className="mt-3 text-xs leading-5 text-slate-600">{delegation.mcp.description}<UiText text={"。项目名称与项目标识仅在项目授权页面按权限展示。"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p><div className="mt-4 flex flex-wrap gap-2">{delegation.capabilities.canOwnerConfirm ? <button type="button" onClick={() => void confirmOwner()} disabled={pending !== null} className={`${connectionButtonClass} bg-indigo-600 text-white hover:bg-indigo-500`}>{pending === "owner-confirmation" ? t("处理中…") : t("确认连接使用")}</button> : null}{delegation.capabilities.canReject ? <button type="button" onClick={() => void terminal("rejection")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "rejection" ? t("处理中…") : t("拒绝委托")}</button> : null}{delegation.capabilities.canRevoke ? <button type="button" onClick={() => void terminal("revocation")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "revocation" ? t("处理中…") : t("撤销委托")}</button> : null}</div></article>;
 }
 
 function McpCreateForm({ onCreated, editing, onEdited }: { onCreated?: (connection: McpConnection) => void; editing?: McpConnection; onEdited?: () => void }) {
@@ -298,15 +308,60 @@ function McpCreateForm({ onCreated, editing, onEdited }: { onCreated?: (connecti
 function McpConnectionCard({ connection, onRemoved, onReload }: { connection: McpConnection; onRemoved: () => void; onReload: () => Promise<void> }) {
   const t = useTranslate();
   const { language } = useAppearance();
-
   const activeTools = connection.toolDefinitions.filter((tool) => isActiveMcpAttestation(tool)).length;
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editingConfig, setEditingConfig] = useState(false);
-  const [governanceOpenFor, setGovernanceOpenFor] = useState<string | null>(null);
-  const governanceOpen = governanceOpenFor === connection.updatedAt;
-  return <><article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5"><div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><button type="button" onClick={() => setEditing(true)} className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"编辑名称"} /></button><button type="button" onClick={() => setEditingConfig(true)} className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"编辑地址与认证"} /></button><OperationPanel key={`${connection.id}:${connection.updatedAt}`} title={`${t("管理 ")}${connection.name}${t(" 的连接安全")}`} triggerLabel={t("安全管理")} open={governanceOpen} onOpenChange={(open) => setGovernanceOpenFor(open ? connection.updatedAt : null)} description={t("连接状态与影响范围在详情中查看；凭据轮换、启停、删除和重新测试须在这里先预览再确认。")}><ConnectionGovernancePanel kind="mcp" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} /></OperationPanel><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{t(mcpStatusLabels[connection.status])}</span></div><p className="mt-2 break-all text-xs text-slate-500">{connection.endpointUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? t("无凭据") : `Bearer（${t("已加密")}）`}</p><p className="mt-1"><UiText text={"更新于 "} />{formatConnectionDate(connection.updatedAt, language)}</p></div></div><details className="mt-4 border-t border-slate-200 pt-3"><summary className="cursor-pointer text-xs font-semibold text-indigo-700"><UiText text={"展开只读详情"} /></summary>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiText text={"最近错误："} />{connection.lastErrorCode}<UiText text={"。请通过安全治理预览管理后续变更；重新发现会先执行 initialize 和 tools/list 只读测试，再继续影响预览；其他治理动作不会发起协议请求。"} /></p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400"><UiText text={"协议"} /></dt><dd className="mt-1 font-medium">{connection.protocolVersion ?? t("待发现")}</dd></div><div><dt className="text-slate-400"><UiText text={"工具目录"} /></dt><dd className="mt-1 font-medium">{connection.toolDefinitions.length} <UiText text={" 个，当前 V2 审核 "} />{activeTools} <UiText text={" 个"} /></dd></div><div><dt className="text-slate-400"><UiText text={"最近发现"} /></dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastDiscoveredAt, language)}</dd></div></dl><div className="mt-4"><ScopeEvidenceCard title={t("个人 MCP 连接边界")} evidence={{ scope: t("个人连接"), owner: t("当前账户"), payer: t("第三方费用由连接所有者承担或按其与服务商约定"), affectedProjects: t("尚未取得项目委托证据；仅按项目权限与明确委托判断，不展示项目标识或数量"), latestSuccess: connection.lastDiscoveredAt ? `${t("最近发现（不是调用成功）：")}${formatConnectionDate(connection.lastDiscoveredAt, language)}` : t("尚未完成工具发现（不是调用成功）") }} /></div>{connection.toolDefinitions.length > 0 ? <details className="mt-4 rounded-xl bg-white p-4"><summary className="cursor-pointer text-xs font-semibold text-slate-700"><UiText text={"查看工具安全摘要（只读展示）"} /></summary><div className="mt-3 space-y-2">{connection.toolDefinitions.map((tool) => { const attested = isActiveMcpAttestation(tool); return <div key={tool.id} className="min-w-0 rounded-xl border border-slate-100 px-3 py-3 text-xs"><div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-words font-semibold text-slate-800">{tool.title || tool.name}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-400">{tool.name}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${attested ? "bg-emerald-50 text-emerald-700" : tool.remoteReadOnlyHint ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{t(attested ? "当前 V2 已审核" : tool.remoteReadOnlyHint ? "仅远端声明" : "声明不足")}</span></div>{tool.description ? <p className="mt-2 break-words leading-5 text-slate-500">{tool.description}</p> : null}<p className="mt-2 text-[12px] leading-5 text-slate-400"><UiText text={"远端声明不具备授权资格；管理员审核与项目授权由平台流程负责。"} /></p></div>; })}</div></details> : null}<p className="mt-3 text-xs leading-5 text-slate-500"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p>{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600"><UiText text={"连接已停用；重新启用后必须重新发现。重新发现会先执行 initialize 和 tools/list 只读测试，再继续影响预览；其他治理动作不会发起协议请求。"} /></p> : null}</details></article>{editing ? <ConnectionEditDialog kind="mcp" connection={connection} onClose={() => setEditing(false)} onSaved={() => void onReload()} /> : null}{editingConfig ? <ConnectionCreateDialog title={t("编辑 MCP 地址与认证")} onClose={() => setEditingConfig(false)}><McpCreateForm editing={connection} onEdited={() => { setEditingConfig(false); void onReload(); }} /></ConnectionCreateDialog> : null}</>;
-}
 
+  function closeDetails() {
+    setDetailsOpen(false);
+    setEditing(false);
+    setEditingConfig(false);
+  }
+
+  return <>
+    <article className={listStyles.connectionRow}>
+      <div className={listStyles.connectionIdentity}>
+        <div className={listStyles.connectionNameLine}>
+          <h3 className={listStyles.connectionName}>{connection.name}</h3>
+          <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{t(mcpStatusLabels[connection.status])}</span>
+        </div>
+        <p className={listStyles.connectionAddress}>{connection.endpointUrl}</p>
+      </div>
+      <div className={listStyles.connectionMeta}>
+        <p>{connection.authKind === "none" ? t("无凭据") : `Bearer（${t("已加密")}）`}</p>
+        <p><UiText text={"更新于 "} />{formatConnectionDate(connection.updatedAt, language)}</p>
+      </div>
+      <button type="button" onClick={() => setDetailsOpen(true)} className={listStyles.manageAction}><UiText text={"安全管理"} /></button>
+    </article>
+
+    <WorkspaceDialog title={`${t("管理 ")}${connection.name}${t(" 的连接安全")}`} open={detailsOpen} drawer onClose={closeDetails}>
+      <div className={listStyles.details}>
+        <p className="text-sm leading-6 text-slate-600"><UiText text={"展示连接状态和工具安全摘要，不提供管理员审核或项目授权按钮。"} /></p>
+        {connection.lastErrorCode ? <p role="status" className="break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiText text={"最近错误："} />{connection.lastErrorCode}<UiText text={"。请通过安全治理预览管理后续变更；重新发现会先执行 initialize 和 tools/list 只读测试，再继续影响预览；其他治理动作不会发起协议请求。"} /></p> : null}
+        <dl className="grid gap-3 text-xs text-slate-600 sm:grid-cols-3">
+          <div><dt className="text-slate-400"><UiText text={"协议"} /></dt><dd className="mt-1 font-medium">{connection.protocolVersion ?? t("待发现")}</dd></div>
+          <div><dt className="text-slate-400"><UiText text={"工具目录"} /></dt><dd className="mt-1 font-medium">{connection.toolDefinitions.length} <UiText text={" 个，当前 V2 审核 "} />{activeTools} <UiText text={" 个"} /></dd></div>
+          <div><dt className="text-slate-400"><UiText text={"最近发现"} /></dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastDiscoveredAt, language)}</dd></div>
+        </dl>
+        <ScopeEvidenceCard title={t("个人 MCP 连接边界")} evidence={{ scope: t("个人连接"), owner: t("当前账户"), payer: t("第三方费用由连接所有者承担或按其与服务商约定"), affectedProjects: t("尚未取得项目委托证据；仅按项目权限与明确委托判断，不展示项目标识或数量"), latestSuccess: connection.lastDiscoveredAt ? `${t("最近发现（不是调用成功）：")}${formatConnectionDate(connection.lastDiscoveredAt, language)}` : t("尚未完成工具发现（不是调用成功）") }} />
+        {connection.toolDefinitions.length > 0 ? <details className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-700"><UiText text={"查看工具安全摘要（只读展示）"} /></summary>
+          <div className="mt-3 space-y-2">{connection.toolDefinitions.map((tool) => { const attested = isActiveMcpAttestation(tool); return <div key={tool.id} className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs"><div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-words font-semibold text-slate-800">{tool.title || tool.name}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-400">{tool.name}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${attested ? "bg-emerald-50 text-emerald-700" : tool.remoteReadOnlyHint ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{t(attested ? "当前 V2 已审核" : tool.remoteReadOnlyHint ? "仅远端声明" : "声明不足")}</span></div>{tool.description ? <p className="mt-2 break-words leading-5 text-slate-500">{tool.description}</p> : null}<p className="mt-2 text-[12px] leading-5 text-slate-400"><UiText text={"远端声明不具备授权资格；管理员审核与项目授权由平台流程负责。"} /></p></div>; })}</div>
+        </details> : null}
+        <p className="text-xs leading-5 text-slate-500"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></p>
+        {connection.status === "disabled" ? <p className="rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600"><UiText text={"连接已停用；重新启用后必须重新发现。重新发现会先执行 initialize 和 tools/list 只读测试，再继续影响预览；其他治理动作不会发起协议请求。"} /></p> : null}
+        <div className={listStyles.detailsActions}>
+          <button type="button" onClick={() => setEditing(true)} className={listStyles.editAction}><UiText text={"编辑名称"} /></button>
+          <button type="button" onClick={() => setEditingConfig(true)} className={listStyles.editAction}><UiText text={"编辑地址与认证"} /></button>
+        </div>
+        <ConnectionGovernancePanel kind="mcp" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} />
+      </div>
+      {editing ? <ConnectionEditDialog kind="mcp" connection={connection} onClose={() => setEditing(false)} onSaved={() => void onReload()} /> : null}
+      {editingConfig ? <ConnectionCreateDialog title={t("编辑 MCP 地址与认证")} onClose={() => setEditingConfig(false)}><McpCreateForm editing={connection} onEdited={() => { setEditingConfig(false); void onReload(); }} /></ConnectionCreateDialog> : null}
+    </WorkspaceDialog>
+  </>;
+}
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   const t = useTranslate();
   const help = label === t("Streamable HTTP 端点")

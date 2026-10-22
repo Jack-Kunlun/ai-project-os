@@ -29,7 +29,7 @@ export function FloatingInquiry(){
        const viewportWidth=document.documentElement.clientWidth||document.body.clientWidth,viewportHeight=document.documentElement.clientHeight||document.body.clientHeight;
        setSize(previous => previous.width === viewportWidth && previous.height === viewportHeight ? previous : { width: viewportWidth, height: viewportHeight });
        const candidates = [...document.querySelectorAll<HTMLElement>('dialog[open], [role="dialog"][aria-modal="true"]')]
-         .filter(el => !el.closest('[data-floating-inquiry-root]') && !el.closest('[hidden],[inert],[aria-hidden="true"]') && el.dataset.inquiryOwned !== 'true' && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
+         .filter(el => !el.closest('[data-floating-inquiry-root],[data-inquiry-disabled]') && !el.closest('[hidden],[inert],[aria-hidden="true"]') && el.dataset.inquiryOwned !== 'true' && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
        const host = assistVisible?candidates.at(-1):undefined;
        const existing=host?.querySelector<HTMLElement>('[data-dialog-footer],[data-operation-footer]');
        const previous=latestOperation.current;
@@ -108,7 +108,7 @@ export function FloatingInquiry(){
      else if(event.key==='Escape'&&opened&&target?.contains(event.target as Node)){
        const modal=event.target instanceof Element?event.target.closest('dialog[open],[role="dialog"][aria-modal="true"]'):null;
        // The topmost inquiry-owned modal handles its native cancel first.
-       if(modal&&target.contains(modal)&&modal.matches(':modal'))return;
+       if(modal&&target.contains(modal)&&modal.matches(':modal')){event.stopPropagation();return;}
        event.preventDefault();event.stopPropagation();close();
      }
      else if(event.key==='Tab'&&host&&event.target instanceof Element&&event.target.closest('dialog[open],[role="dialog"][aria-modal="true"]')===host){

@@ -29,7 +29,7 @@ export function WorkspaceDialog({ title, open, onClose, children, footer, drawer
   }, [open]);
   const owned = useInquiryOperation(open, dialog);
   function containTab(event: KeyboardEvent<HTMLDialogElement>) {
-    if (event.key !== "Tab" || !event.currentTarget.open) return;
+    if (event.defaultPrevented || event.key !== "Tab" || !event.currentTarget.open || !(event.target instanceof Element) || event.target.closest('[role="dialog"], dialog[open]') !== event.currentTarget) return;
     const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled):not([type=hidden]), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])")]
       .filter(element => element.getClientRects().length > 0 && !element.closest("[hidden], [inert], [aria-hidden='true']") && getComputedStyle(element).visibility !== "hidden");
     const first = controls[0], last = controls.at(-1), current = document.activeElement;

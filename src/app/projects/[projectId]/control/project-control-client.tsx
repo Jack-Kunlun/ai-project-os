@@ -103,7 +103,7 @@ export function ProjectControlClient({ username, isSystemAdmin }: { username: st
   return (
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="control" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
+      <div data-page-content className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div>
         <section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600"><UiText text={"Control plane"} /></p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600"><UiText text={"项目不再维护独立模型路由。普通用户使用平台默认免费模型；会员用户可在个人账号配置模型，并通过个人双确认委托在项目中使用。旧项目级 GitHub 连接和自动同步继续冻结；一次性手动只读委托已迁移到"} /><Link href={`/projects/${projectId}/repositories`} className="font-semibold text-indigo-700 underline"><UiText text={"项目 Git 页面"} /></Link>。</p></section>
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}

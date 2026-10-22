@@ -23,7 +23,7 @@ test("formal product identity stays stable while diagnostic version remains expl
   }
 
   assert.match(shell, /AI Project OS/u);
-  assert.match(publicInfoPage, /AI PROJECT OS/u);
+  assert.match(publicInfoPage, /AI Project OS/iu);
   assert.match(layout, /title: "AI Project OS"/u);
   assert.match(terms, /版本与部署验证/u);
   assert.match(health, /version: APP_VERSION/u);

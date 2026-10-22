@@ -39,7 +39,7 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
     <main className={styles.page}>
       <AppHeader username={user.username} active="personalKnowledge" isSystemAdmin={user.role === "admin"} />
       <PersonalWorkspaceNav active="configuration" />
-      <div className={styles.content}>
+      <div data-page-content className={styles.content}>
         <section className={styles.pageHeader}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text="个人资源配置" /></p>

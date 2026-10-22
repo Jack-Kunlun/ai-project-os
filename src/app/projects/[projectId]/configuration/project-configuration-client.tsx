@@ -706,7 +706,7 @@ export function ProjectConfigurationClient({ username, projectId, isSystemAdmin,
   return (
     <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[var(--app-bg)] text-slate-950"}>
       {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="configuration" isSystemAdmin={isSystemAdmin} /> : null}
-      <div className={embedded ? "" : ui.page}>
+      <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : ui.page}>
         {!embedded ? <div className={ui.heading}><div>
           <h1><UiText text="项目配置" /></h1>
           <p><UiText text="这里汇总当前项目的模型路由、代码仓库、MCP 连接和工具授权。页面展示安全摘要；代码仓库连接与读取范围可在项目内管理。" /></p>

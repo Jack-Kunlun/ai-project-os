@@ -1,4 +1,4 @@
-import { expectIconLabelAlignment } from "./support/icon-label-alignment";
+import { expectIconLabelAlignment, expectIconOnlyAlignment } from "./support/icon-label-alignment";
 import prototypeRoutes from "./support/prototype-route-catalog.json";
 import { readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
@@ -12,10 +12,10 @@ import { expectR02NoHorizontalOverflow, signInR02Admin, signInR02PersonalUser } 
 
 type MatrixRole = "admin" | "user" | "anonymous";
 type MatrixMode = Readonly<{
-  id: "zh-light-1440" | "zh-light-390" | "en-dark-1440" | "en-dark-390";
+  id: "zh-light-1920" | "zh-light-1440" | "zh-light-1100" | "zh-light-390" | "en-dark-1440" | "en-dark-390";
   language: "zh-CN" | "en";
   theme: "light" | "dark";
-  width: 1440 | 390;
+  width: 1920 | 1440 | 1100 | 390;
 }>;
 type DynamicIds = Readonly<Record<"projectId" | "userId" | "workspaceId" | "sourceId" | "jobId" | "syncRunId", string>>;
 type MatrixRoute = Readonly<{ source: string; path: string; role: MatrixRole }>;
@@ -49,7 +49,9 @@ type ParentNavigationResult = Readonly<{
 }>;
 
 const MATRIX_MODES: readonly MatrixMode[] = [
+  { id: "zh-light-1920", language: "zh-CN", theme: "light", width: 1920 },
   { id: "zh-light-1440", language: "zh-CN", theme: "light", width: 1440 },
+  { id: "zh-light-1100", language: "zh-CN", theme: "light", width: 1100 },
   { id: "zh-light-390", language: "zh-CN", theme: "light", width: 390 },
   { id: "en-dark-1440", language: "en", theme: "dark", width: 1440 },
   { id: "en-dark-390", language: "en", theme: "dark", width: 390 },
@@ -382,19 +384,21 @@ test("all page routes remain consistent across Chinese light and English dark de
             expect(icon.spriteResolved, `every visible icon must resolve its server-rendered Tabler definition`).toBe(true);
             expect(icon.strokeWidth, `${path}@${mode.id} Tabler app-icon stroke`).toBe("1.75");
           }
-          await expectIconLabelAlignment(page.locator("body"), `${path}@${mode.id}`);
+          const labelsMeasured = await expectIconLabelAlignment(page.locator("body"), `${path}@${mode.id}`);
+          await expectIconOnlyAlignment(page.locator("body"), `${path}@${mode.id}`);
+          if (route.role !== "anonymous" && !gatedNotFound) expect(labelsMeasured, `${path}@${mode.id} must measure actual visible text/icon pairs`).toBeGreaterThan(mode.width <= 900 ? 0 : 3);
           if (route.role !== "anonymous" && !gatedNotFound) {
-            const geometry = await page.locator("h1").first().evaluate(heading => {
-              let container = heading.parentElement;
-              while (container && Number.parseFloat(getComputedStyle(container).paddingLeft) < 12) container = container.parentElement;
-              if (!container) return null;
+            const content = route.role === "admin" ? page.locator("main.admin-page-scroll > div") : page.locator("[data-page-content]");
+            await expect(content, `${path}@${mode.id} has exactly one main reading root`).toHaveCount(1);
+            const geometry = await content.evaluate(container => {
               const style = getComputedStyle(container);
-              return { left:Number.parseFloat(style.paddingLeft), right:Number.parseFloat(style.paddingRight), width:container.getBoundingClientRect().width };
+              const parent=container.parentElement!,parentStyle=getComputedStyle(parent);
+              return {left:Number.parseFloat(style.paddingLeft),right:Number.parseFloat(style.paddingRight),width:container.getBoundingClientRect().width,parentWidth:parent.clientWidth-Number.parseFloat(parentStyle.paddingLeft)-Number.parseFloat(parentStyle.paddingRight)};
             });
             expect(geometry, `${path}@${mode.id} needs the shared prototype reading container`).not.toBeNull();
-            expect(geometry!.left, `${path}@${mode.id} prototype left inset`).toBe(mode.width <= 700 ? 18 : 32);
-            expect(geometry!.right, `${path}@${mode.id} prototype right inset`).toBe(mode.width <= 700 ? 18 : 32);
-            expect(geometry!.width, `${path}@${mode.id} prototype maximum content width`).toBeLessThanOrEqual(1500);
+            expect(geometry!.left, `${path}@${mode.id} prototype left inset`).toBe(mode.width <= 700 ? 18 : mode.width <= 1150 ? 26 : 32);
+            expect(geometry!.right, `${path}@${mode.id} prototype right inset`).toBe(mode.width <= 700 ? 18 : mode.width <= 1150 ? 26 : 32);
+            expect(Math.abs(geometry!.width-Math.min(1500,geometry!.parentWidth)), `${path}@${mode.id} must fill and center the prototype reading width`).toBeLessThanOrEqual(1);
           }
           parentLinks = await readParentLinks(page);
           untranslatedSystemKeys = mode.language === "en" ? await readUntranslatedSystemKeys(page) : [];

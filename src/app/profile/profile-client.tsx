@@ -120,7 +120,7 @@ export function ProfileClient({
   return (
     <main className={styles.page}>
       <AppHeader username={headerUsername} active="profile" isSystemAdmin={isSystemAdmin} />
-      <div className={styles.content}>
+      <div data-page-content className={styles.content}>
         <section className={styles.pageHeader}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">ACCOUNT</p>

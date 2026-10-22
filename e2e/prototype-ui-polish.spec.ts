@@ -29,7 +29,7 @@ test("one-click read-all persists for every notification page", async ({ page })
 
   await signInR02PersonalUser(page, user);
   await page.goto("/notifications");
-  await expect(page.getByRole("heading", { name: "活动记录", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "通知中心", exact: true })).toBeVisible();
   await expect(page.locator("article")).toHaveCount(20);
   await expect(page.getByRole("button", { name: "加载更早记录", exact: true })).toBeVisible();
 

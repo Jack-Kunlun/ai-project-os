@@ -388,6 +388,7 @@
 }
 
 .iconButton {
+  --app-icon-text-offset: 0px;
   display: inline-flex;
   width: 32px;
   height: 32px;

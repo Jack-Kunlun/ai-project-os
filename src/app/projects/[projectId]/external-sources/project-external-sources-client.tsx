@@ -103,7 +103,7 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
   return (
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
+      <div data-page-content className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div>
         <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300"><UiText text={"External knowledge"} /></p>

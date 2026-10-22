@@ -1,0 +1,254 @@
+.page {
+  min-height: 100dvh;
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+.shell {
+  box-sizing: border-box;
+  width: min(100%, 1180px);
+  margin-inline: auto;
+  padding: 24px 40px 52px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 44px;
+  padding: 10px 0 28px;
+}
+
+.brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  color: var(--app-text);
+  text-decoration: none;
+}
+
+.brandName {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.loginLink {
+  display: inline-flex;
+  min-height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-border);
+  border-radius: 5px;
+  padding: 6px 13px;
+  background: var(--app-surface);
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: none;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.loginLink:hover {
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+  color: var(--app-link);
+}
+
+.content {
+  width: min(100%, 800px);
+  margin: 20px auto 0;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
+}
+
+.description {
+  max-width: 690px;
+  margin: 10px 0 0;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.document {
+  margin-top: 28px;
+  border: 1px solid var(--app-border);
+  border-radius: 5px;
+  padding: 28px 30px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.infoSection {
+  min-width: 0;
+}
+
+.infoSection + .infoSection {
+  margin-top: 22px;
+  border-top: 1px solid var(--app-border);
+  padding-top: 22px;
+}
+
+.infoTitle {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.infoBody {
+  display: grid;
+  gap: 12px;
+  margin-top: 9px;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.infoBody p {
+  margin: 0;
+}
+
+.infoBody a {
+  color: var(--app-link);
+}
+
+.infoBody a:focus-visible,
+.loginLink:focus-visible,
+.brand:focus-visible,
+.footerNav a:focus-visible,
+.qrFigure a:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 3px;
+}
+
+.footerNav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 24px;
+  width: min(100%, 800px);
+  margin: 28px auto 0;
+  font-size: 12px;
+}
+
+.footerNav a {
+  color: var(--app-muted);
+  text-decoration: none;
+}
+
+.footerNav a:hover {
+  color: var(--app-link);
+}
+
+.contactLayout {
+  display: grid;
+  justify-items: center;
+  gap: 28px;
+}
+
+.qrFigure {
+  width: min(100%, 480px);
+  margin: 0;
+  text-align: center;
+}
+
+.qrImage {
+  display: block;
+  width: min(100%, 248px);
+  height: auto;
+  margin: 8px auto 14px;
+}
+
+.qrCaption {
+  color: var(--app-muted);
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.contactSections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  width: 100%;
+}
+
+.contactSections .infoSection + .infoSection {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+@media (max-width: 760px) {
+  .shell {
+    padding: 20px 20px 36px;
+  }
+
+  .header {
+    padding-bottom: 22px;
+  }
+
+  .content {
+    margin-top: 16px;
+  }
+
+  .title {
+    font-size: 25px;
+  }
+
+  .description {
+    margin-top: 8px;
+  }
+
+  .document {
+    margin-top: 22px;
+    padding: 22px 20px;
+  }
+
+  .contactSections {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .contactSections .infoSection + .infoSection {
+    border-top: 1px solid var(--app-border);
+    padding-top: 20px;
+  }
+}
+
+@media (max-width: 420px) {
+  .shell {
+    padding-inline: 16px;
+  }
+
+  .document {
+    padding-inline: 16px;
+  }
+
+  .brandName {
+    font-size: 14px;
+  }
+}

@@ -406,6 +406,16 @@ test("processing tasks preserve background state and only offer safe cancellatio
   await page.setViewportSize({ width: 390, height: 844 });
   await expectR02NoHorizontalOverflow(page, "processing task queue 390px");
   await expectR02NoAccessibilityViolations(page, "processing task queue 390px");
+  const origin = new URL(page.url()).origin;
+  await page.context().addCookies([
+    { name: "aipos-language", value: "en", url: origin },
+    { name: "aipos-theme", value: "dark", url: origin },
+  ]);
+  await page.reload();
+  await expect(tasks.getByText("Facts created: 1 · To review: 1 · Duplicates: 0", { exact: true })).toBeVisible();
+  await expect(tasks.getByText("The model response failed validation, so this extraction did not complete.", { exact: true })).toHaveCount(2);
+  await expect(tasks.getByText(/^The task record has been manually reconciled\./u)).toBeVisible();
+  await expectR02NoHorizontalOverflow(page, "processing task queue English dark 390px");
 });
 
 
@@ -493,5 +503,9 @@ test("invalid extraction detail separates incomplete output from open and closed
   await expect(page.getByText(/^The task record has been manually reconciled\./u)).toBeVisible();
   await expect(page.getByText(/^This task has no complete extraction result to confirm\./u)).toBeVisible();
   await expectR02NoHorizontalOverflow(page, "incomplete extraction English dark 390px");
+  await page.goto(`/projects/${projectId}/governance?tab=usage`);
+  await expect(page.getByText(/The model response failed validation, so this extraction did not complete\./u)).toBeVisible();
+  await expect(page.getByText(/The task record has been manually reconciled\./u)).toBeVisible();
+  await expectR02NoHorizontalOverflow(page, "incomplete extraction compatible governance English dark 390px");
   expect(writes).toEqual([]);
 });

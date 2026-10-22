@@ -1,6 +1,11 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
   "图片与截图": "Images & screenshots",
+  "已形成 {confirmed} 条事实 · {review} 条待核对 · {duplicates} 条重复": "Facts created: {confirmed} · To review: {review} · Duplicates: {duplicates}",
+  "识别完成，共 {count} 个片段等待人工核对": "Recognition completed. {count} segments await review",
+  "等 {count} 份资料": "and other sources ({count} total)",
+  "共 {count} 份资料": "{count} sources in total",
+  "{kind}进度": "{kind} progress",
   "模型响应未通过校验，本次资料抽取未正常完成。": "The model response failed validation, so this extraction did not complete.",
   "外部调用的最终结果无法确认，本任务不能按已完成处理。": "The external call's final outcome could not be confirmed. This task cannot be treated as completed.",
   "外部调用记录仍需核对，请到项目概览的任务运行记录中处理。这是核对调用记录，不是审核任务结果；系统不会自动重试。": "The external call record still needs reconciliation in the project overview's task run history. This reconciles the call record; it does not review task results. The system will not retry automatically.",

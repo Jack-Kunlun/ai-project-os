@@ -65,20 +65,20 @@ function stageLabel(stage: string): string {
   }[stage] ?? "后台处理中";
 }
 
-function resultSummary(job: ProcessingJob): string | null {
+function resultSummary(job: ProcessingJob, t: (text: string) => string): string | null {
   const result = record(job.result);
   if (job.kind === "autoExtract") {
     const confirmed = count(result.confirmedCount);
     const review = count(result.reviewRequiredCount);
     const duplicates = count(result.duplicateCount);
     if (confirmed === null || review === null || duplicates === null) return null;
-    return `已形成 ${confirmed} 条事实 · ${review} 条待核对 · ${duplicates} 条重复`;
+    return t("已形成 {confirmed} 条事实 · {review} 条待核对 · {duplicates} 条重复").replace("{confirmed}", String(confirmed)).replace("{review}", String(review)).replace("{duplicates}", String(duplicates));
   }
   const segments = count(result.visionSegmentCount);
-  return segments === null ? null : `识别完成，共 ${segments} 个片段等待人工核对`;
+  return segments === null ? null : t("识别完成，共 {count} 个片段等待人工核对").replace("{count}", String(segments));
 }
 
-function inputSummaryLabel(job: ProcessingJob): string | null {
+function inputSummaryLabel(job: ProcessingJob, t: (text: string) => string): string | null {
   if (job.inputSummary === null) return null;
   if (job.kind === "assetExtract" && "displayName" in job.inputSummary) {
     return [job.inputSummary.displayName, job.inputSummary.fileName].filter((label): label is string => label !== null).join(" · ") || null;
@@ -86,8 +86,8 @@ function inputSummaryLabel(job: ProcessingJob): string | null {
   if (job.kind === "autoExtract" && "sourceCount" in job.inputSummary) {
     const labels = job.inputSummary.sourceLabels.join("、");
     return labels.length > 0
-      ? `${labels}${job.inputSummary.sourceCount > job.inputSummary.sourceLabels.length ? ` 等 ${job.inputSummary.sourceCount} 份资料` : ""}`
-      : `共 ${job.inputSummary.sourceCount} 份资料`;
+      ? `${labels}${job.inputSummary.sourceCount > job.inputSummary.sourceLabels.length ? ` ${t("等 {count} 份资料").replace("{count}", String(job.inputSummary.sourceCount))}` : ""}`
+      : t("共 {count} 份资料").replace("{count}", String(job.inputSummary.sourceCount));
   }
   return null;
 }
@@ -195,17 +195,17 @@ export function ProjectProcessingTasks({ projectId, onChanged }: {
     {loading ? <p className="mt-4 text-sm text-slate-500"><UiText text={"正在读取任务…"} /></p> : error ? null : jobs.length === 0 ? <p className="mt-4 rounded-lg bg-slate-50 px-4 py-5 text-sm text-slate-500"><UiText text={"目前没有识别或整理任务。可以回到资料栏目添加内容或确认 AI 整理。"} /></p> : <div className="mt-4 space-y-2">{jobs.map((job) => {
       const progress = job.progressTotal > 0 ? Math.min(100, Math.round(job.progressCurrent / job.progressTotal * 100)) : null;
       const canCancel = job.canCancel && canceling !== job.id;
-      const inputLabel = inputSummaryLabel(job);
+      const inputLabel = inputSummaryLabel(job, translateUi);
       const unknownOutcome = projectJobUnknownPresentation(job);
       return <article key={job.id} className={styles.taskCard}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h3 className="font-semibold text-slate-900">{job.kind === "assetExtract" ? <UiText text={"文件图片识别"} /> : <UiText text={"资料自动整理"} />}</h3>{inputLabel ? <p className="mt-1 max-w-2xl break-all text-xs text-slate-600">{inputLabel}</p> : null}<p className="mt-1 text-xs text-slate-500">{unknownOutcome?.label ?? statusLabel(job.status)} · {unknownOutcome?.stageLabel ?? stageLabel(job.stage)} {" "}<UiText text={"· 创建于"} />{" "}{formatCreatedAt(job.createdAt, language, translateUi)}</p></div>
+          <div><h3 className="font-semibold text-slate-900">{job.kind === "assetExtract" ? <UiText text={"文件图片识别"} /> : <UiText text={"资料自动整理"} />}</h3>{inputLabel ? <p className="mt-1 max-w-2xl break-all text-xs text-slate-600">{inputLabel}</p> : null}<p className="mt-1 text-xs text-slate-500">{translateUi(unknownOutcome?.label ?? statusLabel(job.status))} · {translateUi(unknownOutcome?.stageLabel ?? stageLabel(job.stage))} {" "}<UiText text={"· 创建于"} />{" "}{formatCreatedAt(job.createdAt, language, translateUi)}</p></div>
           {canCancel ? <button type="button" onClick={() => void cancel(job)} className="min-h-9 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700"><UiText text={"取消任务"} /></button> : canceling === job.id ? <span className="text-xs text-slate-500"><UiText text={"正在取消…"} /></span> : null}
         </div>
-        {progress !== null ? <div className="mt-3"><div className="flex justify-between text-xs text-slate-500"><span><UiText text={"处理进度"} /></span><span>{job.progressCurrent}/{job.progressTotal}（{progress}%）</span></div><div className={`${styles.taskProgress} mt-1`} role="progressbar" aria-valuemin={0} aria-valuemax={job.progressTotal} aria-valuenow={job.progressCurrent} aria-label={`${job.kind === "assetExtract" ? "文件图片识别" : "资料自动整理"}进度`}><div className={styles.taskProgressFill} style={{ width: `${progress}%` }} /></div></div> : null}
-        {job.status === "succeeded" ? <p className="mt-3 text-sm text-emerald-800">{resultSummary(job) ?? <UiText text={"任务已完成，结果已保存。"} />}</p> : null}
+        {progress !== null ? <div className="mt-3"><div className="flex justify-between text-xs text-slate-500"><span><UiText text={"处理进度"} /></span><span>{job.progressCurrent}/{job.progressTotal}（{progress}%）</span></div><div className={`${styles.taskProgress} mt-1`} role="progressbar" aria-valuemin={0} aria-valuemax={job.progressTotal} aria-valuenow={job.progressCurrent} aria-label={translateUi("{kind}进度").replace("{kind}", translateUi(job.kind === "assetExtract" ? "文件图片识别" : "资料自动整理"))}><div className={styles.taskProgressFill} style={{ width: `${progress}%` }} /></div></div> : null}
+        {job.status === "succeeded" ? <p className="mt-3 text-sm text-emerald-800">{resultSummary(job, translateUi) ?? <UiText text={"任务已完成，结果已保存。"} />}</p> : null}
         {job.status === "failed" ? <p className="mt-3 text-sm text-rose-700"><UiText text={"任务失败"} />{job.failureCode ? `（${job.failureCode}）` : ""}<UiText text={"。原始资料仍保留。"} /></p> : null}
-        {unknownOutcome ? <div className={`mt-3 text-sm leading-6 ${unknownOutcome.tone === "danger" ? "text-rose-700" : "text-amber-800"}`}><p>{unknownOutcome.summary}{job.failureCode ? `（${job.failureCode}）` : ""}</p><p>{unknownOutcome.recordNotice}</p></div> : job.reconciliationRequired ? <p className="mt-3 text-sm text-amber-800"><UiText text={"外部调用记录仍需核对，请查看任务详情；系统不会自动重试。"} /></p> : null}
+        {unknownOutcome ? <div className={`mt-3 text-sm leading-6 ${unknownOutcome.tone === "danger" ? "text-rose-700" : "text-amber-800"}`}><p>{translateUi(unknownOutcome.summary)}{job.failureCode ? `（${job.failureCode}）` : ""}</p><p>{translateUi(unknownOutcome.recordNotice)}</p></div> : job.reconciliationRequired ? <p className="mt-3 text-sm text-amber-800"><UiText text={"外部调用记录仍需核对，请查看任务详情；系统不会自动重试。"} /></p> : null}
         {job.status === "cancelled" ? <p className="mt-3 text-sm text-slate-600"><UiText text={"任务已取消，原始资料仍保留。"} /></p> : null}
         <div className="mt-3 flex flex-wrap gap-4 text-xs font-semibold text-indigo-700"><Link href={`/projects/${projectId}/jobs/${job.id}`} className="underline"><UiText text={"查看任务详情"} /></Link>{job.kind === "assetExtract" && job.status === "succeeded" ? <Link href={`/projects/${projectId}/assets`} className="underline"><UiText text={"核对识别结果"} /></Link> : null}{job.kind === "autoExtract" && job.status === "succeeded" ? <Link href={`/projects/${projectId}/materials?view=review&from=materials`} className="underline"><UiText text={"查看整理结果"} /></Link> : null}</div>
       </article>;

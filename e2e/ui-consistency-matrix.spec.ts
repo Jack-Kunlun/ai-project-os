@@ -72,7 +72,7 @@ const PUBLIC_ANONYMOUS_ROUTES = new Set([
 
 const KNOWN_TRANSLATED_SYSTEM_KEYS = Object.entries(englishUiMessages)
   .filter(([key, value]) => key !== value && [...key].length >= 4 && /\p{Script=Han}/u.test(key))
-  .map(([key]) => key);
+  .map(([key]) => key.trim());
 
 const ROUTE_DESTINATIONS: Readonly<Record<string, Readonly<Partial<Record<MatrixRole, string>>>>> = {
   "/": { admin: "/admin", user: "/dashboard", anonymous: "/login" },

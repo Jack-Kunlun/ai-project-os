@@ -284,6 +284,7 @@ test("project member management does not imply inherited team owners can lose ac
   assert.match(members, /inheritedOwner:/u);
   assert.match(mutation, /PROJECT_MEMBER_INHERITED_OWNER/u);
   assert.match(mutation, /teamMembership\?\.role === "owner" \|\| teamMembership\?\.role === "admin"/u);
-  assert.match(client, /有效权限：/u);
+  assert.match(client, /有效权限/u);
+  assert.match(client, /member\.inheritedOwner \? <UiText text=\{"Owner · 团队继承"\}/u);
   assert.match(client, /!member\.inheritedOwner/u);
 });

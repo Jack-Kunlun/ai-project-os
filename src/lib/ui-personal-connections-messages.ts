@@ -1,6 +1,6 @@
 /** Exact UI translations for personal model, Git, and MCP connection screens. */
 export const uiPersonalConnectionsMessages: Record<string, string> = {
-  " 返回我的空间配置": " Back to workspace settings",
+  "返回我的空间配置": "Back to workspace settings",
   "我的空间 / 我的模型": "My workspace / My models",
   "我的空间 / 授权管理 / Git": "My workspace / Authorization / Git",
   "我的空间 / 我的连接 / MCP": "My workspace / My connections / MCP",

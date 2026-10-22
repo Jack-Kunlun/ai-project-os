@@ -2,7 +2,7 @@
 import { UiErrorText } from "@/components/ui-error-text";
 
 
-import { UiText } from "@/components/appearance-provider";
+import { UiText, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
@@ -10,6 +10,7 @@ import { BackButton } from "@/components/back-button";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { OperationPanel } from "@/components/operation-panel";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import styles from "./project-members.module.css";
 
 type Member = Readonly<{
   userId: string; username: string; displayName: string | null;
@@ -24,6 +25,7 @@ type Payload = Readonly<{
 }>;
 
 export function ProjectMembersClient({ projectId, username, isSystemAdmin, embedded = false }: { projectId: string; username: string; isSystemAdmin: boolean; embedded?: boolean }) {
+  const t = useTranslate();
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export function ProjectMembersClient({ projectId, username, isSystemAdmin, embed
   return <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[#f5f7fb] text-slate-950"}>
     {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="members" isSystemAdmin={isSystemAdmin} /> : null}
     {dialog}
-    <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10"}>
+    <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : "pb-16 pt-8"}>
       {!embedded ? <div className="mb-5"><BackButton fallbackHref={`/projects/${projectId}`} /></div> : null}
       {!embedded ? <h1 className="text-3xl font-semibold"><UiText text={"成员权限"} /></h1> : null}
       <p className="mt-2 text-sm text-slate-600"><UiText text={"查看当前项目的有效权限并管理显式授权；团队级账号与邀请在团队空间处理。"} /></p>
@@ -86,7 +88,26 @@ export function ProjectMembersClient({ projectId, username, isSystemAdmin, embed
           {payload.canManage && payload.canManageWorkspace ? <Link href={`/team/${encodeURIComponent(payload.project.workspaceId)}?view=invitations`} className="rounded-xl border border-indigo-200 px-4 py-2.5 text-xs font-semibold text-indigo-700"><UiText text={"邀请成员与创建账号 →"} /></Link> : null}
         </div>
         {payload.truncated ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800"><UiText text={"团队成员选择列表只展示前 200 人；当前项目已有授权仍全部列出并可撤销。"} /></p> : null}
-        {payload.members.length === 0 ? <p className="mt-6 rounded-md border border-dashed border-slate-200 bg-white p-8 text-sm text-slate-500"><UiText text={"当前没有可显示的项目成员。"} /></p> : <ul className="mt-5 grid gap-3 md:grid-cols-2">{payload.members.map((member) => <li key={member.userId} className="rounded-md border border-slate-200 bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{member.displayName || member.username}</h3><p className="mt-1 text-xs text-slate-500">@{member.username}{member.workspaceRole ? <> · <UiText text="团队" /> {member.workspaceRole}</> : ""}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600"><UiText text={"有效权限："} />{member.inheritedOwner ? <UiText text={"Owner · 团队继承"} /> : member.projectRole ?? <UiText text={"无项目权限"} />}</span></div>{member.inheritedOwner && member.projectRole ? <p className="mt-2 text-xs text-slate-500"><UiText text={"另有显式项目授权："} />{member.projectRole}<UiText text={"；团队继承权限优先。"} /></p> : null}{payload.canManage && member.projectRole !== "owner" && !member.inheritedOwner ? <MemberRoleEditor key={member.membershipId ?? member.userId} member={member} disabled={pendingUserId !== null} error={operationError?.userId === member.userId ? operationError.message : null} onSave={(role) => save(member, role)} /> : null}</li>)}</ul>}
+        {payload.members.length === 0 ? <p className="mt-6 rounded-md border border-dashed border-slate-200 bg-white p-8 text-sm text-slate-500"><UiText text={"当前没有可显示的项目成员。"} /></p> : <div className={`${styles.tableFrame} mt-5`}>
+          <table role="table" aria-colcount={5} className={`${styles.membersTable} w-full border-collapse text-left text-sm`}>
+            <thead role="rowgroup" className={styles.tableHead}><tr role="row" className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
+              <th role="columnheader" scope="col" className="px-4 py-3 font-semibold"><UiText text={"成员"} /></th>
+              <th role="columnheader" scope="col" className="px-4 py-3 font-semibold"><UiText text={"团队角色"} /></th>
+              <th role="columnheader" scope="col" className="px-4 py-3 font-semibold"><UiText text={"有效权限"} /></th>
+              <th role="columnheader" scope="col" className="px-4 py-3 font-semibold"><UiText text={"显式授权"} /></th>
+              <th role="columnheader" scope="col" className="px-4 py-3 font-semibold"><UiText text={"操作"} /></th>
+            </tr></thead>
+            <tbody role="rowgroup">
+              {payload.members.map((member) => <tr role="row" key={member.userId} className="border-b border-slate-100 last:border-0">
+                <td role="cell" data-label={t("成员")} className="px-4 py-4"><p className="font-semibold">{member.displayName || member.username}</p><p className="mt-1 break-all text-xs text-slate-500">@{member.username}</p></td>
+                <td role="cell" data-label={t("团队角色")} className="px-4 py-4 text-slate-600">{member.workspaceRole ?? "—"}</td>
+                <td role="cell" data-label={t("有效权限")} className="px-4 py-4"><span className="font-medium">{member.inheritedOwner ? <UiText text={"Owner · 团队继承"} /> : member.projectRole ?? <UiText text={"无项目权限"} />}</span></td>
+                <td role="cell" data-label={t("显式授权")} className="px-4 py-4 text-slate-600">{member.projectRole ? <>{member.projectRole}{member.inheritedOwner ? <p className="mt-1 text-xs text-slate-500"><UiText text={"团队继承权限优先。"} /></p> : null}</> : "—"}</td>
+                <td role="cell" data-label={t("操作")} className="px-4 py-4">{payload.canManage && member.projectRole !== "owner" && !member.inheritedOwner ? <MemberRoleEditor key={member.membershipId ?? member.userId} member={member} disabled={pendingUserId !== null} error={operationError?.userId === member.userId ? operationError.message : null} onSave={(role) => save(member, role)} /> : <span className="text-slate-400">—</span>}</td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>}
       </> : null}
     </div>
   </RootElement>;

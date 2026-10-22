@@ -11,6 +11,7 @@ import { OperationPanel } from "@/components/operation-panel";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import styles from "../support-pages.module.css";
+import overviewStyles from "./team-overview.module.css";
 
 type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
 type ProjectRole = "owner" | "editor" | "viewer";
@@ -153,7 +154,36 @@ export function WorkspaceTeamClient({ username, currentUserId, isSystemAdmin, wo
 }
 
 function TeamOverviewView({ overview }: { overview: TeamOverviewPayload }) {
-  return <div className="grid min-w-0 gap-7 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]"><section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600"><UiText text="项目" /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"团队项目"} /></h2></div><span className="text-xs text-slate-400">{overview.counts.projects} <UiText text={"个可访问项目"} /></span></div>{overview.projects.length === 0 ? <p className="mt-8 rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500"><UiText text={"当前没有分配给你的项目。"} /></p> : <div className="mt-5 space-y-3">{overview.projects.map((project) => <a key={project.id} href={`/projects/${project.id}`} className="block rounded-2xl border border-slate-100 p-4 transition hover:border-violet-200 hover:bg-violet-50/40"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="truncate font-semibold text-slate-900">{project.name}</h3><p className="mt-1 line-clamp-1 text-xs text-slate-500">{project.description || <UiText text="暂无项目描述" />}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${project.archivedAt ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}><UiText text={project.archivedAt ? "已归档" : "进行中"} /></span></div><p className="mt-3 text-xs text-slate-400">{project._count.sources} <UiText text={"个资料源 ·"} /> {project._count.items} <UiText text={"条已确认条目"} /></p></a>)}</div>}</section><section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600"><UiText text="团队成员" /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"团队成员"} /></h2></div><span className="text-xs text-slate-400">{overview.counts.memberships} <UiText text={"人"} /></span></div><div className="mt-5 space-y-3">{overview.members.slice(0, 8).map((member) => <div key={member.userId} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3"><div className="min-w-0"><p className="break-words text-sm font-semibold text-slate-800">{member.displayName || member.username}</p><p className="mt-1 break-all text-xs text-slate-400">@{member.username}</p></div><span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600"><UiText text={workspaceRoleLabel(member.role)} /></span></div>)}</div></section></div>;
+  const { t } = useAppearance();
+  return <div className="grid min-w-0 gap-5">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white" aria-labelledby="team-projects-heading">
+      <div className="flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5"><h2 id="team-projects-heading" className="text-lg font-semibold"><UiText text="团队项目" /></h2><span className="text-xs text-slate-500">{overview.projects.length < overview.counts.projects ? `${overview.projects.length} / ` : ""}{overview.counts.projects} <UiText text="个可访问项目" /></span></div>
+      <div className={overviewStyles.tableWrap}>
+        <table role="table" aria-label={t("团队项目")} className={`${overviewStyles.table} ${overviewStyles.projectTable}`}>
+          <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col"><UiText text="项目" /></th><th role="columnheader" scope="col"><UiText text="状态" /></th><th role="columnheader" scope="col"><UiText text="资料源" /></th><th role="columnheader" scope="col"><UiText text="已确认条目" /></th></tr></thead>
+          <tbody role="rowgroup">{overview.projects.length === 0 ? <tr role="row"><td role="cell" colSpan={4} className="px-4 py-7 text-center text-sm text-slate-500"><UiText text="当前没有分配给你的项目。" /></td></tr> : overview.projects.map((project) => <tr role="row" key={project.id}>
+            <td role="cell" data-label={t("项目")}><div className="min-w-0"><a href={`/projects/${project.id}`} className="break-words font-semibold text-indigo-700 hover:underline">{project.name}</a><p className="mt-1 break-words text-xs leading-5 text-slate-500">{project.description || <UiText text="暂无项目描述" />}</p></div></td>
+            <td role="cell" data-label={t("状态")}><span className={`inline-flex min-h-6 items-center whitespace-nowrap rounded-full px-2 py-1 text-xs font-semibold ${project.archivedAt ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}><UiText text={project.archivedAt ? "已归档" : "进行中"} /></span></td>
+            <td role="cell" data-label={t("资料源")}><span className="tabular-nums">{project._count.sources}</span></td>
+            <td role="cell" data-label={t("已确认条目")}><span className="tabular-nums">{project._count.items}</span></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+    </section>
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white" aria-labelledby="team-members-heading">
+      <div className="flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5"><h2 id="team-members-heading" className="text-lg font-semibold"><UiText text="团队成员" /></h2><span className="text-xs text-slate-500">{Math.min(overview.members.length, 8) < overview.counts.memberships ? `${Math.min(overview.members.length, 8)} / ` : ""}{overview.counts.memberships} <UiText text="人" /></span></div>
+      <div className={overviewStyles.tableWrap}>
+        <table role="table" aria-label={t("团队成员")} className={`${overviewStyles.table} ${overviewStyles.memberTable}`}>
+          <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col"><UiText text="成员" /></th><th role="columnheader" scope="col"><UiText text="角色" /></th></tr></thead>
+          <tbody role="rowgroup">{overview.members.slice(0, 8).map((member) => <tr role="row" key={member.userId}>
+            <td role="cell" data-label={t("成员")}><div className="min-w-0"><p className="break-words text-sm font-semibold text-slate-800">{member.displayName || member.username}</p><p className="mt-1 break-all text-xs text-slate-500">@{member.username}</p></div></td>
+            <td role="cell" data-label={t("角色")}><span className="inline-flex min-h-6 items-center whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"><UiText text={workspaceRoleLabel(member.role)} /></span></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      {overview.counts.memberships > 8 ? <div className="border-t border-slate-200 px-4 py-3 text-xs"><a href={`/team/${overview.workspace.id}?view=members`} className="text-indigo-700 hover:underline"><UiText text="查看成员目录" /></a></div> : null}
+    </section>
+  </div>;
 }
 
 function TeamMemberDirectory({ members }: { members: TeamOverviewPayload["members"] }) {

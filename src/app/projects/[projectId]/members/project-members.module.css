@@ -1,0 +1,13 @@
+.tableFrame { min-width: 0; overflow: hidden; border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-surface); }
+.membersTable { color: var(--app-text); overflow-wrap: anywhere; }
+.tableHead { background: var(--app-surface-soft); }
+
+@media (max-width: 800px) {
+  .tableFrame { overflow: visible; border: 0; background: transparent; }
+  .membersTable, .membersTable tbody, .membersTable tr, .membersTable td { display: block; width: 100%; }
+  .membersTable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .membersTable tbody tr { margin-bottom: 12px; padding: 4px 12px; border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-surface); }
+  .membersTable tbody td { display: grid; grid-template-columns: minmax(5.25rem, 32%) minmax(0, 1fr); gap: 8px; min-width: 0; border-bottom: 1px solid var(--app-border); padding: 10px 0; overflow-wrap: anywhere; }
+  .membersTable tbody td:last-child { border-bottom: 0; }
+  .membersTable tbody td::before { content: attr(data-label); color: var(--app-muted); font-size: 12px; font-weight: 600; }
+}

@@ -1,6 +1,13 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
   "图片与截图": "Images & screenshots",
+  "模型响应未通过校验，本次资料抽取未正常完成。": "The model response failed validation, so this extraction did not complete.",
+  "外部调用的最终结果无法确认，本任务不能按已完成处理。": "The external call's final outcome could not be confirmed. This task cannot be treated as completed.",
+  "外部调用记录仍需核对，请到项目概览的任务运行记录中处理。这是核对调用记录，不是审核任务结果；系统不会自动重试。": "The external call record still needs reconciliation in the project overview's task run history. This reconciles the call record; it does not review task results. The system will not retry automatically.",
+  "任务记录已人工收口，无须再确认任务状态。收口不代表任务成功或用量已结算，系统不会自动重试。": "The task record has been manually reconciled. No further task status confirmation is needed. Reconciliation does not mean the task succeeded or usage was settled. The system will not retry automatically.",
+  "外部调用结果仍无法确认，系统不会自动重试。": "The external call outcome remains unknown. The system will not retry automatically.",
+  "本任务没有完整的抽取结果可供确认。可能已有部分候选保存，请在项目资料中逐条核对原文；候选审核与任务状态是两回事。": "This task has no complete extraction result to confirm. Some candidates may have been saved. Check each candidate against its source in project materials; candidate review and task status are separate.",
+  "本任务没有可安全确认为成功的完整结果，请先查看执行记录。": "This task has no complete result that can safely be confirmed as successful. Review the run history first.",
   "更新时间未知": "Update time unknown",
   "时间无效": "Invalid time",
   "暂无到期时间": "No expiry date",

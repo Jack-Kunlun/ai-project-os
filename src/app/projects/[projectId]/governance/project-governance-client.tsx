@@ -474,7 +474,7 @@ function Metric({ label, value, detail, tone }: { label: string; value: string |
 }
 
 function SectionHeader({ eyebrow, title, description, border = true }: { eyebrow: string; title: string; description: string; border?: boolean }) {
-  return <div className={border ? "border-b border-slate-100 pb-5" : ""}><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p><h2 className="mt-2 text-2xl font-semibold">{title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{description}</p></div>;
+  return <div className={border ? "border-b border-slate-100 pb-5" : ""}><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p><h2 className="mt-2 text-2xl font-semibold">{title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500"><UiText text={description} /></p></div>;
 }
 
 function UsageMetric({ label, value, detail }: { label: string; value: string; detail: string }) {

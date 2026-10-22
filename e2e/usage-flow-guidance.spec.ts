@@ -483,5 +483,15 @@ test("invalid extraction detail separates incomplete output from open and closed
   await expect(page.getByText("自动抽取 · 抽取未完成", { exact: true })).toBeVisible();
   await expect(page.getByText("自动抽取结果待确认", { exact: true })).toHaveCount(0);
   await expectR02NoHorizontalOverflow(page, "incomplete extraction dashboard 390px");
+  const origin = new URL(page.url()).origin;
+  await page.context().addCookies([
+    { name: "aipos-language", value: "en", url: origin },
+    { name: "aipos-theme", value: "dark", url: origin },
+  ]);
+  await page.goto(`/projects/${projectId}/jobs/${job.id}`);
+  await expect(page.getByText("The model response failed validation, so this extraction did not complete.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^The task record has been manually reconciled\./u)).toBeVisible();
+  await expect(page.getByText(/^This task has no complete extraction result to confirm\./u)).toBeVisible();
+  await expectR02NoHorizontalOverflow(page, "incomplete extraction English dark 390px");
   expect(writes).toEqual([]);
 });

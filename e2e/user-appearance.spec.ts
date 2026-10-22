@@ -375,6 +375,10 @@ for (const appearance of APPEARANCE_CASES) {
           await expect(tab).toBeVisible();
           await tab.click();
           await expect(tab).toHaveAttribute("aria-selected", "true");
+          if (appearance.language === "en" && label === "Usage records") {
+            await expect(page.getByText(englishUiMessages["直接查看项目当前使用的模型路由、调用次数与 Token。供应商实际账单与本地调用审计分开显示。"], { exact: true })).toBeVisible();
+            await expect(page.getByText(englishUiMessages["未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。"], { exact: true })).toBeVisible();
+          }
           await expect(page.locator("main h1").first(), `${label} should retain a visible page title`).toBeVisible();
           await expectR02NoHorizontalOverflow(page, `project management ${label} (${appearance.language}/${appearance.theme})`);
         }

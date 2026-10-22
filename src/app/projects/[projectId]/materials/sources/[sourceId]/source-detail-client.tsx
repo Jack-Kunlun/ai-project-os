@@ -77,6 +77,13 @@ export function ProjectSourceDetailClient({ username, isSystemAdmin }: { usernam
     };
   }, [load]);
 
+  const sourceDetails = source ? [
+    ["资料类型", source.kind, "break-words"],
+    ["外部来源", source.externalRef ?? <UiText text={"未提供外部来源"} />, "break-all"],
+    ["资料时间", formatDate(source.capturedAt, language), ""],
+    ["接入于", formatDate(source.ingestedAt, language), ""],
+  ] as const : [];
+
   return (
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" isSystemAdmin={isSystemAdmin} />
@@ -96,12 +103,7 @@ export function ProjectSourceDetailClient({ username, isSystemAdmin }: { usernam
           <aside className="min-w-0 space-y-4">
             <section className="rounded-md border border-slate-200 bg-white p-5">
               <h2 className="text-sm font-semibold"><UiText text={"资料信息"} /></h2>
-              <dl className="mt-4 space-y-4 text-sm">
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"资料类型"} /></dt><dd className="mt-1 break-words">{source.kind}</dd></div>
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"外部来源"} /></dt><dd className="mt-1 break-all">{source.externalRef ?? <UiText text={"未提供外部来源"} />}</dd></div>
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"资料时间"} /></dt><dd className="mt-1">{formatDate(source.capturedAt, language)}</dd></div>
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"接入于"} /></dt><dd className="mt-1">{formatDate(source.ingestedAt, language)}</dd></div>
-              </dl>
+              <dl className="mt-4 space-y-4 text-sm">{sourceDetails.map(([label, value, wrap]) => <div key={label}><dt className="text-xs font-medium text-slate-500"><UiText text={label} /></dt><dd className={wrap ? `mt-1 ${wrap}` : "mt-1"}>{value}</dd></div>)}</dl>
               <div className="mt-4 border-t border-slate-100 pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500"><UiText text={"SHA-256"} /></p><code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code></div>
             </section>
             <section aria-label={translateUi("资料下一步")} className="rounded-md border border-indigo-100 bg-indigo-50/50 p-5">

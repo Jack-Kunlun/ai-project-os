@@ -49,7 +49,7 @@
 .railHeading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px}
 .railIcon,.newConversation,.moreButton{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:6px;background:transparent;color:var(--app-muted);cursor:pointer;flex-shrink:0}
 .railIcon{--app-icon-text-offset:0px;width:32px;height:32px;padding:8px}
-.newConversation{font-size:12px;line-height:20px;white-space:nowrap;min-height:36px;padding:8px 12px;background:var(--app-accent-soft);color:var(--app-link);justify-content:flex-start}
+.newConversation{--app-icon-text-offset:-.025em;font-size:12px;line-height:20px;white-space:nowrap;min-height:36px;padding:8px 12px;background:var(--app-accent-soft);color:var(--app-link);justify-content:flex-start}
 .railIcon:hover,.moreButton:hover{background:var(--app-accent-soft);color:var(--app-link)}
 .conversationRail input,.conversationRail select{width:100%;min-width:0;font-size:12px}
 .railList{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:6px}

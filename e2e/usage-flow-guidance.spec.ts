@@ -413,7 +413,8 @@ test("processing tasks preserve background state and only offer safe cancellatio
   ]);
   await page.reload();
   await expect(tasks.getByText("Facts created: 1 · To review: 1 · Duplicates: 0", { exact: true })).toBeVisible();
-  await expect(tasks.getByText(/^The model response failed validation, so this extraction did not complete\.（AI_PROVIDER_INVALID_RESPONSE）$/u)).toHaveCount(2);
+  await expect(tasks.getByText("The model response failed validation, so this extraction did not complete. (AI_PROVIDER_INVALID_RESPONSE)", { exact: true })).toHaveCount(2);
+  await expect(tasks.getByText("1/3 (33%)", { exact: true })).toBeVisible();
   await expect(tasks.getByText(/^The task record has been manually reconciled\./u)).toBeVisible();
   await expectR02NoHorizontalOverflow(page, "processing task queue English dark 390px");
 });

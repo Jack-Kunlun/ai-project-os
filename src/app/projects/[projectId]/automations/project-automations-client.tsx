@@ -3,7 +3,7 @@ import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 import formFields from "@/components/model-form-fields.module.css";
 
-import {  UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -17,6 +17,7 @@ import { safeResponseError } from "@/lib/safe-error-presentation";
 import type { TokenUsageSummary } from "@/lib/token-usage";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import styles from "./project-automations-client.module.css";
+import { formatUiDateTime } from "@/lib/ui-date-format";
 
 type RuleKind = "repositorySync" | "memoryQuality" | "memoryIndex" | "projectBrief" | "webSourceSync" | "projectPlanHealth";
 type AutomationRunResult = {
@@ -138,11 +139,11 @@ function automationPayer(rule: AutomationRule): string {
     : "不产生模型费用";
 }
 
-function automationSuccessEvidence(rule: AutomationRule, t: (text: string) => string): string {
+function automationSuccessEvidence(rule: AutomationRule, t: (text: string) => string, language: "zh-CN" | "en"): string {
   const latestSuccessfulRun = rule.runs.find((run) => run.status === "succeeded" && run.completedAt !== null);
   return latestSuccessfulRun?.completedAt === undefined || latestSuccessfulRun.completedAt === null
     ? t("尚未取得成功运行证据")
-    : t("最近成功运行：{time}").replace("{time}", formatDateTime(new Date(latestSuccessfulRun.completedAt)));
+    : t("最近成功运行：{time}").replace("{time}", formatDateTime(new Date(latestSuccessfulRun.completedAt), language));
 }
 
 export function ProjectAutomationsClient(props: { username: string; projectId: string; isSystemAdmin: boolean }) {
@@ -150,6 +151,7 @@ export function ProjectAutomationsClient(props: { username: string; projectId: s
 }
 
 function ProjectAutomationsWorkspace({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("automations", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -236,7 +238,7 @@ function ProjectAutomationsWorkspace({ username, projectId, isSystemAdmin }: { u
       <div data-page-content className={styles.content}>
         <header className={styles.pageHeader}>
           <div><h1 className="text-2xl font-semibold tracking-tight text-slate-950"><UiText text={"项目自动化"} /></h1><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600"><UiText text={"查看规则、最近运行和异常，所有规则变更都需要明确操作。"} /></p></div>
-          <div className="flex flex-wrap gap-2"><OperationPanel title="自动化运行记录" triggerLabel="运行记录" description="当前项目每条规则最近 5 条运行记录；这里只展示已由服务端加载的运行实例。" open={runHistoryOpen} onOpenChange={setRunHistoryOpen} variant="drawer"><section aria-labelledby="automation-run-history-title"><h3 id="automation-run-history-title" className="text-base font-semibold text-slate-900"><UiText text="跨规则运行记录" /></h3><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text="按运行时间排列当前项目各规则的已加载记录。每条规则最多展示最近 5 条，不代表完整历史。" /></p>{loading ? <p role="status" className="mt-6 text-sm text-slate-500"><UiText text="正在读取自动化运行记录…" /></p> : recentRuns.length === 0 ? <p className="mt-6 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500"><UiText text="当前没有已加载的自动化运行记录。" /></p> : <ul className="mt-5 divide-y divide-slate-200">{recentRuns.map(({ rule, run }) => <li key={run.id} className="py-4"><Link href={runHref(run.id)} onClick={() => setRunHistoryOpen(false)} className="flex flex-wrap items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"><span className="min-w-0"><strong className="block truncate text-sm font-semibold text-slate-900">{rule.name}</strong><span className="mt-1 block text-xs text-slate-500"><UiText text="来源规则" /> · {translateUi(kindLabels[rule.kind])} · {formatDateTime(new Date(run.createdAt ?? run.scheduledFor))}</span></span><span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{translateUi(runStatusLabels[run.status] ?? "未知状态")}</span></Link></li>)}</ul>}</section></OperationPanel><Link className={styles.headerLink} href={`/projects/${encodeURIComponent(projectId)}/intelligence`}><UiText text={"项目简报与调查"} /></Link><Link className={styles.headerLink} href={`/projects/${encodeURIComponent(projectId)}/configuration`}><UiText text={"配置 AI 路由"} /></Link></div>
+          <div className="flex flex-wrap gap-2"><OperationPanel title="自动化运行记录" triggerLabel="运行记录" description="当前项目每条规则最近 5 条运行记录；这里只展示已由服务端加载的运行实例。" open={runHistoryOpen} onOpenChange={setRunHistoryOpen} variant="drawer"><section aria-labelledby="automation-run-history-title"><h3 id="automation-run-history-title" className="text-base font-semibold text-slate-900"><UiText text="跨规则运行记录" /></h3><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text="按运行时间排列当前项目各规则的已加载记录。每条规则最多展示最近 5 条，不代表完整历史。" /></p>{loading ? <p role="status" className="mt-6 text-sm text-slate-500"><UiText text="正在读取自动化运行记录…" /></p> : recentRuns.length === 0 ? <p className="mt-6 rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500"><UiText text="当前没有已加载的自动化运行记录。" /></p> : <ul className="mt-5 divide-y divide-slate-200">{recentRuns.map(({ rule, run }) => <li key={run.id} className="py-4"><Link href={runHref(run.id)} onClick={() => setRunHistoryOpen(false)} className="flex flex-wrap items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"><span className="min-w-0"><strong className="block truncate text-sm font-semibold text-slate-900">{rule.name}</strong><span className="mt-1 block text-xs text-slate-500"><UiText text="来源规则" /> · {translateUi(kindLabels[rule.kind])} · {formatDateTime(new Date(run.createdAt ?? run.scheduledFor), language)}</span></span><span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{translateUi(runStatusLabels[run.status] ?? "未知状态")}</span></Link></li>)}</ul>}</section></OperationPanel><Link className={styles.headerLink} href={`/projects/${encodeURIComponent(projectId)}/intelligence`}><UiText text={"项目简报与调查"} /></Link><Link className={styles.headerLink} href={`/projects/${encodeURIComponent(projectId)}/configuration`}><UiText text={"配置 AI 路由"} /></Link></div>
         </header>
         <p className={styles.safetyNote}><UiText text={"模型相关规则只生成待确认通知；实际外发仍需在 AI 工作台逐次确认。"} /></p>
         {error ? <div role="alert" className={styles.errorNotice}><UiErrorText text={error} /></div> : null}
@@ -350,12 +352,14 @@ function AutomationRunResultView({ result }: { result: AutomationRunResult | nul
 }
 
 function AutomationRunDetail({ projectId, run, returnHref }: { projectId: string; run: AutomationRun; returnHref: string | null }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const failure = run.status === "failed" ? automationFailurePresentation(run.failureCode) : null;
-  return <section id={`automation-run-${run.id}`} tabIndex={-1} aria-labelledby={`automation-run-title-${run.id}`} className={`${styles.runDetail} outline-none focus:ring-4 focus:ring-indigo-100`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-indigo-700"><UiText text={"运行详情"} /></p><h3 id={`automation-run-title-${run.id}`} className="mt-1 text-base font-semibold text-indigo-950">{run.rule?.name ?? <UiText text={"自动化运行"} />}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-800">{translateUi(runStatusLabels[run.status] ?? "未知状态")}</span></div><p className="mt-3 text-xs text-indigo-800"><UiText text={"计划时间："} />{new Date(run.scheduledFor).toISOString()} {" "}<UiText text={"· 浏览器时间："} />{new Date(run.scheduledFor).toLocaleString("zh-CN")} {" "}<UiText text={"· 仅用于本次查看"} /></p>{failure ? <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-5 text-indigo-950"><p className="font-semibold">{translateUi(failure.title)}</p><p className="mt-1">{translateUi(failure.reason)}</p><p className="mt-1"><UiText text={"下一步："} />{translateUi(failure.nextStep)}</p><p className="mt-1 font-mono text-[12px]"><UiText text={"错误代码："} />{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : <p className="mt-4 text-xs text-indigo-800"><UiText text={"该运行没有失败建议。"} /></p>}<AutomationRunResultView result={run.result} /><TokenUsageView usage={run.usage} compact /><div className="mt-4 flex flex-wrap gap-2">{returnHref ? <ParentPageLink href={returnHref} label="返回活动记录" /> : null}<a href={buildProjectHref(projectId, "automations", { run: run.id })} className="inline-flex rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800"><UiText text={"保留此运行上下文"} /></a></div></section>;
+  return <section id={`automation-run-${run.id}`} tabIndex={-1} aria-labelledby={`automation-run-title-${run.id}`} className={`${styles.runDetail} outline-none focus:ring-4 focus:ring-indigo-100`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-indigo-700"><UiText text={"运行详情"} /></p><h3 id={`automation-run-title-${run.id}`} className="mt-1 text-base font-semibold text-indigo-950">{run.rule?.name ?? <UiText text={"自动化运行"} />}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-800">{translateUi(runStatusLabels[run.status] ?? "未知状态")}</span></div><p className="mt-3 text-xs text-indigo-800"><UiText text={"计划时间："} />{new Date(run.scheduledFor).toISOString()} {" "}<UiText text={"· 浏览器时间："} />{formatUiDateTime(new Date(run.scheduledFor), language)} {" "}<UiText text={"· 仅用于本次查看"} /></p>{failure ? <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-5 text-indigo-950"><p className="font-semibold">{translateUi(failure.title)}</p><p className="mt-1">{translateUi(failure.reason)}</p><p className="mt-1"><UiText text={"下一步："} />{translateUi(failure.nextStep)}</p><p className="mt-1 font-mono text-[12px]"><UiText text={"错误代码："} />{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : <p className="mt-4 text-xs text-indigo-800"><UiText text={"该运行没有失败建议。"} /></p>}<AutomationRunResultView result={run.result} /><TokenUsageView usage={run.usage} compact /><div className="mt-4 flex flex-wrap gap-2">{returnHref ? <ParentPageLink href={returnHref} label="返回活动记录" /> : null}<a href={buildProjectHref(projectId, "automations", { run: run.id })} className="inline-flex rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800"><UiText text={"保留此运行上下文"} /></a></div></section>;
 }
 
 function AutomationCard({ projectId, rule, capabilities, focusedRunId, onReload, runHref }: { projectId: string; rule: AutomationRule; capabilities: AutomationCapabilities; focusedRunId: string | null; onReload: () => Promise<void>; runHref: (runId: string) => string }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -409,12 +413,12 @@ function AutomationCard({ projectId, rule, capabilities, focusedRunId, onReload,
         {capabilities.canManage && !frozen ? <button type="button" onClick={() => void patch({ enabled: rule.status !== "active" })} disabled={pending} aria-pressed={rule.status === "active"} className={styles.toggleButton}>{pending ? <UiText text={"保存中…"} /> : rule.status === "active" ? <UiText text={"暂停"} /> : <UiText text={"启用"} />}</button> : null}
         <OperationPanel title={`自动化详情：${rule.name}`} triggerLabel="更多" variant="drawer" description="查看规则边界、最近运行、异常与可用操作。">
           <div className={styles.detailPanel}>
-            <ScopeEvidenceCard title={translateUi("已保存规则边界")} evidence={{ scope: `${translateUi("仅当前项目")} · ${translateUi(kindLabels[rule.kind])}`, owner: translateUi("当前项目 Owner"), payer: translateUi(automationPayer(rule)), affectedProjects: translateUi("仅当前项目"), latestSuccess: automationSuccessEvidence(rule, translateUi) }} />
-            <p role="status" className={styles.detailNote}><UiText text={"下次运行："} />{formatDateTime(new Date(rule.nextRunAt))} · {frozen ? <UiText text={"旧版 Git 规则已冻结；Worker 领取前会安全暂停。"} /> : rule.kind === "memoryIndex" || rule.kind === "projectBrief" ? <UiText text={"只创建 waitingConsent 通知，不选模型、不扣费、不发送项目内容。"} /> : <UiText text={"运行记录和租约均持久化。"} />}</p>
+            <ScopeEvidenceCard title={translateUi("已保存规则边界")} evidence={{ scope: `${translateUi("仅当前项目")} · ${translateUi(kindLabels[rule.kind])}`, owner: translateUi("当前项目 Owner"), payer: translateUi(automationPayer(rule)), affectedProjects: translateUi("仅当前项目"), latestSuccess: automationSuccessEvidence(rule, translateUi, language) }} />
+            <p role="status" className={styles.detailNote}><UiText text={"下次运行："} />{formatDateTime(new Date(rule.nextRunAt), language)} · {frozen ? <UiText text={"旧版 Git 规则已冻结；Worker 领取前会安全暂停。"} /> : rule.kind === "memoryIndex" || rule.kind === "projectBrief" ? <UiText text={"只创建 waitingConsent 通知，不选模型、不扣费、不发送项目内容。"} /> : <UiText text={"运行记录和租约均持久化。"} />}</p>
             {failure ? <div className={styles.failureNotice}><p className="font-semibold">{failure.title}</p><p className="mt-1">{failure.reason}</p><p className="mt-1"><UiText text={"下一步："} />{failure.nextStep}</p><p className="mt-1 font-mono"><UiText text={"错误代码："} />{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : null}
             <section className={styles.historySection} aria-labelledby={`automation-history-${rule.id}`}>
               <div className={styles.historyHeading}><h4 id={`automation-history-${rule.id}`}><UiText text={"最近运行记录"} /></h4><span><UiText text={"最多显示 5 条"} /></span></div>
-              {rule.runs.length === 0 ? <p className="mt-3 text-xs text-slate-500"><UiText text={"尚无运行记录。"} /></p> : <ul className={styles.historyList}>{rule.runs.map((run) => <li key={run.id}><Link href={runHref(run.id)} className={styles.historyLink}><span>{translateUi(runStatusLabels[run.status] ?? "未知状态")}</span><time dateTime={run.scheduledFor}>{formatDateTime(new Date(run.createdAt ?? run.scheduledFor))}</time><span aria-hidden="true"><UiText text={"查看 →"} /></span></Link></li>)}</ul>}
+              {rule.runs.length === 0 ? <p className="mt-3 text-xs text-slate-500"><UiText text={"尚无运行记录。"} /></p> : <ul className={styles.historyList}>{rule.runs.map((run) => <li key={run.id}><Link href={runHref(run.id)} className={styles.historyLink}><span>{translateUi(runStatusLabels[run.status] ?? "未知状态")}</span><time dateTime={run.scheduledFor}>{formatDateTime(new Date(run.createdAt ?? run.scheduledFor), language)}</time><span aria-hidden="true"><UiText text={"查看 →"} /></span></Link></li>)}</ul>}
             </section>
             {capabilities.canManage && !frozen ? <div className={styles.detailActions}>
               {editing ? <AutomationEditForm projectId={projectId} rule={rule} onCancel={() => setEditing(false)} onSaved={async () => { setEditing(false); await onReload(); }} /> : <button type="button" className={styles.toggleButton} onClick={() => setEditing(true)}><UiText text={"编辑规则"} /></button>}
@@ -427,7 +431,7 @@ function AutomationCard({ projectId, rule, capabilities, focusedRunId, onReload,
     </div>
     <div className={styles.ruleMeta}>
       <div><span><UiText text={"频率"} /></span><strong>{intervalLabel(rule.intervalMinutes, translateUi)}</strong></div>
-      <div><span><UiText text={"上次运行"} /></span><strong>{rule.lastRunAt ? formatDateTime(new Date(rule.lastRunAt)) : <UiText text={"尚未运行"} />}</strong></div>
+      <div><span><UiText text={"上次运行"} /></span><strong>{rule.lastRunAt ? formatDateTime(new Date(rule.lastRunAt), language) : <UiText text={"尚未运行"} />}</strong></div>
       <div><span><UiText text={"最近结果"} /></span><strong>{latest?.status ? translateUi(runStatusLabels[latest.status] ?? "未知状态") : "—"}</strong></div>
       <div><span><UiText text={"连续失败"} /></span><strong>{rule.consecutiveFailures} {" "}<UiText text={"次"} /></strong></div>
     </div>
@@ -470,4 +474,4 @@ function AutomationEditForm({ projectId, rule, onCancel, onSaved }: { projectId:
   </form>;
 }
 
-function formatDateTime(value: Date) { return `${value.toLocaleString("zh-CN")} · ${Intl.DateTimeFormat().resolvedOptions().timeZone || "浏览器时区"}`; }
+function formatDateTime(value: Date, language: "zh-CN" | "en") { return `${formatUiDateTime(value, language)} · ${Intl.DateTimeFormat().resolvedOptions().timeZone || "浏览器时区"}`; }

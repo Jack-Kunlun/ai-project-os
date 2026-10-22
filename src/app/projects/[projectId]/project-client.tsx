@@ -1,7 +1,7 @@
 "use client";
 import { UiErrorText } from "@/components/ui-error-text";
 
-import {  UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -13,6 +13,7 @@ import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import { formatUiDateTime } from "@/lib/ui-date-format";
 import styles from "./project-materials.module.css";
 import { buildMaterialsReturnTo, buildProjectQuestionHref, isAddSourceView, MATERIAL_SOURCE_CATEGORIES, parseMaterialKind, parseProjectItemReviewStatus, type MaterialKind } from "./materials/materials-navigation";
 import { ProjectMaterialIntake } from "./project-material-intake";
@@ -154,16 +155,16 @@ async function getItems(projectId: string, input: { page: number; search: string
   return { items: payload.items, counts: payload.counts, pagination: payload.pagination };
 }
 
-function formatSourceDate(value: string | null): string {
+function formatSourceDate(value: string | null, language: "zh-CN" | "en"): string {
   if (!value) return "未填写";
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "时间无效";
 
-  return new Intl.DateTimeFormat("zh-CN", {
+  return formatUiDateTime(date, language, {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(date);
+  });
 }
 
 function sourcePreview(contentText: string): string {
@@ -231,6 +232,7 @@ export function ProjectDetailClient({ username, isSystemAdmin }: { username: str
 }
 
 function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projectId: string; username: string; isSystemAdmin: boolean }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -743,7 +745,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400"><UiText text={"Project materials"} /></p>
-            <h1 aria-label={`${project.name} · 项目资料`} className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-slate-950"><UiText text={"项目资料"} /></h1>
+            <h1 aria-label={`${project.name} · ${translateUi("项目资料")}`} className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-slate-950"><UiText text={"项目资料"} /></h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600"><UiText text={"查看有来源的资料、整理结果和后台识别任务。"} /></p>
           </div>
           <div className="flex flex-wrap gap-2" aria-label={translateUi("资料主要操作")}>
@@ -764,7 +766,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
             <h2 id="sources-heading" tabIndex={-1} className="text-lg font-semibold text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100"><UiText text={"资料来源"} /></h2>
             <p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"保留原文和来源，可查看版本并追溯整理结果。"} /></p>
           </div>
-          <span className={styles.totalCount}>{isSourcesLoading ? <UiText text={"读取中…"} /> : sourceError ? <UiText text={"读取失败"} /> : `${sourcePagination.total} 条资料`}</span>
+          <span className={styles.totalCount}>{isSourcesLoading ? <UiText text={"读取中…"} /> : sourceError ? <UiText text={"读取失败"} /> : `${sourcePagination.total} ${translateUi("条资料")}`}</span>
         </div>
 
         <p className={styles.safetyNote} role="note"><strong><UiText text={"安全提示："} /></strong><UiText text={"资料不会自动成为已确认事实；请勿提交密码、Token 或带凭据的链接。"} /></p>
@@ -792,7 +794,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
                     {sources.map((source) => (
                       <li key={source.id} className={styles.sourceRow}>
                         <div className={styles.sourceRowMain}>
-                          <div className={styles.sourceMeta}><span className={styles.kindBadge}>{source.kind}</span><span>{source.kind === "manual" ? <UiText text={"手工文本"} /> : <UiText text={"来源已接入"} />}</span><time dateTime={source.ingestedAt}>{formatSourceDate(source.ingestedAt)}</time></div>
+                          <div className={styles.sourceMeta}><span className={styles.kindBadge}>{source.kind}</span><span>{source.kind === "manual" ? <UiText text={"手工文本"} /> : <UiText text={"来源已接入"} />}</span><time dateTime={source.ingestedAt}>{formatSourceDate(source.ingestedAt, language)}</time></div>
                           <h3 className={styles.sourcePreview}>{source.preview || <UiText text={"未提供文字预览"} />}</h3>
                         </div>
                         <div className={styles.sourceActions}>
@@ -937,7 +939,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               <div className="mt-5 min-w-0 max-w-full rounded-xl border border-indigo-100 bg-white p-4">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   <span className="rounded-full bg-indigo-100 px-2.5 py-1 font-semibold uppercase tracking-wide text-indigo-700">{selectedSource.kind}</span>
-                  <span><UiText text={"接入于："} />{formatSourceDate(selectedSource.ingestedAt)}</span>
+                  <span><UiText text={"接入于："} />{formatSourceDate(selectedSource.ingestedAt, language)}</span>
                 </div>
                 <pre className="mt-4 min-w-0 max-w-full max-h-[34rem] overflow-auto whitespace-pre-wrap border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">{selectedSource.contentText}</pre>
               </div>
@@ -1021,6 +1023,7 @@ function ItemCard({
   onEdit: (item: ProjectItem) => Promise<void>;
   onAction: (item: ProjectItem, action: ItemAction) => void;
 }) {
+  const { language } = useAppearance();
   const isActionPending = itemActionId === item.id;
   const actionsDisabled = isActionPending || isSavingItem || editingItemId === item.id;
   const editDisabled = Boolean(itemActionId) || isSavingItem || editingItemId === item.id;
@@ -1124,9 +1127,9 @@ function ItemCard({
       </div>
 
       <dl className="mt-5 grid gap-3 border-t border-slate-100 pt-5 text-xs text-slate-500 sm:grid-cols-3">
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"发生时间"} /></dt><dd className="mt-1">{formatSourceDate(item.occurredAt)}</dd></div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"确认时间"} /></dt><dd className="mt-1">{formatSourceDate(item.confirmedAt)}</dd></div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"更新时间"} /></dt><dd className="mt-1">{formatSourceDate(item.updatedAt)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"发生时间"} /></dt><dd className="mt-1">{formatSourceDate(item.occurredAt, language)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"确认时间"} /></dt><dd className="mt-1">{formatSourceDate(item.confirmedAt, language)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"更新时间"} /></dt><dd className="mt-1">{formatSourceDate(item.updatedAt, language)}</dd></div>
       </dl>
     </li>
   );

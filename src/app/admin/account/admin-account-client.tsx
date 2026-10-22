@@ -2,7 +2,7 @@
 import { UiFeedbackText } from "@/components/ui-error-text";
 
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { AccountPhonePanel } from "@/components/account-phone-panel";
@@ -30,8 +30,8 @@ async function responseMessage(response: Response, fallback: string): Promise<st
   }
 }
 
-function dateTime(value: string | null, language: "zh-CN" | "en"): string {
-  return value === null ? "暂无记录" : new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function dateTime(value: string | null, language: "zh-CN" | "en", t: (text: string) => string): string {
+  return value === null ? t("暂无记录") : new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 export function AdminAccountClient({ initialUsername }: { initialUsername: string }) {
@@ -44,7 +44,8 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
   const [newPassword, setNewPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [openOperation, setOpenOperation] = useState<"profile" | "password" | null>(null);
+  const [openOperation, setOpenOperation] = useState<"profile" | "password" | "phone" | null>(null);
+  const phoneSubmissionPending = useRef(false);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/admin/account", { cache: "no-store" });
@@ -83,8 +84,8 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
     <AdminPageHeader title="管理员账户" description="维护平台管理员的登录资料与密码；这里不显示项目、团队、工作区角色、个人连接或业务额度。" />
     <section className="mt-6 grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-3">
       <div><p className="text-xs font-semibold text-slate-400">{t("登录名")}</p><p className="mt-2 font-semibold">{profile?.username ?? initialUsername}</p></div>
-      <div><p className="text-xs font-semibold text-slate-400">{t("活动会话")}</p><p className="mt-2 font-semibold">{profile ? `${profile.activeSessionCount} ${t("个")}` : t("读取中…")}</p></div>
-      <div><p className="text-xs font-semibold text-slate-400">{t("最近活动")}</p><p className="mt-2 text-sm font-semibold">{profile ? dateTime(profile.lastSeenAt, language) : t("读取中…")}</p></div>
+      <div><p className="text-xs font-semibold text-slate-400">{t("活动会话")}</p><p className="mt-2 font-semibold">{profile ? profile.activeSessionCount.toLocaleString(language) : t("读取中…")}</p></div>
+      <div><p className="text-xs font-semibold text-slate-400">{t("最近活动")}</p><p className="mt-2 text-sm font-semibold">{profile ? dateTime(profile.lastSeenAt, language, t) : t("读取中…")}</p></div>
     </section>
     {message && openOperation === null ? <p role="status" className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"><UiFeedbackText text={message} /></p> : null}
     <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -96,7 +97,7 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
             <label className="block text-sm font-medium text-slate-700">{t("显示名称")}<input aria-label={t("显示名称")} value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={160} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
             <label className="block text-sm font-medium text-slate-700">{t("邮箱")}<input aria-label={t("邮箱")} type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
             {message && openOperation === "profile" ? <p role="status" className="text-sm text-rose-700"><UiFeedbackText text={message} /></p> : null}
-            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "保存中…" : "保存资料")}</button>
+            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "保存中…" : "保存个人资料")}</button>
           </form>
         </OperationPanel>
       </section>
@@ -114,6 +115,33 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
         </OperationPanel>
       </section>
     </div>
-    {profile ? <AccountPhonePanel key={profile.phoneE164 ?? "unbound"} phoneE164={profile.phoneE164} hasLocalPassword={profile.hasLocalPassword} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
+    {profile ? <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="text-lg font-semibold">{t("绑定手机号")}</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{profile.phoneE164 ? `${profile.phoneE164.slice(0, 6)} **** ${profile.phoneE164.slice(-4)}` : t("尚未绑定")}{t("。绑定后可用于登录和找回密码。")}</p>
+      {profile.phoneAuthStatus !== "available" ? <p role="status" className="mt-3 text-sm leading-6 text-amber-800">{t("短信服务暂不可用，请稍后重试。")}</p> : null}
+      {!profile.phoneE164 && !profile.hasLocalPassword ? <p className="mt-3 text-sm leading-6 text-slate-600">{t("请先设置本地密码并重新登录，再验证密码和手机号完成绑定。")}</p> : null}
+      <OperationPanel
+        title={profile.phoneE164 ? "更换手机号" : "绑定手机号"}
+        triggerLabel={profile.phoneE164 ? "更换手机号" : "绑定手机号"}
+        description={profile.phoneE164 ? "需同时验证原号码和新号码。原号码不可用时，暂无法自助换绑。" : "绑定需要验证当前密码及手机号。"}
+        disabled={profile.phoneAuthStatus !== "available" || (!profile.phoneE164 && !profile.hasLocalPassword)}
+        open={openOperation === "phone"}
+        onOpenChange={(open) => {
+          if (!open && phoneSubmissionPending.current) return;
+          if (open) { phoneSubmissionPending.current = false; setMessage(null); }
+          else phoneSubmissionPending.current = false;
+          setOpenOperation(open ? "phone" : null);
+        }}
+      >
+        {openOperation === "phone" ? <AccountPhonePanel
+          key={profile.phoneE164 ?? "unbound"}
+          embedded
+          phoneE164={profile.phoneE164}
+          hasLocalPassword={profile.hasLocalPassword}
+          phoneAuthStatus={profile.phoneAuthStatus}
+          onPendingChange={(pending) => { phoneSubmissionPending.current = pending; }}
+        /> : null}
+      </OperationPanel>
+    </section> : null}
   </div>;
 }

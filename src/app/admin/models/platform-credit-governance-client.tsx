@@ -268,7 +268,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
           </tbody>
         </table>
         <div className="flex items-center justify-between border-t border-slate-100 bg-white px-4 py-3 text-xs text-slate-500">
-          <span><UiText text={"用户第"} />{" "}{userPage} <UiText text={"页"} /></span>
+          <span><UiText text={"用户第"} />{" "}{userPage}{language === "en" ? null : <> {t("页")}</>}</span>
           <div className="flex gap-2">
             <button type="button" onClick={() => setUserPage((page) => Math.max(1, page - 1))} disabled={loading || userPage === 1} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50"><UiText text={"上一页"} /></button>
             <button type="button" onClick={() => setUserPage((page) => page + 1)} disabled={loading || !usersHasNextPage} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50"><UiText text={"下一页"} /></button>
@@ -294,7 +294,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
           </tbody>
         </table>
         <div className="flex items-center justify-between border-t border-slate-100 bg-white px-4 py-3 text-xs text-slate-500">
-          <span><UiText text={"额度记录第"} />{" "}{grantPage} <UiText text={"页"} /></span>
+          <span><UiText text={"额度记录第"} />{" "}{grantPage}{language === "en" ? null : <> {t("页")}</>}</span>
           <div className="flex gap-2">
             <button type="button" onClick={() => setGrantPage((page) => Math.max(1, page - 1))} disabled={loading || grantPage === 1} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50"><UiText text={"上一页"} /></button>
             <button type="button" onClick={() => setGrantPage((page) => page + 1)} disabled={loading || !grantsHasNextPage} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50"><UiText text={"下一页"} /></button>
@@ -318,7 +318,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
             <label className="text-xs font-medium text-slate-600"><UiText text={"补发额度"} /><input type="number" min={1} max={10_000_000} value={grantAmount} onChange={(event) => setGrantAmount(event.target.value)} required className={adminInputClass} /></label>
             <label className="text-xs font-medium text-slate-600"><UiText text={"到期时间"} /><input type="datetime-local" value={grantExpiresAt} onChange={(event) => setGrantExpiresAt(event.target.value)} required className={adminInputClass} /></label>
             <label className="text-xs font-medium text-slate-600 sm:col-span-2"><UiText text={"原因（必填）"} /><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className={adminInputClass} /></label>
-            <div className="sm:col-span-2 flex items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"搜索会覆盖尚无额度记录的本地用户；执行前仍会再次校验目标状态与用户角色。"} /></p><button disabled={pending || selectedUser === undefined || selectedUser.disabled} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("预览补发")}</button></div>
+            <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"搜索会覆盖尚无额度记录的本地用户；执行前仍会再次校验目标状态与用户角色。"} /></p><button disabled={pending || selectedUser === undefined || selectedUser.disabled} className="ml-auto shrink-0 whitespace-nowrap rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("预览补发")}</button></div>
           </form>}
         </OperationPanel>
       </div>

@@ -897,6 +897,29 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   await expect(page.getByRole("button", { name: "放大图谱", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "放大图谱", exact: true }).click();
   await page.getByRole("button", { name: "适应全图", exact: true }).click();
+  // A front node's empty SVG wrapper must not intercept a rear node's visible dot.
+  const pointerFact = page.getByRole("button", { name: `事实：${factTitle}`, exact: true });
+  await expect(pointerFact).toBeVisible();
+  await pointerFact.scrollIntoViewIfNeeded();
+  await pointerFact.evaluate((node) => {
+    const wrapper = node.closest("foreignObject")!;
+    const blocker = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+    for (const key of ["x", "y", "width", "height"]) blocker.setAttribute(key, wrapper.getAttribute(key)!);
+    blocker.setAttribute("data-browser-pointer-fixture", "");
+    blocker.setAttribute("aria-hidden", "true");
+    wrapper.parentElement!.append(blocker);
+  });
+  const hit = await pointerFact.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+  });
+  expect(hit, "transparent SVG wrappers must let pointer input reach the visible node").toBe(true);
+  const pointerBox = (await pointerFact.boundingBox())!;
+  await page.mouse.click(pointerBox.x + pointerBox.width / 2, pointerBox.y + pointerBox.height / 2);
+  const pointerDetails = page.getByRole("dialog", { name: "知识点详情", exact: true });
+  await expect(pointerDetails.getByRole("heading", { name: factTitle, exact: true })).toBeVisible();
+  await pointerDetails.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await page.locator('[data-browser-pointer-fixture]').evaluateAll((nodes) => nodes.forEach(node => node.remove()));
   await expectR02NoHorizontalOverflow(page, "knowledge graph at 390px");
   await expectR02NoAccessibilityViolations(page, "knowledge graph at 390px");
   await page.screenshot({ path: "test-results/v110/graph-mobile.png" });

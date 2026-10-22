@@ -1,5 +1,16 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "Key 尾号": "Key suffix",
+  "Qwen（阿里云百炼）": "Qwen (Alibaba Cloud Bailian)",
+  "GLM（智谱开放平台）": "GLM (Zhipu Open Platform)",
+  "预览授予": "Preview grant",
+  "预览延期": "Preview extension",
+  "个供应商": "providers",
+  "1 个模型": "1 model",
+  "个模型": "models",
+  "确认授予会员": "Confirm membership grant",
+  "确认延期会员": "Confirm membership extension",
+  "确认撤销会员": "Confirm membership revocation",
   "允许手动只读读取": "Allow manual read-only access",
   "开启": "On",
   "手动读取未开启": "Manual reads are off",

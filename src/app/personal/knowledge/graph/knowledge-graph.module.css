@@ -18,7 +18,8 @@
 .spaceEdges path{vector-effect:non-scaling-stroke}
 .spaceEdges text{fill:#8498b3;font-size:9px;paint-order:stroke;stroke:#fafbfe;stroke-width:3px;stroke-linejoin:round}
 /* Keep dense 3D scenes legible: labels appear at the point of attention. */
-.spaceSvg foreignObject{overflow:visible}
+.spaceSvg foreignObject{overflow:visible;pointer-events:none}
+.spaceSvg foreignObject .spaceNode{pointer-events:auto}
 .spaceNode{position:absolute;left:50%;top:50%;padding:0;gap:0;border-radius:50%;transform:translate(-50%,-50%);transition:box-shadow .12s ease,border-color .12s ease;cursor:grab;overflow:visible;background:#fff;border:2px solid #7395bf;box-shadow:0 2px 5px #526d8c15}
 .spaceNode.scope{background:#dce8f6;border-color:#6084b2}
 .spaceNode.fact{background:#89a9d0;border-color:#7699c4}

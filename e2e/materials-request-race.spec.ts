@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
-import { signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
+import { expectR02NoHorizontalOverflow, signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
 
 type Deferred = { promise: Promise<void>; resolve: () => void };
 type DelayedResponse = { requested: Deferred; release: Deferred; completed: Deferred };
@@ -240,4 +240,45 @@ test("materials lists ignore delayed responses after filter changes and unmount"
   unmountedRequest.release.resolve();
   await unmountedRequest.completed.promise;
   expect(pageErrors).toEqual([]);
+});
+
+test("materials source previews wrap long URLs at narrow widths", async ({ page }) => {
+  await signInPersonalUser(page);
+  const projectId = await createProject(page);
+  const origin = new URL(page.url()).origin;
+  const source = sourcePayload(`https://example.feishu.cn/docx/${"A".repeat(180)}`, "document");
+  const blockedWrites: string[] = [];
+
+  await page.route("**/*", (route) => {
+    const method = route.request().method();
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return route.fallback();
+    blockedWrites.push(`${method} ${new URL(route.request().url()).pathname}`);
+    return route.abort();
+  });
+  await page.route(`**/api/projects/${projectId}/sources?*`, (route) => fulfillJson(route, source));
+
+  for (const mode of [
+    { language: "zh-CN", theme: "light" },
+    { language: "en", theme: "dark" },
+  ] as const) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.context().addCookies([
+      { name: "aipos-language", value: mode.language, url: origin, sameSite: "Lax" },
+      { name: "aipos-theme", value: mode.theme, url: origin, sameSite: "Lax" },
+    ]);
+    await page.goto(`/projects/${projectId}/materials`);
+
+    const sourceList = page.getByRole("list", { name: /^(项目原始资料列表|Project source list)$/u });
+    await expect(sourceList.getByRole("heading")).toContainText("https://example.feishu.cn/docx/");
+    const details = sourceList.getByRole("link", { name: /^(查看详情|View details)$/u });
+    const deleteAction = sourceList.getByRole("button");
+    await expect(details).toBeVisible();
+    await expect(deleteAction).toBeVisible();
+    const actionBounds = await deleteAction.boundingBox();
+    expect(actionBounds).not.toBeNull();
+    expect(actionBounds!.x + actionBounds!.width).toBeLessThanOrEqual(391);
+    await expectR02NoHorizontalOverflow(page, `project materials ${mode.language}/${mode.theme} with long URL`);
+  }
+
+  expect(blockedWrites).toEqual([]);
 });

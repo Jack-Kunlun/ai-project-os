@@ -98,6 +98,10 @@ function dateLabel(value: string | null, language: "zh-CN" | "en", t: (text: str
   }).format(new Date(value));
 }
 
+function entityCountLabel(count: number, singularMessage: string, pluralMessage: string, t: (text: string) => string): string {
+  return count === 1 ? t(singularMessage) : `${count} ${t(pluralMessage)}`;
+}
+
 function describeProviderCheck(check: ProviderCheck, t: (text: string) => string): string {
   const messages: string[] = [];
   if (check.attempt.capabilities.generation === "passed") messages.push(t("生成连接通过"));
@@ -211,7 +215,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
 
   const content = (
     <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
-        <AdminPageHeader title="平台模型" description="先查看当前已配置连接；新增供应商时填写官方固定端点的模型与密钥配置。连接测试会单独消耗探测预算。" actions={canManageProviders ? <button ref={createTriggerRef} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"新增供应商"} /></button> : undefined} />
+        <AdminPageHeader title="模型与能力" description="先查看当前已配置连接；新增供应商时填写官方固定端点的模型与密钥配置。连接测试会单独消耗探测预算。" actions={canManageProviders ? <button ref={createTriggerRef} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"新增供应商"} /></button> : undefined} />
 
         {!canManageProviders ? <section className="mt-7 rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><h2 className="text-xl font-semibold"><UiText text={"平台模型由系统管理员管理"} /></h2><p className="mt-3 text-sm leading-7 text-slate-600"><UiText text={"普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。"} />{activeMembership ? t("当前会员有效，你可以在“我的空间”配置自己的模型连接。") : membershipStatus === "expired" ? t("会员资格已到期；重新获得资格后才可配置个人模型。") : membershipStatus === "revoked" ? t("会员资格已撤销；重新获得资格后才可配置个人模型。") : t("如需配置个人模型，请先完成会员申请。")}</p>{activeMembership ? <a href="/personal/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"><UiText text={"配置个人模型"} /></a> : null}</section> : null}
         {canManageProviders && error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
@@ -219,26 +223,26 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
         {canManageProviders ? <section className="mt-5 space-y-4">
           <div className="flex items-end justify-between px-1">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"已配置连接"} /></p>
-              <h2 className="mt-2 text-2xl font-semibold"><UiText text={"已配置连接"} /></h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"平台供应商"} /></p>
+              <h2 className="mt-2 text-xl font-semibold"><UiText text={"供应商连接"} /></h2>
             </div>
-            <span className="text-xs text-slate-400">{loading ? t("读取中…") : `${providers.length} ${t("个")}`}</span>
+            <span className="text-xs text-slate-400">{loading ? t("读取中…") : entityCountLabel(providers.length, "1 个供应商", "个供应商", t)}</span>
           </div>
           {loading ? <div className="rounded-3xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500"><UiText text={"读取中…"} /></div> : providers.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center text-sm text-slate-500"><UiText text={"尚未配置供应商。"} /><button type="button" onClick={() => setCreateOpen(true)} className="ml-1 font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"新增供应商"} /></button></div>
-          ) : providers.map((provider) => (
-            <ProviderCard
-              key={provider.id}
-              provider={provider}
-              catalog={catalog.find((entry) => entry.kind === provider.kind)}
-              onChanged={handleProviderChanged}
-              onRemoved={handleProviderRemoved}
-              onProbeFinished={reload}
-            />
-          ))}
+          ) : <div role="table" aria-label={t("供应商连接")} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div role="rowgroup" className="hidden border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 md:block">
+              <div role="row" className="grid grid-cols-[minmax(0,1.25fr)_minmax(6rem,.7fr)_minmax(0,1.5fr)_minmax(8rem,.9fr)_auto] items-center gap-4">
+                <span role="columnheader"><UiText text={"供应商"} /></span><span role="columnheader"><UiText text={"连接状态"} /></span><span role="columnheader"><UiText text={"可用模型"} /></span><span role="columnheader"><UiText text={"最近测试"} /></span><span role="columnheader" className="sr-only"><UiText text={"操作"} /></span>
+              </div>
+            </div>
+            <div role="rowgroup" className="divide-y divide-slate-200">
+              {providers.map((provider) => <ProviderCard key={provider.id} provider={provider} catalog={catalog.find((entry) => entry.kind === provider.kind)} onChanged={handleProviderChanged} onRemoved={handleProviderRemoved} onProbeFinished={reload} />)}
+            </div>
+          </div>}
         </section> : null}
 
-        {canManageProviders ? <PlatformOperationCards /> : null}
+        {canManageProviders ? <PlatformOperationCards providers={providers} /> : null}
 
         {adminMode ? <section className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5" aria-labelledby="platform-probe-budget-summary-title">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -267,13 +271,14 @@ const dialogFocusableSelector = [
   "[tabindex]:not([tabindex=\"-1\"])",
 ].join(",");
 
-function PlatformOperationCards() {
+function PlatformOperationCards({ providers }: { providers: Provider[] }) {
   const { t } = useAppearance();
   const [view, setView] = useState<PlatformOperationView | null>(null);
   const [selection, setSelection] = useState<Partial<Record<PlatformOperation, string>>>({});
   const [proofs, setProofs] = useState<Partial<Record<PlatformOperation, { probeId: string; clientRequestKey: string }>>>({});
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [openOperation, setOpenOperation] = useState<PlatformOperation | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
 
   const load = useCallback(async () => {
@@ -372,12 +377,18 @@ function PlatformOperationCards() {
     }
   }
 
-  return <><section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="platform-operation-cards-title">
+  return <><section className="mt-6 space-y-4" aria-labelledby="platform-operation-cards-title">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"平台能力配置"} /></p><h2 id="platform-operation-cards-title" className="mt-2 text-xl font-semibold text-slate-950"><UiText text={"平台能力配置"} /></h2><p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500"><UiText text={"候选仅来自已验证且启用的连接。每项能力都必须用选定模型完成一次真实测试后才能启用；此处不展示供应商全量目录。"} /></p></div>
+      <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"平台能力配置"} /></p><h2 id="platform-operation-cards-title" className="mt-2 text-xl font-semibold text-slate-950"><UiText text={"能力分配"} /></h2><p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500"><UiText text={"候选仅来自已验证且启用的连接。每项能力都必须用选定模型完成一次真实测试后才能启用；此处不展示供应商全量目录。"} /></p></div>
       <button type="button" onClick={() => void load()} disabled={pending !== null} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"><UiText text={"刷新能力"} /></button>
     </div>
-    <div className="mt-5 grid gap-3 lg:grid-cols-2">
+    <div role="table" aria-label={t("能力分配")} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div role="rowgroup" className="hidden border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 md:block">
+        <div role="row" className="grid grid-cols-[minmax(0,1.1fr)_minmax(6rem,.75fr)_minmax(0,1.7fr)_auto] items-center gap-4">
+          <span role="columnheader"><UiText text={"能力"} /></span><span role="columnheader"><UiText text={"状态"} /></span><span role="columnheader"><UiText text={"当前模型来源"} /></span><span role="columnheader" className="sr-only"><UiText text={"操作"} /></span>
+        </div>
+      </div>
+      <div role="rowgroup" className="divide-y divide-slate-200">
       {PLATFORM_OPERATIONS.map((operation) => {
         const group = view?.candidates[operation];
         const candidate = selectedCandidate(operation);
@@ -385,15 +396,25 @@ function PlatformOperationCards() {
         const active = group?.active ?? null;
         const activeCandidate = active === null ? undefined : group?.candidates.find((item) => item.providerConnectionId === active.providerConnectionId && item.modelId === active.modelId);
         const configured = active !== null;
-        return <article key={operation} className={`rounded-2xl border p-4 ${configured ? "border-slate-200 bg-white" : view === null ? "border-slate-200 bg-white" : "border-amber-200 bg-amber-50/60"}`} data-operation={operation}>
-          <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">{t(operationLabels[operation])}</h3><p className={`mt-1 text-xs ${configured ? "text-emerald-700" : view === null ? "text-slate-500" : "text-amber-800"}`}>{t(configured ? "已配置并生效" : view === null ? "读取配置中…" : "未配置生效模型")}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${configured ? "bg-emerald-50 text-emerald-700" : view === null ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-900"}`}>{operation}</span></div>
-          {configured ? <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800"><UiText text={"当前生效模型："} />{activeCandidate ? `${activeCandidate.providerName} · ` : ""}{active.modelId}{active.embeddingDimensions ? ` · ${active.embeddingDimensions} ${t("维")}` : ""}</p> : view !== null ? <p className="mt-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2 text-xs leading-5 text-amber-900"><UiText text={"尚未配置当前生效模型；测试通过后才能启用。"} /></p> : null}
-          <label className="mt-4 block text-xs font-medium text-slate-600"><UiText text={"选择已验证连接与能力模型"} /><select value={selection[operation] ?? ""} onChange={(event) => { setSelection((current) => ({ ...current, [operation]: event.target.value })); setProofs((current) => { const next = { ...current }; delete next[operation]; return next; }); }} disabled={pending !== null || (group?.candidates.length ?? 0) === 0} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400">{group?.candidates.length ? group.candidates.map((item) => <option key={`${item.providerConnectionId}:${item.modelId}`} value={item.providerConnectionId}>{item.providerName} · {item.providerKind} · {item.modelId}{item.embeddingDimensions ? ` · ${item.embeddingDimensions} ${t("维")}` : ""}</option>) : <option value=""><UiText text={"暂无合格候选"} /></option>}</select></label>
-          {candidate ? <p className="mt-3 text-xs text-slate-500"><UiText text={"当前选择："} />{candidate.providerName} / {candidate.providerKind} / {candidate.modelId}{candidate.embeddingDimensions ? ` · ${candidate.embeddingDimensions} ${t("维")}` : ""}</p> : null}
-          <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void probe(operation)} disabled={pending !== null || candidate === undefined} className="rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-40">{pending === `${operation}:probe` ? t("测试中…") : t("测试所选模型")}</button><button type="button" onClick={() => void apply(operation)} disabled={pending !== null || proof === undefined} className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{pending === `${operation}:apply` ? t("启用中…") : t("启用能力")}</button></div>
-          {proof ? <p className="mt-3 text-xs font-semibold text-emerald-700"><UiText text={"真实测试证明有效，可启用"} /></p> : null}
-        </article>;
+        const activeProvider = activeCandidate?.providerName ?? providers.find((provider) => provider.id === active?.providerConnectionId)?.name;
+        const ready = group?.readiness === "ready";
+        const stateLabel = group === undefined ? "读取配置中…" : ready ? "已配置并生效" : "未配置生效模型";
+        return <div key={operation} role="row" className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-4 md:grid-cols-[minmax(0,1.1fr)_minmax(6rem,.75fr)_minmax(0,1.7fr)_auto] md:items-center md:gap-4" data-operation={operation}>
+          <div role="cell" className="min-w-0"><h3 className="font-semibold text-slate-900">{t(operationLabels[operation])}</h3></div>
+          <div role="cell" className="justify-self-end md:justify-self-start"><span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-xs font-semibold ${ready ? "bg-emerald-50 text-emerald-700" : group === undefined ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-900"}`}>{t(stateLabel)}</span></div>
+          <div role="cell" className="col-span-2 min-w-0 text-xs leading-5 text-slate-600 md:col-span-1">{active ? <span className="break-words">{activeProvider ? `${activeProvider} · ` : ""}{active.modelId}{active.embeddingDimensions ? ` · ${active.embeddingDimensions} ${t("维")}` : ""}</span> : <span className="text-slate-400"><UiText text={group === undefined ? "读取配置中…" : "尚未配置"} /></span>}</div>
+          <div role="cell" className="col-span-2 flex justify-end md:col-span-1 md:justify-start"><OperationPanel title={`${t(operationLabels[operation])} · ${t("能力配置")}`} translateTitle={false} triggerLabel="配置" variant="drawer" open={openOperation === operation} onOpenChange={(open) => setOpenOperation(open ? operation : null)}>
+            <div className="space-y-4" data-operation-config={operation}>
+              {configured ? <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800"><UiText text={"当前生效模型："} />{activeProvider ? `${activeProvider} · ` : ""}{active.modelId}{active.embeddingDimensions ? ` · ${active.embeddingDimensions} ${t("维")}` : ""}</p> : view !== null ? <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"><UiText text={"尚未配置当前生效模型；测试通过后才能启用。"} /></p> : null}
+              <label className="block text-xs font-medium text-slate-600"><UiText text={"选择已验证连接与能力模型"} /><select value={selection[operation] ?? ""} onChange={(event) => { setSelection((current) => ({ ...current, [operation]: event.target.value })); setProofs((current) => { const next = { ...current }; delete next[operation]; return next; }); }} disabled={pending !== null || (group?.candidates.length ?? 0) === 0} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400">{group?.candidates.length ? group.candidates.map((item) => <option key={`${item.providerConnectionId}:${item.modelId}`} value={item.providerConnectionId}>{item.providerName} · {item.providerKind} · {item.modelId}{item.embeddingDimensions ? ` · ${item.embeddingDimensions} ${t("维")}` : ""}</option>) : <option value=""><UiText text={"暂无合格候选"} /></option>}</select></label>
+              {candidate ? <p className="text-xs text-slate-500"><UiText text={"当前选择："} />{candidate.providerName} / {candidate.providerKind} / {candidate.modelId}{candidate.embeddingDimensions ? ` · ${candidate.embeddingDimensions} ${t("维")}` : ""}</p> : null}
+              <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void probe(operation)} disabled={pending !== null || candidate === undefined} className="min-h-10 rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-40">{pending === `${operation}:probe` ? t("测试中…") : t("测试所选模型")}</button><button type="button" onClick={() => void apply(operation)} disabled={pending !== null || proof === undefined} className="min-h-10 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{pending === `${operation}:apply` ? t("启用中…") : t("启用能力")}</button></div>
+              {proof ? <p className="text-xs font-semibold text-emerald-700"><UiText text={"真实测试证明有效，可启用"} /></p> : null}
+            </div>
+          </OperationPanel></div>
+        </div>;
       })}
+      </div>
     </div>
     {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{localizedMessage ?? <UiFeedbackText text={message} />}</p> : null}
   </section>{dialog}</>;
@@ -466,8 +487,8 @@ function ProviderCreateDialog({
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-3 sm:p-6" role="presentation">
     <button type="button" aria-label={t("关闭新增供应商")} tabIndex={-1} onClick={close} className={`absolute inset-0 ${modalBackdropClassName}`} />
     {/* Keep the dialog compact on tall screens and contained on short screens. */}
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className={`relative z-10 flex max-h-[min(44rem,calc(100dvh-1.5rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl sm:max-h-[min(44rem,calc(100dvh-3rem))] ${modalSurfaceClassName}`}>
-      <header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-5 py-4 sm:px-6`}>
+    <div ref={dialogRef} data-operation-surface="modal" role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className={`relative z-10 flex max-h-[min(44rem,calc(100dvh-1.5rem))] w-full max-w-6xl flex-col overflow-hidden rounded-2xl sm:max-h-[min(44rem,calc(100dvh-3rem))] ${modalSurfaceClassName}`}>
+      <header data-operation-header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-5 py-4 sm:px-6`}>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"新增供应商"} /></p>
           <h2 id="provider-create-dialog-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text={"新增供应商"} /></h2>
@@ -606,7 +627,7 @@ function ProviderCreateForm({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6">
         <Field compact label="供应商">
           <select value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className={`${formFields.lightField} light-field`}>
-            {catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{entry.displayName}</option>)}
+            {catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{t(entry.displayName)}</option>)}
           </select>
         </Field>
         <Field compact label="连接名称"><input value={name} onChange={(event) => { clearProof(); setName(event.target.value); }} maxLength={80} required className={`${formFields.lightField} light-field`} /></Field>
@@ -629,7 +650,7 @@ function ProviderCreateForm({
       </div>
       <footer className={`${modalFooterClassName} grid shrink-0 gap-3 px-5 py-4 sm:grid-cols-2 sm:px-6`}>
         {message ? <p className="text-xs leading-5 text-slate-600 sm:col-span-2" role="status"><UiFeedbackText text={message} /></p> : null}
-        <button type="button" onClick={() => void testConnection()} disabled={pending || catalog.length === 0 || apiKey.trim().length < 8} className="rounded-lg border border-indigo-200 px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("处理中…") : t("测试连接")}</button><button disabled={pending || catalog.length === 0 || proof === null} className="rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("保存中…") : t("保存连接")}</button>
+        <button type="button" onClick={() => void testConnection()} disabled={pending || catalog.length === 0 || apiKey.trim().length < 8} className="rounded-md border border-indigo-200 px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("处理中…") : t("测试连接")}</button><button disabled={pending || catalog.length === 0 || proof === null} className="rounded-md bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("保存中…") : t("保存连接")}</button>
       </footer>
 
     </form>
@@ -660,6 +681,9 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
   const disableBlockReasons = [
     provider._count.platformDefaultAiRoutes > 0 ? "活动默认路由" : null,
   ].filter((reason): reason is string => reason !== null).map(t).join("、");
+  const disableBlockSeparator = language === "en" ? " " : "";
+  const disableBlockTitle = `${t("无法停用：")}${disableBlockSeparator}${disableBlockReasons}${disableBlockSeparator}${t("仍在使用该连接")}`;
+  const providerDisplayName = catalog?.displayName ? t(catalog.displayName) : provider.kind;
 
   async function testConnection() {
     setTesting(true);
@@ -766,21 +790,26 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
     }
   }
 
+  const configuredModels = [...new Set([provider.defaultGenerationModelId, provider.defaultVisionModelId, provider.defaultEmbeddingModelId].filter((modelId): modelId is string => Boolean(modelId)))];
+
   return (
-    <><article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3"><h3 className="text-lg font-semibold">{provider.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${provider.status === "verified" ? "bg-emerald-50 text-emerald-700" : provider.status === "error" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>{t(statusLabel[provider.status])}</span></div>
-          <p className="mt-2 text-xs text-slate-500">{catalog?.displayName ?? provider.kind} <UiText text={"· Key 尾号"} />{" "}{provider.credential.maskedSuffix} <UiText text={"· 配置版本"} />{" "}{provider.configurationVersion} <UiText text={"· 活动默认路由"} />{" "}{provider._count.platformDefaultAiRoutes} <UiText text={"条 ·"} />{" "}{dateLabel(provider.lastTestedAt, language, t)}</p>
+    <><div role="row" data-provider-id={provider.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 px-4 py-4 md:grid-cols-[minmax(0,1.25fr)_minmax(6rem,.7fr)_minmax(0,1.5fr)_minmax(8rem,.9fr)_auto] md:items-center md:gap-4 md:py-3">
+      <div role="cell" className="min-w-0"><h3 className="break-words font-semibold text-slate-900">{provider.name}</h3><p className="mt-1 text-xs text-slate-500">{providerDisplayName}<span aria-hidden="true"> · </span>{provider.kind}</p></div>
+      <div role="cell" className="justify-self-end md:justify-self-start"><span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-xs font-semibold ${provider.status === "verified" ? "bg-emerald-50 text-emerald-700" : provider.status === "error" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>{t(statusLabel[provider.status])}</span></div>
+      <div role="cell" className="col-span-2 min-w-0 text-xs leading-5 md:col-span-1"><span className="font-medium text-slate-700">{entityCountLabel(configuredModels.length, "1 个模型", "个模型", t)}</span>{configuredModels.length ? <span className="mt-1 block break-words text-slate-500">{configuredModels.join(" · ")}</span> : <span className="mt-1 block text-slate-400"><UiText text={"未配置"} /></span>}</div>
+      <div role="cell" className="text-xs text-slate-500">{dateLabel(provider.lastTestedAt, language, t)}</div>
+      <div role="cell" className="col-span-2 flex justify-end md:col-span-1 md:justify-start"><OperationPanel title={`${provider.name} · ${t("供应商连接")}`} translateTitle={false} triggerLabel="管理连接" variant="drawer">
+        <div className="space-y-5">
+          <dl className="grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-2"><div><dt className="text-slate-400"><UiText text={"供应商"} /></dt><dd className="mt-1 font-medium text-slate-700">{providerDisplayName} · {provider.kind}</dd></div><div><dt className="text-slate-400"><UiText text={"连接状态"} /></dt><dd className="mt-1 font-medium text-slate-700">{t(statusLabel[provider.status])}</dd></div><div><dt className="text-slate-400"><UiText text={"Key 尾号"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.credential.maskedSuffix}</dd></div><div><dt className="text-slate-400"><UiText text={"配置版本"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.configurationVersion}</dd></div><div><dt className="text-slate-400"><UiText text={"活动默认路由"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider._count.platformDefaultAiRoutes}</dd></div><div><dt className="text-slate-400"><UiText text={"最近测试"} /></dt><dd className="mt-1 font-medium text-slate-700">{dateLabel(provider.lastTestedAt, language, t)}</dd></div></dl>
+          <div className="flex flex-wrap gap-2"><OperationPanel title={`${t("编辑供应商：")}${provider.name}`} translateTitle={false} triggerLabel="编辑" description="修改连接模型和凭据。保存后配置需要重新执行连接测试。" open={editing} onOpenChange={setEditing}><form onSubmit={save} className="grid gap-4 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className={`${formFields.editField} edit-field`} /></EditField><EditField label="生成模型（可选）"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} className={`${formFields.editField} edit-field`} /></EditField>{catalog?.supportsVision ? <EditField label="图片识别模型（可选）"><input value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} className={`${formFields.editField} edit-field`} /></EditField> : null}{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className={`${formFields.editField} edit-field`} /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className={`${formFields.editField} edit-field`} /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className={`${formFields.editField} edit-field`} /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="min-h-10 rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : t("保存变更")}</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || disableBlocked} title={disableBlocked ? disableBlockTitle : undefined} className="min-h-10 rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{t(provider.status === "disabled" ? "重新启用" : "停用连接")}</button></div>{disableBlocked ? <p className="text-xs leading-5 text-amber-700 sm:col-span-2"><UiText text={"无法停用："} />{disableBlockSeparator}{disableBlockReasons}{disableBlockSeparator}<UiText text={"仍在使用该连接。请先移除项目路由或停用活动能力。"} /></p> : null}{message ? <p role="status" className="text-xs leading-5 text-slate-700 sm:col-span-2"><UiFeedbackText text={message} /></p> : null}</form></OperationPanel><button type="button" onClick={() => void testConnection()} disabled={testing || provider.status === "disabled"} className="min-h-10 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40">{testing ? t("测试中…") : t("测试连接")}</button></div>
+          <dl className="grid gap-3 rounded-2xl border border-slate-200 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400"><UiText text={"生成模型"} /></dt><dd className="mt-1 break-words font-medium text-slate-700">{provider.defaultGenerationModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"图片识别"} /></dt><dd className="mt-1 break-words font-medium text-slate-700">{provider.defaultVisionModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"向量模型"} /></dt><dd className="mt-1 break-words font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} ${t("维")}` : t("未配置")}</dd></div></dl>
+          <ScopeEvidenceCard title="供应商配置边界" evidence={{ scope: t("平台供应商连接"), owner: t("平台管理员"), payer: t("使用平台默认路由时由当前发起人扣减平台额度"), affectedProjects: provider._count.platformDefaultAiRoutes > 0 ? `${t("项目影响需经活动默认路由影响预览核实；当前有")} ${provider._count.platformDefaultAiRoutes} ${t("条活动默认路由引用")}` : t("尚无活动默认路由引用；暂无项目影响证据"), latestSuccess: provider.lastTestedAt ? `${t("最近连接测试")}：${dateLabel(provider.lastTestedAt, language, t)}` : t("尚未完成连接测试") }} />
+          {provider.status === "disabled" ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700"><UiText text={"永久删除仅适用于没有活动平台默认路由或历史审计引用的连接，并会同时删除加密凭据。"} /></p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="min-h-10 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"><UiText text={"永久删除"} /></button></div> : null}
+          {(checkResult || message) && !editing ? <p role="status" className="text-xs leading-5 text-slate-600">{checkResult ? describeProviderCheck(checkResult, t) : <UiFeedbackText text={message ?? ""} />}{probeBudgetHref ? <> <a href={probeBudgetHref} className="font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"配置探测预算"} /></a></> : null}</p> : null}
+          {provider.lastErrorCode ? <p className="text-xs text-rose-600"><UiText text={"最近一次连接测试未通过："} />{describeProviderCheck({ attempt: { status: "failed", safeErrorCode: provider.lastErrorCode, capabilities: { generation: "notConfigured", embedding: "notConfigured", vision: "notConfigured" }, embeddingDimensions: null } }, t)}</p> : null}
         </div>
-        <div className="flex gap-2"><OperationPanel title={`${t("编辑供应商：")}${provider.name}`} translateTitle={false} triggerLabel="编辑" description="修改连接模型和凭据。保存后配置需要重新执行连接测试。" open={editing} onOpenChange={setEditing}><form onSubmit={save} className="grid gap-4 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className={`${formFields.editField} edit-field`} /></EditField><EditField label="生成模型（可选）"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} className={`${formFields.editField} edit-field`} /></EditField>{catalog?.supportsVision ? <EditField label="图片识别模型（可选）"><input value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} className={`${formFields.editField} edit-field`} /></EditField> : null}{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className={`${formFields.editField} edit-field`} /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className={`${formFields.editField} edit-field`} /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className={`${formFields.editField} edit-field`} /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : t("保存变更")}</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || disableBlocked} title={disableBlocked ? `${t("无法停用：")}${disableBlockReasons}${t("仍在使用该连接")}` : undefined} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{t(provider.status === "disabled" ? "重新启用" : "停用连接")}</button></div>{disableBlocked ? <p className="text-xs leading-5 text-amber-700 sm:col-span-2"><UiText text={"无法停用："} />{disableBlockReasons}<UiText text={"仍在使用该连接。请先移除项目路由或停用活动能力。"} /></p> : null}{message ? <p role="status" className="text-xs leading-5 text-slate-700 sm:col-span-2"><UiFeedbackText text={message} /></p> : null}</form></OperationPanel><button type="button" onClick={() => void testConnection()} disabled={testing || provider.status === "disabled"} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{testing ? t("测试中…") : t("测试连接")}</button></div>
-      </div>
-      <dl className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400"><UiText text={"生成模型"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultGenerationModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"图片识别"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultVisionModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"向量模型"} /></dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} ${t("维")}` : t("未配置")}</dd></div></dl>
-      <div className="mt-5"><ScopeEvidenceCard title="供应商配置边界" evidence={{ scope: t("平台供应商连接"), owner: t("平台管理员"), payer: t("使用平台默认路由时由当前发起人扣减平台额度"), affectedProjects: provider._count.platformDefaultAiRoutes > 0 ? `${t("项目影响需经活动默认路由影响预览核实；当前有")} ${provider._count.platformDefaultAiRoutes} ${t("条活动默认路由引用")}` : t("尚无活动默认路由引用；暂无项目影响证据"), latestSuccess: provider.lastTestedAt ? `${t("最近连接测试")}：${dateLabel(provider.lastTestedAt, language, t)}` : t("尚未完成连接测试") }} /></div>
-      {provider.status === "disabled" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700"><UiText text={"永久删除仅适用于没有活动平台默认路由或历史审计引用的连接，并会同时删除加密凭据。"} /></p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><UiText text={"永久删除"} /></button></div> : null}
-      {(checkResult || message) && !editing ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{checkResult ? describeProviderCheck(checkResult, t) : <UiFeedbackText text={message ?? ""} />}{probeBudgetHref ? <> <a href={probeBudgetHref} className="font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"配置探测预算"} /></a></> : null}</p> : null}
-      {provider.lastErrorCode ? <p className="mt-2 text-xs text-rose-600"><UiText text={"最近一次连接测试未通过："} />{describeProviderCheck({ attempt: { status: "failed", safeErrorCode: provider.lastErrorCode, capabilities: { generation: "notConfigured", embedding: "notConfigured", vision: "notConfigured" }, embeddingDimensions: null } }, t)}</p> : null}
-    </article>{dialog}</>
+      </OperationPanel></div>
+    </div>{dialog}</>
   );
 }
 

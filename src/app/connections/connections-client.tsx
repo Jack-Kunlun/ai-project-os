@@ -2,12 +2,13 @@
 import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { ConnectionTabs } from "@/components/connection-tabs";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { formatUiDateTime } from "@/lib/ui-date-format";
 
 type ProviderKind = "github" | "gitee" | "gitlab" | "gitea" | "forgejo" | "generic";
 type Transport = "https" | "ssh";
@@ -227,6 +228,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Connection; onChanged: (connection: Connection) => void; onRemoved: (connectionId: string) => void }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const [repositoryPath, setRepositoryPath] = useState("");
   const [trackedRef, setTrackedRef] = useState("main");
@@ -291,7 +293,7 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
         <div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{translateUi(statusLabels[connection.status])}</span></div><p className="mt-2 text-xs text-slate-500">{connection.providerKind.toUpperCase()} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div>
         <div className="text-right text-xs text-slate-400"><p>{connection._count.repositories} {" "}<UiText text={"个仓库身份"} /></p><p className="mt-1"><UiText text={"凭据 ····"} />{connection.credential?.maskedSuffix ?? <UiText text={"无"} />}</p></div>
       </div>
-      <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p><UiText text={"内网访问："} />{connection.allowPrivateNetwork ? <UiText text={"已显式允许"} /> : <UiText text={"禁止"} />}</p><p><UiText text={"最近验证："} />{connection.lastTestedAt ? new Date(connection.lastTestedAt).toLocaleString("zh-CN") : <UiText text={"尚未验证"} />}</p>{connection.lastErrorCode ? <p className="sm:col-span-2 text-rose-600"><UiText text={"最近错误："} />{connection.lastErrorCode}</p> : null}</div>
+      <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p><UiText text={"内网访问："} />{connection.allowPrivateNetwork ? <UiText text={"已显式允许"} /> : <UiText text={"禁止"} />}</p><p><UiText text={"最近验证："} />{connection.lastTestedAt ? formatUiDateTime(new Date(connection.lastTestedAt), language) : <UiText text={"尚未验证"} />}</p>{connection.lastErrorCode ? <p className="sm:col-span-2 text-rose-600"><UiText text={"最近错误："} />{connection.lastErrorCode}</p> : null}</div>
       {connection.status !== "disabled" ? <form onSubmit={test} className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[1fr_8rem_auto]"><input value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder={translateUi("组织/仓库")} required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><input value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><button disabled={testing} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{testing ? <UiText text={"验证中…"} /> : <UiText text={"只读验证"} />}</button></form> : null}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void toggleEnabled()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? <UiText text={"停用中…"} /> : <UiText text={"停用连接"} />}</button> : <div className="flex flex-wrap items-center gap-2"><button onClick={() => void toggleEnabled()} disabled={disabling} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text={"重新启用"} /></button><button onClick={() => void removeConnection()} disabled={disabling} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"永久删除"} /></button></div>}</div>
       {connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiText text={"只有未被任何项目仓库关联的连接可以永久删除；仍有历史关联时系统会拒绝删除。"} /></p> : null}

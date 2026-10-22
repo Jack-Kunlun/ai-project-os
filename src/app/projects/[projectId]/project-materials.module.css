@@ -284,6 +284,7 @@
 .sourcePreview {
   display: -webkit-box;
   overflow: hidden;
+  overflow-wrap: anywhere;
   margin-top: 0.4rem;
   color: var(--app-text);
   font-size: 0.8125rem;

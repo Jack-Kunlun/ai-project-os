@@ -21,6 +21,30 @@ export function FloatingInquiry(){
  const keepActive=pending&&opened&&!publicRoots.has(pathname.split('/')[1]);
  const assistVisible=allowed||keepActive;
  useEffect(()=>{const node=document.createElement('div');node.dataset.floatingInquiryRoot='';document.body.append(node);const frame=requestAnimationFrame(()=>{setSize({width:document.documentElement.clientWidth||document.body.clientWidth,height:document.documentElement.clientHeight||document.body.clientHeight});setTarget(node);});return()=>{cancelAnimationFrame(frame);node.remove();};},[]);
+ useEffect(()=>{
+   if(!allowed)return;
+   let frame=0;
+   const roots=new Set<HTMLElement>();
+   const resize=new ResizeObserver(update);
+   function update(){
+     cancelAnimationFrame(frame);
+     frame=requestAnimationFrame(()=>{
+       const current=new Set([...document.querySelectorAll<HTMLElement>('[data-page-content]')].filter(root=>!root.closest('[data-ask-page]')));
+       for(const root of roots)if(!current.has(root)){resize.unobserve(root);root.removeAttribute('data-inquiry-scroll-clearance');roots.delete(root);}
+       for(const root of current)if(!roots.has(root)){roots.add(root);resize.observe(root);}
+       for(const root of current){
+         const paddingBottom=parseFloat(getComputedStyle(root).paddingBottom)||0;
+         const naturalBottom=root.getBoundingClientRect().bottom+window.scrollY-paddingBottom+32;
+         root.toggleAttribute('data-inquiry-scroll-clearance',naturalBottom>window.innerHeight+1);
+       }
+     });
+   }
+   const mutations=new MutationObserver(update);
+   mutations.observe(document.body,{childList:true,subtree:true});
+   window.addEventListener('resize',update);
+   update();
+   return()=>{cancelAnimationFrame(frame);resize.disconnect();mutations.disconnect();window.removeEventListener('resize',update);for(const root of roots)root.removeAttribute('data-inquiry-scroll-clearance');};
+ },[allowed,pathname]);
  useEffect(() => {
    let frame = 0;
    function update() {

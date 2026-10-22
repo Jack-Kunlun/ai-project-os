@@ -7,9 +7,10 @@ import { useRouter } from "next/navigation";
 import { UiText, useAppearance } from "@/components/appearance-provider";
 import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
 
-export function AccountPhonePanel({ phoneE164, hasLocalPassword, phoneAuthStatus, embedded = false }: {
+export function AccountPhonePanel({ phoneE164, hasLocalPassword, phoneAuthStatus, embedded = false, onPendingChange }: {
   phoneE164: string | null; hasLocalPassword: boolean; phoneAuthStatus: "disabled" | "unavailable" | "available";
   embedded?: boolean;
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const router = useRouter();
   const { t } = useAppearance();
@@ -30,7 +31,7 @@ export function AccountPhonePanel({ phoneE164, hasLocalPassword, phoneAuthStatus
     event.preventDefault(); setError(null);
     if (!available || !challengeId || code.length !== 6) { setError("请先验证新手机号。"); return; }
     if (changing && (!oldChallengeId || oldCode.length !== 6)) { setError("请填写原手机号的验证码。"); return; }
-    setPending(true);
+    setPending(true); onPendingChange?.(true);
     try {
       const response = await fetch("/api/auth/phone", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -44,7 +45,7 @@ export function AccountPhonePanel({ phoneE164, hasLocalPassword, phoneAuthStatus
       }
       setPassword(""); setCode(""); setOldCode("");
       router.replace("/login?phone=updated"); router.refresh();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "手机号更新失败。"); setPending(false); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "手机号更新失败。"); setPending(false); onPendingChange?.(false); }
   }
 
   function cancel() {

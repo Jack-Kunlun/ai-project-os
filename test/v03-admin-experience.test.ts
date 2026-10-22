@@ -39,7 +39,7 @@ test("platform model responsibilities are split into independent admin surfaces"
     readFile("src/app/admin/operations/probes/page.tsx", "utf8"),
   ]);
   assert.match(client, /import \{ AdminPageHeader \} from "@\/components\/admin-page-header"/u);
-  assert.match(client, /<AdminPageHeader title="平台模型"/u);
+  assert.match(client, /<AdminPageHeader title="模型与能力"/u);
   assert.match(pageHeader, /export function AdminPageHeader/u);
   assert.match(pageHeader, /<h1 className=/u);
   assert.doesNotMatch(client, /<h1 className=.*>平台模型<\/h1>/u);

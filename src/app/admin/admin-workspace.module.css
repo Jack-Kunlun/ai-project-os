@@ -82,14 +82,16 @@
 .workspace :global(button.bg-indigo-700),
 .workspace :global(a.bg-slate-950),
 .workspace :global(a.bg-slate-900),
-.workspace :global(a.bg-indigo-600) { background: var(--app-accent) !important; color: var(--app-on-accent) !important; }
+.workspace :global(a.bg-indigo-600),
+.workspace :global(a.bg-indigo-700) { background: var(--app-accent) !important; color: var(--app-on-accent) !important; }
 .workspace :global(button.bg-slate-950:hover),
 .workspace :global(button.bg-slate-900:hover),
 .workspace :global(button.bg-indigo-600:hover),
 .workspace :global(button.bg-indigo-700:hover),
 .workspace :global(a.bg-slate-950:hover),
 .workspace :global(a.bg-slate-900:hover),
-.workspace :global(a.bg-indigo-600:hover) { background: color-mix(in srgb, var(--app-accent) 88%, #000) !important; }
+.workspace :global(a.bg-indigo-600:hover),
+.workspace :global(a.bg-indigo-700:hover) { background: color-mix(in srgb, var(--app-accent) 88%, #000) !important; }
 .workspace :global(input:not([type=checkbox]):not([type=radio]):not([type=range])),
 .workspace :global(select),
 .workspace :global(textarea) { box-sizing: border-box; min-height: 40px; border-radius: 4px; border-color: var(--admin-line); background: var(--app-input); padding-left: 12px; padding-right: 12px; color: var(--admin-ink); font-size: 12px; }
@@ -145,14 +147,16 @@
 }
 /* OperationPanel portals live outside the admin layout subtree. */
 :global(body):has(.workspace) :global([data-operation-surface]) { border-radius: 6px; color: var(--app-text); box-shadow: 0 20px 100px #1e355a26; }
+:global(body):has(.workspace) :global([data-operation-surface="modal"]) { max-width: 920px; }
 :global(body):has(.workspace) :global([data-operation-surface="drawer"]) { border-radius: 0; max-width: 720px; }
 :global(body):has(.workspace) :global([data-operation-header]) { min-height: 76px; padding: 20px 24px; }
-:global(body):has(.workspace) :global([data-operation-header] h2) { font-size: 16px; }
+:global(body):has(.workspace) :global([data-operation-header] h2) { font-size: 17px; }
 :global(body):has(.workspace) :global([data-operation-content]) { padding: 24px; }
 :global(body):has(.workspace) :global([data-operation-content] input:not([type=checkbox]):not([type=radio])),
 :global(body):has(.workspace) :global([data-operation-content] select),
 :global(body):has(.workspace) :global([data-operation-content] textarea) { min-height: 40px; padding-left: 12px; padding-right: 12px; border-color: var(--app-border); border-radius: 4px; background: var(--app-input); color: var(--app-text); }
 :global(body):has(.workspace) :global([data-operation-content] textarea) { padding-top: 12px; padding-bottom: 12px; }
+:global(body):has(.workspace) :global([data-operation-content] button.rounded-xl:not(.app-icon-button)) { border-radius: 6px; }
 :global(body):has(.workspace) :global([data-operation-content] button.bg-slate-950),
 :global(body):has(.workspace) :global([data-operation-content] button.bg-indigo-600),
 :global(body):has(.workspace) :global([data-operation-content] button.bg-indigo-700) { background: var(--app-accent) !important; color: var(--app-on-accent) !important; }

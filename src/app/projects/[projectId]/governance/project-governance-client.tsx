@@ -1,7 +1,7 @@
 "use client";
 import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
-import {  UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
@@ -11,6 +11,7 @@ import { ParentPageLink } from "@/components/parent-page-link";
 import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import { buildProjectHref, parseProjectPageState, type ProjectNavigationState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import { formatUiDateTime } from "@/lib/ui-date-format";
 
 type Summary = {
   project: { id: string; name: string };
@@ -134,9 +135,9 @@ async function readJson<T>(response: Response): Promise<T> {
   return await response.json() as T;
 }
 
-function formatDate(value: string | null): string {
+function formatDate(value: string | null, language: "zh-CN" | "en"): string {
   if (value === null) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return formatUiDateTime(new Date(value), language, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function formatNumber(value: number): string {
@@ -176,6 +177,7 @@ export function ProjectGovernanceSections({ projectId, navigation }: Readonly<{ 
  * header and hero; each usage/task panel has its own loading and error state.
  */
 export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: embeddedProjectId, navigation: embeddedNavigation, embedded = false }: ProjectGovernanceClientProps) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const routeParams = useParams<{ projectId: string }>();
   const projectId = embeddedProjectId ?? routeParams.projectId;
@@ -408,7 +410,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
                               <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{provider.providerName}</p><p className="mt-1 text-[12px] text-slate-400"><UiText text={"账户余额 · 非项目成本分摊"} /></p></div>{provider.balanceAvailable && canReadProviderBalance ? <button type="button" onClick={() => void refreshProviderBalance(provider.providerConnectionId)} disabled={billingPending !== null} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{billingPending === provider.providerConnectionId ? <UiText text={"读取中…"} /> : balance ? <UiText text={"刷新余额"} /> : <UiText text={"读取账户余额"} />}</button> : null}</div>
                               {provider.balanceAvailable && !canReadProviderBalance ? <p className="mt-3 text-xs text-slate-500"><UiText text={"项目 Owner 或工作区管理员可读取账户余额。"} /></p> : null}
                               {!provider.balanceAvailable ? <p className="mt-3 text-xs text-slate-500"><UiText text={"该供应商暂不支持应用内余额查询，请在供应商控制台核对账单。"} /></p> : null}
-                              {balance ? <div className="mt-3 space-y-2">{balance.balances.map((item) => <div key={item.currency} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs"><span className="text-slate-500">{item.currency} {" "}<UiText text={"可用余额"} /></span><span className="font-semibold text-slate-800">{item.total} {item.currency}</span></div>)}<p className="text-[10px] text-slate-400">{balance.isAvailable ? <UiText text={"账户可正常调用"} /> : <UiText text={"账户当前不可调用"} />} {" "}<UiText text={"· 查询于"} />{" "}{formatDate(balance.fetchedAt)}</p></div> : null}
+                              {balance ? <div className="mt-3 space-y-2">{balance.balances.map((item) => <div key={item.currency} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs"><span className="text-slate-500">{item.currency} {" "}<UiText text={"可用余额"} /></span><span className="font-semibold text-slate-800">{item.total} {item.currency}</span></div>)}<p className="text-[10px] text-slate-400">{balance.isAvailable ? <UiText text={"账户可正常调用"} /> : <UiText text={"账户当前不可调用"} />} {" "}<UiText text={"· 查询于"} />{" "}{formatDate(balance.fetchedAt, language)}</p></div> : null}
                               {provider.providerKind === "deepseek" ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold"><a href="https://platform.deepseek.com/usage" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4"><UiText text={"查看实际用量"} /></a><a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4"><UiText text={"查看官方价格"} /></a></div> : null}
                             </article>
                           );
@@ -420,7 +422,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
 
                   <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <UsageMetric label={translateUi("模型调用尝试")} value={formatNumber(usage.totals.requestCount)} detail={`${formatNumber(usage.totals.recordCount)} 条审计/运行记录`} />
-                    <UsageMetric label={translateUi("输入 Token")} value={formatNumber(usage.totals.inputTokens)} detail={`周期始于 ${formatDate(usage.period.start)}`} />
+                    <UsageMetric label={translateUi("输入 Token")} value={formatNumber(usage.totals.inputTokens)} detail={`周期始于 ${formatDate(usage.period.start, language)}`} />
                     <UsageMetric label={translateUi("输出 Token")} value={formatNumber(usage.totals.outputTokens)} detail={`合计 ${formatNumber(usage.totals.totalTokens)} Token`} />
                     <UsageMetric label={translateUi("异常请求")} value={formatNumber(usage.totals.failedRequests + usage.totals.unknownRequests)} detail={`失败 ${formatNumber(usage.totals.failedRequests)} · 未知 ${formatNumber(usage.totals.unknownRequests)}`} />
                   </div>
@@ -444,7 +446,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{translateUi(jobLabels[operation.kind] ?? operation.kind)}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(operation.githubSync?.status ?? (unknownOutcome?.tone === "danger" ? "failed" : operation.status))}`}>{translateUi(operation.githubSync ? statusLabels[operation.githubSync.status] ?? operation.githubSync.status : unknownOutcome?.label ?? statusLabels[operation.status] ?? operation.status)}</span></div>
-                    <p className="mt-2 text-xs text-slate-400">{formatDate(operation.createdAt)} · {unknownOutcome?.stageLabel ?? operation.stage}{operation.failureCode ? ` · ${operation.failureCode}` : ""}</p>
+                    <p className="mt-2 text-xs text-slate-400">{formatDate(operation.createdAt, language)} · {unknownOutcome?.stageLabel ?? operation.stage}{operation.failureCode ? ` · ${operation.failureCode}` : ""}</p>
                     {unknownOutcome ? <p className={`mt-2 text-xs leading-5 ${unknownOutcome.tone === "danger" ? "text-rose-700" : "text-amber-800"}`}>{unknownOutcome.summary}{operation.capability.reason === "specializedReconciliationRequired" ? <UiText text={"该旧式 GitHub 任务仍有子运行阻塞，当前只能查看，不能用通用对账关闭。"} /> : unknownOutcome.recordNotice}</p> : null}
                     {operation.githubSync ? <p className="mt-2 text-xs text-slate-500"><UiText text={"GitHub：新增"} />{" "}{operation.githubSync.counts.added} {" "}<UiText text={"· 更新"} />{" "}{operation.githubSync.counts.updated} {" "}<UiText text={"· 删除"} />{" "}{operation.githubSync.counts.deleted} {" "}<UiText text={"· 保留"} />{" "}{operation.githubSync.counts.withheld}</p> : null}
                     {operation.githubSync?.warnings.length ? <p className="mt-2 text-xs leading-5 text-amber-700">{operation.githubSync.warnings.join(" · ")}</p> : null}

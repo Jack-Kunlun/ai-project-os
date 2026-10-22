@@ -350,14 +350,14 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
         <div>
           <h3 className="text-lg font-semibold">{item.displayName || item.username}</h3>
           <p className="mt-1 text-xs text-slate-500">@{item.username} · {t(statusLabel(subscription))}</p>
-          <p className="mt-1 text-xs text-slate-400">{subscription ? `${t("到期")}：${date(subscription.expiresAt, language)} · ${t("版本")} ${subscription.version}` : t("尚未授予会员资格")}</p>
+          <p className="mt-1 text-xs text-slate-400">{subscription ? `${t("到期")}${language === "en" ? ": " : "："}${date(subscription.expiresAt, language)} · ${t("版本")} ${subscription.version}` : t("尚未授予会员资格")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label>
             <span className="sr-only"><UiText text={"会员天数"} /></span>
             <input type="number" min={1} max={3650} value={days} onChange={(event) => changedDays(event.target.value)} className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
           </label>
-          <button type="button" disabled={pending} onClick={() => void requestPreview(action)} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><UiText text={"预览"} />{t(action === "extend" ? "延期" : "授予")}</button>
+          <button type="button" disabled={pending} onClick={() => void requestPreview(action)} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{t(action === "extend" ? "预览延期" : "预览授予")}</button>
           {subscription && subscription.status === "active" && new Date(subscription.expiresAt) > new Date() ? <button type="button" disabled={pending} onClick={() => void requestPreview("revoke")} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50"><UiText text={"预览撤销"} /></button> : null}
         </div>
       </div>
@@ -373,7 +373,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
       {preview ? <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 p-5" role="dialog" aria-label={t("会员变更确认")}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h4 className="text-sm font-semibold text-indigo-950"><UiText text={"确认"} />{t(preview.action === "revoke" ? "撤销" : preview.action === "extend" ? "延期" : "授予")}<UiText text={"会员"} /></h4>
+            <h4 className="text-sm font-semibold text-indigo-950">{t(preview.action === "revoke" ? "确认撤销会员" : preview.action === "extend" ? "确认延期会员" : "确认授予会员")}</h4>
             <p className="mt-2 text-xs leading-6 text-indigo-900"><UiText text={"当前状态："} />{t(preview.current.state)}<UiText text={"（版本"} />{" "}{preview.current.version}） → {t(preview.target.state)}<UiText text={"（版本"} />{" "}{preview.target.version}）</p>
             <p className="text-xs leading-6 text-indigo-900"><UiText text={"有效期："} />{date(preview.target.startsAt, language)} <UiText text={"至"} />{" "}{date(preview.target.expiresAt, language)}</p>
           </div>

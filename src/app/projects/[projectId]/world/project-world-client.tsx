@@ -2,13 +2,14 @@
 import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import ui from "@/components/workspace-ui.module.css";
 import { OperationPanel } from "@/components/operation-panel";
 import { ProjectOverviewParentLink } from "@/components/project-parent-link";
+import { formatUiDateTime } from "@/lib/ui-date-format";
 
 type WorldStatus = "on_track" | "needs_attention" | "at_risk" | "insufficient_data";
 type FactType = "decision" | "progress" | "issue" | "risk";
@@ -146,9 +147,9 @@ async function responseError(response: Response, fallback: string): Promise<stri
   }
 }
 
-function formatDate(value: string | null): string {
+function formatDate(value: string | null, language: "zh-CN" | "en"): string {
   if (value === null) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return formatUiDateTime(new Date(value), language, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function shortFingerprint(value: string): string {
@@ -156,6 +157,7 @@ function shortFingerprint(value: string): string {
 }
 
 export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedded = false }: { username: string; projectId: string; isSystemAdmin: boolean; embedded?: boolean }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const [world, setWorld] = useState<WorldPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -276,7 +278,7 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
           <aside className="space-y-6">
             <section className="rounded-md border border-slate-200 bg-white p-6 ">
               <SectionHeading eyebrow="State manifest" title={translateUi("状态指纹")} detail="每次计算都固定实际输入，便于复现与核对。" compact />
-              <dl className="mt-5 space-y-4 text-xs"><FingerprintRow label={translateUi("输入清单")} value={world?.state.inputManifestFingerprint} /><FingerprintRow label={translateUi("当前状态")} value={world?.state.snapshotFingerprint} /><div><dt className="text-slate-400"><UiText text={"计算时点"} /></dt><dd className="mt-1 font-medium text-slate-700">{formatDate(world?.state.asOf ?? null)}</dd></div></dl>
+              <dl className="mt-5 space-y-4 text-xs"><FingerprintRow label={translateUi("输入清单")} value={world?.state.inputManifestFingerprint} /><FingerprintRow label={translateUi("当前状态")} value={world?.state.snapshotFingerprint} /><div><dt className="text-slate-400"><UiText text={"计算时点"} /></dt><dd className="mt-1 font-medium text-slate-700">{formatDate(world?.state.asOf ?? null, language)}</dd></div></dl>
             </section>
             <section className="rounded-md border border-slate-200 bg-white p-6 ">
               <SectionHeading eyebrow="Plan health" title={translateUi("计划联动")} detail="状态与项目计划使用同一套确定性健康度。" compact />
@@ -318,14 +320,14 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
         <section className="mt-10 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <div>
             <SectionHeading eyebrow="Open conflicts" title={translateUi("当前冲突")} detail="这里只展示同时指向当前有效事实的开放冲突；处置仍在记忆质量页面完成。" />
-            <div className="mt-4 space-y-3">{(world?.qualityIssues.filter((issue) => issue.kind === "conflict") ?? []).length === 0 ? <Empty title={translateUi("没有当前事实冲突")} detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-md border border-rose-200 bg-white p-5"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-rose-600"><UiText text={"冲突强度"} />{" "}{Math.round(issue.score * 100)}%</span><span className="text-[12px] text-slate-400">{formatDate(issue.detectedAt)}</span></div><p className="mt-3 text-sm leading-6 text-slate-600">{issue.explanation}</p></article>)}</div>
+            <div className="mt-4 space-y-3">{(world?.qualityIssues.filter((issue) => issue.kind === "conflict") ?? []).length === 0 ? <Empty title={translateUi("没有当前事实冲突")} detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-md border border-rose-200 bg-white p-5"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-rose-600"><UiText text={"冲突强度"} />{" "}{Math.round(issue.score * 100)}%</span><span className="text-[12px] text-slate-400">{formatDate(issue.detectedAt, language)}</span></div><p className="mt-3 text-sm leading-6 text-slate-600">{issue.explanation}</p></article>)}</div>
             <Link href={`/projects/${projectId}/memory-quality`} className="mt-4 flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700"><UiText text={"进入记忆质量处置"} /></Link>
           </div>
           <div>
             <SectionHeading eyebrow="Immutable history" title={translateUi("状态快照与审计")} detail="快照和审计只追加、不覆盖；每条记录都保留操作者与发生时点。" />
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <HistoryPanel title={translateUi("状态快照")}>{world?.snapshots.length === 0 ? <HistoryEmpty><UiText text={"尚未固化状态"} /></HistoryEmpty> : world?.snapshots.slice(0, 8).map((snapshot) => <HistoryRow key={snapshot.id} title={translateUi(statusMeta[snapshot.status].label)} detail={`${snapshot.capturedBy.displayName ?? snapshot.capturedBy.username} · ${formatDate(snapshot.createdAt)}`} fingerprint={snapshot.snapshotFingerprint} />)}</HistoryPanel>
-              <HistoryPanel title={translateUi("治理审计")}>{world?.audits.length === 0 ? <HistoryEmpty><UiText text={"尚无治理操作"} /></HistoryEmpty> : world?.audits.slice(0, 10).map((audit) => <HistoryRow key={audit.id} title={translateUi(auditLabels[audit.event])} detail={`${audit.actor.displayName ?? audit.actor.username} · ${formatDate(audit.createdAt)}`} />)}</HistoryPanel>
+              <HistoryPanel title={translateUi("状态快照")}>{world?.snapshots.length === 0 ? <HistoryEmpty><UiText text={"尚未固化状态"} /></HistoryEmpty> : world?.snapshots.slice(0, 8).map((snapshot) => <HistoryRow key={snapshot.id} title={translateUi(statusMeta[snapshot.status].label)} detail={`${snapshot.capturedBy.displayName ?? snapshot.capturedBy.username} · ${formatDate(snapshot.createdAt, language)}`} fingerprint={snapshot.snapshotFingerprint} />)}</HistoryPanel>
+              <HistoryPanel title={translateUi("治理审计")}>{world?.audits.length === 0 ? <HistoryEmpty><UiText text={"尚无治理操作"} /></HistoryEmpty> : world?.audits.slice(0, 10).map((audit) => <HistoryRow key={audit.id} title={translateUi(auditLabels[audit.event])} detail={`${audit.actor.displayName ?? audit.actor.username} · ${formatDate(audit.createdAt, language)}`} />)}</HistoryPanel>
             </div>
           </div>
         </section>
@@ -363,6 +365,7 @@ function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, er
   onErrorDismiss: () => void;
   onRetire: (relation: WorldRelation, reason: string) => Promise<boolean>;
 }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const [reason, setReason] = useState("");
   const [open, setOpen] = useState(false);
@@ -370,7 +373,7 @@ function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, er
     <div className="flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{translateUi(relationLabels[relation.kind])}</span>{relation.stale ? <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700"><UiText text={"版本已变化"} /></span> : <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"><UiText text={"当前有效"} /></span>}</div>
     <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm"><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{sourceTitle}</span><span className="text-slate-300">→</span><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{targetTitle}</span></div>
     <p className="mt-4 text-sm leading-6 text-slate-600">{relation.rationale}</p>
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>{relation.createdBy.displayName ?? relation.createdBy.username} · {formatDate(relation.createdAt)}</span>{canEdit ? <OperationPanel title={translateUi("退役事实关系")} triggerLabel="退役关系" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending !== null} description="退役会将该关系从当前状态判断中移除，并保留历史记录。请填写原因。">{error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}<div className="max-w-xl"><label className="block text-sm font-medium text-slate-700"><UiText text={"退役理由"} /><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={translateUi("说明为何不再使用这条关系")} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm" /></label><button type="button" onClick={async () => { if (await onRetire(relation, reason)) { setReason(""); setOpen(false); } }} disabled={pending !== null || !reason.trim()} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-500 disabled:opacity-40">{pending === `retire-${relation.id}` ? <UiText text={"退役中…"} /> : <UiText text={"确认退役关系"} />}</button></div></OperationPanel> : null}</div>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>{relation.createdBy.displayName ?? relation.createdBy.username} · {formatDate(relation.createdAt, language)}</span>{canEdit ? <OperationPanel title={translateUi("退役事实关系")} triggerLabel="退役关系" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending !== null} description="退役会将该关系从当前状态判断中移除，并保留历史记录。请填写原因。">{error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}<div className="max-w-xl"><label className="block text-sm font-medium text-slate-700"><UiText text={"退役理由"} /><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={translateUi("说明为何不再使用这条关系")} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm" /></label><button type="button" onClick={async () => { if (await onRetire(relation, reason)) { setReason(""); setOpen(false); } }} disabled={pending !== null || !reason.trim()} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-500 disabled:opacity-40">{pending === `retire-${relation.id}` ? <UiText text={"退役中…"} /> : <UiText text={"确认退役关系"} />}</button></div></OperationPanel> : null}</div>
   </article>;
 }
 

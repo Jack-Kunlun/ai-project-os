@@ -1,7 +1,7 @@
 "use client";
 import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
-import {  UiText, useTranslate } from "@/components/appearance-provider";
+import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -14,6 +14,7 @@ import { safeResponseError } from "@/lib/safe-error-presentation";
 import { isReviewType, parseReviewType, type ReviewType } from "./materials/materials-navigation";
 import { buildProjectQuestionHref } from "./materials/materials-navigation";
 import styles from "./project-materials.module.css";
+import { formatUiDateTime } from "@/lib/ui-date-format";
 
 type Review = {
   source: "web" | "verified";
@@ -40,11 +41,12 @@ async function readJson<T>(response: Response): Promise<T> {
   return await response.json() as T;
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function formatDate(value: string, language: "zh-CN" | "en"): string {
+  return formatUiDateTime(new Date(value), language, { dateStyle: "medium", timeStyle: "short" });
 }
 
 export function ProjectMaterialReviewQueue({ projectId, onChanged, embedded = false }: { projectId: string; onChanged?: () => Promise<void>; embedded?: boolean }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const router = useRouter();
   const pathname = usePathname();
@@ -191,7 +193,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged, embedded = fa
       {message ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700"><UiFeedbackText text={message} /></p> : null}
       {loading ? <div className="mt-4 h-28 animate-pulse rounded-lg bg-slate-100" /> : error ? null : reviews.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">{search.trim() || itemType !== "all" ? <UiText text={"没有匹配的 AI 候选。"} /> : <UiText text={"当前没有待核对的整理结果。"} />}</p> : <div className="mt-4 space-y-2">{reviews.map((review) => (
         <article key={`${review.source}:${review.id}`} className={styles.reviewCard}>
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">{itemLabels[review.item.type]}</span><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{review.source === "web" ? <UiText text={"网页 AI"} /> : <UiText text={"受控 AI"} />}</span></div><h3 className="mt-3 text-base font-semibold">{review.item.title}</h3></div><span className="text-xs text-slate-400">{formatDate(review.createdAt)}</span></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">{itemLabels[review.item.type]}</span><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{review.source === "web" ? <UiText text={"网页 AI"} /> : <UiText text={"受控 AI"} />}</span></div><h3 className="mt-3 text-base font-semibold">{review.item.title}</h3></div><span className="text-xs text-slate-400">{formatDate(review.createdAt, language)}</span></div>
           <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{review.item.content}</p>
           <blockquote className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 [overflow-wrap:anywhere]">{review.evidence.excerpt || <UiText text={"未提供证据摘录"} />}</blockquote>
           <p className="mt-3 text-[12px] text-slate-400 [overflow-wrap:anywhere]">{review.model.providerName ?? review.model.providerKind ?? <UiText text={"模型供应商未记录"} />} · {review.model.modelId} {" "}<UiText text={"· Source"} />{" "}{review.evidence.sourceKind}</p>

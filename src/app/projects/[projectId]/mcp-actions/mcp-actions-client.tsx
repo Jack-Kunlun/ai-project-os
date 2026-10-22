@@ -2,12 +2,13 @@
 import { UiErrorText } from "@/components/ui-error-text";
 
 
-import { UiText, useTranslate } from "@/components/appearance-provider";
+import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { OperationPanel } from "@/components/operation-panel";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ProjectOverviewParentLink } from "@/components/project-parent-link";
+import { formatUiDateTime } from "@/lib/ui-date-format";
 import { connectionErrorText, readConnectionError } from "@/app/profile/connections/connection-ui";
 import supportStyles from "../project-support.module.css";
 
@@ -83,11 +84,11 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return await response.json() as T;
 }
 
-function formatDate(value: string | null | undefined): string {
+function formatDate(value: string | null | undefined, language: "zh-CN" | "en"): string {
   if (!value) return "暂无记录";
   const date = new Date(value);
   return Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date)
+    ? formatUiDateTime(date, language, { dateStyle: "medium", timeStyle: "short" })
     : "暂无记录";
 }
 
@@ -107,6 +108,7 @@ function actionStatusClass(status: ActionStatus): string {
 }
 
 export function ProjectMcpActionsClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
+  const { language } = useAppearance();
   const translateUi = useTranslate();
   const [actions, setActions] = useState<readonly Action[]>([]);
   const [grants, setGrants] = useState<readonly Grant[]>([]);
@@ -476,12 +478,12 @@ export function ProjectMcpActionsClient({ username, projectId, isSystemAdmin }: 
               {actions.length === 0 ? <p className="mt-5 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-500"><UiText text={"还没有项目 MCP 动作。"} /></p> : (
                 <div className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[minmax(180px,.6fr)_minmax(0,1fr)]">
                   <div className="min-w-0 space-y-2" aria-label={translateUi("项目 MCP 动作列表")}>
-                    {actions.map((action) => <button key={action.id} type="button" onClick={() => { setImportedSource(null); setOperationOpen(false); setSelectedActionId(action.id); }} disabled={pendingKey !== null} aria-pressed={selectedActionId === action.id} className={`w-full min-w-0 rounded-xl border p-3 text-left transition ${selectedActionId === action.id ? "border-indigo-300 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"}`}><span className="block break-all text-xs font-semibold text-slate-800">{action.toolName}</span><span className="mt-2 flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[12px] font-semibold ${actionStatusClass(action.status)}`}>{translateUi(statusLabels[action.status])}</span><span className="font-mono text-[10px] text-slate-400"><UiText text={"v"} />{action.stateVersion}</span></span><span className="mt-2 block text-[12px] text-slate-400">{formatDate(action.createdAt)}</span></button>)}
+                    {actions.map((action) => <button key={action.id} type="button" onClick={() => { setImportedSource(null); setOperationOpen(false); setSelectedActionId(action.id); }} disabled={pendingKey !== null} aria-pressed={selectedActionId === action.id} className={`w-full min-w-0 rounded-xl border p-3 text-left transition ${selectedActionId === action.id ? "border-indigo-300 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"}`}><span className="block break-all text-xs font-semibold text-slate-800">{action.toolName}</span><span className="mt-2 flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[12px] font-semibold ${actionStatusClass(action.status)}`}>{translateUi(statusLabels[action.status])}</span><span className="font-mono text-[10px] text-slate-400"><UiText text={"v"} />{action.stateVersion}</span></span><span className="mt-2 block text-[12px] text-slate-400">{formatDate(action.createdAt, language)}</span></button>)}
                   </div>
                   <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
                     {detailLoading ? <p className="py-8 text-center text-xs text-slate-500"><UiText text={"正在读取规范化参数与状态…"} /></p> : detailError ? <p role="alert" className="rounded-xl bg-rose-50 px-3 py-3 text-xs text-rose-700"><UiErrorText text={detailError} /></p> : detail ? <>
                       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h3 className="break-words text-base font-semibold text-slate-900">{detail.toolName}</h3><p className="mt-1 break-all font-mono text-[12px] text-slate-500">{detail.id}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${actionStatusClass(detail.status)}`}>{translateUi(statusLabels[detail.status])}</span></div>
-                      <dl className="mt-4 grid min-w-0 gap-3 rounded-xl bg-white p-3 text-xs sm:grid-cols-2"><div><dt className="text-slate-400"><UiText text={"状态版本"} /></dt><dd className="mt-1 font-mono font-semibold text-slate-800">{detail.stateVersion}</dd></div><div><dt className="text-slate-400"><UiText text={"授权版本"} /></dt><dd className="mt-1 font-mono font-semibold text-slate-800"><UiText text={"1"} /></dd></div><div className="min-w-0 sm:col-span-2"><dt className="text-slate-400"><UiText text={"动作修订"} /></dt><dd className="mt-1 break-all font-mono text-[12px] text-slate-700">{detail.actionRevision}</dd></div><div><dt className="text-slate-400"><UiText text={"提案时间"} /></dt><dd className="mt-1 text-slate-700">{formatDate(detail.createdAt)}</dd></div><div><dt className="text-slate-400"><UiText text={"审批到期"} /></dt><dd className="mt-1 text-slate-700">{formatDate(detail.approvalExpiresAt)}</dd></div></dl>
+                      <dl className="mt-4 grid min-w-0 gap-3 rounded-xl bg-white p-3 text-xs sm:grid-cols-2"><div><dt className="text-slate-400"><UiText text={"状态版本"} /></dt><dd className="mt-1 font-mono font-semibold text-slate-800">{detail.stateVersion}</dd></div><div><dt className="text-slate-400"><UiText text={"授权版本"} /></dt><dd className="mt-1 font-mono font-semibold text-slate-800"><UiText text={"1"} /></dd></div><div className="min-w-0 sm:col-span-2"><dt className="text-slate-400"><UiText text={"动作修订"} /></dt><dd className="mt-1 break-all font-mono text-[12px] text-slate-700">{detail.actionRevision}</dd></div><div><dt className="text-slate-400"><UiText text={"提案时间"} /></dt><dd className="mt-1 text-slate-700">{formatDate(detail.createdAt, language)}</dd></div><div><dt className="text-slate-400"><UiText text={"审批到期"} /></dt><dd className="mt-1 text-slate-700">{formatDate(detail.approvalExpiresAt, language)}</dd></div></dl>
                       {detailHasArguments ? <section className="mt-4 min-w-0"><h4 className="text-xs font-semibold text-slate-700"><UiText text={"服务端规范化后的完整参数"} /></h4><pre className="mt-2 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100">{jsonPreview(detail.arguments)}</pre></section> : <p className="mt-4 rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"><UiText text={"详情接口尚未返回参数；在参数可见前不能审批。"} /></p>}
                       {detail.result ? <section className="mt-4 min-w-0"><h4 className="text-xs font-semibold text-slate-700"><UiText text={"安全处理后的派发结果"} /></h4>{detail.result.payload === null ? <p className="mt-2 rounded-xl bg-white px-3 py-3 text-xs text-slate-600"><UiText text={"没有可显示的结果正文。结果指纹："} /><code className="break-all">{detail.result.resultFingerprint}</code></p> : <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100">{jsonPreview(detail.result.payload)}</pre>}<p className="mt-2 break-all text-[12px] text-slate-500"><UiText text={"指纹"} />{" "}{detail.result.resultFingerprint} · {detail.result.resultBytes} {" "}<UiText text={"字节 ·"} />{" "}{detail.result.omittedContentCount} {" "}<UiText text={"项内容已省略"} /></p></section> : null}
                       {detail.status === "succeeded" && detail.result ? <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void importResult()} disabled={archived || pendingKey !== null || detail.importedSourceId !== undefined} className={quietButtonClass}>{pendingKey === `import:${detail.id}` ? <UiText text={"纳入中…"} /> : detail.importedSourceId ? <UiText text={"已纳入未审核资料"} /> : <UiText text={"人工纳入未审核资料"} />}</button>{detail.importedSourceId || importedSource?.actionId === detail.id ? <a href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(detail.importedSourceId ?? importedSource!.sourceId)}`} className="text-xs font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"打开纳入的资料"} /></a> : null}</div> : null}

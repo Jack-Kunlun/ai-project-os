@@ -211,6 +211,9 @@ function SmallStat({ label, value }: { label: string; value: number }) {
 function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId: string; onClose: () => void; onCreated: () => Promise<void> }) {
   const t = useTranslate();
   const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const pendingRef = useRef(false);
+  const onCloseRef = useRef(onClose);
   useInquiryOperation(true, dialogRef);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -218,47 +221,105 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) { if (event.key === "Escape" && !pending) onClose(); }
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
+      const dialog = dialogRef.current;
+      if (!dialog?.isConnected) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const nestedDialog = target?.closest<HTMLElement>('[role="dialog"]');
+      if (nestedDialog && nestedDialog !== dialog) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (!pendingRef.current) onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>([
+        "a[href]",
+        "button:not([disabled])",
+        "input:not([disabled])",
+        "select:not([disabled])",
+        "textarea:not([disabled])",
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(","))).filter((element) => element.getClientRects().length > 0 && !element.closest("[hidden], [inert], [aria-hidden='true']"));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, pending]);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  const close = () => {
+    if (!pendingRef.current) onCloseRef.current();
+  };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!name.trim()) return;
+    pendingRef.current = true;
     setPending(true); setError(null);
     try {
       const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, description, workspaceId }) });
       if (!response.ok) throw new Error(t(await readError(response, "项目创建失败")));
       await onCreated();
       notifyUserProjectsChanged();
-      onClose();
+      onCloseRef.current();
     } catch (submitError) {
       setError(t(submitError instanceof Error ? submitError.message : "项目创建失败"));
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
   }
 
-  return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}>
-    <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="create-project-title" className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
+  return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+    <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="create-project-title" className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
       <header data-dialog-header className={`${modalHeaderClassName} flex shrink-0 items-start justify-between gap-4 px-7 py-5 sm:px-8`}>
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"New project"} /></p><h2 id="create-project-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text="创建项目空间" /></h2></div>
-        <button data-dialog-close type="button" onClick={onClose} disabled={pending} className="app-icon-button" aria-label={t("关闭")}><ShellIcon name="close" className="app-icon--control" /></button>
+        <button ref={closeButtonRef} data-dialog-close type="button" onClick={close} disabled={pending} className="app-icon-button" aria-label={t("关闭")}><ShellIcon name="close" className="app-icon--control" /></button>
       </header>
       <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
         <p className="text-sm leading-6 text-slate-600"><UiText text="项目会隔离自己的资料、仓库和智能记忆；模型能力由平台默认模型或个人双确认委托提供。" /></p>
         <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"><UiText text="创建到当前已选工作空间。提交后项目会出现在当前工作空间的项目列表中。" /></p>
         <form id="projects-create-form" onSubmit={submit} className="mt-5">
           <label htmlFor="projects-project-name" className="text-sm font-semibold text-slate-700"><UiText text="项目名称" /></label>
-          <input id="projects-project-name" autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("例如：AI Project OS")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
+          <input id="projects-project-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("例如：AI Project OS")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           <label htmlFor="projects-project-description" className="mt-5 block text-sm font-semibold text-slate-700"><UiText text="项目描述" /> <span className="font-normal text-slate-400"><UiText text="（可选）" /></span></label>
           <textarea id="projects-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder={t("这个项目在解决什么问题？当前最重要的目标是什么？")} className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
         </form>
       </div>
       <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
-        <button data-dialog-close type="button" onClick={onClose} disabled={pending} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"><UiText text="取消" /></button>
+        <button data-dialog-close type="button" onClick={close} disabled={pending} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"><UiText text="取消" /></button>
         <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
       </footer>
     </section>

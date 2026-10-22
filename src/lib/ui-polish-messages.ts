@@ -1,5 +1,12 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "图片与截图": "Images & screenshots",
+  "更新时间未知": "Update time unknown",
+  "时间无效": "Invalid time",
+  "暂无到期时间": "No expiry date",
+  "尚未抓取": "Not fetched yet",
+  "未填写": "Not provided",
+  "浏览器时区": "Browser time zone",
   "Key 尾号": "Key suffix",
   "Qwen（阿里云百炼）": "Qwen (Alibaba Cloud Bailian)",
   "GLM（智谱开放平台）": "GLM (Zhipu Open Platform)",

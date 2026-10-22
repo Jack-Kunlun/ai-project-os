@@ -23,6 +23,87 @@ async function projectFixture(page: Page) {
   return href!.slice("/projects/".length);
 }
 
+test("project creation dialog traps focus, restores its opener, and stays open while pending", async ({ page }) => {
+  await signInR02Admin(page);
+  const user = await seedBrowserPersonalUser(`browser-project-dialog-${randomUUID().slice(0, 8)}`, "BrowserProjectDialog2026Password!");
+  await signOutR02User(page);
+  await signInR02PersonalUser(page, user);
+
+  let resolvePendingCreate!: () => void;
+  const pendingCreate = new Promise<void>((resolve) => { resolvePendingCreate = resolve; });
+  let markCreateStarted!: () => void;
+  const createStarted = new Promise<void>((resolve) => { markCreateStarted = resolve; });
+  const projectCreateRequests: string[] = [];
+  await page.route("**/api/projects", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    projectCreateRequests.push(route.request().method());
+    markCreateStarted();
+    await pendingCreate;
+    await route.fulfill({ status: 400, json: { error: { code: "CONTROLLED_UI_TEST", message: "Controlled project creation error" } } });
+  });
+
+  for (const appearance of [
+    { width: 1440, height: 900, language: "zh-CN", theme: "light", openerName: "＋ 新建项目", dialogName: "创建项目空间", closeName: "关闭", cancelName: "取消" },
+    { width: 390, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "Create a project workspace", closeName: "Close", cancelName: "Cancel" },
+  ] as const) {
+    await page.setViewportSize({ width: appearance.width, height: appearance.height });
+    const origin = new URL(page.url()).origin;
+    await page.context().addCookies([
+      { name: "aipos-language", value: appearance.language, url: origin },
+      { name: "aipos-theme", value: appearance.theme, url: origin },
+    ]);
+    await page.goto("/projects");
+    await expect(page.locator("html")).toHaveAttribute("lang", appearance.language === "en" ? "en" : "zh-CN");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", appearance.theme === "dark" ? "dark" : "light");
+
+    const opener = page.getByRole("button", { name: appearance.openerName, exact: true }).first();
+    await opener.click();
+    const dialog = page.getByRole("dialog", { name: appearance.dialogName, exact: true });
+    const close = dialog.getByRole("button", { name: appearance.closeName, exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.getByRole("button", { name: appearance.cancelName, exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+    expect(projectCreateRequests).toEqual([]);
+
+    await opener.click();
+    const reopenedDialog = page.getByRole("dialog", { name: appearance.dialogName, exact: true });
+    await reopenedDialog.getByRole("button", { name: appearance.closeName, exact: true }).click();
+    await expect(reopenedDialog).toBeHidden();
+    await expect(opener).toBeFocused();
+    expect(projectCreateRequests).toEqual([]);
+  }
+
+  const opener = page.getByRole("button", { name: "＋ New project", exact: true }).first();
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "Create a project workspace", exact: true });
+  await dialog.getByLabel("Project name", { exact: true }).fill("Pending project draft");
+  await dialog.getByRole("button", { name: "Create project", exact: true }).click();
+  await createStarted;
+  const close = dialog.getByRole("button", { name: "Close", exact: true });
+  await expect(close).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await page.mouse.click(4, 4);
+  await expect(dialog).toBeVisible();
+  await close.evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(dialog).toBeVisible();
+  expect(projectCreateRequests).toEqual(["POST"]);
+
+  resolvePendingCreate();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByLabel("Project name", { exact: true })).toHaveValue("Pending project draft");
+  await expect(dialog).toBeVisible();
+});
+
 /** Model responses are isolated fixtures; PostgreSQL service gates prove actual fact persistence. */
 async function mockModelFlow(page: Page, projectId: string) {
   const prepared: Array<{ sourceIds: string[]; clientKey: string }> = [];

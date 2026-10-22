@@ -256,6 +256,9 @@ test("materials source previews wrap long URLs at narrow widths", async ({ page 
     return route.abort();
   });
   await page.route(`**/api/projects/${projectId}/sources?*`, (route) => fulfillJson(route, source));
+  await page.route(`**/api/projects/${projectId}/sources/${source.sources[0]!.id}`, (route) => fulfillJson(route, {
+    source: { ...source.sources[0], contentText: source.sources[0]!.preview, contentHash: "b".repeat(64) },
+  }));
 
   for (const mode of [
     { language: "zh-CN", theme: "light" },
@@ -267,6 +270,8 @@ test("materials source previews wrap long URLs at narrow widths", async ({ page 
       { name: "aipos-theme", value: mode.theme, url: origin, sameSite: "Lax" },
     ]);
     await page.goto(`/projects/${projectId}/materials`);
+
+    if (mode.language === "en") await expect(page.getByRole("button", { name: "Images & screenshots", exact: true })).toBeVisible();
 
     const sourceList = page.getByRole("list", { name: /^(项目原始资料列表|Project source list)$/u });
     await expect(sourceList.getByRole("heading")).toContainText("https://example.feishu.cn/docx/");

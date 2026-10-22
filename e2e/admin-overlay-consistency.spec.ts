@@ -153,7 +153,7 @@ async function setEnglishDarkAppearance(page: Page): Promise<void> {
 }
 
 async function expectSingleLineFooterAction(form: Locator, expectedLabel: string): Promise<void> {
-  const geometry = await form.locator('button[type="submit"]').evaluate((button) => {
+  const geometry = await form.getByRole("button", { name: expectedLabel, exact: true }).evaluate((button) => {
     const footer = button.parentElement;
     if (!footer) throw new Error("ADMIN_FOOTER_ACTION_PARENT_MISSING");
     const range = document.createRange();
@@ -290,7 +290,7 @@ test("admin profile overlays use shared geometry and phone verification stays in
     await field.fill(code);
   }
 
-  await operation.dialog.locator("button[type=submit]").click();
+  await operation.dialog.getByRole("button", { name: translated("确认换绑并重新登录"), exact: true }).click();
   await phoneRequestObserved;
   await expect(operation.dialog.locator("fieldset")).toBeDisabled();
   const closeButton = operation.dialog.getByRole("button", { name: translated("关闭窗口"), exact: true });

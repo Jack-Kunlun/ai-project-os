@@ -6,7 +6,7 @@ import { UiText, useAppearance, useTranslate } from "@/components/appearance-pro
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "../support-pages.module.css";
-import { formatUiDateTime } from "@/lib/ui-date-format";
+import { formatUiDateTimeOrFallback } from "@/lib/ui-date-format";
 
 type ResourceCount = number | "1+" | null;
 
@@ -208,9 +208,8 @@ async function readJson(endpoint: string, signal: AbortSignal, label: string): P
 }
 
 /** Format project activity timestamps without allowing invalid dates to leak. */
-function formatDate(value: string, language: "zh-CN" | "en"): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "更新时间未知" : formatUiDateTime(date, language, { dateStyle: "medium", timeStyle: "short" });
+function formatDate(value: string, language: "zh-CN" | "en", t: (text: string) => string): string {
+  return formatUiDateTimeOrFallback(new Date(value), language, t("更新时间未知"), { dateStyle: "medium", timeStyle: "short" });
 }
 
 /** Show resource counts as unavailable instead of turning failed reads into zero. */
@@ -458,7 +457,7 @@ function KnowledgeOverviewSection({
           <div className="mt-6 grid gap-4 sm:grid-cols-3" aria-label={translateUi("知识库容量与索引状态")}>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"知识文档"} /></p><p className="mt-2 text-2xl font-semibold text-slate-950">{overview.capacity.documentCount}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"当前有效文档"} /></p></div>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"已用容量"} /></p><p className="mt-2 text-2xl font-semibold text-slate-950">{formatBytes(overview.capacity.usedBytes)}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"按当前版本正文 UTF-8 字节统计 ·"} />{" "}{overview.capacity.limitLabel}</p></div>
-            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"索引状态"} /></p><p className="mt-2 text-base font-semibold text-amber-700"><UiText text={overview.index.label} /></p><p className="mt-1 text-xs text-slate-500"><UiText text={"统计时间"} />{" "}{formatDate(overview.capacity.measuredAt, language)}</p></div>
+            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"索引状态"} /></p><p className="mt-2 text-base font-semibold text-amber-700"><UiText text={overview.index.label} /></p><p className="mt-1 text-xs text-slate-500"><UiText text={"统计时间"} />{" "}{formatDate(overview.capacity.measuredAt, language, translateUi)}</p></div>
           </div>
 
           <div className="mt-6 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
@@ -500,10 +499,11 @@ function MetricCard({ label, value, href }: Readonly<{ label: string; value: str
 /** Show project state without duplicating lifecycle controls from `/projects`. */
 function ProjectCard({ project }: Readonly<{ project: PersonalProjectSummary }>): React.JSX.Element {
   const { language } = useAppearance();
+  const translateUi = useTranslate();
   return (
     <article className="flex h-full min-w-0 flex-col rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
       <div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="truncate text-lg font-semibold text-slate-900">{project.name}</h3><p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{project.description ?? <UiText text={"暂无项目描述。"} />}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${project.memoryReady ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{project.memoryReady ? <UiText text={"记忆就绪"} /> : <UiText text={"待建立记忆"} />}</span></div>
-      <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600"><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"事实"} />{" "}{project.itemCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"仓库"} />{" "}{project.repositoryCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"更新于"} />{" "}{formatDate(project.updatedAt, language)}</span></div>
+      <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600"><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"事实"} />{" "}{project.itemCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"仓库"} />{" "}{project.repositoryCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"更新于"} />{" "}{formatDate(project.updatedAt, language, translateUi)}</span></div>
       <div className="mt-auto flex border-t border-slate-200/70 pt-4"><Link href={`/projects/${project.id}`} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-600"><UiText text={"进入项目 →"} /></Link></div>
     </article>
   );

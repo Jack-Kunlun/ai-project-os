@@ -13,7 +13,7 @@ import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
-import { formatUiDateTime } from "@/lib/ui-date-format";
+import { formatUiDateTimeOrFallback } from "@/lib/ui-date-format";
 import styles from "./project-materials.module.css";
 import { buildMaterialsReturnTo, buildProjectQuestionHref, isAddSourceView, MATERIAL_SOURCE_CATEGORIES, parseMaterialKind, parseProjectItemReviewStatus, type MaterialKind } from "./materials/materials-navigation";
 import { ProjectMaterialIntake } from "./project-material-intake";
@@ -155,13 +155,9 @@ async function getItems(projectId: string, input: { page: number; search: string
   return { items: payload.items, counts: payload.counts, pagination: payload.pagination };
 }
 
-function formatSourceDate(value: string | null, language: "zh-CN" | "en"): string {
-  if (!value) return "未填写";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "时间无效";
-
-  return formatUiDateTime(date, language, {
+function formatSourceDate(value: string | null, language: "zh-CN" | "en", t: (text: string) => string): string {
+  const date = value ? new Date(value) : null;
+  return formatUiDateTimeOrFallback(date, language, t(value ? "时间无效" : "未填写"), {
     dateStyle: "medium",
     timeStyle: "short",
   });
@@ -794,7 +790,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
                     {sources.map((source) => (
                       <li key={source.id} className={styles.sourceRow}>
                         <div className={styles.sourceRowMain}>
-                          <div className={styles.sourceMeta}><span className={styles.kindBadge}>{source.kind}</span><span>{source.kind === "manual" ? <UiText text={"手工文本"} /> : <UiText text={"来源已接入"} />}</span><time dateTime={source.ingestedAt}>{formatSourceDate(source.ingestedAt, language)}</time></div>
+                          <div className={styles.sourceMeta}><span className={styles.kindBadge}>{source.kind}</span><span>{source.kind === "manual" ? <UiText text={"手工文本"} /> : <UiText text={"来源已接入"} />}</span><time dateTime={source.ingestedAt}>{formatSourceDate(source.ingestedAt, language, translateUi)}</time></div>
                           <h3 className={styles.sourcePreview}>{source.preview || <UiText text={"未提供文字预览"} />}</h3>
                         </div>
                         <div className={styles.sourceActions}>
@@ -939,7 +935,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               <div className="mt-5 min-w-0 max-w-full rounded-xl border border-indigo-100 bg-white p-4">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   <span className="rounded-full bg-indigo-100 px-2.5 py-1 font-semibold uppercase tracking-wide text-indigo-700">{selectedSource.kind}</span>
-                  <span><UiText text={"接入于："} />{formatSourceDate(selectedSource.ingestedAt, language)}</span>
+                  <span><UiText text={"接入于："} />{formatSourceDate(selectedSource.ingestedAt, language, translateUi)}</span>
                 </div>
                 <pre className="mt-4 min-w-0 max-w-full max-h-[34rem] overflow-auto whitespace-pre-wrap border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">{selectedSource.contentText}</pre>
               </div>
@@ -1024,6 +1020,7 @@ function ItemCard({
   onAction: (item: ProjectItem, action: ItemAction) => void;
 }) {
   const { language } = useAppearance();
+  const translateUi = useTranslate();
   const isActionPending = itemActionId === item.id;
   const actionsDisabled = isActionPending || isSavingItem || editingItemId === item.id;
   const editDisabled = Boolean(itemActionId) || isSavingItem || editingItemId === item.id;
@@ -1127,9 +1124,9 @@ function ItemCard({
       </div>
 
       <dl className="mt-5 grid gap-3 border-t border-slate-100 pt-5 text-xs text-slate-500 sm:grid-cols-3">
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"发生时间"} /></dt><dd className="mt-1">{formatSourceDate(item.occurredAt, language)}</dd></div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"确认时间"} /></dt><dd className="mt-1">{formatSourceDate(item.confirmedAt, language)}</dd></div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"更新时间"} /></dt><dd className="mt-1">{formatSourceDate(item.updatedAt, language)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"发生时间"} /></dt><dd className="mt-1">{formatSourceDate(item.occurredAt, language, translateUi)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"确认时间"} /></dt><dd className="mt-1">{formatSourceDate(item.confirmedAt, language, translateUi)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400"><UiText text={"更新时间"} /></dt><dd className="mt-1">{formatSourceDate(item.updatedAt, language, translateUi)}</dd></div>
       </dl>
     </li>
   );

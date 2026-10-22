@@ -2,12 +2,12 @@
 import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 
-import { UiText, useAppearance } from "@/components/appearance-provider";
+import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { projectJobUnknownPresentation } from "@/lib/project-job-outcome-presentation";
 import styles from "./project-materials.module.css";
-import { formatUiDateTime } from "@/lib/ui-date-format";
+import { formatUiDateTimeOrFallback } from "@/lib/ui-date-format";
 
 type ProcessingJob = Readonly<{
   id: string;
@@ -92,9 +92,9 @@ function inputSummaryLabel(job: ProcessingJob): string | null {
   return null;
 }
 
-function formatCreatedAt(value: string, language: "zh-CN" | "en"): string {
+function formatCreatedAt(value: string, language: "zh-CN" | "en", t: (text: string) => string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "时间未知" : formatUiDateTime(date, language, {
+  return formatUiDateTimeOrFallback(date, language, t("时间未知"), {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
   });
 }
@@ -104,6 +104,7 @@ export function ProjectProcessingTasks({ projectId, onChanged }: {
   onChanged?: () => Promise<void>;
 }) {
   const { language } = useAppearance();
+  const translateUi = useTranslate();
   const [jobs, setJobs] = useState<ProcessingJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -198,7 +199,7 @@ export function ProjectProcessingTasks({ projectId, onChanged }: {
       const unknownOutcome = projectJobUnknownPresentation(job);
       return <article key={job.id} className={styles.taskCard}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h3 className="font-semibold text-slate-900">{job.kind === "assetExtract" ? <UiText text={"文件图片识别"} /> : <UiText text={"资料自动整理"} />}</h3>{inputLabel ? <p className="mt-1 max-w-2xl break-all text-xs text-slate-600">{inputLabel}</p> : null}<p className="mt-1 text-xs text-slate-500">{unknownOutcome?.label ?? statusLabel(job.status)} · {unknownOutcome?.stageLabel ?? stageLabel(job.stage)} {" "}<UiText text={"· 创建于"} />{" "}{formatCreatedAt(job.createdAt, language)}</p></div>
+          <div><h3 className="font-semibold text-slate-900">{job.kind === "assetExtract" ? <UiText text={"文件图片识别"} /> : <UiText text={"资料自动整理"} />}</h3>{inputLabel ? <p className="mt-1 max-w-2xl break-all text-xs text-slate-600">{inputLabel}</p> : null}<p className="mt-1 text-xs text-slate-500">{unknownOutcome?.label ?? statusLabel(job.status)} · {unknownOutcome?.stageLabel ?? stageLabel(job.stage)} {" "}<UiText text={"· 创建于"} />{" "}{formatCreatedAt(job.createdAt, language, translateUi)}</p></div>
           {canCancel ? <button type="button" onClick={() => void cancel(job)} className="min-h-9 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700"><UiText text={"取消任务"} /></button> : canceling === job.id ? <span className="text-xs text-slate-500"><UiText text={"正在取消…"} /></span> : null}
         </div>
         {progress !== null ? <div className="mt-3"><div className="flex justify-between text-xs text-slate-500"><span><UiText text={"处理进度"} /></span><span>{job.progressCurrent}/{job.progressTotal}（{progress}%）</span></div><div className={`${styles.taskProgress} mt-1`} role="progressbar" aria-valuemin={0} aria-valuemax={job.progressTotal} aria-valuenow={job.progressCurrent} aria-label={`${job.kind === "assetExtract" ? "文件图片识别" : "资料自动整理"}进度`}><div className={styles.taskProgressFill} style={{ width: `${progress}%` }} /></div></div> : null}

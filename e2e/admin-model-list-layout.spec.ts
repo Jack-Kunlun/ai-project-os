@@ -95,7 +95,8 @@ test("admin models use compact lists and open read-only drawers across narrow an
     await expect(page.getByText("1 provider", { exact: true })).toBeVisible();
     await expect(providerRow).toContainText("gpt-4.1-mini");
     const configuredModelCount = providerRow.getByRole("cell").nth(2);
-    await expect(configuredModelCount).toHaveText("3 models");
+    await expect(configuredModelCount.getByText("2 models", { exact: true })).toBeVisible();
+    await expect(configuredModelCount).toContainText("gpt-4.1-mini · text-embedding-3-small");
     await expect(configuredModelCount).not.toContainText("projects");
     await expect(providerRow.getByRole("button", { name: "Manage connection", exact: true })).toBeVisible();
     const embeddingRow = page.locator('[data-operation="embedding"]');

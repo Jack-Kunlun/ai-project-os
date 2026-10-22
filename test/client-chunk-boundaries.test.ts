@@ -111,3 +111,12 @@ test("feedback exports share the appearance chunk while the error interpreter st
     assert.equal(cacheGroups.appearance.test?.test("/app/src/lib/ui-error-text.ts".replaceAll("/", separator)), false);
   }
 });
+
+test("locale date formatting is shared without adding code to unrelated page chunks", () => {
+  const cacheGroups = groups();
+  for (const separator of ["/", "\\"]) {
+    const resource = "/app/src/lib/ui-date-format.ts".replaceAll("/", separator);
+    assert.deepEqual(Object.keys(cacheGroups).filter(key => cacheGroups[key].test?.test(resource)), ["uiDateFormat"]);
+    assert.equal(cacheGroups.uiDateFormat.test?.test("/app/src/app/guide/guide-client.tsx".replaceAll("/", separator)), false);
+  }
+});

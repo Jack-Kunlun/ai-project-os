@@ -164,6 +164,12 @@ const nextConfig: NextConfig = {
           },
           chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
         },
+        // Locale formatting is used by many small legacy pages below the default split threshold.
+        uiDateFormat: {
+          test: /[\\/]src[\\/]lib[\\/]ui-date-format\.ts$/,
+          name: "ui-date-format",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
         graphicCaptcha: {
           test: /[\\/]src[\\/]components[\\/]graphic-captcha-dialog\.tsx$/,
           name: "graphic-captcha",

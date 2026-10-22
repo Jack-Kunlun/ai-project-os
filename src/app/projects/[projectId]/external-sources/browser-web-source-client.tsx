@@ -5,7 +5,7 @@ import { UiFeedbackText } from "@/components/ui-error-text";
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { useState, type FormEvent } from "react";
 import { OperationPanel } from "@/components/operation-panel";
-import { formatUiDateTime } from "@/lib/ui-date-format";
+import { formatUiDateTimeOrFallback } from "@/lib/ui-date-format";
 
 export type BrowserWebSourceSummary = {
   id: string;
@@ -29,8 +29,8 @@ async function responseError(response: Response, fallback: string): Promise<stri
   } catch { return fallback; }
 }
 
-function time(value: string | null, language: "zh-CN" | "en"): string {
-  return value === null ? "尚未抓取" : formatUiDateTime(new Date(value), language, { dateStyle: "medium", timeStyle: "short" });
+function time(value: string | null, language: "zh-CN" | "en", t: (text: string) => string): string {
+  return formatUiDateTimeOrFallback(value === null ? null : new Date(value), language, t("尚未抓取"), { dateStyle: "medium", timeStyle: "short" });
 }
 
 export function BrowserWebSourceForm({ projectId, onCreated }: { projectId: string; onCreated: () => void }) {
@@ -138,8 +138,8 @@ export function BrowserWebSourceCard({ projectId, source, canManage, canReview, 
 
   return <article className="rounded-3xl border border-cyan-200 bg-white p-6 shadow-sm">
     <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h3 className="truncate text-lg font-semibold">{source.name}</h3><a href={source.url} target="_blank" rel="noreferrer" className="mt-1 block max-w-lg truncate text-xs text-cyan-700 hover:underline">{source.url}</a></div><span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800">{source.authenticationMode === "siteForm" ? <UiText text={"站点表单登录"} /> : <UiText text={"JavaScript 渲染"} />}</span></div>
-    <div className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><UiText text={"状态："} />{source.status === "disabled" ? <UiText text={"已停用"} /> : source.status === "error" ? <UiText text={"需要处理"} /> : <UiText text={"已启用"} />}</div><div><UiText text={"最近抓取："} />{time(source.lastFetchedAt, language)}</div><div>{source.authenticationMode === "siteForm" ? `私有预览：${source.pendingReview ? "可查看" : "暂无内容"}` : `发布：${source.pointer ? "已有活动版本" : source.pendingReview ? "等待审核" : "尚未发布"}`}</div></div>
-    {source.pendingReview ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">{source.authenticationMode === "siteForm" ? <UiText text={"Owner 私有预览"} /> : <UiText text={"待审核"} />}：{source.pendingReview.title} · {time(source.pendingReview.fetchedAt, language)}</p> : null}
+    <div className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><UiText text={"状态："} />{source.status === "disabled" ? <UiText text={"已停用"} /> : source.status === "error" ? <UiText text={"需要处理"} /> : <UiText text={"已启用"} />}</div><div><UiText text={"最近抓取："} />{time(source.lastFetchedAt, language, translateUi)}</div><div>{source.authenticationMode === "siteForm" ? `私有预览：${source.pendingReview ? "可查看" : "暂无内容"}` : `发布：${source.pointer ? "已有活动版本" : source.pendingReview ? "等待审核" : "尚未发布"}`}</div></div>
+    {source.pendingReview ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">{source.authenticationMode === "siteForm" ? <UiText text={"Owner 私有预览"} /> : <UiText text={"待审核"} />}：{source.pendingReview.title} · {time(source.pendingReview.fetchedAt, language, translateUi)}</p> : null}
     {source.lastErrorCode ? <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs text-rose-700"><UiText text={"安全错误码："} />{source.lastErrorCode}</p> : null}
     {message ? <p role="status" className="mt-4 text-xs text-slate-600"><UiFeedbackText text={message} /></p> : null}
     {canManage ? <OperationPanel title={translateUi("管理浏览器来源")} triggerLabel="管理来源" open={operationOpen} onOpenChange={setOperationOpen} disabled={pending} description="停用来源会退役已发布版本；手动抓取不会自动发布内容。">

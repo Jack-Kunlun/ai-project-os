@@ -184,11 +184,11 @@ async function installDisplayOnlyLongTeamFixture(page: Page, fixture: TeamFixtur
   return evidence;
 }
 
-async function expectLongMemberCard(page: Page, roleLabel: string): Promise<void> {
+async function expectLongMemberCard(page: Page, roleLabel: string, layout: "row" | "card" = "card"): Promise<void> {
   const username = page.getByText(`@${LONG_USERNAME}`, { exact: true });
   await expect(username).toBeVisible();
   await expect(page.getByText(LONG_DISPLAY_NAME, { exact: true })).toBeVisible();
-  const card = username.locator("xpath=../..");
+  const card = username.locator(layout === "row" ? "xpath=ancestor::tr[1]" : "xpath=../..");
   await expect(card.getByText(roleLabel, { exact: true })).toBeVisible();
   const [cardBox, roleBox] = await Promise.all([
     card.boundingBox(),
@@ -230,7 +230,7 @@ test("team overview and member query layouts fit 390px in English dark mode with
     await expect(ownerPage.locator("html")).toHaveAttribute("lang", "en");
     await expect(ownerPage.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(ownerPage.getByRole("heading", { name: "Team projects", exact: true })).toBeVisible();
-    await expectLongMemberCard(ownerPage, "Member");
+    await expectLongMemberCard(ownerPage, "Member", "row");
     await expectR02NoHorizontalOverflow(ownerPage, "team-owner-overview-en-dark-390");
     await captureTeamView(ownerPage, testInfo, "team-owner-overview-en-dark-390.png");
 

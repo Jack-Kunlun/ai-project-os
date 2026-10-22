@@ -98,6 +98,13 @@ test("source detail and project members follow prototype reading layouts (isolat
     const sourceDocument = page.locator("[data-source-document]");
     await expect(sourceDocument).toBeVisible();
     await expect(sourceDocument).toHaveText(sourceText);
+    const documentPadding = await sourceDocument.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [parseFloat(style.paddingLeft), parseFloat(style.paddingRight)];
+    });
+    for (const padding of documentPadding) expect(padding, "original text keeps the card's reading inset").toBeGreaterThanOrEqual(20);
+    await expect(page.getByText("SHA-256", { exact: true })).toBeVisible();
+    await expect(page.locator("[data-page-content]").getByRole("complementary").getByRole("link", { name: /^(智能问答|Ask AI)/u })).toHaveCount(0);
     const readingBox = await sourceDocument.locator("..").boundingBox();
     const metadataBox = await page.locator("[data-page-content]").getByRole("complementary").boundingBox();
     expect(readingBox).not.toBeNull();

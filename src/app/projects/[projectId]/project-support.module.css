@@ -187,4 +187,5 @@
   .supportPage > :global(div[class*="mx-auto"]){ padding:var(--app-page-padding); }
 }
 
-.supportPage :global([data-source-document]) { margin:0; padding:0; color:var(--app-text); background:var(--app-surface); font-family:inherit; font-size:13px; line-height:1.95; }
+.supportPage :global([data-source-document]) { margin:0; padding:20px; color:var(--app-text); background:var(--app-surface); font-family:inherit; font-size:13px; line-height:1.95; }
+@media (min-width:640px) { .supportPage :global([data-source-document]) { padding:24px; } }

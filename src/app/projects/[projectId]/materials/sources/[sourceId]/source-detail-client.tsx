@@ -5,13 +5,12 @@ import { UiErrorText } from "@/components/ui-error-text";
 import { UiText, useTranslate, useAppearance } from "@/components/appearance-provider";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { OperationPanel } from "@/components/operation-panel";
 import { ProjectFactImport } from "../../../project-fact-import";
 import { AppHeader } from "@/components/app-header";
 import { ParentPageLink } from "@/components/parent-page-link";
 import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
-import { buildProjectQuestionHref, safeMaterialsReturnTo } from "../../materials-navigation";
+import { safeMaterialsReturnTo } from "../../materials-navigation";
 import supportStyles from "../../../project-support.module.css";
 
 type ProjectSource = {
@@ -102,14 +101,13 @@ export function ProjectSourceDetailClient({ username, isSystemAdmin }: { usernam
                 <div><dt className="text-xs font-medium text-slate-500"><UiText text={"资料时间"} /></dt><dd className="mt-1">{formatDate(source.capturedAt, language)}</dd></div>
                 <div><dt className="text-xs font-medium text-slate-500"><UiText text={"接入于"} /></dt><dd className="mt-1">{formatDate(source.ingestedAt, language)}</dd></div>
               </dl>
-              <div className="mt-4 border-t border-slate-100 pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500"><UiText text={"SHA-256"} /></p><code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code></div>
+              <div className="mt-4 border-t border-slate-100 pt-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"SHA-256"} /></p><code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code></div>
             </section>
             <section aria-label={translateUi("资料下一步")} className="rounded-md border border-indigo-100 bg-indigo-50/50 p-5">
               <h2 className="text-sm font-semibold"><UiText text={"资料已保存，接下来做什么？"} /></h2>
               <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={"可直接整理这份资料；有原文依据且符合条件的内容形成事实，其余结果待核对。想查资料时，再单独确认更新问答索引。"} /></p>
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <OperationPanel title={translateUi("整理这份资料")} triggerLabel="继续 AI 整理"><ProjectFactImport projectId={projectId} sourceIds={[source.id]} onChanged={async () => undefined} /></OperationPanel>
-                <Link href={buildProjectQuestionHref(projectId)} className="text-sm font-semibold text-indigo-700 underline"><UiText text={"智能问答 →"} /></Link>
               </div>
             </section>
           </aside>

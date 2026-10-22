@@ -200,6 +200,12 @@ test("personal Git and MCP connection lists match the prototype across desktop a
       const addButton = pageHeader.getByRole("button", { name: connection.addLabel, exact: true });
       await expect(addButton).toBeVisible();
       await expect(addButton).toBeEnabled();
+      await expect(addButton).toHaveCSS("min-height", mode.width <= 700 ? "44px" : "40px");
+      if (mode.width > 700) {
+        const headingBounds = await page.getByRole("heading", { name: connection.heading, exact: true }).boundingBox();
+        const actionBounds = await addButton.boundingBox();
+        expect(Math.abs(actionBounds!.y + actionBounds!.height / 2 - headingBounds!.y - headingBounds!.height / 2), "header action aligns with the title instead of a wrapped description").toBeLessThanOrEqual(6);
+      }
 
       const search = page.locator('[data-page-content] input[type="search"]');
       const status = page.locator("[data-page-content] select");
@@ -217,7 +223,7 @@ test("personal Git and MCP connection lists match the prototype across desktop a
       await status.selectOption("verified");
       await expect(connectionHeading).toBeVisible();
       await expect(page.locator("[data-page-content] option:checked")).toHaveText(
-        connection.kind === "mcp" && english ? "Discovered" : english ? "Verified" : "已验证",
+        connection.kind === "mcp" ? english ? "Discovered" : "已发现" : english ? "Verified" : "已验证",
       );
 
       await expectR02NoHorizontalOverflow(page, `${connection.kind}-${mode.width}-${mode.language}-${mode.theme}`);

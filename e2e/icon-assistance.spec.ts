@@ -70,6 +70,19 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expect(page).toHaveURL(/\/dashboard$/u);
     const restored=page.locator('[data-floating-inquiry-root] > .inquiry-launcher');
     await expect(restored).toBeVisible();
+    await expect(page.locator('aside[aria-labelledby="common-actions-heading"] a[href="/ask"]')).toHaveCount(0);
+    if(mode.width===390){
+      await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
+      const overlaps=await page.locator('[data-page-content]').evaluate(root=>{
+        const launcher=document.querySelector('.inquiry-launcher:not([hidden])')!.getBoundingClientRect();
+        return [...root.querySelectorAll('a,button')].filter(element=>{
+          const r=element.getBoundingClientRect();
+          return r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight&&Math.min(r.right,launcher.right)-Math.max(r.left,launcher.left)>1&&Math.min(r.bottom,launcher.bottom)-Math.max(r.top,launcher.top)>1;
+        }).map(element=>element.textContent?.trim());
+      });
+      expect(overlaps,'main controls must scroll clear of the floating launcher').toEqual([]);
+      await page.screenshot({path:testInfo.outputPath(`dashboard-safe-${name}.png`)});
+    }
     expect(await restored.evaluate(element=>element.isConnected&&!element.closest('[data-inquiry-footer]'))).toBe(true);
     await restored.click();
     const restoredAsk=page.getByRole('dialog',{name:en?'Floating Ask AI':'智能问答悬浮窗',exact:true});

@@ -35,3 +35,6 @@
 .inquiry-launcher.in-operation-launcher:hover{background:var(--app-surface-soft);color:var(--app-link)}
 .inquiry-launcher.in-operation-launcher:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}
 @media(max-width:700px){.inquiry-operation-footer{padding:10px 16px}}
+
+/* Reading controls can scroll clear of the fixed launcher; full-page chat owns its height. */
+body:has([data-floating-inquiry-root]) [data-page-content]:not([data-ask-page] *){padding-bottom:100px}

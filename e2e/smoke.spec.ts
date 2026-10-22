@@ -896,7 +896,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto("/personal/connections/mcp");
   await expect(page.getByRole("heading", { name: "我的 MCP 连接", exact: true })).toBeVisible();
-  const mcpBoundary = page.locator("section").filter({ hasText: "当前使用边界" });
+  const mcpBoundary = page.getByRole("complementary").filter({ hasText: "当前使用边界" });
   await expect(mcpBoundary).toHaveCount(1);
   await expect(mcpBoundary.getByText(/项目委托控制面已开放/u)).toBeVisible();
   await expect(mcpBoundary.getByText(/只读动作在受控环境逐次审批，生产开放仍需验收；自动化保持关闭/u)).toBeVisible();

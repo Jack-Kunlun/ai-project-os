@@ -744,7 +744,8 @@ test("dashboard feedback keeps direct actions, title counts, independent graph a
   }
   await expect(common.getByText("选择一个入口，开始今天的工作。", { exact: true })).toBeVisible();
   const actionCards = common.locator('a').filter({ has: page.locator('strong') });
-  await expect(actionCards).toHaveCount(3);
+  await expect(actionCards).toHaveCount(2);
+  await expect(common.getByRole("link", { name: /发起智能问答/u })).toHaveCount(0);
   for (const card of await actionCards.all()) {
     await expect(card.locator('svg[aria-hidden="true"]')).toHaveCount(2);
     expect((await card.boundingBox())!.height).toBeGreaterThanOrEqual(66);

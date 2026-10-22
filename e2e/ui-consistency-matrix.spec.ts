@@ -386,8 +386,11 @@ test("all page routes remain consistent across Chinese light and English dark de
             expect(icon.strokeWidth, `${path}@${mode.id} Tabler app-icon stroke`).toBe("1.75");
           }
           const labelsMeasured = await expectIconLabelAlignment(page.locator("body"), `${path}@${mode.id}`);
-          await expectIconOnlyAlignment(page.locator("body"), `${path}@${mode.id}`);
-          if (route.role !== "anonymous" && !gatedNotFound) expect(labelsMeasured, `${path}@${mode.id} must measure actual visible text/icon pairs`).toBeGreaterThan(mode.width <= 900 ? 0 : 3);
+          const iconOnlyMeasured = await expectIconOnlyAlignment(page.locator("body"), `${path}@${mode.id}`);
+          if (route.role !== "anonymous" && !gatedNotFound) {
+            if (route.role === "admin" && mode.width <= 900) expect(labelsMeasured + iconOnlyMeasured, `${path}@${mode.id} must measure visible narrow-shell controls`).toBeGreaterThan(0);
+            else expect(labelsMeasured, `${path}@${mode.id} must measure actual visible text/icon pairs`).toBeGreaterThan(mode.width <= 900 ? 0 : 3);
+          }
           if (route.role !== "anonymous" && !gatedNotFound) {
             const content = route.role === "admin" ? page.locator("main.admin-page-scroll > div") : page.locator("[data-page-content]");
             await expect(content, `${path}@${mode.id} has exactly one main reading root`).toHaveCount(1);

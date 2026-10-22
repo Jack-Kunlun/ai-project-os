@@ -705,7 +705,15 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
   const beforeDelayedReads = delayedReads;
   const nextFloatingRail = floating.getByRole("complementary", { name: "最近会话", exact: true });
   const expandRail = nextFloatingRail.getByRole("button", { name: "展开最近会话", exact: true });
-  if (await expandRail.isVisible()) await expandRail.click();
+  // A remounted rail restores its persisted state on the next animation frame.
+  // Wait for that state before deciding whether the expand control exists.
+  const persistedCollapsed = await page.evaluate(() => localStorage.getItem("aipos-conversation-rail") === "collapsed");
+  if (persistedCollapsed) {
+    await expect(expandRail).toBeVisible();
+    await expandRail.click();
+  } else {
+    await expect(nextFloatingRail.getByRole("button", { name: "收起最近会话", exact: true })).toBeVisible();
+  }
   await nextFloatingRail.getByRole("textbox", { name: "搜索历史会话", exact: true }).fill(suffix);
   await conversationRow(nextFloatingRail, displayedTitle).click();
   await expect.poll(() => delayedReads).toBe(beforeDelayedReads + 1);

@@ -13,6 +13,8 @@ test("operation assistance stays in the secondary footer and icons align with re
   const response = await page.request.post("/api/projects", {headers:{origin:new URL(page.url()).origin}, data:{name:"UI alignment acceptance", workspaceId:user.workspaceId}});
   expect(response.status()).toBe(201);
   const {project} = await response.json() as {project:{id:string}};
+  const unexpectedWrites:string[]=[];
+  page.on('request',request=>{if(['POST','PATCH','PUT','DELETE'].includes(request.method())&&new URL(request.url()).pathname.startsWith('/api/'))unexpectedWrites.push(request.method()+' '+new URL(request.url()).pathname);});
   for (const mode of [
     {language:"zh-CN",theme:"light",width:1440}, {language:"en",theme:"dark",width:1440},
     {language:"zh-CN",theme:"light",width:390}, {language:"en",theme:"dark",width:390},
@@ -54,6 +56,27 @@ test("operation assistance stays in the secondary footer and icons align with re
     expect(alignment).toHaveLength(1);
     expect(Math.abs(alignment[0].verticalDelta)).toBeLessThanOrEqual(.5);
     await testInfo.attach(`conversation-${name}.png`,{body:await page.screenshot({path:testInfo.outputPath(`conversation-${name}.png`)}),contentType:"image/png"});
+    // Keep the client shell mounted while leaving an operation through Ask AI.
+    await page.goto(`/projects/${project.id}/plan`);
+    await page.getByRole('button',{name:en?'New work item':'新建工作项',exact:true}).click();
+    const routeDialog=page.getByRole('dialog',{name:en?'Add a work item':'添加人工工作项',exact:true});
+    await routeDialog.getByRole('textbox',{name:en?'Work item name':'工作项名称',exact:true}).fill('Do not submit this navigation draft');
+    await routeDialog.locator('[data-inquiry-footer] .inquiry-launcher').click();
+    const routeAsk=page.getByRole('dialog',{name:en?'Floating Ask AI':'智能问答悬浮窗',exact:true});
+    await routeAsk.getByRole('link',{name:en?'Open full page':'在完整页面打开',exact:true}).click();
+    await expect(page).toHaveURL(/\/ask(?:\?|$)/u);
+    if(mode.width===390)await page.getByRole('button',{name:en?'Open navigation':'打开导航',exact:true}).click();
+    await page.getByRole('navigation',{name:en?'Global navigation':'全局入口',exact:true}).getByRole('link',{name:en?'Dashboard':'工作台',exact:true}).click();
+    await expect(page).toHaveURL(/\/dashboard$/u);
+    const restored=page.locator('[data-floating-inquiry-root] > .inquiry-launcher');
+    await expect(restored).toBeVisible();
+    expect(await restored.evaluate(element=>element.isConnected&&!element.closest('[data-inquiry-footer]'))).toBe(true);
+    await restored.click();
+    const restoredAsk=page.getByRole('dialog',{name:en?'Floating Ask AI':'智能问答悬浮窗',exact:true});
+    await expect(restoredAsk).toBeVisible();
+    await restoredAsk.getByRole('textbox',{name:en?'Your question':'输入问题',exact:true}).press('Escape');
+    await expect(restoredAsk).toBeHidden();
+    expect(unexpectedWrites,'opening, closing and navigating must not submit the business draft').toEqual([]);
   }
 });
 

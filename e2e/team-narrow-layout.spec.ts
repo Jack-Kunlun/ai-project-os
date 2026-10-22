@@ -17,6 +17,7 @@ type TeamFixture = Readonly<{
 
 type TeamOverviewProjection = {
   overview: {
+    counts: { memberships: number };
     members: Array<{
       userId: string;
       role: string;
@@ -122,6 +123,8 @@ async function installDisplayOnlyLongNameFixture(page: Page, fixture: TeamFixtur
       throw new Error("Real team overview did not contain the expected confirmed member projection.");
     }
     evidence.teamOverview = true;
+    // Display-only total exercises the server-bounded directory notice without adding access.
+    projection.overview.counts.memberships = 120;
     projection.overview.members = projection.overview.members.map((entry) => entry.userId === fixture.member.id
       ? { ...entry, username: LONG_USERNAME, displayName: LONG_DISPLAY_NAME, role: "member" }
       : entry);
@@ -248,6 +251,8 @@ test("team overview and member query layouts fit 390px in English dark mode with
     await expect(memberPage.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(memberPage.getByRole("heading", { name: "Team members", exact: true })).toBeVisible();
     await expectLongMemberCard(memberPage, "Member");
+    await expect(memberPage.locator("[data-team-member-directory]")).toContainText("2 / 120");
+    await expect(memberPage.getByText("This directory currently shows a partial member list.", { exact: true })).toBeVisible();
     await expectR02NoHorizontalOverflow(memberPage, "team-member-directory-en-dark-390");
     await captureTeamView(memberPage, testInfo, "team-member-directory-en-dark-390.png");
     const memberNavigation = memberPage.getByRole("navigation", { name: "Team navigation" });

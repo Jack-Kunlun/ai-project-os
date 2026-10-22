@@ -8,6 +8,8 @@ export const uiPolishMessages: Readonly<Record<string,string>> = {
   "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。": "Restoring returns the project to the active list. You can edit materials, sync repositories, and run AI jobs again.",
   "此操作不可恢复：项目资料、文件、仓库快照、候选、记忆索引、智能体记录和项目审计都会删除。建议先导出 JSON；系统仅保留不含项目名称或内容的最小删除回执。": "This cannot be undone: project materials, files, repository snapshots, candidates, memory indexes, agent records, and project audits will be deleted. Export JSON first. Only a minimal deletion receipt without the project name or content is retained.",
   "团队继承权限优先。": "Inherited team access takes precedence.",
+  "已加载成员": "Loaded members",
+  "当前目录只显示部分成员。": "This directory currently shows a partial member list.",
   "资料源": "Sources",
   "查看成员目录": "View member directory",
   "有效权限": "Effective access",

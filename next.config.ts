@@ -158,7 +158,7 @@ const nextConfig: NextConfig = {
           chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
         },
         sharedPresentation: {
-          test: /[\\/]src[\\/](?:components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)|app[\\/]projects[\\/]\[projectId\][\\/]memory-quality[\\/]project-memory-quality-client\.tsx)$/,
+          test: /[\\/]src[\\/](?:components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)|app[\\/]projects[\\/]\[projectId\][\\/](?:memory-quality[\\/]project-memory-quality-client|members[\\/]project-members-client)\.tsx)$/,
           name(module: { resource?: string }) {
             return `ui-${(module.resource?.split(/[\\/]/).pop() ?? "common").replace(/\.(?:tsx|ts|module\.css)$/u, "")}`;
           },

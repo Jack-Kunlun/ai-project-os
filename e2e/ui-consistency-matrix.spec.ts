@@ -12,7 +12,7 @@ import { expectR02NoHorizontalOverflow, signInR02Admin, signInR02PersonalUser } 
 
 type MatrixRole = "admin" | "user" | "anonymous";
 type MatrixMode = Readonly<{
-  id: "zh-light-1920" | "zh-light-1440" | "zh-light-1100" | "zh-light-390" | "en-dark-1440" | "en-dark-390";
+  id: "zh-light-1920" | "zh-light-1440" | "zh-light-1100" | "zh-light-390" | "en-dark-1440" | "en-dark-1100" | "en-dark-390";
   language: "zh-CN" | "en";
   theme: "light" | "dark";
   width: 1920 | 1440 | 1100 | 390;
@@ -54,6 +54,7 @@ const MATRIX_MODES: readonly MatrixMode[] = [
   { id: "zh-light-1100", language: "zh-CN", theme: "light", width: 1100 },
   { id: "zh-light-390", language: "zh-CN", theme: "light", width: 390 },
   { id: "en-dark-1440", language: "en", theme: "dark", width: 1440 },
+  { id: "en-dark-1100", language: "en", theme: "dark", width: 1100 },
   { id: "en-dark-390", language: "en", theme: "dark", width: 390 },
 ];
 

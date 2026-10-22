@@ -98,8 +98,8 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(spec, /R02_ACTOR_PASSWORD/u);
   assert.match(support, /R02_PUBLIC_ROUTE_EXPECTATIONS/u);
   assert.match(support, /r02ProjectGuardRoutes/u);
-  assert.match(support, /path: "\/admin\/models", heading: "平台模型"/u);
-  assert.match(support, /path: "\/admin\/models\/routes", heading: "平台模型"/u);
+  assert.match(support, /path: "\/admin\/models", heading: "模型与能力"/u);
+  assert.match(support, /path: "\/admin\/models\/routes", heading: "模型与能力"/u);
   assert.match(support, /path: "\/admin\/credits", heading: "平台额度"/u);
   assert.match(support, /path: "\/admin\/operations\/probes", heading: "连接探测预算"/u);
   assert.match(support, /path: "\/admin\/users", heading: "用户运营"/u);

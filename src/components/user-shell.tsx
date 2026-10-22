@@ -386,7 +386,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
         </p>
         {projectList.status === "error" ? <button type="button" className={styles.retryButton} onClick={retryProjectList}><UiText text="重试读取项目列表"/></button> : null}
 
-        <nav className={styles.projectNavigation} aria-label={selectedProject ? `${selectedProject.name} · ${t("当前项目导航")}` : t("当前项目导航")}>
+        <nav className={styles.projectNavigation} aria-label={selectedProject ? `${selectedProject.name} ${t("项目导航")}` : t("当前项目导航")}>
           {USER_PROJECT_NAVIGATION.map((item) => {
             const active = routeContext?.section === item.key && routeContext.projectId === selectedProject?.id;
             const className = `${styles.navLink} ${styles.projectNavLink} ${active ? styles.navLinkActive : ""}`;

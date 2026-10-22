@@ -87,7 +87,7 @@ body {
 
 .appearance-controls-trigger:hover {
   border-color: var(--app-accent);
-  color: var(--app-accent);
+  color: var(--app-link);
 }
 
 .appearance-controls-trigger:focus-visible,

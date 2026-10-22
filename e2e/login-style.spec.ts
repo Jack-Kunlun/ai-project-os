@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
 import { englishUiMessages } from "../src/lib/ui-dictionary-source";
+import { expectIconOnlyAlignment } from "./support/icon-label-alignment";
 
 function loginText(source: string, language: "zh-CN" | "en"): string {
   return language === "en" ? englishUiMessages[source] ?? source : source;
@@ -21,6 +22,10 @@ async function checkErrorStateLayout(page: Page, language: "zh-CN" | "en", theme
     await expectR02NoHorizontalOverflow(page, `login error at ${width}px (${language}/${theme})`);
     await page.locator(".appearance-controls-trigger").hover();
     await expectR02NoAccessibilityViolations(page, `login error at ${width}px (${language}/${theme})`);
+    expect(await expectIconOnlyAlignment(page.locator("#login-password").locator(".."), `login error at ${width}px (${language}/${theme})`)).toBe(1);
+    await expect(page.locator("main h1")).toHaveCount(1);
+    await expect(page.locator("main h1")).toHaveText(loginText("登录 AI Project OS", language));
+    await expect(page.locator("main h1")).toBeVisible();
     await expect(page.getByRole("link", { name: loginText("创建账号", language), exact: true })).toHaveAttribute("href", "/register");
     await expect(page.getByRole("link", { name: loginText("忘记账号或密码？", language), exact: true })).toHaveAttribute("href", "/recover");
     await page.screenshot({ path: `test-results/v110/login-${languageName}-${theme}-${width}.png`, fullPage: true });

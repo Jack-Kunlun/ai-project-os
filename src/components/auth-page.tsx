@@ -25,10 +25,10 @@ export function AuthPage({ sectionLabel, children }: { sectionLabel: string; chi
       <div className={styles.layout}>
         <section className={styles.productPanel} aria-labelledby="auth-product-title">
           <p className={styles.eyebrow}><UiText text="一个空间，串起项目的上下文" /></p>
-          <h1 id="auth-product-title" className={styles.headline}>
+          <p id="auth-product-title" className={styles.headline}>
             <span><UiText text="让项目的每一步，" /></span>
             <span><UiText text="都有据可循。" /></span>
-          </h1>
+          </p>
           <p className={styles.introText}>
             <UiText text="把零散资料组织成知识，用带引用的问答找回上下文，再将目标连接到计划与验收。" />
           </p>
@@ -63,7 +63,7 @@ export function AuthPage({ sectionLabel, children }: { sectionLabel: string; chi
               </div>
             </div>
             <aside className={styles.sourceCard}>
-              <h2><i aria-hidden="true" /><UiText text="有来源的回答" /></h2>
+              <div className={styles.sourceTitle}><i aria-hidden="true" /><UiText text="有来源的回答" /></div>
               <p><UiText text="每轮问答保留当时的范围和引用，可以继续追问，也可以回到原文。" /></p>
               <div className={styles.sourceTags}>
                 <span>1 <UiText text="需求说明" /></span>
@@ -74,7 +74,7 @@ export function AuthPage({ sectionLabel, children }: { sectionLabel: string; chi
         </section>
 
         <section className={styles.authPanel} aria-labelledby="auth-form-section-title">
-          <h2 id="auth-form-section-title" className={styles.visuallyHidden}><UiText text={sectionLabel} /></h2>
+          <span id="auth-form-section-title" className={styles.visuallyHidden}><UiText text={sectionLabel} /></span>
           {children}
         </section>
       </div>

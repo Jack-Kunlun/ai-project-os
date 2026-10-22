@@ -294,7 +294,7 @@
   box-shadow: 0 8px 22px rgb(50 74 114 / 7%);
 }
 
-.sourceCard h2 {
+.sourceCard .sourceTitle {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -304,7 +304,7 @@
   font-weight: 500;
 }
 
-.sourceCard h2 i {
+.sourceCard .sourceTitle i {
   width: 5px;
   height: 5px;
   flex: 0 0 auto;
@@ -402,6 +402,7 @@
   line-height: 18px;
 }
 
+.formHeading h1,
 .formHeading h2 {
   margin: 7px 0 0;
   color: var(--app-text);
@@ -875,6 +876,7 @@
 }
 
 .passwordToggle {
+  --app-icon-text-offset: 0px;
   position: absolute;
   top: 3px;
   right: 3px;
@@ -1153,6 +1155,13 @@
   margin: 0;
 }
 
+.successHeading {
+  margin: 0;
+  color: var(--app-text);
+  font: inherit;
+  font-weight: 600;
+}
+
 .successCard strong {
   color: var(--app-text);
   font-weight: 600;
@@ -1268,6 +1277,7 @@
     padding: 20px;
   }
 
+  .formHeading h1,
   .formHeading h2 {
     font-size: 23px;
   }

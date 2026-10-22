@@ -71,7 +71,7 @@ export function RecoveryForm({ phoneAuthStatus }: { phoneAuthStatus: "disabled" 
   if (username !== null) return (
     <div className={styles.formBody}>
       <div role="status" className={`${styles.notice} ${styles.noticeSuccess} ${styles.successCard}`}>
-        <p><strong>{t("密码已重设")}</strong></p><p>{t("你的登录名：")}<strong>{username}</strong></p>
+        <h1 className={styles.successHeading}>{t("密码已重设")}</h1><p>{t("你的登录名：")}<strong>{username}</strong></p>
         <p>{t("所有设备已退出登录，请使用新密码重新登录。")}</p>
       </div>
       <Link href="/login?password=updated" className={styles.actionLinkButton}>{t("返回登录")}</Link>
@@ -82,7 +82,7 @@ export function RecoveryForm({ phoneAuthStatus }: { phoneAuthStatus: "disabled" 
     <form onSubmit={submit} className={`${styles.recoveryForm} ${styles.formBody}`}>
       <div className={styles.formHeading}>
         <p className={styles.formEyebrow}>{t("账户恢复")}</p>
-        <h2>{t(step === 1 ? "找回账号与密码" : "设置新密码")}</h2>
+        <h1>{t(step === 1 ? "找回账号与密码" : "设置新密码")}</h1>
         <p>{t(step === 1 ? "通过已绑定的手机号重新访问账号。" : "为账号设置新的登录密码。")}</p>
       </div>
       {!available ? <p role="status" className={`${styles.notice} ${styles.noticeWarning}`}>{t("短信找回暂不可用，请稍后重试。你也可以返回登录页，使用已绑定的 GitHub 或企业身份登录。")}</p> : null}

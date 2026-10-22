@@ -152,7 +152,7 @@ export function RegisterForm({
     <div className={styles.formBody}>
       <div className={styles.formHeading}>
         <p className={styles.formEyebrow}>{t("开始使用")}</p>
-        <h2>{t(verificationRequired && step === 2 ? "设置你的账号" : "创建账号")}</h2>
+        <h1>{t(verificationRequired && step === 2 ? "设置你的账号" : "创建账号")}</h1>
         <p>{t(verificationRequired ? step === 1 ? "用常用邮箱或手机号开始。" : "设置用户名和密码。" : "设置登录账号和密码。")}</p>
       </div>
       {localRegistrationEnabled ? (

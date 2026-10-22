@@ -3,14 +3,19 @@ import { expect, test, type Page } from "@playwright/test";
 import { getEntitlementDb } from "@/lib/db";
 import { installBrowserPhoneAuthConfigFixture } from "./support/browser-phone-auth-config-fixture";
 import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
+import { englishUiMessages } from "../src/lib/ui-dictionary-source";
+import { expectIconOnlyAlignment } from "./support/icon-label-alignment";
 
-async function checkAuthLayout(page: Page, name: string) {
+async function checkAuthLayout(page: Page, name: string, language: "zh-CN" | "en" = "zh-CN") {
+  const text = (value: string) => language === "en" ? englishUiMessages[value] ?? value : value;
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expectR02NoHorizontalOverflow(page, `${name} at ${width}px`);
     await expectR02NoAccessibilityViolations(page, `${name} at ${width}px`);
-    await expect(page.getByRole("link", { name: "隐私政策", exact: true })).toHaveAttribute("href", "/privacy");
-    await expect(page.getByRole("link", { name: "服务条款", exact: true })).toHaveAttribute("href", "/terms");
+    await expect(page.locator("main h1")).toHaveCount(1);
+    await expect(page.locator("main h1")).toBeVisible();
+    await expect(page.getByRole("link", { name: text("隐私政策"), exact: true })).toHaveAttribute("href", "/privacy");
+    await expect(page.getByRole("link", { name: text("服务条款"), exact: true })).toHaveAttribute("href", "/terms");
     await page.screenshot({ path: `test-results/auth-flow/${name}-${width}.png`, fullPage: true });
   }
 }
@@ -243,6 +248,7 @@ test("phone registration remains local until final submit and clears the challen
 });
 
 test("phone recovery stays local until final submit and preserves the challenge while editing", async ({ page }) => {
+  test.setTimeout(60_000);
   test.skip(process.env.PHONE_AUTH_ENABLED !== "true", "Requires the guarded local phone-auth environment; all SMS endpoints are intercepted.");
   await signInR02Admin(page);
   await signOutR02User(page);
@@ -319,6 +325,7 @@ test("phone recovery stays local until final submit and preserves the challenge 
 
   await page.getByLabel("新密码", { exact: true }).fill("BrowserRecovery2026!");
   await page.getByLabel("再次输入新密码", { exact: true }).fill("BrowserRecovery2026!");
+  expect(await expectIconOnlyAlignment(page.locator("form"), "recovery password controls")).toBe(2);
   await page.getByRole("button", { name: "验证并重设密码", exact: true }).click();
   await expect.poll(() => recoveries.length).toBe(1);
   expect(recoveries[0]).toEqual({
@@ -331,6 +338,17 @@ test("phone recovery stays local until final submit and preserves the challenge 
   expect(sentSms.every(request => request.purpose === "recover")).toBe(true);
   await expect(page.getByRole("status").getByText("recovered_owner", { exact: true })).toBeVisible();
   await expect(page.getByRole("status")).toContainText("所有设备已退出登录，请使用新密码重新登录。");
+  await expect(page.getByRole("heading", { name: "密码已重设", level: 1, exact: true })).toBeVisible();
+  await checkAuthLayout(page, "recovery-success");
+  await page.locator(".appearance-controls-trigger").click();
+  const appearance = page.locator(".appearance-controls-popover");
+  await appearance.getByRole("combobox").nth(0).selectOption("en");
+  await appearance.getByRole("combobox").nth(1).selectOption("dark");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByRole("heading", { name: englishUiMessages["密码已重设"], level: 1, exact: true })).toBeVisible();
+  await checkAuthLayout(page, "recovery-success-en-dark", "en");
   } finally {
     await restorePhoneConfig();
   }

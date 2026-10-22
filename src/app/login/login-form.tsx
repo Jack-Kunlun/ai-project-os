@@ -125,7 +125,7 @@ export function LoginForm({
           <form onSubmit={submit} className={styles.form}>
             <div className={styles.formHeading}>
               <p className={styles.formEyebrow}>{t("欢迎回来")}</p>
-              <h2>{t("登录 AI Project OS")}</h2>
+              <h1>{t("登录 AI Project OS")}</h1>
               <p>{t("使用你的账号进入工作区。")}</p>
             </div>
 

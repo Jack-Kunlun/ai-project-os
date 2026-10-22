@@ -895,12 +895,21 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   await page.goto(`/personal/knowledge/graph?scope=project&projectId=${projectId}`);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: "放大图谱", exact: true })).toBeVisible();
+  await expect(page.locator(".inquiry-launcher:not([hidden])")).toBeVisible();
   await page.getByRole("button", { name: "放大图谱", exact: true }).click();
   await page.getByRole("button", { name: "适应全图", exact: true }).click();
+  const graphViewport=page.getByRole("region",{name:"知识关系图",exact:true});
+  await expect.poll(()=>graphViewport.evaluate(node=>{
+    const rect=node.getBoundingClientRect();
+    const topBar=[...document.querySelectorAll<HTMLElement>("header")].find(element=>getComputedStyle(element).position==="fixed"&&Math.abs(element.getBoundingClientRect().top)<1);
+    const launcher=document.querySelector<HTMLElement>(".inquiry-launcher:not([hidden])");
+    const topLimit=(topBar?.getBoundingClientRect().bottom||0)+12;
+    const bottomLimit=launcher&&launcher.getBoundingClientRect().height>0?launcher.getBoundingClientRect().top-12:innerHeight-12;
+    return rect.top>=topLimit-1&&rect.bottom<=bottomLimit+1;
+  })).toBe(true);
   // A front node's empty SVG wrapper must not intercept a rear node's visible dot.
   const pointerFact = page.getByRole("button", { name: `事实：${factTitle}`, exact: true });
   await expect(pointerFact).toBeVisible();
-  await pointerFact.scrollIntoViewIfNeeded();
   await pointerFact.evaluate((node) => {
     const wrapper = node.closest("foreignObject")!;
     const blocker = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
@@ -923,4 +932,42 @@ test("3D knowledge graph rotates, pans, zooms and drags without losing direct so
   await expectR02NoHorizontalOverflow(page, "knowledge graph at 390px");
   await expectR02NoAccessibilityViolations(page, "knowledge graph at 390px");
   await page.screenshot({ path: "test-results/v110/graph-mobile.png" });
+
+  await page.context().addCookies([
+    { name: "aipos-language", value: "en", url: new URL(page.url()).origin },
+    { name: "aipos-theme", value: "dark", url: new URL(page.url()).origin },
+  ]);
+  await page.reload();
+  await expect(page.locator(".inquiry-launcher:not([hidden])")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByRole("heading", { name: "Knowledge graph", exact: true })).toBeVisible();
+  const englishGraph=page.getByTestId("knowledge-graph-space");
+  const englishViewport=page.getByRole("region",{name:"Knowledge relationship graph",exact:true});
+  await page.getByRole("button",{name:"Fit graph",exact:true}).click();
+  await englishGraph.press("Home");
+  await expect.poll(()=>englishViewport.evaluate(node=>{
+    const rect=node.getBoundingClientRect();
+    const topBar=[...document.querySelectorAll<HTMLElement>("header")].find(element=>getComputedStyle(element).position==="fixed"&&Math.abs(element.getBoundingClientRect().top)<1);
+    const launcher=document.querySelector<HTMLElement>(".inquiry-launcher:not([hidden])");
+    const topLimit=(topBar?.getBoundingClientRect().bottom||0)+12;
+    const bottomLimit=launcher&&launcher.getBoundingClientRect().height>0?launcher.getBoundingClientRect().top-12:innerHeight-12;
+    return rect.top>=topLimit-1&&rect.bottom<=bottomLimit+1;
+  })).toBe(true);
+  expect(await englishGraph.getAttribute("height")).toBe(String(await englishViewport.evaluate(node=>Math.round(node.clientHeight))));
+  const englishPointerFact=page.getByRole("button",{name:new RegExp(`Fact：${factTitle}`)});
+  await expect(englishPointerFact).toBeVisible();
+  const englishHit=await englishPointerFact.evaluate(node=>{
+    const rect=node.getBoundingClientRect();
+    return node.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2));
+  });
+  expect(englishHit,"the fit graph action must preserve direct fact pointer hits in English dark mode").toBe(true);
+  const englishPointerBox=(await englishPointerFact.boundingBox())!;
+  await page.mouse.click(englishPointerBox.x+englishPointerBox.width/2,englishPointerBox.y+englishPointerBox.height/2);
+  const englishPointerDetails=page.getByRole("dialog",{name:"Knowledge point details",exact:true});
+  await expect(englishPointerDetails.getByRole("heading",{name:factTitle,exact:true})).toBeVisible();
+  await englishPointerDetails.getByRole("button",{name:"Close dialog",exact:true}).click();
+  await expect(englishPointerDetails).toBeHidden();
+  await expectR02NoHorizontalOverflow(page,"knowledge graph at 390px in English dark mode");
+  await expectR02NoAccessibilityViolations(page,"knowledge graph at 390px in English dark mode");
+  await page.screenshot({ path: "test-results/v110/graph-mobile-en-dark.png" });
 });

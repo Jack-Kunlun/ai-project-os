@@ -909,10 +909,6 @@
   box-shadow: none;
 }
 
-.inputShell > .passwordShell > .passwordInput {
-  padding-left: 0;
-}
-
 .inputShell > .passwordShell > .passwordToggle {
   top: 3px;
   right: 2px;
@@ -1030,7 +1026,7 @@
 }
 
 .recoverLink {
-  margin: 0 0 2px;
+  margin: 8px 0 12px;
   text-align: right;
   font-size: 11px;
 }
@@ -1054,9 +1050,10 @@
 }
 
 .registerPrompt {
-  margin: 2px 0 0;
+  margin: 12px 0 0;
   color: var(--app-muted);
   font-size: 12px;
+  line-height: 1.6;
   text-align: center;
 }
 
@@ -1064,7 +1061,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 3px 0 0;
+  margin: 16px 0 12px;
   color: var(--app-muted);
   font-size: 10px;
 }

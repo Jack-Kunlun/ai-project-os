@@ -63,7 +63,39 @@ export function KnowledgeGraphCanvas({graph,selectedId,onSelect,onActivate}:Prop
     return()=>target.removeEventListener("wheel",handleWheel);
   },[]);
 
-  function fitCamera(nextNodes=nodes){setCamera(fitKnowledgeGraphCamera(nextNodes,viewport.width,viewport.height,camera.yaw,camera.pitch));}
+  function readViewportSize(){
+    const target=viewportRef.current;
+    if(!target)return viewport;
+    const next={width:Math.max(320,Math.round(target.clientWidth)),height:Math.max(420,Math.round(target.clientHeight))};
+    setViewport(current=>current.width===next.width&&current.height===next.height?current:next);
+    return next;
+  }
+
+  function revealViewportForFit(){
+    const target=viewportRef.current;
+    if(!target)return;
+    const rect=target.getBoundingClientRect();
+    const fixedTopBar=[...document.querySelectorAll<HTMLElement>("header")].find(element=>{
+      const style=window.getComputedStyle(element);
+      return style.position==="fixed"&&Math.abs(element.getBoundingClientRect().top)<1;
+    });
+    const topLimit=(fixedTopBar?.getBoundingClientRect().bottom||0)+12;
+    const launcher=document.querySelector<HTMLElement>(".inquiry-launcher:not([hidden])");
+    const launcherRect=launcher?.getBoundingClientRect();
+    const bottomLimit=launcherRect&&launcherRect.height>0?launcherRect.top-12:window.innerHeight-12;
+    const lastValidTop=bottomLimit-rect.height;
+    const nextTop=lastValidTop>=topLimit
+      ?Math.max(topLimit,Math.min(rect.top,lastValidTop))
+      :topLimit;
+    const delta=rect.top-nextTop;
+    if(Math.abs(delta)>1)window.scrollBy({top:delta,behavior:"instant"});
+  }
+
+  function fitCamera(nextNodes=nodes){
+    const size=readViewportSize();
+    setCamera(fitKnowledgeGraphCamera(nextNodes,size.width,size.height,camera.yaw,camera.pitch));
+    revealViewportForFit();
+  }
   function zoomBy(factor:number){setCamera(current=>({...current,distance:Math.min(maximumDistance,Math.max(minimumDistance,current.distance*factor))}));}
   function moveCamera(deltaX:number,deltaY:number){setCamera(current=>({...current,panX:current.panX+deltaX,panY:current.panY+deltaY}));}
   function turnCamera(deltaYaw:number,deltaPitch:number){setCamera(current=>({...current,yaw:current.yaw+deltaYaw,pitch:Math.min(78,Math.max(-78,current.pitch+deltaPitch))}));}
@@ -133,7 +165,8 @@ export function KnowledgeGraphCanvas({graph,selectedId,onSelect,onActivate}:Prop
   function resetLayout(){
     const resetPoints=Object.fromEntries(initialNodes.map(node=>[node.id,node.point]));
     setNodePoints(resetPoints);
-    setCamera(fitKnowledgeGraphCamera(initialNodes,viewport.width,viewport.height,initialCamera.yaw,initialCamera.pitch));
+    const size=readViewportSize();
+    setCamera(fitKnowledgeGraphCamera(initialNodes,size.width,size.height,initialCamera.yaw,initialCamera.pitch));
   }
 
   function activateNode(node:KnowledgeGraphSpaceNode){

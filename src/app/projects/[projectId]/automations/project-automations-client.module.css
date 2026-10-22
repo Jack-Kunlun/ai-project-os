@@ -4,10 +4,10 @@
   color: var(--app-link);
 }
 
-.content {
-  width: min(100%, 76rem);
+.content {padding:var(--app-page-padding);
+  width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 1.75rem 1.5rem 4rem;
+
 }
 
 .pageHeader {
@@ -367,9 +367,9 @@
 }
 
 @media (max-width: 640px) {
-  .content {
-    padding-right: 1rem;
-    padding-left: 1rem;
+  .content {padding:var(--app-page-padding);
+
+
   }
 
   .pageHeader {

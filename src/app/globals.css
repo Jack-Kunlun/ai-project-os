@@ -6,6 +6,14 @@
   --scrollbar-track: #e2e8f0;
   --scrollbar-thumb: #94a3b8;
   --scrollbar-thumb-hover: #64748b;
+  --app-page-padding: 28px 32px 32px;
+}
+
+@media (max-width: 1150px) {
+  :root { --app-page-padding: 28px 26px 32px; }
+}
+@media (max-width: 700px) {
+  :root { --app-page-padding: 23px 18px 32px; }
 }
 
 @theme inline {
@@ -176,28 +184,28 @@ svg.app-icon {
 
 .parent-page-link {
   display: inline-flex;
-  min-height: 40px;
-  flex: 0 0 auto;
+  min-height: 32px;
+  max-width: 100%;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  padding: 8px 12px;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 0;
   color: var(--app-muted);
-  background: var(--app-surface);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
-  font-size: 14px;
-  font-weight: 550;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
   cursor: pointer;
   text-decoration: none;
-  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
+  transition: color 140ms ease;
 }
 
 .parent-page-link:hover {
-  border-color: var(--app-accent);
   color: var(--app-link);
-  background: var(--app-surface-soft);
 }
 
 .parent-page-link:focus-visible {

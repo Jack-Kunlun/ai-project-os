@@ -6,7 +6,14 @@ export async function readIconLabelAlignment(root: Locator) {
     const control = icon.closest("button,a,summary");
     if (!control || control.querySelectorAll("svg.app-icon").length !== 1) return [];
     const iconBox = icon.getBoundingClientRect();
-    if (!iconBox.width || !iconBox.height || getComputedStyle(icon).visibility === "hidden") return [];
+    if (!iconBox.width || !iconBox.height || getComputedStyle(icon).visibility === "hidden" || icon.closest('[aria-hidden="true"]')) return [];
+    // Cards can contain a title and a second description row. Their trailing
+    // chevron centers on that block, rather than the first text baseline.
+    const textRange = document.createRange();
+    textRange.selectNodeContents(control);
+    const controlLines = [...textRange.getClientRects()].filter(rect => rect.width && rect.height);
+    const textLine = Number.parseFloat(getComputedStyle(control).lineHeight);
+    if (controlLines.length && Math.max(...controlLines.map(rect => rect.bottom)) - Math.min(...controlLines.map(rect => rect.top)) > Math.max(textLine * 1.5, iconBox.height + 4)) return [];
     const walker = document.createTreeWalker(control, NodeFilter.SHOW_TEXT);
     let node: Node | null;
     while ((node = walker.nextNode())) {

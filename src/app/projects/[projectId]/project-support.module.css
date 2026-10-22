@@ -14,11 +14,11 @@
   margin-top: 20px;
 }
 
-.supportPage > :global(div[class*="mx-auto"]) {
+.supportPage > :global(div[class*="mx-auto"]){
   width: 100%;
   max-width: 1500px;
   margin-inline: auto;
-  padding: 31px 38px 48px;
+  padding:var(--app-page-padding);
 }
 
 .supportPage :global(h1),
@@ -180,9 +180,9 @@
 }
 
 @media (max-width: 1120px) {
-  .supportPage > :global(div[class*="mx-auto"]) { padding-right: 27px; padding-left: 27px; }
+  .supportPage > :global(div[class*="mx-auto"]){   }
 }
 
 @media (max-width: 600px) {
-  .supportPage > :global(div[class*="mx-auto"]) { padding: 22px 15px 32px; }
+  .supportPage > :global(div[class*="mx-auto"]){ padding:var(--app-page-padding); }
 }

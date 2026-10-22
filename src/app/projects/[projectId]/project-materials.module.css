@@ -1,7 +1,7 @@
-.content {
+.content {padding:var(--app-page-padding);
   width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 31px 38px 48px;
+
 }
 
 .pageHeader {
@@ -486,9 +486,9 @@
 }
 
 @media (max-width: 1120px) {
-  .content { padding-right: 27px; padding-left: 27px; }
+  .content {padding:var(--app-page-padding);   }
 }
 
 @media (max-width: 600px) {
-  .content { padding: 22px 15px 32px; }
+  .content {padding:var(--app-page-padding);  }
 }

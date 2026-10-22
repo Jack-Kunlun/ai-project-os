@@ -9,7 +9,7 @@ import { PARENT_PAGE_LINK_CLASS_NAME } from "./parent-page-link";
 export function BackButton({ fallbackHref, label = "返回上一页" }: { fallbackHref: string; label?: string }) {
   const t = useTranslate();
   return <Link href={fallbackHref} className={PARENT_PAGE_LINK_CLASS_NAME}>
-    <ShellIcon name="back" className="app-icon--compact" />
+    <ShellIcon name="back" className="app-icon--control" />
     {t(label)}
   </Link>;
 }

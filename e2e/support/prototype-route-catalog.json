@@ -1,0 +1,450 @@
+{
+  "/accept-invitation": {
+    "route": "/accept-invitation",
+    "view": "invitation",
+    "name": "接受邀请",
+    "group": "public"
+  },
+  "/admin/account": {
+    "route": "/admin/account",
+    "view": "admin-account",
+    "name": "管理员账户",
+    "group": "admin"
+  },
+  "/admin/audit": {
+    "route": "/admin/audit",
+    "view": "admin-audit",
+    "name": "审计日志",
+    "group": "admin"
+  },
+  "/admin/connectors/git": {
+    "route": "/admin/connectors/git",
+    "kind": "redirect",
+    "destination": "/admin"
+  },
+  "/admin/connectors/mcp": {
+    "route": "/admin/connectors/mcp",
+    "view": "admin-mcp",
+    "name": "MCP审核",
+    "group": "admin"
+  },
+  "/admin/credits": {
+    "route": "/admin/credits",
+    "view": "admin-credits",
+    "name": "平台额度治理",
+    "group": "admin"
+  },
+  "/admin/guide": {
+    "route": "/admin/guide",
+    "view": "admin-guide",
+    "name": "管理端指南",
+    "group": "admin"
+  },
+  "/admin/models/governance": {
+    "route": "/admin/models/governance",
+    "kind": "redirect",
+    "destination": "/admin/models"
+  },
+  "/admin/models": {
+    "route": "/admin/models",
+    "view": "admin-models",
+    "name": "模型与能力",
+    "group": "admin"
+  },
+  "/admin/models/routes": {
+    "route": "/admin/models/routes",
+    "kind": "redirect",
+    "destination": "/admin/models"
+  },
+  "/admin/operations/backups": {
+    "route": "/admin/operations/backups",
+    "view": "admin-backups",
+    "name": "资源与备份",
+    "group": "admin"
+  },
+  "/admin/operations/failures": {
+    "route": "/admin/operations/failures",
+    "view": "admin-failures",
+    "name": "失败收件箱",
+    "group": "admin"
+  },
+  "/admin/operations/probes": {
+    "route": "/admin/operations/probes",
+    "view": "admin-probes",
+    "name": "探测预算",
+    "group": "admin"
+  },
+  "/admin": {
+    "route": "/admin",
+    "view": "admin",
+    "name": "平台总览",
+    "group": "admin"
+  },
+  "/admin/sms": {
+    "route": "/admin/sms",
+    "view": "admin-sms",
+    "name": "短信配置",
+    "group": "admin"
+  },
+  "/admin/users/[userId]": {
+    "route": "/admin/users/[userId]",
+    "view": "admin-user-detail",
+    "name": "用户详情",
+    "group": "admin"
+  },
+  "/admin/users/memberships": {
+    "route": "/admin/users/memberships",
+    "view": "admin-memberships",
+    "name": "会员管理",
+    "group": "admin"
+  },
+  "/admin/users": {
+    "route": "/admin/users",
+    "view": "admin-users",
+    "name": "用户列表",
+    "group": "admin"
+  },
+  "/ask": {
+    "route": "/ask",
+    "view": "ask",
+    "name": "智能问答",
+    "group": "personal"
+  },
+  "/connections/mcp": {
+    "route": "/connections/mcp",
+    "kind": "redirect",
+    "destination": "/personal/connections/mcp"
+  },
+  "/connections": {
+    "route": "/connections",
+    "kind": "redirect",
+    "destination": "/personal/connections/git"
+  },
+  "/contact": {
+    "route": "/contact",
+    "view": "contact",
+    "name": "联系作者",
+    "group": "public"
+  },
+  "/credits": {
+    "route": "/credits",
+    "view": "credits",
+    "name": "额度与账单",
+    "group": "personal"
+  },
+  "/dashboard": {
+    "route": "/dashboard",
+    "view": "dashboard",
+    "name": "工作台",
+    "group": "personal"
+  },
+  "/guide": {
+    "route": "/guide",
+    "view": "guide",
+    "name": "用户使用指南",
+    "group": "personal"
+  },
+  "/help": {
+    "route": "/help",
+    "view": "help",
+    "name": "登录帮助",
+    "group": "public"
+  },
+  "/login": {
+    "route": "/login",
+    "view": "@login",
+    "name": "登录",
+    "group": "public"
+  },
+  "/notifications": {
+    "route": "/notifications",
+    "view": "inbox",
+    "name": "通知中心",
+    "group": "personal"
+  },
+  "/": {
+    "route": "/",
+    "kind": "redirect",
+    "destination": "/dashboard"
+  },
+  "/personal/configuration": {
+    "route": "/personal/configuration",
+    "view": "configuration",
+    "name": "个人资源配置",
+    "group": "personal"
+  },
+  "/personal/connections/git": {
+    "route": "/personal/connections/git",
+    "view": "personal-git",
+    "name": "Git 授权管理",
+    "group": "personal"
+  },
+  "/personal/connections/mcp": {
+    "route": "/personal/connections/mcp",
+    "view": "personal-mcp",
+    "name": "个人 MCP 连接",
+    "group": "personal"
+  },
+  "/personal/knowledge/graph": {
+    "route": "/personal/knowledge/graph",
+    "view": "graph",
+    "name": "知识图谱",
+    "group": "personal"
+  },
+  "/personal/knowledge": {
+    "route": "/personal/knowledge",
+    "view": "knowledge",
+    "name": "我的知识",
+    "group": "personal"
+  },
+  "/personal/models": {
+    "route": "/personal/models",
+    "view": "models",
+    "name": "个人模型",
+    "group": "personal"
+  },
+  "/personal": {
+    "route": "/personal",
+    "view": "personal",
+    "name": "个人空间总览",
+    "group": "personal"
+  },
+  "/personal/projects": {
+    "route": "/personal/projects",
+    "view": "projects",
+    "name": "我的项目",
+    "group": "personal"
+  },
+  "/privacy": {
+    "route": "/privacy",
+    "view": "privacy",
+    "name": "隐私政策",
+    "group": "public"
+  },
+  "/profile/connections/git": {
+    "route": "/profile/connections/git",
+    "kind": "redirect",
+    "destination": "/personal/connections/git"
+  },
+  "/profile/connections/mcp": {
+    "route": "/profile/connections/mcp",
+    "kind": "redirect",
+    "destination": "/personal/connections/mcp"
+  },
+  "/profile/models": {
+    "route": "/profile/models",
+    "kind": "redirect",
+    "destination": "/personal/models"
+  },
+  "/profile": {
+    "route": "/profile",
+    "view": "profile",
+    "name": "账户设置",
+    "group": "personal"
+  },
+  "/projects/[projectId]/actions": {
+    "route": "/projects/[projectId]/actions",
+    "view": "actions",
+    "name": "独立动作审批",
+    "group": "project"
+  },
+  "/projects/[projectId]/assets": {
+    "route": "/projects/[projectId]/assets",
+    "view": "assets",
+    "name": "上传文件管理",
+    "group": "project"
+  },
+  "/projects/[projectId]/automations": {
+    "route": "/projects/[projectId]/automations",
+    "view": "automation",
+    "name": "项目自动化",
+    "group": "project"
+  },
+  "/projects/[projectId]/configuration": {
+    "route": "/projects/[projectId]/configuration",
+    "view": "project-settings",
+    "name": "独立项目配置",
+    "group": "project"
+  },
+  "/projects/[projectId]/control": {
+    "route": "/projects/[projectId]/control",
+    "view": "control",
+    "name": "项目AI使用与任务记录",
+    "group": "project"
+  },
+  "/projects/[projectId]/external-sources": {
+    "route": "/projects/[projectId]/external-sources",
+    "view": "external-sources",
+    "name": "网页与文件夹来源",
+    "group": "project"
+  },
+  "/projects/[projectId]/github-syncs/[syncRunId]": {
+    "route": "/projects/[projectId]/github-syncs/[syncRunId]",
+    "view": "sync-detail",
+    "name": "GitHub同步详情",
+    "group": "project"
+  },
+  "/projects/[projectId]/governance": {
+    "route": "/projects/[projectId]/governance",
+    "view": "govern",
+    "name": "项目管理",
+    "group": "project"
+  },
+  "/projects/[projectId]/intelligence": {
+    "route": "/projects/[projectId]/intelligence",
+    "view": "ai",
+    "name": "简报与调查",
+    "group": "project"
+  },
+  "/projects/[projectId]/jobs/[jobId]": {
+    "route": "/projects/[projectId]/jobs/[jobId]",
+    "view": "job-detail",
+    "name": "处理任务详情",
+    "group": "project"
+  },
+  "/projects/[projectId]/materials": {
+    "route": "/projects/[projectId]/materials",
+    "view": "materials",
+    "name": "项目资料",
+    "group": "project"
+  },
+  "/projects/[projectId]/materials/review": {
+    "route": "/projects/[projectId]/materials/review",
+    "view": "reviews",
+    "name": "独立候选审核",
+    "group": "project"
+  },
+  "/projects/[projectId]/materials/sources/[sourceId]": {
+    "route": "/projects/[projectId]/materials/sources/[sourceId]",
+    "view": "source-detail",
+    "name": "资料详情",
+    "group": "project"
+  },
+  "/projects/[projectId]/mcp-actions": {
+    "route": "/projects/[projectId]/mcp-actions",
+    "view": "mcp-actions",
+    "name": "只读MCP审批",
+    "group": "project"
+  },
+  "/projects/[projectId]/mcp-export": {
+    "route": "/projects/[projectId]/mcp-export",
+    "view": "mcp-export",
+    "name": "对外MCP接入",
+    "group": "project"
+  },
+  "/projects/[projectId]/members": {
+    "route": "/projects/[projectId]/members",
+    "view": "members",
+    "name": "独立成员权限",
+    "group": "project"
+  },
+  "/projects/[projectId]/memory": {
+    "route": "/projects/[projectId]/memory",
+    "view": "memory",
+    "name": "项目语义索引与旧问答页",
+    "group": "project"
+  },
+  "/projects/[projectId]/memory-quality": {
+    "route": "/projects/[projectId]/memory-quality",
+    "view": "quality",
+    "name": "独立记忆质量",
+    "group": "project"
+  },
+  "/projects/[projectId]": {
+    "route": "/projects/[projectId]",
+    "view": "overview",
+    "name": "项目概览",
+    "group": "project"
+  },
+  "/projects/[projectId]/plan": {
+    "route": "/projects/[projectId]/plan",
+    "view": "plan",
+    "name": "项目计划",
+    "group": "project"
+  },
+  "/projects/[projectId]/repositories": {
+    "route": "/projects/[projectId]/repositories",
+    "view": "repositories",
+    "name": "项目代码仓库",
+    "group": "project"
+  },
+  "/projects/[projectId]/tools": {
+    "route": "/projects/[projectId]/tools",
+    "view": "tools",
+    "name": "工具权限",
+    "group": "project"
+  },
+  "/projects/[projectId]/world": {
+    "route": "/projects/[projectId]/world",
+    "view": "world",
+    "name": "项目状态治理",
+    "group": "project"
+  },
+  "/projects": {
+    "route": "/projects",
+    "kind": "redirect",
+    "destination": "/personal/projects"
+  },
+  "/recover": {
+    "route": "/recover",
+    "view": "@recover",
+    "name": "找回账号与密码",
+    "group": "public"
+  },
+  "/register": {
+    "route": "/register",
+    "view": "@register",
+    "name": "注册",
+    "group": "public"
+  },
+  "/settings": {
+    "route": "/settings",
+    "kind": "redirect",
+    "destination": "管理员至 /admin/models；用户至 /dashboard"
+  },
+  "/setup": {
+    "route": "/setup",
+    "view": "setup",
+    "name": "首次初始化",
+    "group": "public"
+  },
+  "/system/account-access": {
+    "route": "/system/account-access",
+    "kind": "redirect",
+    "destination": "/admin/users"
+  },
+  "/system/memberships": {
+    "route": "/system/memberships",
+    "kind": "redirect",
+    "destination": "管理员至 /admin/users/memberships；用户至 /dashboard"
+  },
+  "/system/operations": {
+    "route": "/system/operations",
+    "kind": "redirect",
+    "destination": "初始超管至 /admin/operations/backups；其他按权限返回或404"
+  },
+  "/team/[workspaceId]": {
+    "route": "/team/[workspaceId]",
+    "view": "team",
+    "name": "工作区与团队",
+    "group": "personal"
+  },
+  "/team": {
+    "route": "/team",
+    "view": "teams",
+    "name": "我的团队",
+    "group": "personal"
+  },
+  "/terms": {
+    "route": "/terms",
+    "view": "terms",
+    "name": "服务条款",
+    "group": "public"
+  },
+  "/personal/usage": {
+    "route": "/personal/usage",
+    "view": "usage",
+    "name": "使用记录",
+    "group": "personal"
+  }
+}

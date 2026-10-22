@@ -1,4 +1,5 @@
 import { expectIconLabelAlignment } from "./support/icon-label-alignment";
+import prototypeRoutes from "./support/prototype-route-catalog.json";
 import { readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
@@ -28,6 +29,7 @@ type MatrixEntry = Readonly<{
   expectedPath: string;
   gatedNotFound: boolean;
   iconCount: number;
+  prototype?: unknown;
   parentLinks: readonly string[];
   untranslatedSystemKeys: readonly string[];
   serverErrors: readonly Readonly<{ status: number; url: string }>[];
@@ -290,6 +292,7 @@ test("all page routes remain consistent across Chinese light and English dark de
   test.setTimeout(720_000);
   const routes = discoverAppPageRoutes();
   expect(routes, "route discovery must cover every current src/app/**/page.tsx page").toHaveLength(77);
+  for (const route of routes) expect(prototypeRoutes[route.path as keyof typeof prototypeRoutes], `${route.path} needs an explicit prototype view or compatibility destination`).toBeDefined();
 
   const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const userContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -380,6 +383,19 @@ test("all page routes remain consistent across Chinese light and English dark de
             expect(icon.strokeWidth, `${path}@${mode.id} Tabler app-icon stroke`).toBe("1.75");
           }
           await expectIconLabelAlignment(page.locator("body"), `${path}@${mode.id}`);
+          if (route.role !== "anonymous" && !gatedNotFound) {
+            const geometry = await page.locator("h1").first().evaluate(heading => {
+              let container = heading.parentElement;
+              while (container && Number.parseFloat(getComputedStyle(container).paddingLeft) < 12) container = container.parentElement;
+              if (!container) return null;
+              const style = getComputedStyle(container);
+              return { left:Number.parseFloat(style.paddingLeft), right:Number.parseFloat(style.paddingRight), width:container.getBoundingClientRect().width };
+            });
+            expect(geometry, `${path}@${mode.id} needs the shared prototype reading container`).not.toBeNull();
+            expect(geometry!.left, `${path}@${mode.id} prototype left inset`).toBe(mode.width <= 700 ? 18 : 32);
+            expect(geometry!.right, `${path}@${mode.id} prototype right inset`).toBe(mode.width <= 700 ? 18 : 32);
+            expect(geometry!.width, `${path}@${mode.id} prototype maximum content width`).toBeLessThanOrEqual(1500);
+          }
           parentLinks = await readParentLinks(page);
           untranslatedSystemKeys = mode.language === "en" ? await readUntranslatedSystemKeys(page) : [];
           expect(untranslatedSystemKeys, `${path}@${mode.id} must not leave exact translated dictionary keys in system UI`).toEqual([]);
@@ -390,6 +406,7 @@ test("all page routes remain consistent across Chinese light and English dark de
           if (mode.id === "en-dark-390" && path === "/admin") {
             await testInfo.attach("ui-matrix-admin-en-dark-390.png", { body: await page.screenshot(), contentType: "image/png" });
           }
+          if (!gatedNotFound) await page.screenshot({path:testInfo.outputPath(`pages/${mode.id}/${route.path.replaceAll(/[^a-zA-Z0-9_-]/g,"_") || "index"}.png`)});
           parentLinksAttempted = true;
           await exerciseParentLinks({
             page,
@@ -417,6 +434,7 @@ test("all page routes remain consistent across Chinese light and English dark de
             expectedPath: expectedFullPath,
             gatedNotFound: gatedNotFound && status === 404,
             iconCount,
+            prototype: prototypeRoutes[route.path as keyof typeof prototypeRoutes],
             parentLinks,
             untranslatedSystemKeys,
             serverErrors,

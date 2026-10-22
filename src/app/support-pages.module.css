@@ -4,11 +4,11 @@
   color: var(--app-text);
 }
 
-.content {
+.content{
   box-sizing: border-box;
   width: min(100%, 1500px);
   margin-inline: auto;
-  padding: 31px 38px 48px;
+  padding:var(--app-page-padding);
   background: var(--app-surface);
 }
 
@@ -163,8 +163,8 @@
 }
 
 .resourceCardIcon :global(svg.app-icon) {--app-icon-size: var(--app-icon-tile);
-  
-  
+
+
 }
 
 .resourceCardTitle {
@@ -334,11 +334,11 @@
 }
 
 @media (max-width: 1120px) {
-  .content { padding-right: 27px; padding-left: 27px; }
+  .content{   }
 }
 
 @media (max-width: 600px) {
-  .content { padding: 22px 15px 32px; }
+  .content{ padding:var(--app-page-padding); }
 }
 
 @media (max-width: 1100px) {

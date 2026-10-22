@@ -101,6 +101,7 @@ async function expectCitationDrawer(
   await turn.getByRole("button", { name: `[1] ${citation.title} · ${versionLabel}`, exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "当时的引用来源", exact: true });
   await expect(drawer).toBeVisible();
+  await expect(drawer.locator("[data-inquiry-footer]")).toHaveCount(0);
   await expect(drawer.getByRole("heading", { name: citation.title, exact: true })).toBeVisible();
   await expect(drawer).toContainText(citation.revision);
   await expect(drawer.getByText(content, { exact: true })).toBeVisible();

@@ -4,10 +4,10 @@
   background: var(--app-surface);
 }
 
-.content {
+.content{
   width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 32px;
+  padding:var(--app-page-padding);
 }
 
 .heading {
@@ -130,8 +130,8 @@
 }
 
 .searchBox svg {--app-icon-size: 15px;
-  
-  
+
+
   flex: 0 0 auto;
   color: var(--app-muted);
 }
@@ -379,12 +379,12 @@
 }
 
 @media (max-width: 1120px) {
-  .content { padding-right: 28px; padding-left: 28px; }
+  .content{   }
   .projectGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 700px) {
-  .content { padding: 25px 19px 36px; }
+  .content{ padding:var(--app-page-padding); }
   .toolbar { align-items: stretch; flex-direction: column; }
   .searchBox { width: 100%; }
   .projectGrid { grid-template-columns: minmax(0, 1fr); gap: 11px; }
@@ -392,7 +392,7 @@
 }
 
 @media (max-width: 480px) {
-  .content { padding: 21px 15px 28px; }
+  .content{ padding:var(--app-page-padding); }
   .heading { align-items: flex-start; flex-direction: column; gap: 14px; }
   .projectStats { gap: 5px; }
   .stat { padding: 8px 7px; }

@@ -1,8 +1,8 @@
-.page {
+.page{
   box-sizing: border-box;
   width: min(100%, 1500px);
   margin-inline: auto;
-  padding: 28px 32px 56px;
+  padding:var(--app-page-padding);
 }
 
 .header {
@@ -270,7 +270,7 @@
 }
 
 @media (max-width: 680px) {
-  .page { padding: 21px 16px 40px; }
+  .page{ padding:var(--app-page-padding); }
   .header { flex-direction: column; gap: 14px; }
   .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summaryCard,

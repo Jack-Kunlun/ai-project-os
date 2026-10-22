@@ -4,10 +4,10 @@
   background: var(--app-surface);
 }
 
-.content {
+.content {padding:var(--app-page-padding);
   width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 31px 38px 48px;
+
 }
 
 .heading,
@@ -69,17 +69,18 @@
   line-height: 1.6;
 }
 
-.headingActions { gap: 8px; }
+.headingActions { gap: 16px; }
 
 .headingActions > div > button {
-  min-height: 34px;
+  min-height: 40px;
   border: 1px solid var(--app-border);
   border-radius: 6px;
-  padding: 7px 11px;
+  padding: 8px 16px;
   color: var(--app-muted);
   background: var(--app-surface);
-  font-size: 10px;
-  font-weight: 620;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
 }
 
 .headingActions > div:last-child > button {
@@ -548,7 +549,7 @@
 @keyframes shimmer { to { background-position-x: -200%; } }
 
 @media (max-width: 1120px) {
-  .content { padding-right: 27px; padding-left: 27px; }
+  .content {padding:var(--app-page-padding);   }
   .board { gap: 8px; }
   .boardColumn { padding: 8px; }
   .workCard { padding: 9px; }
@@ -566,7 +567,7 @@
 }
 
 @media (max-width: 600px) {
-  .content { padding: 22px 15px 32px; }
+  .content {padding:var(--app-page-padding);  }
   .goalBanner { align-items: flex-start; flex-wrap: wrap; padding: 12px; }
   .goalCopy { flex-basis: calc(100% - 48px); }
   .goalProgress { width: calc(100% - 10px); margin-left: 45px; }

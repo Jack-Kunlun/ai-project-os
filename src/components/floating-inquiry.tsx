@@ -19,6 +19,7 @@ export function FloatingInquiry(){
  const [activeRequest]=useInquiryValue('request'),[sessionEpoch]=useInquiryValue('epoch'),preparing=activeRequest?.phase==='prepare';
  const allowed=!publicRoots.has(pathname.split('/')[1])&&pathname!=='/ask';
  const keepActive=pending&&opened&&!publicRoots.has(pathname.split('/')[1]);
+ const assistVisible=allowed||keepActive;
  useEffect(()=>{const node=document.createElement('div');node.dataset.floatingInquiryRoot='';document.body.append(node);const frame=requestAnimationFrame(()=>{setSize({width:document.documentElement.clientWidth||document.body.clientWidth,height:document.documentElement.clientHeight||document.body.clientHeight});setTarget(node);});return()=>{cancelAnimationFrame(frame);node.remove();};},[]);
  useEffect(() => {
    let frame = 0;
@@ -29,7 +30,7 @@ export function FloatingInquiry(){
        setSize(previous => previous.width === viewportWidth && previous.height === viewportHeight ? previous : { width: viewportWidth, height: viewportHeight });
        const candidates = [...document.querySelectorAll<HTMLElement>('dialog[open], [role="dialog"][aria-modal="true"]')]
          .filter(el => !el.closest('[data-floating-inquiry-root]') && !el.closest('[hidden],[inert],[aria-hidden="true"]') && el.dataset.inquiryOwned !== 'true' && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
-       const host = candidates.at(-1);
+       const host = assistVisible?candidates.at(-1):undefined;
        const existing=host?.querySelector<HTMLElement>('[data-dialog-footer],[data-operation-footer]');
        const previous=latestOperation.current;
        if(previous?.host!==host||!previous?.footer.isConnected||(existing&&existing!==previous.footer)){
@@ -40,7 +41,7 @@ export function FloatingInquiry(){
            footer.setAttribute('data-inquiry-footer','');
            latestOperation.current={host,footer,owned:!existing};
            setOperation({host,footer});
-         }else if(previous){latestOperation.current=null;setOperation(null);}
+         }else{latestOperation.current=null;setOperation(value=>value?null:value);}
        }
      });
    }
@@ -48,8 +49,8 @@ export function FloatingInquiry(){
    const updateInquiryLayer=()=>{setOwnedDialogVersion(version=>version+1);update();};
    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'data-inquiry-owned'] });
    window.addEventListener('resize', update); window.addEventListener(INQUIRY_OPERATION_EVENT, updateInquiryLayer); update();
-   return () => { cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener('resize', update); window.removeEventListener(INQUIRY_OPERATION_EVENT, updateInquiryLayer); const mount=latestOperation.current;if(mount){mount.footer.removeAttribute('data-inquiry-footer');if(mount.owned)mount.footer.remove();} };
- }, []);
+   return () => { cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener('resize', update); window.removeEventListener(INQUIRY_OPERATION_EVENT, updateInquiryLayer); const mount=latestOperation.current;if(mount){mount.footer.removeAttribute('data-inquiry-footer');if(mount.owned)mount.footer.remove();}latestOperation.current=null; };
+ }, [assistVisible]);
  useLayoutEffect(()=>{
    const footer=operation?.footer,launcher=launcherRef.current;
    if(footer&&launcher?.parentElement===footer)footer.insertBefore(launcher,footer.firstChild);

@@ -11,7 +11,7 @@ export function ParentPageLink({ href, label, scroll }: { href: string; label: s
       scroll={scroll}
       className={PARENT_PAGE_LINK_CLASS_NAME}
     >
-      <ShellIcon name="back" className="app-icon--compact" />
+      <ShellIcon name="back" className="app-icon--control" />
       <UiText text={label} />
     </Link>
   );

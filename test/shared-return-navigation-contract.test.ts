@@ -68,7 +68,8 @@ test("modal and drawer headers use accessible icon-only close buttons", () => {
 
 test("shared workspace content keeps the project-plan width and narrow-screen margins", () => {
   const sharedPage = source("src/components/workspace-ui.module.css");
-  assert.match(sharedPage, /\.page\{width:min\(100%,1500px\);margin:0 auto;padding:31px 38px 48px/u);
-  assert.match(sharedPage, /@media\(max-width:1120px\)\{\.page\{padding-right:27px;padding-left:27px\}\}/u);
-  assert.match(sharedPage, /@media\(max-width:600px\)\{\.page\{padding:22px 15px 32px\}\}/u);
+  assert.match(sharedPage, /padding:var\(--app-page-padding\)/u);
+  const tokens = source("src/app/globals.css");
+  assert.match(tokens, /--app-page-padding: 28px 32px 32px/u);
+  assert.match(tokens, /--app-page-padding: 23px 18px 32px/u);
 });

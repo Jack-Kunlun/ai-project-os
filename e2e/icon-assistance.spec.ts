@@ -34,7 +34,7 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expectIconLabelAlignment(dialog,name);
     await expectR02NoHorizontalOverflow(page,name);
     await expectR02NoAccessibilityViolations(page,name);
-    await testInfo.attach(`assistance-${name}.png`,{body:await page.screenshot(),contentType:"image/png"});
+    await testInfo.attach(`assistance-${name}.png`,{body:await page.screenshot({path:testInfo.outputPath(`assistance-${name}.png`)}),contentType:"image/png"});
     await launcher.click();
     const ask=page.getByRole("dialog",{name:en?"Floating Ask AI":"智能问答悬浮窗",exact:true});
     await expect(ask).toBeVisible();
@@ -48,6 +48,6 @@ test("operation assistance stays in the secondary footer and icons align with re
     const alignment=await readIconLabelAlignment(create);
     expect(alignment).toHaveLength(1);
     expect(Math.abs(alignment[0].verticalDelta)).toBeLessThanOrEqual(.5);
-    await testInfo.attach(`conversation-${name}.png`,{body:await page.screenshot(),contentType:"image/png"});
+    await testInfo.attach(`conversation-${name}.png`,{body:await page.screenshot({path:testInfo.outputPath(`conversation-${name}.png`)}),contentType:"image/png"});
   }
 });

@@ -4,10 +4,10 @@
   background: var(--app-surface);
 }
 
-.content {
+.content{
   width: min(100%, 1500px);
   margin: 0 auto;
-  padding: 32px;
+  padding:var(--app-page-padding);
 }
 
 .heading,
@@ -505,13 +505,13 @@
 }
 
 @media (max-width: 1050px) {
-  .content { padding-right: 28px; padding-left: 28px; }
+  .content{   }
   .featureGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .projectGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
-  .content { padding: 25px 20px 36px; }
+  .content{ padding:var(--app-page-padding); }
   .heading { align-items: flex-start; }
   .featureGrid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .panel,
@@ -521,7 +521,7 @@
 }
 
 @media (max-width: 480px) {
-  .content { padding: 21px 15px 28px; }
+  .content{ padding:var(--app-page-padding); }
   .heading { flex-direction: column; align-items: stretch; gap: 14px; }
   .primaryButton { align-self: flex-start; }
   .panel,

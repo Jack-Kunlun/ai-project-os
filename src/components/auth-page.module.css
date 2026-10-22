@@ -884,8 +884,8 @@
 }
 
 .providerLink :global(svg.app-icon) {--app-icon-size: var(--app-icon-feature);
-  
-  
+
+
   flex: 0 0 auto;
 }
 

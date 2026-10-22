@@ -292,7 +292,8 @@ test("admin profile overlays use shared geometry and phone verification stays in
 
   await operation.dialog.getByRole("button", { name: translated("确认换绑并重新登录"), exact: true }).click();
   await phoneRequestObserved;
-  await expect(operation.dialog.locator("fieldset")).toBeDisabled();
+  await expect(operation.dialog.locator("fieldset")).toHaveAttribute("disabled", "");
+  await expect(operation.dialog.locator("input").first()).toBeDisabled();
   const closeButton = operation.dialog.getByRole("button", { name: translated("关闭窗口"), exact: true });
   await closeButton.click();
   await expect(operation.dialog).toBeVisible();
@@ -312,7 +313,8 @@ test("admin profile overlays use shared geometry and phone verification stays in
 
   releasePhoneRequest();
   await expect(operation.dialog.getByRole("alert")).toBeVisible();
-  await expect(operation.dialog.locator("fieldset")).toBeEnabled();
+  await expect(operation.dialog.locator("fieldset")).not.toHaveAttribute("disabled", "");
+  await expect(operation.dialog.locator("input").first()).toBeEnabled();
   await page.keyboard.press("Escape");
   await expect(operation.dialog).toBeHidden();
   await expect(operation.trigger).toBeFocused();

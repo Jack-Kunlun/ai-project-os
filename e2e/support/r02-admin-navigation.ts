@@ -33,7 +33,7 @@ export type R02RouteExpectation = Readonly<{
 export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin", heading: "平台总览", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取就绪证据…", "正在读取默认路由状态…", "读取中…"] },
   { path: "/admin/models", heading: "模型与能力", terminal: { kind: "heading", name: "供应商连接" }, pendingTexts: ["读取中…"] },
-  { path: "/admin/models/routes", heading: "模型与能力", terminal: { kind: "text", name: "平台能力配置" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/models/routes", heading: "模型与能力", terminal: { kind: "heading", name: "能力分配" }, pendingTexts: ["读取中…"] },
   { path: "/admin/sms", heading: "短信服务", terminal: { kind: "text", name: "尚未配置短信供应商" }, pendingTexts: ["正在读取供应商配置…"] },
   { path: "/admin/credits", heading: "平台额度", terminal: { kind: "text", name: "平台额度治理" }, pendingTexts: ["读取中…"] },
   { path: "/admin/operations/probes", heading: "连接探测预算", terminal: { kind: "text", name: "平台连接探测预算" }, pendingTexts: ["读取中…"] },

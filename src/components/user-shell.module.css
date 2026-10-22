@@ -345,6 +345,7 @@
 
 .topActions {
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .searchButton {
@@ -358,6 +359,7 @@
   padding: 0 8px;
   color: var(--app-muted);
   font-size: 11px;
+  white-space: nowrap;
   transition: background-color 140ms ease, color 140ms ease;
 }
 

@@ -1,5 +1,7 @@
 .tableFrame { min-width: 0; overflow: hidden; border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-surface); }
-.membersTable { color: var(--app-text); overflow-wrap: anywhere; }
+.membersTable { table-layout: fixed; color: var(--app-text); overflow-wrap: anywhere; }
+.membersTable th:first-child { width: 32%; }
+.membersTable th:last-child { width: 20%; }
 .tableHead { background: var(--app-surface-soft); }
 
 @media (max-width: 800px) {

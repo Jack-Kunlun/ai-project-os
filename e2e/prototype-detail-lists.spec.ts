@@ -98,6 +98,11 @@ test("source detail and project members follow prototype reading layouts (isolat
     const sourceDocument = page.locator("[data-source-document]");
     await expect(sourceDocument).toBeVisible();
     await expect(sourceDocument).toHaveText(sourceText);
+    if (mode.width >= 1100) {
+      const searchLabel = page.getByRole("button", { name: mode.language === "en" ? "Search and navigate" : "搜索与跳转", exact: true }).locator(":scope > span");
+      const searchMetrics = await searchLabel.evaluate((element) => ({ height: element.getBoundingClientRect().height, font: parseFloat(getComputedStyle(element).fontSize) }));
+      expect(searchMetrics.height, "header search label must remain on one line").toBeLessThanOrEqual(searchMetrics.font * 1.8);
+    }
     const documentPadding = await sourceDocument.evaluate((element) => {
       const style = getComputedStyle(element);
       return [parseFloat(style.paddingLeft), parseFloat(style.paddingRight)];
@@ -137,9 +142,20 @@ test("source detail and project members follow prototype reading layouts (isolat
     if (mode.language === "en") {
       expect(await page.locator("[data-page-content]").innerText()).not.toMatch(/\p{Script=Han}/u);
     }
-    await page.screenshot({ path: testInfo.outputPath(`project-members-${modeName}.png`), fullPage: true });
     const edit = membersTable.getByRole("button", { name: mode.language === "en" ? "Edit permissions" : "编辑权限", exact: true });
     await expect(edit).toHaveCount(1);
+    if (mode.width >= 1100) {
+      const tableBox = await membersTable.boundingBox();
+      const firstColumn = await membersTable.getByRole("columnheader").first().boundingBox();
+      expect(firstColumn!.width, "long names must leave room for permissions and actions").toBeLessThanOrEqual(tableBox!.width * 0.35);
+      const lines = await edit.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.top))).size;
+      });
+      expect(lines, "permission action must remain on one line").toBe(1);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`project-members-${modeName}.png`), fullPage: true });
     await edit.click();
     const editor = page.getByRole("dialog").filter({ has: page.locator("select") });
     await expect(editor).toBeVisible();

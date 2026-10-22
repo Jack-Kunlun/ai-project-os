@@ -594,6 +594,7 @@
   }
 
   .searchButton {
+    --app-icon-text-offset: 0px;
     width: 36px;
     justify-content: center;
     padding: 0;

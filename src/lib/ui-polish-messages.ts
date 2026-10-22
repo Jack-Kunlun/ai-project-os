@@ -1,5 +1,15 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "了解角色、邀请和工作区入口": "Understand roles, invitations and workspace access",
+  "建立隔离的项目空间": "Create an isolated project space",
+  "查看当前事实和项目状态": "Review current facts and project status",
+  "管理项目使用的 Git、MCP 和 AI 连接": "Manage the project's Git, MCP and AI connections",
+  "把目标和证据转成可推进的工作": "Turn objectives and evidence into actionable work",
+  "接入文件、网页和代码来源": "Add files, web pages and code sources",
+  "统一问答、检索、简报和只读调查": "Use Q&A, search, briefs and read-only investigation",
+  "按计划维护来源并接收提醒": "Maintain sources on a schedule and receive reminders",
+  "在概览中核对任务、关系、审批和用量": "Review tasks, relationships, approvals and usage",
+  "处理待确认候选和任务结果": "Review pending candidates and task results",
   "管理员指南目录": "Administrator guide contents",
   "模型与额度": "Models and quota",
   "平台默认模型": "Platform default models",

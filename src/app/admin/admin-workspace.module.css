@@ -117,6 +117,7 @@
 .workspace :global(.admin-navigation-search p) { padding: 12px; font-size: 13px; }
 .workspace :global(.admin-legacy-frame) { display: grid; grid-template-columns: 218px minmax(0, 1fr); gap: 24px; }
 @media (max-width: 1100px) {
+  .workspace :global(.admin-search-trigger) { --app-icon-text-offset: 0px; }
   .workspace :global(.admin-search-trigger > span),
   .workspace :global(.admin-search-trigger kbd) { display: none; }
   .workspace :global(.admin-header-actions) { gap: 8px; }

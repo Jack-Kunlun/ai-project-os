@@ -304,7 +304,7 @@ for (const appearance of APPEARANCE_CASES) {
 
       if (route === "/personal/connections/git" || route === "/personal/connections/mcp") {
         const tr = (text: string) => appearance.language === "en" ? englishUiMessages[text] ?? text : text;
-        const add = page.getByRole("button", { name: tr("添加服务"), exact: true });
+        const add = page.getByRole("button", { name: tr(route === "/personal/connections/git" ? "添加 Git 服务" : "添加 MCP 服务"), exact: true });
         await expect(add).toBeEnabled();
         await add.click();
         const editor = page.locator("[data-connection-dialog]");
@@ -631,7 +631,7 @@ test("Git creation waits for its real provider catalog before accepting a click"
   try {
     await page.goto("/personal/connections/git");
     await expect.poll(() => requested).toBe(true);
-    const add = page.getByRole("button", { name: "添加服务", exact: true });
+    const add = page.getByRole("button", { name: "添加 Git 服务", exact: true });
     await expect(add).toBeDisabled();
     release();
     await expect(add).toBeEnabled();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslate } from "./appearance-provider";
 import { useInquiryOperation } from "./inquiry-operation";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
@@ -21,6 +22,7 @@ export type AppConfirmOptions = Readonly<{
   inputOptional?: boolean;
   defaultValue?: string;
   maxLength?: number;
+  returnFocus?: HTMLElement;
 }>;
 
 export type AppConfirmResult = Readonly<{ confirmed: boolean; value: string }>;
@@ -28,6 +30,7 @@ export type AppConfirmResult = Readonly<{ confirmed: boolean; value: string }>;
 type PendingRequest = Readonly<{
   options: AppConfirmOptions;
   resolve: (result: AppConfirmResult) => void;
+  portalHost: HTMLElement;
 }>;
 
 export function useAppConfirmDialog() {
@@ -53,7 +56,13 @@ export function useAppConfirmDialog() {
 
   const confirm = useCallback((options: AppConfirmOptions) => new Promise<AppConfirmResult>((resolve) => {
     requestRef.current?.resolve({ confirmed: false, value: "" });
-    const next = { options, resolve };
+    // Leave custom operation stacking contexts, while staying in a native
+    // modal's top layer when the opener belongs to one.
+    const portalHost = document.activeElement?.closest<HTMLElement>("dialog[open]")
+      ?? [...document.querySelectorAll<HTMLElement>("dialog:modal")].at(-1)
+      ?? document.body;
+    const next = { options, resolve, portalHost };
+    previousFocusRef.current = options.returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     requestRef.current = next;
     valueRef.current = options.defaultValue ?? "";
     setValue(valueRef.current);
@@ -62,7 +71,6 @@ export function useAppConfirmDialog() {
 
   useEffect(() => {
     if (request === null) return;
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusTimer = window.setTimeout(() => {
       const firstFocusable = dialogRef.current?.querySelector<HTMLElement>("button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])");
       firstFocusable?.focus();
@@ -87,8 +95,17 @@ export function useAppConfirmDialog() {
     return () => {
       window.clearTimeout(focusTimer);
       window.removeEventListener("keydown", onKeyDown);
-      previousFocusRef.current?.focus();
+      const previousFocus = previousFocusRef.current;
       previousFocusRef.current = null;
+      // The caller may re-enable its pending trigger when the promise settles.
+      window.requestAnimationFrame(() => {
+        if (requestRef.current !== null) return;
+        if (previousFocus?.isConnected && previousFocus !== document.body && previousFocus.getClientRects().length > 0 && !previousFocus.matches(":disabled") && !previousFocus.closest("[hidden], [inert], [aria-hidden='true']")) previousFocus.focus();
+        else if (request.portalHost !== document.body && request.portalHost.matches("dialog:modal")) {
+          const fallback = request.portalHost.querySelector<HTMLElement>("[data-dialog-close]:not(:disabled)");
+          if (fallback && fallback.getClientRects().length > 0 && !fallback.closest("[hidden], [inert], [aria-hidden='true']")) fallback.focus();
+        }
+      });
     };
   }, [close, request]);
 
@@ -108,7 +125,7 @@ export function useAppConfirmDialog() {
   const confirmClass = tone === "danger" ? "bg-rose-600 hover:bg-rose-500" : tone === "warning" ? "bg-amber-600 hover:bg-amber-500" : "bg-indigo-600 hover:bg-indigo-500";
   const descriptionClass = tone === "danger" ? "text-rose-700" : "text-slate-600";
 
-  const dialog = request === null || options === undefined ? null : (
+  const dialog = request === null || options === undefined ? null : createPortal(
     <div className={`fixed inset-0 z-[80] flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onPointerDown={event=>{backdropStarted.current=event.target===event.currentTarget;}} onClick={(event) => { if (backdropStarted.current&&event.target === event.currentTarget) close(false); }}>
       <section data-inquiry-owned={String(owned)} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
         <header data-dialog-header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-7 py-5 sm:px-8`}>
@@ -134,7 +151,7 @@ export function useAppConfirmDialog() {
           <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{t(options.confirmLabel ?? "确认")}</button>
         </footer>
       </section>
-    </div>
+    </div>, request.portalHost,
   );
 
   return { confirm, dialog } as const;

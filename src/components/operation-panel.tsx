@@ -51,7 +51,7 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
   }, [isOpen]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented || !(event.target instanceof Element) || event.target.closest('[role="dialog"], dialog[open]') !== dialogRef.current) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();

@@ -27,7 +27,7 @@ export default function ContactPage() {
             <p><UiText text={"欢迎分享 AI Project OS 的使用体验、反馈遇到的问题或提出改进建议。"} /></p>
             <p><UiText text={"电脑访问时，可用手机微信扫描页面中的二维码；手机访问时，可保存二维码图片，再通过微信识别。"} /></p>
             <div className="flex flex-wrap gap-3 pt-1">
-              <a href="/contact/author-wechat.jpg" download="AI-Project-OS-作者微信.jpg" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"保存二维码"} /></a>
+              <a href="/contact/author-wechat.jpg" download="AI-Project-OS-作者微信.jpg" className={styles.primaryAction}><UiText text={"保存二维码"} /></a>
               <a href="/contact/author-wechat.jpg" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"查看原图"} /><span className="sr-only"><UiText text={"（在新窗口打开）"} /></span></a>
             </div>
           </InfoSection>

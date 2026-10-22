@@ -91,3 +91,40 @@ test("model quota uses the real report envelope and Ask Escape preserves a confi
   await expect(launcher).toBeFocused();
   await confirmation.getByRole('button',{name:'取消',exact:true}).click();
 });
+
+test("nested graph confirmation Escape preserves both operation panels without executing (client-only prepare fixture)", async ({page})=>{
+  await signInR02Admin(page);await signOutR02User(page);
+  const user=await seedBrowserPersonalUser(`graph-confirm-${randomUUID().slice(0,8)}`,"GraphConfirm2026Password!");
+  await signInR02PersonalUser(page,user);
+  const documentId=randomUUID(),secondDocumentId=randomUUID(),providerId=randomUUID();
+  let executes=0;
+  await page.route('**/api/personal/knowledge/graph',async route=>{
+    if(route.request().method()==='GET')return route.fulfill({json:{documents:{nodes:[{id:documentId,title:'First safe document',version:1},{id:secondDocumentId,title:'Second safe document',version:1}],edges:[],truncated:false},suggestions:[],truncated:false}});
+    const data=route.request().postDataJSON() as {action:string};
+    if(data.action==='prepare')return route.fulfill({json:{attemptId:randomUUID(),providerName:'Safe model display fixture',modelId:'gpt-4.1-mini'}});
+    executes++;return route.abort();
+  });
+  await page.route('**/api/me/ai-providers',route=>route.request().method()==='GET'?route.fulfill({json:{providers:[{id:providerId,name:'Safe model display fixture',status:'verified',defaultGenerationModelId:'gpt-4.1-mini'}]}}):route.abort());
+  await page.goto('/personal/knowledge/graph');
+  await page.getByRole('button',{name:'维护个人关系',exact:true}).click();
+  const outer=page.getByRole('dialog',{name:'维护个人关系',exact:true});
+  await outer.getByRole('button',{name:'提取候选关系',exact:true}).click();
+  const editor=page.getByRole('dialog',{name:'提取知识关系候选',exact:true});
+  const documentSelect=editor.getByRole('combobox',{name:'知识文档',exact:true});
+  await documentSelect.selectOption(secondDocumentId);
+  await editor.getByRole('button',{name:'开始提取',exact:true}).click();
+  const confirmation=page.getByRole('dialog',{name:'发送文档给个人模型提取候选关系？',exact:true});
+  await expect(confirmation).toBeVisible();
+  const cancel=confirmation.getByRole('button',{name:'返回',exact:true});
+  await expect(confirmation.getByRole('button',{name:'关闭窗口',exact:true})).toBeFocused();
+  expect(await cancel.evaluate(element=>{const r=element.getBoundingClientRect();return element.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),'confirmation must be above both operation panels').toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(confirmation).toBeHidden();
+  await expect(editor).toBeVisible();await expect(outer).toBeVisible();
+  await expect(documentSelect).toHaveValue(secondDocumentId);
+  await expect(editor.getByRole('button',{name:'开始提取',exact:true})).toBeEnabled();
+  await expect(editor.getByRole('button',{name:'开始提取',exact:true})).toBeFocused();
+  expect(executes).toBe(0);
+  await editor.getByRole('button',{name:'关闭窗口',exact:true}).click();
+  await outer.getByRole('button',{name:'关闭窗口',exact:true}).click();
+});

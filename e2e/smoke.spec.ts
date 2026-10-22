@@ -504,7 +504,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto("/personal/connections/git");
   await expect(page.getByRole("heading", { name: "Git 授权管理", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "添加服务", exact: true }).click();
+  await page.getByRole("button", { name: "添加 Git 服务", exact: true }).click();
   const gitDialog = page.getByRole("dialog", { name: "添加 Git 服务" });
   const addressHelp = gitDialog.getByRole("button", { name: "服务地址填写示例" });
   await addressHelp.scrollIntoViewIfNeeded();

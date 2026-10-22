@@ -136,11 +136,25 @@
   color: var(--app-link);
 }
 
+.infoBody a.primaryAction {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  padding: 8px 16px;
+  background: var(--app-accent);
+  color: var(--app-on-accent);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
 .infoBody a:focus-visible,
 .loginLink:focus-visible,
 .brand:focus-visible,
-.footerNav a:focus-visible,
-.qrFigure a:focus-visible {
+.footerNav a:focus-visible {
   outline: 2px solid var(--app-accent);
   outline-offset: 3px;
 }

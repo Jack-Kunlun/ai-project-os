@@ -2,6 +2,7 @@ import { UiText } from "@/components/appearance-provider";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { InfoSection, PublicInfoPage } from "@/components/public-info-page";
+import styles from "@/components/public-info-page.module.css";
 
 export const metadata: Metadata = { title: "帮助文档 · AI Project OS" };
 
@@ -16,7 +17,7 @@ export default function HelpPage() {
       </InfoSection>
       <InfoSection title="登录后从哪里开始">
         <p><UiText text={"进入 Dashboard 查看工作空间状态，再选择项目。项目内固定使用“项目概览、项目配置、项目计划、项目资料、AI 工作台、项目自动化”六个入口；任务记录和 AI 用量在项目概览中查看。"} /></p>
-        <div className="flex flex-wrap gap-3 pt-1"><Link href="/login" className="inline-flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"><UiText text={"前往登录"} /></Link><Link href="/guide" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50"><UiText text={"登录后查看完整指南"} /></Link></div>
+        <div className="flex flex-wrap gap-3 pt-1"><Link href="/login" className={styles.primaryAction}><UiText text={"前往登录"} /></Link><Link href="/guide" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50"><UiText text={"登录后查看完整指南"} /></Link></div>
       </InfoSection>
       <InfoSection title="联系作者">
         <p><UiText text={"需要反馈使用问题或提出建议时，可以通过微信联系作者。"} /></p>

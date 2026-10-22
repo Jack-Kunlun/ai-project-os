@@ -273,21 +273,30 @@ test("personal Git and MCP connection lists match the prototype across desktop a
 
         const preview = governance.locator('[aria-live="polite"]');
         await expect(preview).toBeVisible();
-        await expect(preview.getByText("Preview issued", { exact: true })).toBeVisible();
+        await expect(preview.getByText("可在确认后执行", { exact: true })).toBeVisible();
         expect(governanceFixture.previewRequests).toEqual([{ kind: "git", action: "disable", reason }]);
 
-        await governance.getByRole("button", { name: "继续停用连接", exact: true }).click();
+        // A pending opener can lose focus before a confirmation is mounted.
+        // Force that case and exercise the native :modal host fallback.
+        await governance.getByRole("button", { name: "继续停用连接", exact: true }).evaluate(button => {
+          if (!(button instanceof HTMLButtonElement)) throw new Error("expected governance button");
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          if (document.activeElement?.closest("dialog[open]")) throw new Error("native fallback setup did not release focus");
+          button.click();
+        });
         const confirmation = page.getByRole("dialog", { name: "确认停用这条连接？", exact: true });
         await expect(confirmation).toBeVisible();
-        await expect(confirmation.getByRole("textbox")).toBeFocused();
+        expect(await confirmation.evaluate(element => element.closest("dialog[open]") !== null)).toBe(true);
+        await expect(confirmation.getByRole("button", { name: "关闭窗口", exact: true })).toBeFocused();
         await page.keyboard.press("Escape");
 
         await expect(confirmation).toBeHidden();
         await expect(drawer).toBeVisible();
         await expect(governance).toBeVisible();
         await expect(reasonInput).toHaveValue(reason);
+        await expect(governance.getByRole("button", { name: "继续停用连接", exact: true })).toBeFocused();
         await expect(preview).toBeVisible();
-        await expect(preview.getByText("Preview issued", { exact: true })).toBeVisible();
+        await expect(preview.getByText("可在确认后执行", { exact: true })).toBeVisible();
         expect(governanceFixture.executeRequests).toEqual([]);
 
         await drawer.getByRole("button", { name: labels.closeDialog, exact: true }).click();

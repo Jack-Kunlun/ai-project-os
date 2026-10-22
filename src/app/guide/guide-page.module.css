@@ -274,7 +274,7 @@
   }
 
   .chapterNav {
-    position: static;
+    position: relative;
     overflow-x: auto;
     border-bottom: 1px solid var(--app-border);
     padding-bottom: 8px;

@@ -45,7 +45,7 @@ export function ConversationRail(props: {
       {!props.collapsed ? <strong><UiText text="最近会话"/></strong> : null}
       <button className={styles.railIcon} type="button" onClick={() => props.setCollapsed(!props.collapsed)} aria-label={t(props.collapsed ? "展开最近会话" : "收起最近会话")} title={t(props.collapsed ? "展开最近会话" : "收起最近会话")} aria-expanded={!props.collapsed}><ShellIcon name="sidebar"/></button>
     </div>
-    <button className={props.collapsed ? styles.railIcon : styles.newConversation} onClick={props.create} disabled={props.busy} aria-label={t("新建会话")} title={t("新建会话")}><ShellIcon name="plus"/>{!props.collapsed ? <UiText text="新建会话"/> : null}</button>
+    <button className={props.collapsed ? styles.railIcon : styles.newConversation} onClick={props.create} disabled={props.busy} aria-label={t("新建会话")} title={t("新建会话")}><ShellIcon name="plus"/>{!props.collapsed ? <span><UiText text="新建会话"/></span> : null}</button>
     {!props.collapsed ? <>
       <label className={ui.field}><span className={styles.visuallyHidden}><UiText text="会话列表"/></span><select aria-label={t("会话列表")} value={props.view} onChange={e => props.setView(e.target.value as ConversationView)}><option value="active"><UiText text="最近会话"/></option><option value="archived"><UiText text="已归档"/></option><option value="deleted"><UiText text="回收站"/></option></select></label>
       <input className={ui.search} aria-label={t("搜索历史会话")} placeholder={t("搜索会话")} value={props.query} onChange={e => props.setQuery(e.target.value)}/>

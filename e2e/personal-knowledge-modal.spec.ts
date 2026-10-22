@@ -36,7 +36,7 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   const closeModal = modal.getByRole("button", { name: "关闭窗口", exact: true });
   await closeModal.focus();
   await page.keyboard.press("Shift+Tab");
-  await expect(modal.locator(".inquiry-launcher")).toBeFocused();
+  await expect(modal.getByRole("button", {name:"创建知识",exact:true})).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(closeModal).toBeFocused();
   await page.keyboard.press("Tab");

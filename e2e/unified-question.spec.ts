@@ -1,3 +1,4 @@
+import { readIconLabelAlignment } from "./support/icon-label-alignment";
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin, signInR02PersonalUser, signOutR02User } from "./support/r02-admin-navigation";
@@ -444,6 +445,10 @@ test("unified Ask keeps real source snapshots across scopes (isolated client rou
     await matrixHistory.getByRole("textbox", { name: english ? "Search conversation history" : "搜索历史会话", exact: true }).fill(suffix);
     const row = conversationRow(matrixHistory, `统一问答验收 ${suffix}`);
     await expect(row).toBeVisible();
+    const newConversation = matrixHistory.getByRole("button", {name: english ? "New conversation" : "新建会话", exact:true});
+    const buttonAlignment = await readIconLabelAlignment(newConversation);
+    expect(buttonAlignment).toHaveLength(1);
+    expect(Math.abs(buttonAlignment[0].verticalDelta)).toBeLessThanOrEqual(0.5);
     const before = await row.boundingBox();
     await row.hover();
     const after = await row.boundingBox();

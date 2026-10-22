@@ -162,9 +162,9 @@
   color: var(--app-link);
 }
 
-.resourceCardIcon :global(svg.app-icon) {
-  width: var(--app-icon-tile);
-  height: var(--app-icon-tile);
+.resourceCardIcon :global(svg.app-icon) {--app-icon-size: var(--app-icon-tile);
+  
+  
 }
 
 .resourceCardTitle {

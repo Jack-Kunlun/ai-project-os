@@ -133,13 +133,19 @@ svg.app-icon {
   width: var(--app-icon-size, var(--app-icon-control));
   height: var(--app-icon-size, var(--app-icon-control));
   flex: 0 0 auto;
-  vertical-align: middle;
+  vertical-align: calc(.375em - var(--app-icon-size, var(--app-icon-control)) * .5 + var(--app-icon-text-offset, 0px));
+  translate: 0 var(--app-icon-text-offset, 0px);
   color: inherit;
   pointer-events: none;
   stroke-width: 1.75;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* Font glyphs sit slightly above the line box center; use one shared optical
+   offset for text controls and a size-aware baseline for inline metadata. */
+:where(button, a, label, summary) { --app-icon-text-offset: -.05em; }
+.app-icon-button { --app-icon-text-offset: 0px; }
 
 .app-icon--meta { --app-icon-size: var(--app-icon-meta); }
 .app-icon--compact { --app-icon-size: var(--app-icon-compact); }

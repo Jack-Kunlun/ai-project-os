@@ -184,7 +184,13 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const closeBounds = await intake.getByRole("button", { name: "关闭窗口", exact: true }).boundingBox();
   expect(launcherBounds).not.toBeNull();
   expect(closeBounds).not.toBeNull();
-  expect(launcherBounds!.x + launcherBounds!.width).toBeLessThanOrEqual(closeBounds!.x);
+  const footer = intake.locator("[data-inquiry-footer]");
+  await expect(footer).toBeVisible();
+  await expect(intake.locator("[data-operation-header] .inquiry-launcher")).toHaveCount(0);
+  const footerBounds = await footer.boundingBox();
+  expect(launcherBounds!.y).toBeGreaterThanOrEqual(footerBounds!.y);
+  expect(launcherBounds!.y + launcherBounds!.height).toBeLessThanOrEqual(footerBounds!.y + footerBounds!.height);
+  expect(launcherBounds!.y).toBeGreaterThan(closeBounds!.y + closeBounds!.height);
   expect(launcherBounds!.height).toBeLessThanOrEqual(44);
   await expectR02NoAccessibilityViolations(page, "project add source 390px");
 

@@ -48,8 +48,8 @@
 .conversationRail[data-collapsed="true"]{padding-right:8px;align-items:center}
 .railHeading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px}
 .railIcon,.newConversation,.moreButton{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:6px;background:transparent;color:var(--app-muted);cursor:pointer;flex-shrink:0}
-.railIcon{width:32px;height:32px;padding:8px}
-.newConversation{min-height:36px;padding:8px 12px;background:var(--app-accent-soft);color:var(--app-link);justify-content:flex-start}
+.railIcon{--app-icon-text-offset:0px;width:32px;height:32px;padding:8px}
+.newConversation{font-size:12px;line-height:20px;min-height:36px;padding:8px 12px;background:var(--app-accent-soft);color:var(--app-link);justify-content:flex-start}
 .railIcon:hover,.moreButton:hover{background:var(--app-accent-soft);color:var(--app-link)}
 .conversationRail input,.conversationRail select{width:100%;min-width:0;font-size:12px}
 .railList{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:6px}
@@ -58,7 +58,7 @@
 .railMain{display:block;min-width:0;flex:1;border:0;padding:0;background:transparent;text-align:left;color:var(--app-text);cursor:pointer}
 .railTitle{display:block;font-weight:550;line-height:1.6;overflow-wrap:anywhere}
 .railMain small{display:block;margin-top:4px;line-height:1.6;font-size:11px;color:var(--app-muted)}
-.moreButton{width:28px;height:28px;padding:6px;opacity:.65}
+.moreButton{--app-icon-text-offset:0px;width:28px;height:28px;padding:6px;opacity:.65}
 .railItem:hover .moreButton,.moreButton:focus-visible,.moreButton[aria-expanded="true"]{opacity:1}
 .conversationPopover{position:fixed;inset:auto;margin:0;width:180px;max-height:calc(100dvh - 16px);overflow:auto;padding:6px;border:1px solid var(--app-border);border-radius:8px;background:var(--app-surface);color:var(--app-text);box-shadow:0 8px 28px #0002}
 .conversationPopover:popover-open{display:grid;gap:2px}
@@ -66,7 +66,7 @@
 .conversationPopover button:hover{background:var(--app-accent-soft)}
 .railPagination{display:flex;align-items:center;justify-content:center;gap:4px;color:var(--app-muted);font-size:11px}
 .railEmpty{padding:8px;color:var(--app-muted);line-height:1.7}
-.iconSmall{width:12px!important;height:12px!important;vertical-align:middle;margin-right:4px}
+.iconSmall{--app-icon-size:12px;margin-right:4px}
 .chevronPrevious{transform:rotate(180deg)}
 .visuallyHidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .sendDisclosure{font-size:10px;line-height:1.7;color:var(--app-muted);margin:10px 0 0;overflow-wrap:anywhere}

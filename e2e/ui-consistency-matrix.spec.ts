@@ -1,3 +1,4 @@
+import { expectIconLabelAlignment } from "./support/icon-label-alignment";
 import { readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
@@ -378,6 +379,7 @@ test("all page routes remain consistent across Chinese light and English dark de
             expect(icon.spriteResolved, `every visible icon must resolve its server-rendered Tabler definition`).toBe(true);
             expect(icon.strokeWidth, `${path}@${mode.id} Tabler app-icon stroke`).toBe("1.75");
           }
+          await expectIconLabelAlignment(page.locator("body"), `${path}@${mode.id}`);
           parentLinks = await readParentLinks(page);
           untranslatedSystemKeys = mode.language === "en" ? await readUntranslatedSystemKeys(page) : [];
           expect(untranslatedSystemKeys, `${path}@${mode.id} must not leave exact translated dictionary keys in system UI`).toEqual([]);

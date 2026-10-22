@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ShellIcon } from "@/components/shell-icon";
 import { OperationPanel } from "@/components/operation-panel";
 import { WorkspaceDialog } from "@/components/workspace-dialog";
 import { layoutKnowledgeGraph, type KnowledgeGraphNode, type KnowledgeGraphEdge } from "@/lib/knowledge-graph-view";
@@ -24,6 +25,7 @@ type Fact={id:string;title:string;content:string;sourceExcerpt:string|null;lifec
 type World={facts:Fact[];relations:Array<{id:string;sourceItemId:string;targetItemId:string;kind:string;stale:boolean;rationale:string}>};
 type PersonalGraph={documents:{nodes:Array<{id:string;title:string;version:number}>;edges:Array<{id:string;fromDocumentId:string;toDocumentId:string;stale?:boolean}>;truncated:boolean};suggestions:Array<{id:string;documentId:string;documentTitle:string;subject:string;predicate:string;object:string;evidence:string;status:string;stale:boolean}>;truncated:boolean};
 type GraphNodeDetail={sourceExcerpt?:string;content?:string};
+const projectsPerPage=5;
 const idPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 async function read<T>(response:Response):Promise<T>{if(!response.ok)throw new Error((await safeResponseError(response,'图谱加载失败，请重试。')).message);return response.json() as Promise<T>;}
 
@@ -37,14 +39,18 @@ export function PersonalKnowledgeGraphClient({username,isSystemAdmin}:{username:
   const [nodes,setNodes]=useState<KnowledgeGraphNode[]>([]),[edges,setEdges]=useState<KnowledgeGraphEdge[]>([]),[selectedId,setSelectedId]=useState(''),[nodeDetails,setNodeDetails]=useState<Record<string,GraphNodeDetail>>({});
   const [loading,setLoading]=useState(true),[error,setError]=useState<string|null>(null),[truncated,setTruncated]=useState(false),[refresh,setRefresh]=useState(0);
   const [toolsOpen,setToolsOpen]=useState(false),[detailOpen,setDetailOpen]=useState(false),[detailLoading,setDetailLoading]=useState(false),[detailError,setDetailError]=useState<string|null>(null),[sourceOpen,setSourceOpen]=useState(false),[sourceBody,setSourceBody]=useState(''),[sourceLoading,setSourceLoading]=useState(false),[sourceError,setSourceError]=useState<string|null>(null);
+  const [legendOpen,setLegendOpen]=useState(false);
+  const legendRef=useRef<HTMLDetailsElement>(null);
   const sourceRequest=useRef(0);
   const sourceController=useRef<AbortController|null>(null);
   const relationLabels = useMemo<Record<string, string>>(() => ({
     supports: t("支持"), contradicts: t("冲突"), dependsOn: t("依赖"), blocks: t("阻断"),
     causedBy: t("导致"), resolves: t("解决"), relatesTo: t("关联"),
   }), [t]);
-  const visibleProjects=useMemo(()=>scope==='project'?projects.filter(p=>p.id===projectId):scope==='all'?projects.slice((projectPage-1)*5,projectPage*5):[],[projects,scope,projectId,projectPage]);
-  useEffect(()=>{const controller=new AbortController();void(async()=>{try{const list:Project[]=[];for(const view of ['active','archived']){let page=1,totalPages=1;do{const result=await read<{projects:Project[];pagination:{totalPages:number}}>(await fetch(`/api/projects?view=${view}&page=${page}&pageSize=50`,{cache:'no-store',signal:controller.signal}));list.push(...result.projects);totalPages=result.pagination.totalPages;page++;}while(page<=totalPages&&!controller.signal.aborted);}if(!controller.signal.aborted){setProjects(list);setProjectError(null);}}catch(cause){if(!controller.signal.aborted)setProjectError(cause instanceof Error?cause.message:'项目列表加载失败。');}})();return()=>controller.abort();},[refresh]);
+  const projectPageCount=Math.max(1,Math.ceil(projects.length/projectsPerPage));
+  const visibleProjectPage=Math.min(projectPage,projectPageCount);
+  const visibleProjects=useMemo(()=>scope==='project'?projects.filter(p=>p.id===projectId):scope==='all'?projects.slice((visibleProjectPage-1)*projectsPerPage,visibleProjectPage*projectsPerPage):[],[projects,scope,projectId,visibleProjectPage]);
+  useEffect(()=>{const controller=new AbortController();void(async()=>{try{const list:Project[]=[];for(const view of ['active','archived']){let page=1,totalPages=1;do{const result=await read<{projects:Project[];pagination:{totalPages:number}}>(await fetch(`/api/projects?view=${view}&page=${page}&pageSize=50`,{cache:'no-store',signal:controller.signal}));list.push(...result.projects);totalPages=result.pagination.totalPages;page++;}while(page<=totalPages&&!controller.signal.aborted);}if(!controller.signal.aborted){setProjects(list);setProjectPage(current=>Math.min(current,Math.max(1,Math.ceil(list.length/projectsPerPage))));setProjectError(null);}}catch(cause){if(!controller.signal.aborted)setProjectError(cause instanceof Error?cause.message:'项目列表加载失败。');}})();return()=>controller.abort();},[refresh]);
   useEffect(()=>{
     const controller=new AbortController();
     sourceRequest.current++;sourceController.current?.abort();sourceController.current=null;
@@ -75,6 +81,12 @@ export function PersonalKnowledgeGraphClient({username,isSystemAdmin}:{username:
     return()=>{window.clearTimeout(timer);controller.abort();};
   },[scope,visibleProjects,refresh,relationLabels,t]);
   useEffect(()=>()=>{sourceRequest.current++;sourceController.current?.abort();sourceController.current=null;},[]);
+  useEffect(()=>{
+    if(!legendOpen)return;
+    const closeOnOutsidePointer=(event:PointerEvent)=>{if(!legendRef.current?.contains(event.target as Node)){if(legendRef.current)legendRef.current.open=false;setLegendOpen(false);}};
+    document.addEventListener('pointerdown',closeOnOutsidePointer);
+    return()=>document.removeEventListener('pointerdown',closeOnOutsidePointer);
+  },[legendOpen]);
   const graph=useMemo(()=>layoutKnowledgeGraph(nodes,edges),[nodes,edges]);
   function cancelSourceRead(){sourceRequest.current++;sourceController.current?.abort();sourceController.current=null;setDetailLoading(false);setDetailError(null);setSourceOpen(false);setSourceLoading(false);}
   function selectNode(id:string){cancelSourceRead();setDetailOpen(false);setSelectedId(id);}
@@ -99,13 +111,34 @@ export function PersonalKnowledgeGraphClient({username,isSystemAdmin}:{username:
   const linkedSource=selected?.kind==='fact'?nodes.find(node=>node.kind==='source'&&node.scope===selected.scope&&node.projectId===selected.projectId&&node.sourceId===selected.sourceId):selected?.kind==='source'?selected:undefined;
   const selectedScope=selected?.scope==='personal'?t('个人空间'):selected?.projectId?projects.find(project=>project.id===selected.projectId)?.name||t('项目资料'):t('项目资料');
   async function openSource(source:KnowledgeGraphNode|undefined){if(!source||source.kind!=='source'||!source.sourceId)return;const controller=new AbortController();sourceController.current?.abort();sourceController.current=controller;const version=++sourceRequest.current;setDetailLoading(false);setDetailError(null);setDetailOpen(false);setSourceOpen(true);setSourceLoading(true);setSourceError(null);setSourceBody('');try{if(source.scope==='personal'){const content=await readPersonalSourceVersion(source,controller.signal);if(version===sourceRequest.current)setSourceBody(content);}else if(source.projectId){const payload=await read<{source:{contentText:string}}>(await fetch('/api/projects/'+source.projectId+'/sources/'+source.sourceId,{cache:'no-store',signal:controller.signal}));if(version===sourceRequest.current)setSourceBody(payload.source.contentText);}}catch(cause){if(version===sourceRequest.current&&!controller.signal.aborted)setSourceError(cause instanceof Error?cause.message:'来源无法访问。');}finally{if(version===sourceRequest.current)setSourceLoading(false);if(sourceController.current===controller)sourceController.current=null;}}
+  const projectRangeStart=(visibleProjectPage-1)*projectsPerPage+1;
+  const projectRangeEnd=Math.min(visibleProjectPage*projectsPerPage,projects.length);
   return <main><AppHeader username={username} active="personalKnowledge" isSystemAdmin={isSystemAdmin}/><div data-page-content className={ui.page}>
     <div className={ui.heading}><div><h1><UiText text={"知识图谱"} /></h1><p><UiText text={"查看来源归属，以及有明确原文依据的事实关系。"} /></p></div><div className={ui.actions}><button className={ui.button} onClick={()=>setToolsOpen(true)}><UiText text={"维护个人关系"} /></button></div></div>
-    <div className={ui.toolbar}><div className={ui.actions}><label className={ui.field}><UiText text={"内容范围"} /><select aria-label={t("图谱内容范围")} value={scope} onChange={e=>changeScope(e.target.value as Scope)}><option value="all"><UiText text={"全量可访问内容"} /></option><option value="personal"><UiText text={"个人空间"} /></option><option value="project"><UiText text={"单个项目"} /></option></select></label>{scope==='project'?<label className={ui.field}><UiText text={"项目"} /><select aria-label={t("选择图谱项目")} value={projectId} onChange={e=>changeProject(e.target.value)}><option value=""><UiText text={"选择项目"} /></option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</select></label>:null}</div><div className={styles.counts}><strong>{scopeName}</strong><span>{nodes.filter(node=>node.kind==='source').length} {" "}<UiText text={"个来源"} /></span><span>{nodes.filter(node=>node.kind==='fact').length} {" "}<UiText text={"条关联事实"} /></span><span>{graph.edges.length} {" "}<UiText text={"条关系"} /></span></div></div>
+    <div className={`${ui.toolbar} ${styles.graphToolbar}`}>
+      <div className={ui.actions}><label className={ui.field}><UiText text={"内容范围"} /><select aria-label={t("图谱内容范围")} value={scope} onChange={e=>changeScope(e.target.value as Scope)}><option value="all"><UiText text={"全量可访问内容"} /></option><option value="personal"><UiText text={"个人空间"} /></option><option value="project"><UiText text={"单个项目"} /></option></select></label>{scope==='project'?<label className={ui.field}><UiText text={"项目"} /><select aria-label={t("选择图谱项目")} value={projectId} onChange={e=>changeProject(e.target.value)}><option value=""><UiText text={"选择项目"} /></option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</select></label>:null}</div>
+      <div className={styles.toolbarActions}>
+        {scope==='all'&&projects.length>5?<nav className={styles.pagination} aria-label={t("项目按页展示")}>
+          <span className={styles.pageRange}><UiText text={"项目"} /> {projectRangeStart}–{projectRangeEnd} / {projects.length}</span>
+          <button type="button" className={styles.paginationButton} disabled={visibleProjectPage<=1} onClick={()=>setProjectPage(visibleProjectPage-1)} aria-label={t("上一页")}><ShellIcon name="left" /></button>
+          <button type="button" className={styles.paginationButton} disabled={visibleProjectPage>=projectPageCount} onClick={()=>setProjectPage(visibleProjectPage+1)} aria-label={t("下一页")}><ShellIcon name="arrow" /></button>
+        </nav>:null}
+        <details ref={legendRef} className={styles.legendMenu} onToggle={event=>setLegendOpen(event.currentTarget.open)} onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
+          <summary><UiText text={"图例与说明"} /></summary>
+          <div className={styles.legendPopover}>
+            <p><span className={styles.scopeSwatch} aria-hidden="true"/><UiText text={"范围归属"} /></p>
+            <p><span className={styles.relationSwatch} aria-hidden="true"/><UiText text={"来源支撑事实"} /></p>
+            <p><span className={styles.staleSwatch} aria-hidden="true"/><UiText text={"只展示明确记录的关系；虚线表示版本已变化。"} /></p>
+            <small><UiText text={"项目按页展示"} /></small>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div className={styles.summaryRow}>
+      <div className={styles.counts}><strong>{scopeName}</strong><span>{nodes.filter(node=>node.kind==='source').length} {" "}<UiText text={"个来源"} /></span><span>{nodes.filter(node=>node.kind==='fact').length} {" "}<UiText text={"条关联事实"} /></span><span>{graph.edges.length} {" "}<UiText text={"条关系"} /></span></div>
+      {truncated?<p className={styles.truncationHint}><UiText text={"资料较多，图谱显示有界来源与事实。可缩小到单个项目，或从来源详情进入完整资料列表。"} /></p>:null}
+    </div>
     {projectError?<p className={ui.error} role="alert"><UiErrorText text={projectError} /><button className={ui.link} onClick={()=>setRefresh(n=>n+1)}><UiText text={"重试"} /></button></p>:null}
-    {scope==='all'&&projects.length>5?<div className={styles.pageSelect}><UiText text={"项目按页展示"} />{" "}<button disabled={projectPage<=1} onClick={()=>setProjectPage(p=>p-1)}><UiText text={"上一页"} /></button>{projectPage} / {Math.ceil(projects.length/5)}<button disabled={projectPage>=Math.ceil(projects.length/5)} onClick={()=>setProjectPage(p=>p+1)}><UiText text={"下一页"} /></button></div>:null}
-    <div className={styles.legend}><span><UiText text={"范围归属"} /></span><span><UiText text={"来源支撑事实"} /></span><small><UiText text={"只展示明确记录的关系；虚线表示版本已变化。"} /></small></div>
-    {truncated?<p className={ui.notice}><UiText text={"资料较多，图谱显示有界来源与事实。可缩小到单个项目，或从来源详情进入完整资料列表。"} /></p>:null}
     {error?<p className={ui.error} role="alert"><UiErrorText text={error} /><button className={ui.link} onClick={()=>setRefresh(n=>n+1)}><UiText text={"重新加载"} /></button></p>:loading?<div className={ui.empty} role="status"><UiText text={"正在核对来源与关系…"} /></div>:scope==='project'&&!projectId?<div className={ui.empty}><h2><UiText text={"选择一个项目"} /></h2><p><UiText text={"查看该项目的来源与已确认事实。"} /></p></div>:<div className={styles.layout}><KnowledgeGraphCanvas graph={graph} selectedId={selectedId} onSelect={selectNode} onActivate={activateNode}/><aside className={styles.detail}>{selected?<><span className={ui.muted}>{t(selected.kind==='fact'?'有来源的事实':'来源内容')}</span><h2>{selected.title}</h2><span className={ui.muted}>{selectedScope} · {selected.revision||t('版本未记录')}</span><h3><UiText text={"内容"} /></h3><p>{selected.kind==='fact'&&selected.scope==='project'?selected.excerpt:selected.kind==='fact'?selected.title:selected.excerpt||t('打开来源查看当前正文、版本与来源记录。')}</p>{selected.kind==='fact'&&selectedDetail?.sourceExcerpt?<><h3><UiText text={"原文依据"} /></h3><p>{selectedDetail.sourceExcerpt}</p></>:null}{linkedSource?.sourceId?<button className={ui.button} onClick={()=>void openSource(linkedSource)}><UiText text={"打开来源"} /></button>:null}</>:<p><UiText text={"选择来源或事实，查看对应内容。"} /></p>}</aside></div>}
     <WorkspaceDialog title={"知识点详情"} open={detailOpen&&selected!==undefined} onClose={()=>{cancelSourceRead();setDetailOpen(false);}} drawer>
       {selected?<div className="space-y-5">

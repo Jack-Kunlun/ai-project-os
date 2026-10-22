@@ -40,6 +40,7 @@ export function LoginForm({
   const [method, setMethod] = useState<"password" | "sms">("password");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [phone, setPhone] = useState("");
   const [smsCode, setSmsCode] = useState("");
   const [smsChallengeId, setSmsChallengeId] = useState<string | null>(null);
@@ -153,11 +154,15 @@ export function LoginForm({
                 <label className={`${styles.fieldLabel} ${styles.nextFieldLabel}`} htmlFor="login-password">{t("密码")}</label>
                 <div className={styles.inputShell}>
                   <span className={styles.inputIcon}><LockIcon /></span>
-                  <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder={t("输入密码")} className={styles.textInput} />
+                  <div className={styles.passwordShell}>
+                    <input id="login-password" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder={t("输入密码")} className={styles.passwordInput} />
+                    <button type="button" className={styles.passwordToggle} aria-label={t(passwordVisible ? "隐藏密码" : "显示密码")} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((current) => !current)}><ShellIcon name={passwordVisible ? "eye-off" : "eye"} className="app-icon--control" /></button>
+                  </div>
                 </div>
               </>
-            ) : (
-              <div className={styles.smsFields}>
+            ) : null}
+
+            <fieldset disabled={method !== "sms"} data-hidden={method !== "sms"} className={`${styles.smsFields} ${styles.stepPanel}`}>
                 <div className={styles.smsPhoneField}>
                   <label className={styles.fieldLabel} htmlFor="login-phone">{t("手机号")}</label>
                   <div className={styles.phoneShell}>
@@ -184,7 +189,6 @@ export function LoginForm({
                 </div>
                 <div className={styles.smsCodeField}>
                   <SmsCodeInput
-                    key={phone}
                     id="login-sms-code"
                     size="large"
                     phoneE164={`+86${phone}`}
@@ -195,8 +199,7 @@ export function LoginForm({
                     onChallengeIdChange={setSmsChallengeId}
                   />
                 </div>
-              </div>
-            )}
+            </fieldset>
 
             {method === "password" ? (
               <div className={styles.recoverLink}>

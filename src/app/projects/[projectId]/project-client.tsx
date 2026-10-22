@@ -750,7 +750,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
         </div>
       </div>
 
-      <nav aria-label={translateUi("项目资料栏目")} className={styles.tabs}>
+      <nav aria-label={translateUi("项目资料栏目")} className={styles.tabs} data-sticky-page-tabs>
         {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`${styles.tab} ${materialsView === tab.view ? styles.tabActive : ""}`}><UiText text={tab.label} />{tab.view === "review" && itemCounts.candidate > 0 ? <span className={styles.countBadge}>{itemCounts.candidate}</span> : null}</Link>)}
       </nav>
 

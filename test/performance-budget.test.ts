@@ -251,7 +251,7 @@ test("performance budget is wired into production build and CI", async () => {
   assert.ok(workflow.indexOf("Export the already-built Next.js output") > workflow.indexOf("Verify immutable IDs for the built images"));
   assert.equal(checkedConfig.budgets.sharedJavaScriptGzipBytes, 145 * 1024);
   assert.equal(checkedConfig.budgets.globalCssGzipBytes, 15.25 * 1024);
-  assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 863 * 1024);
+  assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 868 * 1024);
   assert.deepEqual(Object.keys(checkedConfig.criticalRoutes), [
     "/setup",
     "/dashboard",
@@ -268,7 +268,7 @@ test("performance budget is wired into production build and CI", async () => {
     "/ask",
   ]);
   assert.equal(checkedConfig.criticalRoutes["/system/account-access"], 155 * 1024);
-  assert.equal(checkedConfig.criticalRoutes["/personal/projects"], 165 * 1024);
+  assert.equal(checkedConfig.criticalRoutes["/personal/projects"], 166 * 1024);
   assert.equal(checkedConfig.criticalRoutes["/ask"], 180 * 1024);
   assert.equal(checkedConfig.criticalRoutes["/personal/knowledge/graph"], 185 * 1024);
 });

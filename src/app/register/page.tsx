@@ -16,13 +16,8 @@ export default async function RegisterPage() {
   if (existingSession !== null) redirect(existingSession.role === "admin" ? "/admin" : "/dashboard");
 
   return (
-    <AuthPage sectionLabel="创建账号工作区">
+    <AuthPage sectionLabel="账号注册表单">
       <div className={styles.form}>
-        <div className={styles.formHeading}>
-          <p className={styles.formEyebrow}><UiText text="开始使用" /></p>
-          <h2><UiText text="创建账号" /></h2>
-          <p><UiText text="注册后会创建一个只属于你的个人工作区，你将成为该工作区的 Owner。" /></p>
-        </div>
         <RegisterForm phoneAuthStatus={await getPhoneAuthStatus()} emailAuthStatus={await getEmailAuthStatus()} localRegistrationEnabled={isLocalRegistrationEnabled()} />
         <footer className={styles.formReturnLink}><UiText text="已有账号？" /> <a href="/login"><UiText text="返回登录" /></a></footer>
       </div>

@@ -20,7 +20,8 @@
 .header {
   display: flex;
   width: min(1160px, 100%);
-  min-height: 108px;
+  min-height: 72px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
@@ -83,16 +84,16 @@
   display: grid;
   width: min(1160px, 100%);
   flex: 1 0 auto;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 400px);
+  grid-template-columns: minmax(0, 1fr) minmax(400px, 440px);
   align-items: center;
-  gap: clamp(48px, 7.2vw, 104px);
+  gap: clamp(48px, 6vw, 80px);
   margin: 0 auto;
-  padding: 0 0 22px;
+  padding: 10px 0 18px;
 }
 
 .productPanel {
   min-width: 0;
-  padding-bottom: 24px;
+  padding-bottom: 0;
 }
 
 .eyebrow {
@@ -336,9 +337,9 @@
 
 .authPanel {
   min-width: 0;
-  padding: 32px;
+  padding: 24px;
   border: 1px solid var(--app-border);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--app-surface);
   box-shadow: 0 12px 44px rgb(42 66 108 / 4%), 0 2px 6px rgb(42 66 108 / 2%);
 }
@@ -351,7 +352,8 @@
   justify-content: center;
   gap: 12px 20px;
   margin: 0 auto;
-  padding: 10px 0 28px;
+  flex: 0 0 auto;
+  padding: 8px 0 14px;
   color: var(--app-muted);
   font-size: 10px;
 }
@@ -387,9 +389,9 @@
 
 .formBody {
   display: grid;
-  gap: 15px;
+  gap: 12px;
   min-width: 0;
-  margin-top: 20px;
+  margin-top: 0;
 }
 
 .formHeading .formEyebrow {
@@ -412,12 +414,12 @@
 .formHeading > p:last-child {
   margin: 7px 0 0;
   color: var(--app-muted);
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .methodSection {
-  margin-top: 20px;
+  margin-top: 15px;
 }
 
 .methodTabs {
@@ -698,6 +700,222 @@
   border: 0;
 }
 
+.registerForm .fieldLabel,
+.recoveryForm .fieldLabel,
+.registerForm .smsCodeField :global(label),
+.registerForm .emailCodeField :global(label),
+.recoveryForm .smsCodeField :global(label) {
+  margin-top: 0;
+}
+
+.stepPanel {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.stepPanel[data-hidden="true"] {
+  display: none !important;
+}
+
+.flowSteps {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 2px;
+  color: var(--app-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.flowStep {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.flowStep > i {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--app-border);
+  border-radius: 50%;
+  background: var(--app-surface);
+  color: var(--app-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.flowStepActive {
+  color: var(--app-link);
+  font-weight: 500;
+}
+
+.flowStepActive > i {
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+  color: var(--app-link);
+}
+
+.flowStepDone > i {
+  border-color: var(--app-success-border);
+  background: var(--app-success-soft);
+  color: var(--app-success-ink);
+}
+
+.flowConnector {
+  height: 1px;
+  min-width: 18px;
+  flex: 1 1 auto;
+  background: var(--app-border);
+}
+
+.identitySummary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-soft);
+}
+
+.identitySummary > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.identitySummary span {
+  color: var(--app-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.identitySummary strong {
+  overflow-wrap: anywhere;
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.identitySummary button {
+  min-height: 32px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 5px;
+  background: var(--app-surface);
+  color: var(--app-link);
+  font: inherit;
+  font-size: 11px;
+}
+
+.identitySummary button:hover {
+  border-color: var(--app-link);
+}
+
+.registerCredentialFields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 12px;
+  row-gap: 10px;
+}
+
+.registerCredentialFields > div:first-child {
+  grid-column: 1 / -1;
+}
+
+.passwordShell {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-input);
+}
+
+.passwordShell:focus-within {
+  border-color: var(--app-link);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 17%, transparent);
+}
+
+.passwordInput {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 46px 0 12px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.passwordInput:focus-visible {
+  outline: 0;
+}
+
+.passwordToggle {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--app-muted);
+}
+
+.passwordToggle:hover {
+  background: var(--app-surface-soft);
+  color: var(--app-link);
+}
+
+.passwordToggle :global(svg.app-icon) {
+  width: var(--app-icon-control);
+  height: var(--app-icon-control);
+}
+
+.inputShell > .passwordShell {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.inputShell > .passwordShell > .passwordInput {
+  padding-left: 0;
+}
+
+.inputShell > .passwordShell > .passwordToggle {
+  top: 3px;
+  right: 2px;
+}
+
 .methodOptions {
   display: flex;
   flex-wrap: wrap;
@@ -714,6 +932,10 @@
   color: var(--app-text);
   font-size: 12px;
   font-weight: 500;
+}
+
+.methodOptions[data-hidden="true"] {
+  display: none !important;
 }
 
 .choiceLabel,
@@ -942,11 +1164,12 @@
 
 @media (min-width: 901px) and (max-height: 800px) {
   .header {
-    min-height: 85px;
+    min-height: 64px;
   }
 
   .layout {
-    padding-bottom: 8px;
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
 
   .headline {
@@ -954,7 +1177,11 @@
   }
 
   .workspaceStage {
-    margin-top: 24px;
+    margin-top: 18px;
+  }
+
+  .workspaceBody {
+    height: 184px;
   }
 }
 
@@ -975,7 +1202,7 @@
 
   .header {
     width: min(520px, 100%);
-    min-height: 94px;
+    min-height: 64px;
   }
 
   .headerCaption {
@@ -983,50 +1210,27 @@
   }
 
   .layout {
-    display: block;
+    display: flex;
     width: min(520px, 100%);
-    flex: 0 0 auto;
-    margin: 0 auto 28px;
-    padding: 0;
+    flex: 1 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    margin: 0 auto;
+    padding: 12px 0;
   }
 
   .productPanel {
-    padding-bottom: 26px;
-  }
-
-  .eyebrow,
-  .workspaceStage {
     display: none;
   }
 
-  .headline {
-    font-size: 26px;
-    letter-spacing: -0.6px;
-    line-height: 1.5;
-  }
-
-  .headline span {
-    display: inline;
-  }
-
-  .headline span + span::before {
-    content: " ";
-  }
-
-  .introText {
-    max-width: 460px;
-    margin-top: 10px;
-    font-size: 12px;
-    line-height: 1.9;
-  }
-
   .authPanel {
-    padding: 26px;
+    width: 100%;
+    padding: 22px;
   }
 
   .footer {
     width: min(520px, 100%);
-    padding-bottom: 25px;
+    padding-bottom: 12px;
     font-size: 10px;
   }
 }
@@ -1038,7 +1242,7 @@
   }
 
   .header {
-    min-height: 84px;
+    min-height: 62px;
     gap: 12px;
   }
 
@@ -1056,11 +1260,12 @@
   }
 
   .layout {
-    margin-bottom: 22px;
+    margin-bottom: 0;
+    padding: 10px 0;
   }
 
   .authPanel {
-    padding: 23px 20px;
+    padding: 20px;
   }
 
   .formHeading h2 {
@@ -1077,6 +1282,14 @@
     min-width: 104px;
     padding-right: 7px;
     padding-left: 7px;
+  }
+
+  .registerCredentialFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .registerCredentialFields > div:first-child {
+    grid-column: auto;
   }
 }
 

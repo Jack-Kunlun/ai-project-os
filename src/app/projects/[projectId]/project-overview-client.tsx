@@ -351,8 +351,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
             </Link> : null}
 
             <section className={styles.overviewGrid}>
-              <div className={styles.mainColumn}>
-                <article id="current-state" tabIndex={-1} aria-label={translateUi("项目当前状态")} className={styles.goalPanel}>
+                <article id="current-state" tabIndex={-1} aria-label={translateUi("项目当前状态")} className={styles.goalPanel} data-overview-card="objective">
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"CURRENT OBJECTIVE"} /></p><h2><UiText text={"当前目标"} /></h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}><UiText text={"查看计划 →"} /></Link></div>
                   {currentData.planError ? <p className={styles.panelEmpty}><UiText text={"目标数据暂不可用。"} /><UiErrorText text={currentData.planError} /></p> : currentObjective ? <>
                     <div className={styles.goalMeta}>{t(objectiveStatusLabel(currentObjective.status))}{currentObjective.targetDate ? ` · ${t("目标日期")} ${formatDate(currentObjective.targetDate, language)}` : ` · ${t("目标日期未设置")}`}</div>
@@ -370,7 +369,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                   </div>
                 </article>
 
-                <section className={styles.nextTasks} aria-labelledby="next-work-heading">
+                <section className={styles.nextTasks} aria-labelledby="next-work-heading" data-overview-card="next">
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"NEXT WORK"} /></p><h2 id="next-work-heading"><UiText text={"接下来推进"} /></h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}><UiText text={"全部工作 →"} /></Link></div>
                   {currentData.planError ? <p className={styles.panelEmpty}><UiText text={"计划工作暂不可用，稍后重试。"} /></p> : nextWorkItems.length === 0 ? <p className={styles.panelEmpty}><UiText text={"暂无待推进工作。"} /></p> : <div className={styles.workList}>{nextWorkItems.map((item) => <Link key={item.id} href={`/projects/${projectId}/plan?focus=${encodeURIComponent(item.id)}&status=${encodeURIComponent(item.status)}`} className={styles.workItem}>
                     <span className={`${styles.workDot} ${item.status === "blocked" ? styles.workBlocked : item.status === "inProgress" ? styles.workActive : ""}`} aria-hidden="true" />
@@ -379,17 +378,15 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                   </Link>)}</div>}
                 </section>
 
-                <section className={styles.factsPanel} aria-labelledby="recent-facts-heading">
+                <section className={styles.factsPanel} aria-labelledby="recent-facts-heading" data-overview-card="facts">
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"SOURCE-GROUNDED FACTS"} /></p><h2 id="recent-facts-heading"><UiText text={"最近确认的项目事实"} /></h2></div><Link href={buildProjectHref(projectId, "materials", { status: "confirmed", focus: "confirmed-facts", from: "overview", returnTo: overviewReturnTo })} className={styles.textLink}><UiText text={"查看全部 →"} /></Link></div>
                   {currentData.factsError ? <p className={styles.panelEmpty}><UiErrorText text={currentData.factsError} /></p> : currentData.recentFacts.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有已确认事实。"} /></p> : <div className={styles.factList}>{currentData.recentFacts.map((fact) => <Link key={fact.id} href={`/projects/${projectId}/materials/sources/${fact.sourceId}`} className={styles.factItem}>
                     <span className={styles.factText}><strong>{fact.title}</strong><small>{fact.sourceExcerpt || fact.content}</small></span>
                     <span className={styles.factSource}>{t(fact.source.kind)} · {formatDate(fact.updatedAt, language)}</span>
                   </Link>)}</div>}
                 </section>
-              </div>
 
-              <aside className={styles.sideColumn}>
-                <section className={styles.activityPanel}>
+                <section className={styles.activityPanel} data-overview-card="activity">
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"RECENT ACTIVITY"} /></p><h2><UiText text={"最近动态"} /></h2></div></div>
                   {currentData.activityError && recentActivity.length === 0 ? <p className={styles.panelEmpty}><UiErrorText text={currentData.activityError} /></p> : recentActivity.length === 0 ? <p className={styles.panelEmpty}><UiText text={"还没有近期项目活动。"} /></p> : <div className={styles.activityList}>{recentActivity.map((activity) => <Link key={activity.id} href={activity.href} className={styles.activityItem}>
                     <span className={styles.activityDot} aria-hidden="true" />
@@ -398,14 +395,13 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                   <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview", returnTo: overviewReturnTo })} className={styles.textLink}><UiText text={"查看任务运行记录 →"} /></Link>
                 </section>
 
-                <section className={styles.continuePanel} aria-labelledby="continue-heading">
+                <section className={styles.continuePanel} aria-labelledby="continue-heading" data-overview-card="continue">
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"CONTINUE"} /></p><h2 id="continue-heading"><UiText text={"从这里继续"} /></h2></div></div>
                   <Link href={buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo: overviewReturnTo })} className={styles.quickLink}><span><UiText text={"添加新的项目资料"} /></span><span aria-hidden="true">→</span></Link>
                   <Link href={`/ask?scope=project&projectId=${encodeURIComponent(projectId)}`} className={styles.quickLink}><span><UiText text={"打开智能问答"} /></span><span aria-hidden="true">→</span></Link>
                   <Link href={`/projects/${projectId}/plan`} className={styles.quickLink}><span><UiText text={"打开项目计划"} /></span><span aria-hidden="true">→</span></Link>
                   <Link href={nextStep.href} className={styles.recommendedStep}><span><UiText text={"推荐下一步"} /></span><strong>{nextStep.title}</strong><small>{nextStep.detail}</small></Link>
                 </section>
-              </aside>
             </section>
 
             <details id="attention-details" tabIndex={-1} className={styles.governanceDetails} open={navigation.focus === "attention-details" || navigation.focus === "task-runs"}>

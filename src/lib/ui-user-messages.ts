@@ -375,6 +375,7 @@ const uiWorkflowMessages: Record<string, string> = {
   "条关联事实": " linked facts",
   "条关系": " relationships",
   "项目按页展示": "Projects are shown one page at a time",
+  "图例与说明": "Legend and details",
   "只展示明确记录的关系；虚线表示版本已变化。": "Only explicitly recorded relationships are shown. Dashed lines indicate that the source version has changed.",
   "资料较多，图谱显示有界来源与事实。可缩小到单个项目，或从来源详情进入完整资料列表。": "The graph is limited to a bounded set of sources and facts. Narrow the scope to one project or open a source detail page to browse the complete list.",
   "正在核对来源与关系…": "Checking sources and relationships…",

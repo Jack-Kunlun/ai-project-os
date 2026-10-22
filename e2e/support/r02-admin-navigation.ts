@@ -101,7 +101,7 @@ export async function signInR02Admin(page: Page): Promise<void> {
     await page.getByLabel("再次输入密码", { exact: true }).fill(R02_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "创建管理员并进入", exact: true }).click();
   } else if (pathname === "/login") {
-    await page.getByLabel("用户名或手机号", { exact: true }).fill("browser_admin");
+    await page.getByLabel(/^(?:用户名或手机号|用户名、手机号或已验证邮箱)$/u).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(R02_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
   }
@@ -111,7 +111,7 @@ export async function signInR02Admin(page: Page): Promise<void> {
 export async function signInR02PersonalUser(page: Page, user: BrowserPersonalUser): Promise<void> {
   await page.goto("/login");
   await expect(page).toHaveURL(/\/login$/u);
-  await page.getByLabel("用户名或手机号", { exact: true }).fill(user.username);
+  await page.getByLabel(/^(?:用户名或手机号|用户名、手机号或已验证邮箱)$/u).fill(user.username);
   await page.getByLabel("密码", { exact: true }).fill(user.password);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);

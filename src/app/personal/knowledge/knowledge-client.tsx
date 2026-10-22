@@ -1109,7 +1109,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         {message && knowledgeModal === null && (!editing || message.tone === "success") ? <div role={message.tone === "error" ? "alert" : "status"} className={`${styles.feedback} ${message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess}`}><UiFeedbackText text={message.text} /></div> : null}
 
         {workspaceSection === "library" ? <>
-          <nav className={styles.tabs} aria-label={t("知识栏目")}>
+          <nav className={styles.tabs} aria-label={t("知识栏目")} data-sticky-page-tabs>
             <button type="button" aria-current={knowledgeFilter === "all" ? "page" : undefined} aria-pressed={knowledgeFilter === "all"} onClick={() => selectKnowledgeFilter("all")} className={`${styles.tab} ${knowledgeFilter === "all" ? styles.activeTab : ""}`}><UiText text="全部知识" /></button>
             <button type="button" aria-current={knowledgeFilter === "memory" ? "page" : undefined} aria-pressed={knowledgeFilter === "memory"} onClick={() => selectKnowledgeFilter("memory")} className={`${styles.tab} ${knowledgeFilter === "memory" ? styles.activeTab : ""}`}><UiText text="通用记忆" /></button>
           </nav>

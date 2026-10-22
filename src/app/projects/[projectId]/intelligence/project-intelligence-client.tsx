@@ -297,7 +297,7 @@ function ProjectIntelligenceWorkspace({ projectId, username, isSystemAdmin }: { 
             </button>
             {readinessOpen ? <div className={styles.readinessContent}><ReadinessPanel readiness={status.readiness} latestSuccessAt={[...status.reports, ...status.agentRuns].map((entry) => entry.createdAt).sort().at(-1) ?? null} /><Link href={`/projects/${encodeURIComponent(projectId)}/configuration`} className={styles.configLink}><UiText text={"前往项目配置 →"} /></Link></div> : null}
           </section>
-          <nav className={styles.tabs} role="tablist" aria-label={translateUi("简报与调查")}>
+          <nav className={styles.tabs} role="tablist" aria-label={translateUi("简报与调查")} data-sticky-page-tabs>
             <button id="brief-tab" type="button" role="tab" aria-selected={activeSection === "brief"} aria-controls="brief-panel" className={`${styles.tab} ${activeSection === "brief" ? styles.tabActive : ""}`} onClick={() => setSectionSelection({ focus: navigation.focus, section: "brief" })}><UiText text={"项目简报"} /></button>
             <button id="investigation-tab" type="button" role="tab" aria-selected={activeSection === "investigation"} aria-controls="investigation-panel" className={`${styles.tab} ${activeSection === "investigation" ? styles.tabActive : ""}`} onClick={() => setSectionSelection({ focus: navigation.focus, section: "investigation" })}><UiText text={"只读调查"} /></button>
           </nav>

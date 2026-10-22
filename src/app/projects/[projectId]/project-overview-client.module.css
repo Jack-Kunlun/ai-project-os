@@ -196,14 +196,13 @@
 
 .overviewGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 275px;
-  align-items: start;
-  gap: 23px;
-}
-
-.mainColumn,
-.sideColumn {
-  min-width: 0;
+  grid-template-columns: minmax(0, 2fr) minmax(275px, 1fr);
+  grid-template-areas:
+    "objective activity"
+    "next continue"
+    "facts facts";
+  align-items: stretch;
+  gap: 20px 24px;
 }
 
 .goalPanel,
@@ -217,6 +216,20 @@
   padding: 20px;
   background: var(--app-surface);
 }
+
+.goalPanel,
+.nextTasks,
+.activityPanel,
+.continuePanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.goalPanel { grid-area: objective; }
+.activityPanel { grid-area: activity; }
+.nextTasks { grid-area: next; }
+.continuePanel { grid-area: continue; }
+.factsPanel { grid-area: facts; }
 
 .panelHeading {
   align-items: flex-end;
@@ -328,9 +341,6 @@
 .emptyGoal p { margin-top: 5px; }
 .emptyGoal a { display: inline-block; margin-top: 8px; color: var(--app-muted); font-size: 10px; font-weight: 620; text-decoration: none; }
 
-.nextTasks,
-.factsPanel { margin-top: 19px; }
-
 .workList,
 .factList { margin-top: 12px; }
 
@@ -407,12 +417,6 @@
   color: var(--app-muted);
   font-size: 9px;
   text-align: right;
-}
-
-.sideColumn {
-  display: flex;
-  flex-direction: column;
-  gap: 17px;
 }
 
 .activityPanel { min-height: 205px; }
@@ -493,6 +497,8 @@
   background: var(--app-surface-soft);
   text-decoration: none;
 }
+
+.continuePanel .recommendedStep { margin-top: auto; }
 
 .recommendedStep span,
 .recommendedStep small { color: var(--app-muted); font-size: 9px; line-height: 1.55; }
@@ -600,7 +606,7 @@
 
 @media (max-width: 1120px) {
   .content {padding:var(--app-page-padding);   }
-  .overviewGrid { grid-template-columns: minmax(0, 1fr) 245px; gap: 16px; }
+  .overviewGrid { grid-template-columns: minmax(0, 2fr) minmax(245px, 1fr); gap: 16px; }
   .goalPanel,
   .nextTasks,
   .factsPanel,
@@ -609,8 +615,11 @@
 }
 
 @media (max-width: 850px) {
-  .overviewGrid { grid-template-columns: minmax(0, 1fr); }
-  .sideColumn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overviewGrid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "objective" "next" "facts" "activity" "continue";
+    gap: 16px;
+  }
   .activityPanel { min-height: 0; }
   .skeletonMain { grid-template-columns: minmax(0, 1fr); }
 }
@@ -624,7 +633,6 @@
   .metricCard strong { font-size: 19px; }
   .attentionBar { align-items: flex-start; }
   .attentionArrow { display: none; }
-  .sideColumn { grid-template-columns: minmax(0, 1fr); }
   .worldSummary { grid-template-columns: auto minmax(0, 1fr); }
   .worldSummary a { grid-column: 2; }
   .factItem { flex-direction: column; gap: 5px; }

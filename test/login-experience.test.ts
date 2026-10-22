@@ -76,7 +76,7 @@ test("login page aligns with the workspace and preserves configured auth choices
     readFile("src/lib/local-registration-config.ts", "utf8"),
   ]);
   assert.match(registerPage, /RegisterForm/u);
-  assert.match(registerPage, /<AuthPage sectionLabel="创建账号工作区">/u);
+  assert.match(registerPage, /<AuthPage sectionLabel="账号注册表单">/u);
   assert.match(registerForm, /styles\.registerForm/u);
   assert.match(registerPage, /isLocalRegistrationEnabled/u);
   assert.match(registerForm, /localRegistrationEnabled \?/u);
@@ -84,8 +84,12 @@ test("login page aligns with the workspace and preserves configured auth choices
   assert.doesNotMatch(registerForm, /使用 GitHub 注册或登录/u);
   assert.doesNotMatch(registerForm, /或使用 GitHub/u);
   assert.match(registerForm, /emailAuthStatus = "disabled"/u);
-  assert.match(registerForm, /emailVerificationRequired \? \(/u);
+  assert.match(registerForm, /if \(emailVerificationRequired\)/u);
   assert.match(registerForm, /EmailCodeInput/u);
+  // Changing the contact must dispose any old CAPTCHA and in-flight send state;
+  // moving between steps keeps the same key and preserves its cooldown.
+  assert.match(registerForm, /<EmailCodeInput key=\{email\}/u);
+  assert.match(registerForm, /<SmsCodeInput key=\{phone\}/u);
   assert.match(registerForm, /邮件找回密码/u);
   assert.match(registerForm, /id="register-email"/u);
   assert.match(registrationRoute, /assertSameOrigin/u);
@@ -116,17 +120,42 @@ test("login page aligns with the workspace and preserves configured auth choices
     readFile("src/app/recover/page.tsx", "utf8"),
     readFile("src/app/recover/recovery-form.tsx", "utf8"),
   ]);
-  assert.match(recoverPage, /<AuthPage sectionLabel="找回账号与密码工作区">/u);
-  assert.match(recoveryForm, /purpose="recover" availability=\{available \? "available" : "unavailable"\}/u);
+  assert.match(recoverPage, /<AuthPage sectionLabel="账号恢复表单">/u);
+  const recoverySmsInput = recoveryForm.match(/<SmsCodeInput\b[^>]*>/u)?.[0];
+  assert.ok(recoverySmsInput);
+  assert.match(recoverySmsInput, /purpose="recover"/u);
+  assert.match(recoverySmsInput, /key=\{phone\}/u);
+  assert.match(recoverySmsInput, /availability=\{available \? "available" : "unavailable"\}/u);
   assert.match(recoveryForm, /username !== null/u);
   assert.match(recoveryForm, /href="\/login\?password=updated"/u);
 });
 
 test("registration native username pattern is valid with Unicode sets and retains the server character rules", async () => {
   const source = await readFile("src/app/register/register-form.tsx", "utf8");
-  const literal = source.match(/pattern=\{("(?:[^"\\]|\\.)*")\}/u)?.[1];
-  assert.ok(literal);
-  const pattern = new RegExp(`^(?:${JSON.parse(literal)})$`, "v");
-  for (const value of ["project.owner", "team-owner", "user_01", "A12"]) assert.equal(pattern.test(value), true, value);
-  for (const value of ["ab", "_owner", "bad!name", "name with spaces", "a".repeat(65)]) assert.equal(pattern.test(value), false, value);
+  const usernameIdIndex = source.indexOf('id="register-username"');
+  assert.ok(usernameIdIndex >= 0);
+  const usernameInputStart = source.lastIndexOf("<input", usernameIdIndex);
+  const usernameInputEnd = source.indexOf("/>", usernameIdIndex);
+  assert.ok(usernameInputStart >= 0 && usernameInputEnd > usernameIdIndex);
+  const usernameInput = source.slice(usernameInputStart, usernameInputEnd + 2);
+  const inlinePattern = usernameInput.match(/\bpattern=\{("(?:[^"\\]|\\.)*")\}/u)?.[1];
+  const patternName = usernameInput.match(/\bpattern=\{([A-Za-z_$][\w$]*)\}/u)?.[1];
+  const patternLiteral = inlinePattern ?? (patternName
+    ? source.match(new RegExp(`(?:const|let)\\s+${patternName}\\s*=\\s*("(?:[^"\\\\]|\\\\.)*")`, "u"))?.[1]
+    : undefined);
+  assert.ok(patternLiteral, "the register-username input must declare or reference its native pattern");
+  const nativePattern = new RegExp(`^(?:${JSON.parse(patternLiteral)})$`, "v");
+
+  const registrationService = await readFile("src/lib/local-registration-service.ts", "utf8");
+  const serverPatternSource = registrationService.match(/const USERNAME_PATTERN = \/((?:\\.|[^/])+)\/u/u)?.[1];
+  assert.ok(serverPatternSource, "the server username validation must remain explicit");
+  const serverPattern = new RegExp(serverPatternSource, "u");
+  for (const value of ["project.owner", "team-owner", "user_01", "A12"]) {
+    assert.equal(nativePattern.test(value), true, value);
+    assert.equal(serverPattern.test(value), true, value);
+  }
+  for (const value of ["ab", "_owner", "bad!name", "name with spaces", "a".repeat(65)]) {
+    assert.equal(nativePattern.test(value), false, value);
+    assert.equal(serverPattern.test(value), false, value);
+  }
 });

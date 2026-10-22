@@ -477,6 +477,7 @@ test("invalid extraction detail separates incomplete output from open and closed
   const runs = page.locator("#task-runs");
   await expect(runs.getByText("抽取未完成", { exact: true })).toBeVisible();
   await expect(runs.getByText(/任务记录已人工收口，无须再确认任务状态/u)).toBeVisible();
+  await expect(runs.getByText(/抽取未正常完成。任务记录已人工收口/u)).toBeVisible();
   await expect(runs.getByText(/reconciled_unknown/u)).toHaveCount(0);
   await expect(runs.getByRole("button", { name: "人工收口", exact: true })).toHaveCount(0);
   await expect(runs.getByRole("link", { name: "查看详情", exact: true })).toHaveCount(2);
@@ -507,6 +508,7 @@ test("invalid extraction detail separates incomplete output from open and closed
   await page.goto(`/projects/${projectId}/governance?tab=usage`);
   await expect(page.getByText(/The model response failed validation, so this extraction did not complete\./u)).toBeVisible();
   await expect(page.getByText(/The task record has been manually reconciled\./u)).toBeVisible();
+  await expect(page.getByText(/complete\. The task record has been manually reconciled\./u)).toBeVisible();
   await expectR02NoHorizontalOverflow(page, "incomplete extraction compatible governance English dark 390px");
   expect(writes).toEqual([]);
 });

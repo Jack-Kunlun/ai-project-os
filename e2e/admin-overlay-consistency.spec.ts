@@ -254,6 +254,10 @@ test("admin profile overlays use shared geometry and phone verification stays in
 
   let operation = await openOperation(page, "编辑资料", "编辑管理员账户资料");
   await expectModalGeometry(operation.dialog, 1440);
+  await page.mouse.click(2, 2);
+  await expect(operation.dialog).toBeHidden();
+  await expect(operation.trigger).toBeFocused();
+  operation = await openOperation(page, "编辑资料", "编辑管理员账户资料");
   await closeOperation(operation.trigger, operation.dialog);
 
   operation = await openOperation(page, "修改密码", "修改管理员登录密码");
@@ -301,6 +305,7 @@ test("admin profile overlays use shared geometry and phone verification stays in
   await expect(operation.dialog).toBeVisible();
   await page.mouse.click(2, 2);
   await expect(operation.dialog).toBeVisible();
+  await expect.poll(() => operation.dialog.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
   expect(phonePayloads).toEqual([{
     phone: "+8613900000001",
     challengeId: CAPTCHA_IDS["change-new"],

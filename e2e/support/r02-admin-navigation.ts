@@ -42,7 +42,7 @@ export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin/users/memberships", heading: "会员资格管理", terminal: { kind: "text", name: "Git / MCP 私有连接与平台自动化属于独立配置", exact: false }, pendingTexts: ["读取中…"] },
   { path: "/admin/audit", heading: "审计中心", terminal: { kind: "text", name: "当前筛选", exact: false }, pendingTexts: ["正在读取审计快照…"] },
   { path: "/admin/operations/failures", heading: "失败与待对账收件箱", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取安全异常…"] },
-  { path: "/admin/operations/backups", heading: "生产备份与 COS 同步", terminal: { kind: "heading", name: "恢复演练证据" } },
+  { path: "/admin/operations/backups", heading: "生产备份与 COS 同步", terminal: { kind: "heading", name: "恢复演练证据" }, pendingTexts: ["正在读取服务器资源…", "刷新中…"] },
   { path: "/admin/guide", heading: "管理员操作指南", terminal: { kind: "heading", name: "2. 新增供应商：先测试后保存" } },
   { path: "/admin/account", heading: "管理员账户", terminal: { kind: "heading", name: "登录密码" }, pendingTexts: ["读取中…"] },
 ] as const;

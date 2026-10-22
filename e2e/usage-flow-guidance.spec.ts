@@ -40,6 +40,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const { projectId, projectName } = await projectFixture(page);
   const projectListReads: string[] = [];
   const projectSourcePosts: string[] = [];
+  const questionPosts: string[] = [];
   const extractCalls: ExtractCall[] = [];
   const challengeByClientKey = new Map<string, string>();
   const completedJobs = new Map<string, { id: string; status: string; result: { confirmedCount: number; reviewRequiredCount: number; duplicateCount: number } }>();
@@ -52,6 +53,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
     if (request.method() === "POST" && url.pathname === `/api/projects/${projectId}/sources`) {
       projectSourcePosts.push(request.url());
     }
+    if (request.method() === "POST" && /^\/api\/ask(?:\/|$)/u.test(url.pathname)) questionPosts.push(request.url());
   });
 
   // These synthetic responses stop at the browser boundary; no model provider is contacted.
@@ -248,8 +250,22 @@ test("personal knowledge hands off explicitly into project materials and guided 
   await page.locator(`#source-link-${sourceId}`).click();
   await expect(page.getByRole("heading", { name: "项目资料详情", exact: true })).toBeVisible();
   await expect(page.locator("main")).toContainText(body);
-  await expect(page.getByRole("link", { name: "智能问答 →", exact: true })).toHaveAttribute("href", `/ask?scope=project&projectId=${projectId}`);
+  await expect(page.getByRole("link", { name: "智能问答 →", exact: true })).toHaveCount(0);
   const executeCountBeforeDetail = extractCalls.filter((call) => call.phase === "execute").length;
+  const detailInquiryLauncher = page.locator(".inquiry-launcher");
+  await expect(detailInquiryLauncher).toHaveCount(1);
+  await detailInquiryLauncher.click();
+  const detailInquiry = page.getByRole("dialog", { name: "智能问答悬浮窗", exact: true });
+  await expect(detailInquiry).toBeVisible();
+  await detailInquiry.getByRole("combobox", { name: "智能问答内容范围", exact: true }).selectOption("project");
+  const questionProject = detailInquiry.getByRole("combobox", { name: "选择智能问答项目", exact: true });
+  await questionProject.selectOption(projectId);
+  await expect(questionProject).toHaveValue(projectId);
+  await detailInquiry.getByRole("button", { name: "收起问答", exact: true }).click();
+  await expect(detailInquiry).toBeHidden();
+  await expect(detailInquiryLauncher).toBeFocused();
+  expect(questionPosts, "opening, selecting a scope and closing Ask never sends a question").toEqual([]);
+  expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(executeCountBeforeDetail);
   await expectR02NoHorizontalOverflow(page, "project source detail 390px");
   await expectR02NoAccessibilityViolations(page, "project source detail 390px");
 

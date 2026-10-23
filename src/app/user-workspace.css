@@ -3,11 +3,6 @@ body:has([data-user-shell-root]) {
   display: block;
   min-height: 100vh;
   padding-left: 218px;
-  background: #fff;
-}
-
-body:has([data-user-shell-root]) main:has(> [data-user-shell-root]) {
-  background: #fff;
 }
 
 @media (max-width: 760px) {
@@ -35,9 +30,6 @@ body:has([data-user-shell-root]) [data-operation-surface="modal"] {
 body:has([data-user-shell-root]) [data-operation-surface="drawer"] {
   border-radius: 0;
 }
-body:has([data-user-shell-root]) [data-operation-header] {
-  padding: 20px 24px 17px;
-}
 body:has([data-user-shell-root]) [data-operation-header] h2 {
   font-size: 17px;
   font-weight: 600;
@@ -48,10 +40,6 @@ body:has([data-user-shell-root]) [data-operation-header] button {
   font-size: 12px;
   font-weight: 500;
 }
-body:has([data-user-shell-root]) [data-operation-content] {
-  padding: 20px 24px;
-}
-
 /* Shared geometry from the approved product prototype. */
 :root{--user-shell-header-height:59px}
 body:has([data-user-shell-root]),body:has([data-user-shell-root]) main:has(> [data-user-shell-root]){background:var(--app-bg)}
@@ -60,7 +48,6 @@ body:has([data-user-shell-root]) [data-sticky-page-tabs]{position:sticky;top:var
 .header-account{position:relative}.header-avatar{display:grid;place-items:center;flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--app-surface-soft);border:1px solid var(--app-border);font-size:11px}.header-account-popover{position:absolute;right:0;top:calc(100% + 10px);width:210px;padding:8px;background:var(--app-surface);border:1px solid var(--app-border);border-radius:6px;box-shadow:0 12px 40px #15274020;z-index:100;display:flex;flex-direction:column;gap:4px}.header-account-popover strong{padding:10px;font-size:12px;overflow-wrap:anywhere}.header-account-popover a,.header-account-popover button{display:block;width:100%;text-align:left;padding:9px 10px;font-size:12px;border-radius:4px}.header-account-popover a:hover,.header-account-popover button:hover{background:var(--app-surface-soft)}.account-signout{border-top:1px solid var(--app-border);color:var(--app-danger,#bc514f)}
 
 /* Shared surface geometry follows the reviewed prototype. */
-body:has([data-user-shell-root]) main:has(> [data-user-shell-root]){background:var(--app-bg)}
 body:has([data-user-shell-root]) [data-operation-surface="drawer"]{max-width:720px}
 body:has([data-user-shell-root]) [data-operation-content]{padding:24px}
 body:has([data-user-shell-root]) [data-operation-header]{min-height:76px;padding:20px 24px}

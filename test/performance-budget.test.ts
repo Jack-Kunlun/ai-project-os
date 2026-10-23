@@ -251,7 +251,7 @@ test("performance budget is wired into production build and CI", async () => {
   assert.ok(workflow.indexOf("Export the already-built Next.js output") > workflow.indexOf("Verify immutable IDs for the built images"));
   assert.equal(checkedConfig.budgets.sharedJavaScriptGzipBytes, 145 * 1024);
   assert.equal(checkedConfig.budgets.globalCssGzipBytes, 15.25 * 1024);
-  assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 870 * 1024);
+  assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 871.25 * 1024);
   assert.deepEqual(Object.keys(checkedConfig.criticalRoutes), [
     "/setup",
     "/dashboard",

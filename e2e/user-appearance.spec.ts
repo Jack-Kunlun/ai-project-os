@@ -441,7 +441,7 @@ test("knowledge and floating Ask AI preserve both drafts across tabs, modal tran
   const editor = page.getByRole("dialog", { name: "新建知识", exact: true });
   await expect(editor).toBeVisible();
   await expect.poll(() => panel.evaluate(node => node.matches(":modal"))).toBe(false);
-  await expect(editor.locator("[data-dialog-body]")).toHaveCSS("visibility", "visible");
+  await expect(editor.locator(":scope > [data-dialog-body]")).toHaveCSS("visibility", "visible");
   const title = editor.getByRole("textbox", { name: "标题", exact: true });
   await title.click();
   await expect(title).toBeFocused();
@@ -810,7 +810,7 @@ test("dashboard feedback keeps direct actions, title counts, independent graph a
   await title.fill("Isolated unsaved form draft");
   await editor.locator(".inquiry-launcher").click();
   await expect.poll(() => question.evaluate(node => node.matches(":modal"))).toBe(false);
-  await expect(editor.locator("[data-dialog-body]")).toHaveCSS("visibility", "visible");
+  await expect(editor.locator(":scope > [data-dialog-body]")).toHaveCSS("visibility", "visible");
   await title.click();
   await expect(title).toBeFocused();
   await expect(question).toBeVisible();

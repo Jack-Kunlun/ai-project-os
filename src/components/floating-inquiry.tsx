@@ -73,7 +73,7 @@ export function FloatingInquiry(){
        const blocked=Boolean(topSurface?.closest('[data-inquiry-disabled]'));
        const host=blocked?undefined:topSurface;
        setInquiryDisabled(previous=>previous===(assistVisible&&blocked)?previous:assistVisible&&blocked);
-       const existing=host?.querySelector<HTMLElement>('[data-dialog-footer],[data-operation-footer]');
+       const existing=host?[...host.querySelectorAll<HTMLElement>('[data-dialog-footer],[data-operation-footer]')].find(footer=>footer.closest(operationSurfaceSelector)===host&&!footer.closest('[data-floating-inquiry-root]')):undefined;
        const previous=latestOperation.current;
        if(previous?.host!==host||!previous?.footer.isConnected||(existing&&existing!==previous.footer)){
          setOperationPosition(null);

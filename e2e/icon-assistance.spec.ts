@@ -128,6 +128,8 @@ test("operation assistance stays in the secondary footer and icons align with re
     await ask.getByRole("textbox",{name:en?"Your question":"输入问题",exact:true}).press("Escape");
     await expect(ask).toBeHidden();
     await expect(title).toHaveValue("Unsaved work item");
+    await expect(launcher).toBeVisible();
+    expect(await launcher.evaluate(element=>element.closest('[role="dialog"],dialog[open]')===element.closest('[data-operation-surface]'))).toBe(true);
     await expect(launcher).toBeFocused();
     await dialog.getByRole("button",{name:en?"Close dialog":"关闭窗口",exact:true}).click();
     await page.getByRole("button",{name:en?"Search and navigate":"搜索与跳转",exact:true}).click();

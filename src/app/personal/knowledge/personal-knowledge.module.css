@@ -375,46 +375,28 @@
 }
 
 .knowledgeDialog {
-  width: min(calc(100vw - 32px), 760px);
-  max-width: 760px;
-  max-height: 90dvh;
-  margin: auto;
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(560px, 100vw);
+  height: 100dvh;
+  max-width: 560px;
+  max-height: 100dvh;
+  margin: 0;
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 12px;
+  border-radius: 12px 0 0 12px;
   background: var(--app-surface);
   padding: 0;
   color: var(--app-text);
-  box-shadow: 0 22px 64px rgb(31 45 67 / 18%);
-}
-
-.knowledgeDialog[data-variant="create"],
-.knowledgeDialog[data-variant="edit"],
-.knowledgeDialog[data-variant="import"] {
-  position: fixed;
-  inset: 0 0 0 auto;
-  width: min(720px, 100vw);
-  height: 100dvh;
-  max-width: 720px;
-  max-height: 100dvh;
-  margin: 0;
-  border-radius: 12px 0 0 12px;
   box-shadow: -14px 0 40px rgb(31 45 67 / 14%);
 }
 
-.knowledgeDialog[data-variant="create"],
-.knowledgeDialog[data-variant="edit"] {
-  width: min(560px, 100vw);
-  max-width: 560px;
+.knowledgeDialog[data-variant="import"] {
+  width: min(720px, 100vw);
+  max-width: 720px;
 }
 
 .knowledgeDialog::backdrop {
-  background: rgb(25 36 52 / 32%);
-}
-
-.knowledgeDialog[data-variant="create"]::backdrop,
-.knowledgeDialog[data-variant="edit"]::backdrop,
-.knowledgeDialog[data-variant="import"]::backdrop {
   background: rgb(25 36 52 / 42%);
 }
 
@@ -577,49 +559,8 @@
 }
 
 @media (max-width: 640px) {
-  .content{
-    padding:var(--app-page-padding);
-  }
-
-  .heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .headingActions {
-    width: 100%;
-  }
-
-  .toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .row {
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .rowMeta {
-    flex-wrap: wrap;
-    white-space: normal;
-  }
-
   .detailDialog {
-    width: 100vw;
     border-left: 0;
-  }
-
-  .detailContent {
-    padding: 20px 16px 32px;
-  }
-
-  .knowledgeDialog[data-variant="create"],
-  .knowledgeDialog[data-variant="edit"],
-  .knowledgeDialog[data-variant="import"] {
-    width: 100vw;
-    border-radius: 0;
   }
 }
 
@@ -677,9 +618,7 @@
   }
 
   .detailDialog,
-  .knowledgeDialog[data-variant="create"],
-  .knowledgeDialog[data-variant="edit"],
-  .knowledgeDialog[data-variant="import"] {
+  .knowledgeDialog {
     inset: 0;
     width: 100vw;
     height: 100dvh;

@@ -131,7 +131,7 @@
   background: var(--app-surface);
 }
 
-.searchBox svg {--app-icon-size: 15px;
+.searchBox svg {--app-icon-size: 16px;
 
 
   flex: 0 0 auto;

@@ -164,7 +164,7 @@ button:not(:disabled) {
 
 .app-action-button--compact {
   min-height: var(--app-action-small-height);
-  padding: 5px 12px;
+  padding: 6px 12px;
   white-space: nowrap;
 }
 

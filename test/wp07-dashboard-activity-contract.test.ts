@@ -149,7 +149,11 @@ test("Dashboard, deep links, return context and mobile admin entry are bounded c
   assert.match(notificationService, /actionState === "pending"/u);
   assert.match(notifications, /<time className="text-xs text-slate-600">/u);
   assert.match(notifications, /item\.readAt !== null \? <span className="text-xs text-slate-600"><UiText text=\{"已读"\} \/><\/span> : null/u);
-  assert.match(notifications, /"text-slate-700 hover:bg-white\/70"/u);
+  assert.match(notifications, /className=\{styles\.notificationTab\}/u);
+  assert.match(notifications, /aria-pressed=\{filter === value\}/u);
+  const notificationStyles = await readFile("src/app/support-pages.module.css", "utf8");
+  assert.match(notificationStyles, /\.notificationTab\[aria-pressed="true"\][\s\S]*?border-bottom-color: var\(--app-accent\)/u);
+  assert.match(notificationStyles, /\.notificationTab:focus-visible/u);
   assert.match(header, /return <UserShell username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
   assert.match(userShell, /<HeaderAccount username=\{username\} isSystemAdmin=\{isSystemAdmin\}\/>/u);
   assert.match(headerAccount, /\{isSystemAdmin\s*\?\s*<Link href="\/admin"/u);

@@ -143,8 +143,8 @@ export function LoginForm({
               </div>
             ) : null}
 
-            {method === "password" ? (
-              <>
+            <div className={styles.loginMethods}>
+              <fieldset disabled={method !== "password"} inert={method !== "password"} aria-hidden={method !== "password"} data-hidden={method !== "password"} className={styles.loginFields}>
                 <label className={styles.fieldLabel} htmlFor="login-username">{t(emailAuthEnabled ? "用户名、手机号或已验证邮箱" : "用户名或手机号")}</label>
                 <div className={styles.inputShell}>
                   <span className={styles.inputIcon}><UserIcon /></span>
@@ -159,10 +159,12 @@ export function LoginForm({
                     <button type="button" className={styles.passwordToggle} aria-label={t(passwordVisible ? "隐藏密码" : "显示密码")} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((current) => !current)}><ShellIcon name={passwordVisible ? "eye-off" : "eye"} className="app-icon--control" /></button>
                   </div>
                 </div>
-              </>
-            ) : null}
+                <div className={styles.recoverLink}>
+                  <Link href="/recover">{t("忘记账号或密码？")}</Link>
+                </div>
+              </fieldset>
 
-            <fieldset disabled={method !== "sms"} data-hidden={method !== "sms"} className={`${styles.smsFields} ${styles.stepPanel}`}>
+            {smsLoginAvailable ? <fieldset disabled={method !== "sms"} inert={method !== "sms"} aria-hidden={method !== "sms"} data-hidden={method !== "sms"} className={`${styles.loginFields} ${styles.smsFields}`}>
                 <div className={styles.smsPhoneField}>
                   <label className={styles.fieldLabel} htmlFor="login-phone">{t("手机号")}</label>
                   <div className={styles.phoneShell}>
@@ -199,19 +201,16 @@ export function LoginForm({
                     onChallengeIdChange={setSmsChallengeId}
                   />
                 </div>
-            </fieldset>
+            </fieldset> : null}
+            </div>
 
-            {method === "password" ? (
-              <div className={styles.recoverLink}>
-                <Link href="/recover">{t("忘记账号或密码？")}</Link>
-              </div>
-            ) : null}
-
+            <div className={styles.loginActions}>
             {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}><UiFeedbackText text={notice} /></p> : null}
             {smsSuccessNotice ? <p role="status" className={`${styles.notice} ${styles.noticeSuccess}`}>{t(smsSuccessNotice)}</p> : null}
             {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
 
             <button type="submit" disabled={pending} className={styles.submitButton}>{pending ? t("登录中…") : t("登 录")}</button>
+            </div>
 
             <p className={styles.registerPrompt}>{t("还没有账号？")} <Link href="/register">{t("创建账号")}</Link></p>
 

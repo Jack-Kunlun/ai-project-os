@@ -29,9 +29,8 @@ async function expectLoginFieldAndActionSpacing(page: Page, language: "zh-CN" | 
     const recoverRect = recover?.getBoundingClientRect();
     const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
     const submitRect = submit?.getBoundingClientRect();
-    const nextAfterRecover = recover?.parentElement?.nextElementSibling;
-    const alert = nextAfterRecover?.matches('[role="alert"], [role="status"]') ? nextAfterRecover : null;
-    const nextRect = alert?.getBoundingClientRect() ?? submitRect;
+    const nextAction = submit?.parentElement?.firstElementChild;
+    const nextRect = nextAction?.getBoundingClientRect();
     const register = form.querySelector<HTMLAnchorElement>('a[href="/register"]');
     const registerRect = register?.parentElement?.getBoundingClientRect();
     const divider = Array.from(form.querySelectorAll("div")).find((element) => element.textContent?.trim() === otherMethodsLabel);

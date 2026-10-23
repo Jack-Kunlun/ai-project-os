@@ -618,6 +618,43 @@
   gap: 14px;
 }
 
+/* Both methods determine the shared track height, including wrapped hints. */
+.loginMethods {
+  display: grid;
+  min-width: 0;
+  margin-top: 20px;
+}
+
+.loginFields {
+  grid-area: 1 / 1;
+  align-self: start;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.loginFields[data-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loginFields > .fieldLabel:first-child,
+.loginFields .smsPhoneField > .fieldLabel,
+.loginFields .smsCodeField :global(label) {
+  margin-top: 0;
+}
+
+.loginFields.smsFields {
+  gap: 17px;
+}
+
+.loginActions {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .smsPhoneField,
 .smsCodeField,
 .emailCodeField {
@@ -1026,7 +1063,7 @@
 }
 
 .recoverLink {
-  margin: 8px 0 12px;
+  margin: 8px 0 0;
   text-align: right;
   font-size: 11px;
 }

@@ -20,6 +20,103 @@ async function checkAuthLayout(page: Page, name: string, language: "zh-CN" | "en
   }
 }
 
+test("login methods share their height and keep SMS hints separated from actions", async ({ page }) => {
+  test.setTimeout(120_000);
+  test.skip(process.env.PHONE_AUTH_ENABLED !== "true", "Requires the guarded local phone-auth environment; all SMS endpoints are intercepted.");
+  await signInR02Admin(page);
+  await signOutR02User(page);
+  const restorePhoneConfig = await installBrowserPhoneAuthConfigFixture();
+  try {
+    let rejectSend = false;
+    let sentRequests = 0;
+    await page.route("**/api/auth/sms/captcha", route => route.fulfill({ json: {
+      challengeId: randomUUID(),
+      image: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jcWQAAAAASUVORK5CYII=",
+      expiresInSeconds: 300,
+    } }));
+    await page.route("**/api/auth/sms/send", route => {
+      sentRequests += 1;
+      return rejectSend
+        ? route.fulfill({ status: 429, headers: { "retry-after": "60" }, json: { error: { code: "PHONE_AUTH_RATE_LIMITED" } } })
+        : route.fulfill({ json: { challengeId: randomUUID(), retryAfterSeconds: 60 } });
+    });
+    const measure = () => page.locator("form").evaluate(form => {
+      const panel = form.querySelector('fieldset[aria-hidden="false"]');
+      const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (!panel || !submit) throw new Error("LOGIN_GEOMETRY_REQUIRED");
+      const formRect = form.getBoundingClientRect();
+      const submitRect = submit.getBoundingClientRect();
+      const tail = panel.querySelector('#login-sms-code-message') ?? panel.querySelector('a[href="/recover"]');
+      if (!tail) throw new Error("LOGIN_HINT_REQUIRED");
+      return {
+        height: formRect.height,
+        actionTop: submitRect.top - formRect.top,
+        hintGap: submitRect.top - tail.getBoundingClientRect().bottom,
+        buttonHeight: submitRect.height,
+      };
+    });
+    for (const language of ["zh-CN", "en"] as const) {
+      const text = (source: string) => language === "en" ? englishUiMessages[source] ?? source : source;
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await page.goto("/login?returnTo=%2Fpersonal%2Fknowledge");
+        if (language === "en") {
+          await page.locator(".appearance-controls-trigger").click();
+          const appearance = page.locator(".appearance-controls-popover");
+          await appearance.getByRole("combobox").nth(0).selectOption("en");
+          await appearance.getByRole("combobox").nth(1).selectOption("dark");
+          await page.keyboard.press("Escape");
+        }
+        await expect(page.locator("html")).toHaveAttribute("lang", language);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", language === "en" ? "dark" : "light");
+        await page.locator("#login-username").fill("spacing_draft");
+        await page.locator("#login-password").fill("SpacingDraft2026!");
+        const passwordMetrics = await measure();
+        await expect(page.locator("#login-phone")).toBeDisabled();
+        await page.screenshot({ path: `test-results/auth-flow/login-password-${language}-${width}.png`, fullPage: true });
+        await page.getByRole("tab", { name: text("手机号验证码"), exact: true }).click();
+        await expect(page.locator("#login-password")).toBeDisabled();
+        await expect(page.locator("#login-password")).toBeHidden();
+        await expect(page.getByRole("link", { name: text("忘记账号或密码？"), exact: true })).toHaveCount(0);
+        await expect(page.locator("#login-phone")).toBeEnabled();
+        const smsMetrics = await measure();
+        expect(Math.abs(passwordMetrics.height - smsMetrics.height), `form height at ${width}px (${language})`).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(passwordMetrics.actionTop - smsMetrics.actionTop), `action position at ${width}px (${language})`).toBeLessThanOrEqual(0.5);
+        expect(smsMetrics.hintGap).toBeGreaterThanOrEqual(12);
+        expect(smsMetrics.buttonHeight).toBeGreaterThanOrEqual(44);
+        await page.screenshot({ path: `test-results/auth-flow/login-sms-${language}-${width}.png`, fullPage: true });
+        for (const state of ["sent", "limited"] as const) {
+          rejectSend = state === "limited";
+          const previousRequests = sentRequests;
+          await page.locator("#login-phone").fill(state === "sent" ? "13800138000" : "13800138001");
+          await page.locator("#login-sms-code + button").click();
+          const captcha = page.getByRole("dialog", { name: text("安全验证"), exact: true });
+          await captcha.getByLabel(text("验证码"), { exact: true }).fill("ABC123");
+          await captcha.getByRole("button", { name: text("验证并发送短信"), exact: true }).click();
+          await expect(captcha).toBeHidden();
+          await expect.poll(() => sentRequests).toBe(previousRequests + 1);
+          await expect(page.locator("#login-sms-code-message")).toHaveAttribute("role", "status");
+          expect((await measure()).hintGap, `${state} hint spacing at ${width}px (${language})`).toBeGreaterThanOrEqual(12);
+          await page.getByRole("tab", { name: text("用户名密码"), exact: true }).click();
+          const passwordState = await measure();
+          await expect(page.locator("#login-username")).toHaveValue("spacing_draft");
+          await expect(page.locator("#login-password")).toHaveValue("SpacingDraft2026!");
+          await page.getByRole("tab", { name: text("手机号验证码"), exact: true }).click();
+          const smsState = await measure();
+          expect(Math.abs(passwordState.height - smsState.height)).toBeLessThanOrEqual(0.5);
+          expect(Math.abs(passwordState.actionTop - smsState.actionTop)).toBeLessThanOrEqual(0.5);
+        }
+        await expectR02NoHorizontalOverflow(page, `SMS login ${language}/${width}`);
+        await page.locator(".appearance-controls-trigger").hover();
+        await expectR02NoAccessibilityViolations(page, `SMS login ${language}/${width}`);
+        await expect(page.locator("main h1")).toHaveCount(1);
+      }
+    }
+  } finally {
+    await restorePhoneConfig();
+  }
+});
+
 test("registration shares the login layout, preserves a rejected draft, and creates a real personal account", async ({ page }) => {
   test.skip(process.env.PHONE_AUTH_ENABLED === "true" || process.env.AI_PROJECT_OS_EMAIL_AUTH_ENABLED === "true", "This real legacy registration case requires all verification channels disabled.");
   await signInR02Admin(page);

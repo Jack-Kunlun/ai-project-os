@@ -18,12 +18,14 @@ body:has([data-user-shell-root]) main:has(> [data-user-shell-root]) {
 
 /* Match user operation surfaces to the compact workspace design. */
 body:has([data-user-shell-root]) [data-operation-trigger] {
-  min-height: 33px;
+  min-height: var(--app-action-min-height);
   border-color: #d7dce4;
   border-radius: 4px;
-  padding: 7px 12px;
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   color: #3566c9;
-  font-size: 12px;
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
+  gap: var(--app-action-gap);
   font-weight: 500;
 }
 body:has([data-user-shell-root]) [data-operation-surface="modal"] {
@@ -59,7 +61,6 @@ body:has([data-user-shell-root]) [data-sticky-page-tabs]{position:sticky;top:var
 
 /* Shared surface geometry follows the reviewed prototype. */
 body:has([data-user-shell-root]) main:has(> [data-user-shell-root]){background:var(--app-bg)}
-body:has([data-user-shell-root]) [data-operation-trigger]{min-height:40px;padding:9px 12px}
 body:has([data-user-shell-root]) [data-operation-surface="drawer"]{max-width:720px}
 body:has([data-user-shell-root]) [data-operation-content]{padding:24px}
 body:has([data-user-shell-root]) [data-operation-header]{min-height:76px;padding:20px 24px}
@@ -85,6 +86,16 @@ body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>sec
 @media(max-width:700px){body:has([data-user-shell-root]) [data-connection-dialog] :is([data-dialog-header],[data-dialog-body],[data-dialog-footer]){padding-left:20px;padding-right:20px}}
 
 /* Filled actions and form fields follow the approved workspace controls. */
+:root body:has([data-user-shell-root]) :is(button,a):is(.bg-slate-950,.bg-slate-900,.bg-indigo-600,.bg-indigo-700):is([class~="px-3"],[class~="px-4"],[class~="px-5"],[class~="px-6"]):not([role="switch"]):not([role="tab"]):not([aria-pressed]):not(.app-icon-button) {
+  display: inline-flex;
+  min-height: var(--app-action-min-height);
+  align-items: center;
+  justify-content: center;
+  gap: var(--app-action-gap);
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
+}
 :root body:has([data-user-shell-root]) :is(button,a):is(.bg-slate-950,.bg-slate-900,.bg-indigo-600,.bg-indigo-700) {
   background: var(--app-accent) !important;
   color: var(--app-on-accent) !important;

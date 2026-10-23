@@ -95,17 +95,18 @@
 .buttonPrimary,
 .buttonDanger {
   display: inline-flex;
-  min-height: 36px;
+  min-height: var(--app-action-min-height);
   align-items: center;
   justify-content: center;
+  gap: var(--app-action-gap);
   border: 1px solid var(--app-border);
   border-radius: 6px;
   background: var(--app-surface);
-  padding: 7px 12px;
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   color: var(--app-muted);
-  font-size: 12px;
+  font-size: var(--app-action-font-size);
   font-weight: 550;
-  line-height: 1.4;
+  line-height: var(--app-action-line-height);
   text-decoration: none;
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
@@ -534,13 +535,10 @@
 
 .knowledgeDialog :global(.knowledge-editor-button),
 .knowledgeDialog :global(.knowledge-editor-submit) {
-  min-height: 36px;
   border: 1px solid var(--app-border);
   border-radius: 6px;
   background: var(--app-surface);
-  padding: 7px 12px;
   color: var(--app-muted);
-  font-size: 12px;
   font-weight: 550;
 }
 

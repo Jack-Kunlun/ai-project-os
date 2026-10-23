@@ -9,5 +9,5 @@
 @media(max-width:700px){.heading{flex-wrap:wrap;gap:15px;margin-bottom:20px}.heading h1{font-size:22px}.heading p{font-size:11px}.formRow{grid-template-columns:1fr}.toolbar{gap:12px}.tabs{gap:20px}.panel{padding:16px}.dialogHeader,.dialogFooter{padding:16px 18px}.dialogBody{padding:20px 18px}.dialog{max-height:94dvh}.drawer{max-height:100dvh}.dialogFooter{flex-wrap:wrap}}
 
 .field input,.field select,.search{min-height:40px}.field textarea{padding:12px;line-height:1.6}.dialogHeader,.dialogBody,.dialogFooter{padding-left:24px;padding-right:24px}.dialogHeader{min-height:76px}.dialogFooter{min-height:72px}.panel+.notice{margin-top:20px}.table td,.table th{vertical-align:middle}
-@media(max-width:700px){.button,.primary,.field input,.field select,.search{min-height:44px}.dialogHeader,.dialogBody,.dialogFooter{padding-left:20px;padding-right:20px}}
+@media(max-width:700px){.field input,.field select,.search{min-height:44px}.dialogHeader,.dialogBody,.dialogFooter{padding-left:20px;padding-right:20px}}
 @media(max-width:600px){.page{padding:var(--app-page-padding);}}

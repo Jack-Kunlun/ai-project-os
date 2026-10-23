@@ -137,6 +137,27 @@ button:not(:disabled) {
   --app-icon-feature: 20px;
   --app-icon-tile: 24px;
   --app-icon-empty: 32px;
+  --app-action-min-height: 40px;
+  --app-action-font-size: 12px;
+  --app-action-line-height: 18px;
+  --app-action-padding-block: 8px;
+  --app-action-padding-inline: 16px;
+  --app-action-gap: 8px;
+}
+
+/* Shared business actions only; tabs, icon-only controls and auth fields opt out. */
+.app-action-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  min-height: var(--app-action-min-height);
+  align-items: center;
+  justify-content: center;
+  gap: var(--app-action-gap);
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
+  text-align: center;
+  white-space: normal;
 }
 
 svg.app-icon {

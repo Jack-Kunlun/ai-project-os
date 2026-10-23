@@ -147,8 +147,8 @@ export function useAppConfirmDialog() {
           ) : null}
         </div>
         <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
-          <button type="button" onClick={() => close(false)} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">{t(options.cancelLabel ?? "取消")}</button>
-          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{t(options.confirmLabel ?? "确认")}</button>
+          <button type="button" onClick={() => close(false)} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600">{t(options.cancelLabel ?? "取消")}</button>
+          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`app-action-button rounded-lg font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{t(options.confirmLabel ?? "确认")}</button>
         </footer>
       </section>
     </div>, request.portalHost,

@@ -1100,9 +1100,9 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             <p><UiText text="维护个人知识、通用记忆与知识图谱。" /></p>
           </div>
           <div className={styles.headingActions}>
-            <Link href={buildPersonalKnowledgeHistoryHref()} className={styles.button}><UiText text="历史会话" /></Link>
-            <button type="button" onClick={() => openKnowledgeModal("import")} className={styles.button}><UiText text="导入文件" /></button>
-            <button type="button" onClick={startCreate} className={styles.buttonPrimary}><UiText text="新建知识" /></button>
+            <Link href={buildPersonalKnowledgeHistoryHref()} className={`${styles.button} app-action-button`}><UiText text="历史会话" /></Link>
+            <button type="button" onClick={() => openKnowledgeModal("import")} className={`${styles.button} app-action-button`}><UiText text="导入文件" /></button>
+            <button type="button" onClick={startCreate} className={`${styles.buttonPrimary} app-action-button`}><UiText text="新建知识" /></button>
           </div>
         </header>
 
@@ -1123,10 +1123,10 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
                   <span className="sr-only"><UiText text="搜索个人知识标题或正文" /></span>
                   <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("搜索个人知识标题或正文")} maxLength={240} className={styles.searchInput} />
                 </label>
-                <button type="submit" className={styles.button}><UiText text="搜索" /></button>
+                <button type="submit" className={`${styles.button} app-action-button`}><UiText text="搜索" /></button>
               </form>
               <div className={styles.toolbarActions}>
-                <button type="button" onClick={() => void openSearchTool("semantic")} className={styles.button}><UiText text="智能检索与索引" /></button>
+                <button type="button" onClick={() => void openSearchTool("semantic")} className={`${styles.button} app-action-button`}><UiText text="智能检索与索引" /></button>
               </div>
             </div>
 
@@ -1145,7 +1145,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
               </button>)}
             </div>}
 
-            {documents.length > 0 ? <nav className={styles.pager} aria-label={t("个人知识分页")}><span>{language === "en" ? `Page ${pageNumber}` : `第 ${pageNumber} 页`}</span><div className={styles.rowActions}><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className={styles.button}><UiText text="上一页" /></button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className={styles.button}><UiText text="下一页" /></button></div></nav> : null}
+            {documents.length > 0 ? <nav className={styles.pager} aria-label={t("个人知识分页")}><span>{language === "en" ? `Page ${pageNumber}` : `第 ${pageNumber} 页`}</span><div className={styles.rowActions}><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className={`${styles.button} app-action-button`}><UiText text="上一页" /></button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className={`${styles.button} app-action-button`}><UiText text="下一页" /></button></div></nav> : null}
           </section>
         </> : null}
 
@@ -1256,7 +1256,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
               </div>
             </div>
             <div data-dialog-footer className="shrink-0 border-t border-slate-100 px-5 py-3 text-right sm:px-7">
-              <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50"><UiText text="完成" /></button>
+              <button type="button" onClick={() => void requestCloseKnowledgeModal()} disabled={importing} className="app-action-button rounded-xl border border-slate-200 font-semibold text-slate-600 disabled:opacity-50"><UiText text="完成" /></button>
             </div>
           </div> : null}
         </dialog>
@@ -1270,12 +1270,12 @@ function EmptyList({ searchQuery, filter, onCreate }: { searchQuery: string; fil
   const t = useTranslate();
   const title = t(searchQuery ? "没有匹配的知识" : filter === "memory" ? "还没有通用记忆" : "还没有个人知识");
   const description = t(searchQuery ? "换一个关键词，或清空搜索后查看全部内容。" : filter === "memory" ? "编辑知识并明确标记为通用记忆后，会显示在这里。" : "新建或导入一条知识，开始整理个人资料。");
-  return <div className={styles.empty}><p className="font-semibold text-slate-700">{title}</p><p className="mt-2">{description}</p>{!searchQuery && filter === "all" ? <button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}><UiText text="新建知识" /></button> : null}</div>;
+  return <div className={styles.empty}><p className="font-semibold text-slate-700">{title}</p><p className="mt-2">{description}</p>{!searchQuery && filter === "all" ? <button type="button" onClick={onCreate} className={`${styles.buttonPrimary} app-action-button mt-4`}><UiText text="新建知识" /></button> : null}</div>;
 }
 
 /** Render the neutral detail state before a document has been selected. */
 function EmptyDetail({ onCreate }: { onCreate: () => void }): React.JSX.Element {
-  return <div className={styles.empty}><h2 className="font-semibold text-slate-700"><UiText text="这条知识暂不可用" /></h2><p className="mt-2"><UiText text="内容可能已删除，或当前账号已不能访问。" /></p><button type="button" onClick={onCreate} className={`${styles.buttonPrimary} mt-4`}><UiText text="新建知识" /></button></div>;
+  return <div className={styles.empty}><h2 className="font-semibold text-slate-700"><UiText text="这条知识暂不可用" /></h2><p className="mt-2"><UiText text="内容可能已删除，或当前账号已不能访问。" /></p><button type="button" onClick={onCreate} className={`${styles.buttonPrimary} app-action-button mt-4`}><UiText text="新建知识" /></button></div>;
 }
 
 type DocumentDetailProps = Readonly<{
@@ -1340,8 +1340,8 @@ function DocumentDetail({
 
       <div data-dialog-body>
       <div className="mt-5 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={onEdit} className={styles.buttonPrimary}><UiText text="编辑" /></button>
-        <button type="button" onClick={onDelete} disabled={deleting} className={styles.buttonDanger}>{deleting ? t("删除中…") : t("删除")}</button>
+        <button type="button" onClick={onEdit} className={`${styles.buttonPrimary} app-action-button`}><UiText text="编辑" /></button>
+        <button type="button" onClick={onDelete} disabled={deleting} className={`${styles.buttonDanger} app-action-button`}>{deleting ? t("删除中…") : t("删除")}</button>
         <button type="button" onClick={() => onExport("markdown")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "markdown" ? "导出中…" : "导出 Markdown")}</button>
         <button type="button" onClick={() => onExport("text")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "text" ? "导出中…" : "导出纯文本")}</button>
         <button type="button" onClick={onHistory} disabled={historyLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(historyLoading ? "读取历史中…" : historyOpen ? "收起版本历史" : "查看版本历史")}</button>

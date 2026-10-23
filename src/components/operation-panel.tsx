@@ -8,7 +8,7 @@ import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } f
 import { ShellIcon } from "./shell-icon";
 
 /** Keep mutations out of the reading surface while preserving parent-owned drafts. */
-export function OperationPanel({ title, translateTitle = true, triggerLabel, description, children, open, onOpenChange, className, disabled, triggerId, variant = "modal" }: {
+export function OperationPanel({ title, translateTitle = true, triggerLabel, description, children, open, onOpenChange, className, disabled, triggerId, variant = "modal", inquiryEnabled = true }: {
   title: string;
   translateTitle?: boolean;
   triggerLabel?: string;
@@ -20,6 +20,7 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
   disabled?: boolean;
   triggerId?: string;
   variant?: "modal" | "drawer";
+  inquiryEnabled?: boolean;
 }) {
   const [localOpen, setLocalOpen] = useState(false);
   const isOpen = open ?? localOpen;
@@ -30,7 +31,7 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
   const titleId = useId();
   const t = useTranslate();
   const backdropStarted = useRef(false);
-  const owned = useInquiryOperation(isOpen, dialogRef);
+  const owned = useInquiryOperation(isOpen, dialogRef, inquiryEnabled);
   const descriptionId = useId();
 
   function changeOpen(value: boolean) {
@@ -51,8 +52,13 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
   }, [isOpen]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.defaultPrevented || !(event.target instanceof Element) || event.target.closest('[role="dialog"], dialog[open]') !== dialogRef.current) return;
+    if (event.defaultPrevented || !(event.target instanceof Element) || !dialogRef.current?.contains(event.target)) return;
+    const activeSurface = event.target.closest<HTMLElement>('[role="dialog"], dialog[open]');
+    const inAsk = Boolean(event.target.closest('[data-floating-inquiry-root]'));
+    if (activeSurface !== dialogRef.current && !inAsk) return;
+    if (activeSurface && activeSurface !== dialogRef.current && activeSurface.dataset.inquiryOwned === "true" && activeSurface.id !== "global-inquiry-panel") return;
     if (event.key === "Escape") {
+      if (activeSurface !== dialogRef.current) return;
       event.preventDefault();
       event.stopPropagation();
       changeOpen(false);
@@ -80,7 +86,7 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
   }
 
   return <div className={className} data-operation-panel>
-    <button data-operation-trigger id={triggerId} type="button" disabled={disabled} onClick={() => changeOpen(true)} aria-haspopup="dialog" aria-expanded={isOpen} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{t(triggerLabel ?? title)}</button>
+    <button data-operation-trigger id={triggerId} type="button" disabled={disabled} onClick={() => changeOpen(true)} aria-haspopup="dialog" aria-expanded={isOpen} className="app-action-button inline-flex items-center justify-center rounded-xl border border-indigo-200 bg-white font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{t(triggerLabel ?? title)}</button>
     {hasOpened && typeof document !== "undefined" ? createPortal(
       <div hidden={!isOpen} inert={!isOpen} aria-hidden={!isOpen || undefined} style={isOpen ? undefined : { display: "none" }} className={`fixed inset-0 z-[60] flex ${modalBackdropClassName} p-0 ${variant === "drawer" ? "items-stretch justify-end" : "items-end justify-center sm:items-center sm:p-5"}`} onPointerDown={(event) => { backdropStarted.current=event.target===event.currentTarget; if (backdropStarted.current) event.preventDefault(); }} onClick={(event) => { if (backdropStarted.current && event.target === event.currentTarget) changeOpen(false); }}>
         <section data-inquiry-owned={String(owned)} data-operation-surface={variant} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} tabIndex={-1} onKeyDown={handleKeyDown} className={`flex w-full flex-col overflow-hidden outline-none ${variant === "drawer" ? "h-dvh max-h-dvh max-w-3xl rounded-none" : "max-h-[95dvh] max-w-6xl rounded-t-2xl sm:rounded-2xl"} ${modalSurfaceClassName}`}>

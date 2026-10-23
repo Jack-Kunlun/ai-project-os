@@ -2,8 +2,8 @@
 import { createContext,useContext,useLayoutEffect,type RefObject } from 'react';
 export const InquiryOwnedContext=createContext(false);
 export const INQUIRY_OPERATION_EVENT='ai-project-os:operation-surface';
-export function useInquiryOperation(open:boolean,ref:RefObject<HTMLElement|null>){
+export function useInquiryOperation(open:boolean,ref:RefObject<HTMLElement|null>,enabled=true){
  const owned=useContext(InquiryOwnedContext);
- useLayoutEffect(()=>{const surface=ref.current;if(!surface||!open)return;surface.dataset.inquiryOwned=String(owned);window.dispatchEvent(new CustomEvent(INQUIRY_OPERATION_EVENT));return()=>{surface.removeAttribute('data-inquiry-host');surface.removeAttribute('data-inquiry-view');surface.removeAttribute('data-inquiry-owned');window.dispatchEvent(new CustomEvent(INQUIRY_OPERATION_EVENT));};},[open,ref,owned]);
+ useLayoutEffect(()=>{const surface=ref.current;if(!surface||!open)return;surface.dataset.inquiryOwned=String(owned);if(enabled)surface.removeAttribute('data-inquiry-disabled');else surface.dataset.inquiryDisabled='true';window.dispatchEvent(new CustomEvent(INQUIRY_OPERATION_EVENT));return()=>{surface.removeAttribute('data-inquiry-host');surface.removeAttribute('data-inquiry-view');surface.removeAttribute('data-inquiry-owned');surface.removeAttribute('data-inquiry-disabled');window.dispatchEvent(new CustomEvent(INQUIRY_OPERATION_EVENT));};},[open,ref,owned,enabled]);
  return owned;
 }

@@ -88,3 +88,11 @@
   .conversationPane>.chat{flex:0 0 auto}
   .conversationPane .rounds{flex:0 0 clamp(160px,30dvh,260px);min-height:160px}
 }
+
+@media(max-width:700px){
+  .embedded .conversationPane{flex:1;min-height:0;overflow:hidden}
+  .embedded .conversationPane>.chat{flex:1 1 auto;min-height:0;height:auto;max-height:none;overflow:hidden}
+  .embedded .conversationPane .rounds{flex:1 1 auto;min-height:0;overflow-y:auto}
+  .embedded .rangeHint{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;max-height:2.6em;margin:0 0 6px;font-size:10px;line-height:1.3}
+  .embedded .chatNote{display:none}
+}

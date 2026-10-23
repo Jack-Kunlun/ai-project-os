@@ -49,16 +49,17 @@
 
 .primaryButton {
   display: inline-flex;
-  min-height: 36px;
+  min-height: var(--app-action-min-height);
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--app-action-gap);
   border: 1px solid var(--app-accent);
   border-radius: 6px;
-  padding: 8px 14px;
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   color: var(--app-on-accent);
   background: var(--app-accent);
-  font-size: 12px;
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
   font-weight: 600;
   text-decoration: none;
   transition: background 140ms ease;

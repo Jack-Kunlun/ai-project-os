@@ -29,7 +29,11 @@ export function WorkspaceDialog({ title, open, onClose, children, footer, drawer
   }, [open]);
   const owned = useInquiryOperation(open, dialog);
   function containTab(event: KeyboardEvent<HTMLDialogElement>) {
-    if (event.defaultPrevented || event.key !== "Tab" || !event.currentTarget.open || !(event.target instanceof Element) || event.target.closest('[role="dialog"], dialog[open]') !== event.currentTarget) return;
+    if (event.defaultPrevented || event.key !== "Tab" || !event.currentTarget.open || !(event.target instanceof Element) || !event.currentTarget.contains(event.target)) return;
+    const activeSurface = event.target.closest<HTMLElement>('[role="dialog"], dialog[open]');
+    const inAsk = Boolean(event.target.closest('[data-floating-inquiry-root]'));
+    if (activeSurface !== event.currentTarget && !inAsk) return;
+    if (activeSurface && activeSurface !== event.currentTarget && activeSurface.dataset.inquiryOwned === "true" && activeSurface.id !== "global-inquiry-panel") return;
     const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled):not([type=hidden]), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])")]
       .filter(element => element.getClientRects().length > 0 && !element.closest("[hidden], [inert], [aria-hidden='true']") && getComputedStyle(element).visibility !== "hidden");
     const first = controls[0], last = controls.at(-1), current = document.activeElement;

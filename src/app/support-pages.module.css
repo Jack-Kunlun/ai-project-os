@@ -359,6 +359,17 @@
 }
 
 /* Secondary resource pages use the same action colors and heading hierarchy. */
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-height: var(--app-action-min-height);
+  align-items: center;
+  justify-content: center;
+  gap: var(--app-action-gap);
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
+}
 .primaryAction {
   background: var(--app-accent);
   color: var(--app-on-accent);

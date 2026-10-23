@@ -143,7 +143,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             <h1><UiText text="我的项目" /></h1>
             <p className={styles.subtitle}><UiText text="项目资料、共识与工作都保存在各自的空间中。" /></p>
           </div>
-          {payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={styles.primaryButton}>＋ <UiText text="新建项目" /></button> : null}
+          {payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={`${styles.primaryButton} app-action-button`}>＋ <UiText text="新建项目" /></button> : null}
         </section>
 
         {error ? <div className={styles.error} role="alert"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text="重试" /></button></div> : null}
@@ -169,7 +169,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             <div className={styles.emptyState}>
               <h2><UiText text={search.trim() ? "没有匹配的项目" : view === "active" ? payload.canCreateProject ? "还没有进行中的项目" : "等待工作区授权" : "还没有归档项目"} /></h2>
               <p><UiText text={search.trim() ? "换一个项目名称或描述关键词试试。" : view === "active" ? payload.canCreateProject ? "创建项目后，就可以添加资料、建立计划并继续工作。" : "请联系当前工作区 Owner/Admin 授予你创建项目或访问项目的权限。" : "归档项目会集中显示在这里；项目数据仍可恢复使用。"} /></p>
-              {!search.trim() && view === "active" && payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={styles.primaryButton}><UiText text="创建第一个项目" /></button> : null}
+              {!search.trim() && view === "active" && payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={`${styles.primaryButton} app-action-button`}><UiText text="创建第一个项目" /></button> : null}
             </div>
           ) : (
             <><div className={styles.projectGrid}>
@@ -214,7 +214,7 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingRef = useRef(false);
   const onCloseRef = useRef(onClose);
-  useInquiryOperation(true, dialogRef);
+  useInquiryOperation(true, dialogRef, false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [pending, setPending] = useState(false);
@@ -319,8 +319,8 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
         </form>
       </div>
       <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
-        <button data-dialog-close type="button" onClick={close} disabled={pending} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"><UiText text="取消" /></button>
-        <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
+        <button data-dialog-close type="button" onClick={close} disabled={pending} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600"><UiText text="取消" /></button>
+        <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="app-action-button rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
       </footer>
     </section>
   </div>;

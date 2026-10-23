@@ -72,14 +72,15 @@
 .headingActions { gap: 16px; }
 
 .headingActions > div > button {
-  min-height: 40px;
+  min-height: var(--app-action-min-height);
+  gap: var(--app-action-gap);
   border: 1px solid var(--app-border);
   border-radius: 6px;
-  padding: 8px 16px;
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   color: var(--app-muted);
   background: var(--app-surface);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
   font-weight: 500;
 }
 
@@ -374,10 +375,8 @@
   margin-top: 8px;
   border: 1px dashed var(--app-border);
   border-radius: 6px;
-  padding: 8px;
   color: var(--app-muted);
   background: transparent;
-  font-size: 9px;
 }
 
 .listView {
@@ -471,13 +470,13 @@
 .objectiveText span,
 .objectiveText small { color: var(--app-muted); font-size: 8px; line-height: 1.55; }
 .transitionButtons { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
-.transitionButtons button { min-height: 27px; border: 1px solid var(--app-border); border-radius: 6px; padding: 5px 8px; color: var(--app-muted); background: var(--app-surface); font-size: 8px; }
+.transitionButtons button { border: 1px solid var(--app-border); border-radius: 6px; color: var(--app-muted); background: var(--app-surface); }
 .transitionButtons button:disabled { opacity: 0.45; }
 
 .recommendationCard { display: block; }
 .recommendationCard strong { color: var(--app-muted); font-size: 10px; font-weight: 620; line-height: 1.6; }
 .recommendationCard p { color: var(--app-muted); font-size: 8px; line-height: 1.6; }
-.recommendationCard button { min-height: 29px; border: 1px solid var(--app-border); border-radius: 6px; padding: 5px 9px; color: var(--app-muted); background: var(--app-surface-soft); font-size: 8px; font-weight: 620; }
+.recommendationCard button { border: 1px solid var(--app-border); border-radius: 6px; color: var(--app-muted); background: var(--app-surface-soft); font-weight: 620; }
 .recommendationCard button:disabled { opacity: 0.45; }
 
 .auditList { padding: 0 0 10px; }
@@ -513,7 +512,7 @@
 .detailSubsection li { border-radius: 4px; padding: 4px 7px; background: var(--app-surface-soft); }
 
 .detailActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 15px; }
-.detailActions button { min-height: 34px; border: 1px solid var(--app-border); border-radius: 6px; padding: 6px 10px; color: var(--app-muted); background: var(--app-surface); font-size: 9px; font-weight: 620; }
+.detailActions button { border: 1px solid var(--app-border); border-radius: 6px; color: var(--app-muted); background: var(--app-surface); font-weight: 620; }
 .detailActions button:disabled { opacity: 0.45; }
 
 .form { display: grid; max-width: 850px; gap: 13px; border: 1px solid var(--app-border); border-radius: 8px; padding: 17px; background: var(--app-surface); }
@@ -528,7 +527,7 @@
 .formGrid,
 .formGridFour { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .formGridFour { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.form > button { min-height: 34px; justify-self: start; border: 1px solid var(--app-accent); border-radius: 6px; padding: 7px 13px; color: var(--app-on-accent); background: var(--app-accent); font-size: 9px; font-weight: 620; }
+.form > button { justify-self: start; border: 1px solid var(--app-accent); border-radius: 6px; color: var(--app-on-accent); background: var(--app-accent); font-weight: 620; }
 .form > button:disabled { cursor: not-allowed; opacity: 0.45; }
 .formError { margin: 0; border-radius: 6px; padding: 8px 10px; color: var(--app-muted); background: var(--app-danger-soft); font-size: 9px; }
 

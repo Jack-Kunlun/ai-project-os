@@ -1,8 +1,42 @@
 import { randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 import { signInR02Admin, signInR02PersonalUser, signOutR02User, expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow } from "./support/r02-admin-navigation";
 import { expectIconLabelAlignment, readIconLabelAlignment } from "./support/icon-label-alignment";
+
+async function expectActionButtonGeometry(button: Locator, exactHeight = false) {
+  const geometry = await button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return {
+      height: rect.height,
+      minHeight: style.minHeight,
+      fontSize: style.fontSize,
+      padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+      gap: style.columnGap,
+      overflow: element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1,
+    };
+  });
+  expect(geometry.minHeight).toBe("40px");
+  expect(geometry.fontSize).toBe("12px");
+  expect(geometry.padding).toEqual(["8px", "16px", "8px", "16px"]);
+  expect(geometry.gap).toBe("8px");
+  expect(geometry.height).toBeGreaterThanOrEqual(40);
+  if (exactHeight) expect(geometry.height).toBeCloseTo(40, 0);
+  expect(geometry.overflow).toBe(false);
+  return geometry;
+}
+
+async function expectActionRowGeometry(buttons: Locator) {
+  const rows = await buttons.evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { height: rect.height, top: rect.top };
+  }));
+  expect(rows.length).toBeGreaterThan(1);
+  for (const button of await buttons.all()) await expectActionButtonGeometry(button, true);
+  expect(Math.max(...rows.map((row) => row.height)) - Math.min(...rows.map((row) => row.height))).toBeLessThanOrEqual(1);
+  expect(Math.max(...rows.map((row) => row.top)) - Math.min(...rows.map((row) => row.top))).toBeLessThanOrEqual(1);
+}
 
 test("operation assistance stays in the secondary footer and icons align with rendered labels", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
@@ -16,15 +50,20 @@ test("operation assistance stays in the secondary footer and icons align with re
   const unexpectedWrites:string[]=[];
   page.on('request',request=>{if(['POST','PATCH','PUT','DELETE'].includes(request.method())&&new URL(request.url()).pathname.startsWith('/api/'))unexpectedWrites.push(request.method()+' '+new URL(request.url()).pathname);});
   for (const mode of [
-    {language:"zh-CN",theme:"light",width:1440}, {language:"en",theme:"dark",width:1440},
-    {language:"zh-CN",theme:"light",width:390}, {language:"en",theme:"dark",width:390},
+    {language:"zh-CN",theme:"light",width:1440,height:900}, {language:"en",theme:"dark",width:1440,height:900},
+    {language:"zh-CN",theme:"light",width:390,height:844}, {language:"en",theme:"dark",width:390,height:844},
   ]) {
     const en = mode.language === "en", name=`${mode.language}-${mode.theme}-${mode.width}`;
     await page.context().addCookies([{name:"aipos-language",value:mode.language,url:new URL(page.url()).origin},{name:"aipos-theme",value:mode.theme,url:new URL(page.url()).origin}]);
-    await page.setViewportSize({width:mode.width,height:900});
+    await page.setViewportSize({width:mode.width,height:mode.height});
     await page.goto(`/projects/${project.id}/plan`);
-    await page.getByRole("button",{name:en?"New work item":"新建工作项",exact:true}).click();
+    const createWorkItem=page.getByRole("button",{name:en?"New work item":"新建工作项",exact:true});
+    await expectActionButtonGeometry(createWorkItem,true);
+    await createWorkItem.click();
     const dialog=page.getByRole("dialog",{name:en?"Add a work item":"添加人工工作项",exact:true});
+    const workItemAction=dialog.locator(".app-action-button");
+    await expect(workItemAction).toHaveCount(1);
+    await expectActionButtonGeometry(workItemAction,true);
     const title=dialog.getByRole("textbox",{name:en?"Work item name":"工作项名称",exact:true});
     await title.fill("Unsaved work item");
     const footer=dialog.locator("[data-inquiry-footer]"), launcher=footer.getByRole("button",{name:en?"Ask AI":"智能问答",exact:true});
@@ -37,9 +76,55 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expectR02NoHorizontalOverflow(page,name);
     await expectR02NoAccessibilityViolations(page,name);
     await testInfo.attach(`assistance-${name}.png`,{body:await page.screenshot({path:testInfo.outputPath(`assistance-${name}.png`)}),contentType:"image/png"});
+    if(mode.width>=1200){
+      const beforeLauncherNudge=await launcher.boundingBox();
+      await launcher.focus();
+      await launcher.press("ArrowLeft");
+      const afterLauncherNudge=await launcher.boundingBox();
+      expect(afterLauncherNudge!.x).toBeCloseTo(beforeLauncherNudge!.x-24,0);
+      const fromX=afterLauncherNudge!.x+afterLauncherNudge!.width/2,fromY=afterLauncherNudge!.y+afterLauncherNudge!.height/2;
+      await page.mouse.move(fromX,fromY);await page.mouse.down();await page.mouse.move(fromX+72,fromY-48,{steps:4});await page.mouse.up();
+      const afterLauncherDrag=await launcher.boundingBox();
+      expect(afterLauncherDrag!.x).toBeGreaterThan(afterLauncherNudge!.x+40);
+      expect(afterLauncherDrag!.y).toBeLessThan(afterLauncherNudge!.y-24);
+      expect(await launcher.evaluate(element=>getComputedStyle(element).position)).toBe("fixed");
+      await expect(page.locator("#global-inquiry-panel")).not.toHaveAttribute("open");
+    }
     await launcher.click();
     const ask=page.getByRole("dialog",{name:en?"Floating Ask AI":"智能问答悬浮窗",exact:true});
     await expect(ask).toBeVisible();
+    const embeddedRail=ask.getByRole("complementary",{name:en?"Recent conversations":"最近会话",exact:true});
+    await expect(embeddedRail).toHaveAttribute("data-collapsed","true");
+    await expect(launcher).toBeHidden();
+    if(mode.width<700){
+      const questionInput=ask.getByRole("textbox",{name:en?"Your question":"输入问题",exact:true});
+      const send=ask.getByRole("button",{name:en?"Send":"发送",exact:true});
+      const geometry=await ask.evaluate(root=>{
+        const panel=root.getBoundingClientRect(),conversation=root.querySelector("section[aria-label]")!,input=conversation.querySelector("textarea")!.getBoundingClientRect(),submit=conversation.querySelector("form button")!.getBoundingClientRect(),rounds=conversation.querySelector("[aria-busy]") as HTMLElement,welcome=rounds.querySelector("h2")?.parentElement,scrollStyle=getComputedStyle(rounds);
+        return {panel:{left:panel.left,right:panel.right,top:panel.top,bottom:panel.bottom},input:{left:input.left,right:input.right,top:input.top,bottom:input.bottom},submit:{left:submit.left,right:submit.right,top:submit.top,bottom:submit.bottom},roundsOverflow:scrollStyle.overflowY,welcomeInRounds:Boolean(welcome&&rounds.contains(welcome))};
+      });
+      for(const item of [geometry.input,geometry.submit]){
+        expect(item.left).toBeGreaterThanOrEqual(geometry.panel.left-1);
+        expect(item.right).toBeLessThanOrEqual(geometry.panel.right+1);
+        expect(item.top).toBeGreaterThanOrEqual(geometry.panel.top-1);
+        expect(item.bottom).toBeLessThanOrEqual(geometry.panel.bottom+1);
+      }
+      expect(geometry.roundsOverflow).toBe("auto");
+      expect(geometry.welcomeInRounds).toBe(true);
+      await expect(questionInput).toBeEnabled();
+      await questionInput.focus();
+      await expect(questionInput).toBeFocused();
+      await expect(send).toBeVisible();
+    }
+    if(mode.width>=1200){
+      await title.click();
+      await expect(title).toBeFocused();
+      await expect(ask).toBeVisible();
+    }
+    const hostControls=dialog.locator('button:not([disabled]):visible, input:not([disabled]):visible, select:not([disabled]):visible, textarea:not([disabled]):visible, a[href]:visible, [tabindex]:not([tabindex="-1"]):visible');
+    await hostControls.last().focus();
+    await hostControls.last().press("Tab");
+    await expect(dialog.locator("[data-dialog-close]").first()).toBeFocused();
     await ask.getByRole("textbox",{name:en?"Your question":"输入问题",exact:true}).press("Escape");
     await expect(ask).toBeHidden();
     await expect(title).toHaveValue("Unsaved work item");
@@ -60,9 +145,15 @@ test("operation assistance stays in the secondary footer and icons align with re
     await page.goto(`/projects/${project.id}/plan`);
     await page.getByRole('button',{name:en?'New work item':'新建工作项',exact:true}).click();
     const routeDialog=page.getByRole('dialog',{name:en?'Add a work item':'添加人工工作项',exact:true});
+    const routeLauncher=routeDialog.locator('[data-inquiry-footer] .inquiry-launcher');
+    await expect(routeLauncher).toBeVisible();
+    expect(await routeLauncher.evaluate(element=>getComputedStyle(element).position)).toBe("static");
+    await expect(routeLauncher).not.toHaveClass(/is-dragged-operation/u);
     await routeDialog.getByRole('textbox',{name:en?'Work item name':'工作项名称',exact:true}).fill('Do not submit this navigation draft');
-    await routeDialog.locator('[data-inquiry-footer] .inquiry-launcher').click();
+    await routeLauncher.click();
     const routeAsk=page.getByRole('dialog',{name:en?'Floating Ask AI':'智能问答悬浮窗',exact:true});
+    await expect(routeLauncher).toBeHidden();
+    await expect(routeAsk.getByRole("complementary",{name:en?"Recent conversations":"最近会话",exact:true})).toHaveAttribute("data-collapsed","true");
     await routeAsk.getByRole('link',{name:en?'Open full page':'在完整页面打开',exact:true}).click();
     await expect(page).toHaveURL(/\/ask(?:\?|$)/u);
     if(mode.width===390)await page.getByRole('button',{name:en?'Open navigation':'打开导航',exact:true}).click();
@@ -71,6 +162,20 @@ test("operation assistance stays in the secondary footer and icons align with re
     const restored=page.locator('[data-floating-inquiry-root] > .inquiry-launcher');
     await expect(restored).toBeVisible();
     await expect(page.locator('aside[aria-labelledby="common-actions-heading"] a[href="/ask"]')).toHaveCount(0);
+    if(mode.width===1440){
+      const beforeNudge=await restored.boundingBox();
+      await restored.focus();
+      await restored.press("ArrowLeft");
+      const afterNudge=await restored.boundingBox();
+      expect(afterNudge!.x).toBeCloseTo(beforeNudge!.x-24,0);
+      const fromX=afterNudge!.x+afterNudge!.width/2,fromY=afterNudge!.y+afterNudge!.height/2;
+      await page.mouse.move(fromX,fromY);await page.mouse.down();await page.mouse.move(fromX-72,fromY-48,{steps:4});await page.mouse.up();
+      const afterDrag=await restored.boundingBox();
+      expect(afterDrag!.x).toBeLessThan(afterNudge!.x-40);
+      expect(afterDrag!.y).toBeLessThan(afterNudge!.y-24);
+      expect(afterDrag!.x+afterDrag!.width).toBeLessThanOrEqual(1440);
+      await expect(page.locator("#global-inquiry-panel")).not.toHaveAttribute("open");
+    }
     if(mode.width===390){
       await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
       const overlaps=await page.locator('[data-page-content]').evaluate(root=>{
@@ -91,6 +196,48 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expect(restoredAsk).toBeHidden();
     expect(unexpectedWrites,'opening, closing and navigating must not submit the business draft').toEqual([]);
   }
+});
+
+test("basic project and team invitation forms hide Ask and use shared action dimensions", async ({page})=>{
+  await signInR02Admin(page);await signOutR02User(page);
+  const user=await seedBrowserPersonalUser(`basic-form-${randomUUID().slice(0,8)}`,"IconAssist2026Password!");
+  await signInR02PersonalUser(page,user);
+
+  await page.goto("/projects");
+  const newProject=page.getByRole("button",{name:"新建项目",exact:true});
+  await expectActionButtonGeometry(newProject,true);
+  await newProject.click();
+  const projectDialog=page.getByRole("dialog",{name:"创建项目空间",exact:true});
+  await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
+  const projectActions=projectDialog.locator("footer .app-action-button");
+  await expectActionRowGeometry(projectActions);
+  await page.keyboard.press("Alt+j");
+  await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);
+  await projectDialog.getByRole("button",{name:"取消",exact:true}).click();
+  await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(1);
+
+  await page.goto(`/team/${user.workspaceId}?view=invitations`);
+  const createInvitation=page.getByRole("button",{name:"创建邀请",exact:true});
+  await expectActionButtonGeometry(createInvitation,true);
+  await createInvitation.click();
+  const invitationDialog=page.getByRole("dialog",{name:"创建邀请链接",exact:true});
+  await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
+  const submitInvitation=invitationDialog.locator("form .app-action-button");
+  await expect(submitInvitation).toHaveCount(1);
+  await expectActionButtonGeometry(submitInvitation,true);
+  await page.keyboard.press("Alt+j");
+  await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);
+  await invitationDialog.locator("[data-dialog-close]").click();
+  await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(1);
+
+  await page.goto(`/team/${user.workspaceId}?view=members`);
+  await page.getByRole("button",{name:"添加成员",exact:true}).click();
+  const memberDialog=page.getByRole("dialog",{name:"添加本地成员",exact:true});
+  await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
+  await page.keyboard.press("Alt+j");
+  await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);
+  await memberDialog.locator("[data-dialog-close]").click();
+  await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(1);
 });
 
 test("model quota uses the real report envelope and Ask Escape preserves a confirmation input (isolated provider display fixture)", async ({page})=>{

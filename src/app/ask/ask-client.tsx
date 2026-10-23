@@ -45,9 +45,9 @@ export function AskClient({ username, isSystemAdmin,embedded=false,onConversatio
   const [sourceError,setSourceError] = useState<string | null>(null);
   const [model,setModel] = useState<InquiryModelDisclosure|null>(null);
   const pending=activeRequest!==null;
-  const [collapsed,setCollapsed] = useState(false), [historyView,setHistoryView] = useState<ConversationView>("active");
+  const [collapsed,setCollapsed] = useState(embedded), [historyView,setHistoryView] = useState<ConversationView>("active");
   const [historyQuery,setHistoryQuery] = useState(""), [historyPage,setHistoryPage] = useState(1), [historyLoading,setHistoryLoading] = useState(false), [historyError,setHistoryError] = useState<string | null>(null);
-  useEffect(()=>{const frame=requestAnimationFrame(()=>{try{setCollapsed(window.localStorage.getItem("aipos-conversation-rail")==="collapsed");}catch{/* Storage may be unavailable; the default expanded rail remains usable. */}});return()=>cancelAnimationFrame(frame);},[]);
+  useEffect(()=>{if(embedded)return;const frame=requestAnimationFrame(()=>{try{setCollapsed(window.localStorage.getItem("aipos-conversation-rail")==="collapsed");}catch{/* Storage may be unavailable; the default expanded rail remains usable. */}});return()=>cancelAnimationFrame(frame);},[embedded]);
   function collapseRail(value:boolean){setCollapsed(value);try{window.localStorage.setItem("aipos-conversation-rail",value?"collapsed":"expanded");}catch{/* The current view does not depend on persistence. */}}
   const [summaries,setSummaries] = useState<Summary[]>([]), [pagination,setPagination] = useState<Pagination>({page:1,totalPages:1,total:0});
   const [historyRefresh,setHistoryRefresh] = useState(0), [historyWriting,setHistoryWriting] = useState(false);

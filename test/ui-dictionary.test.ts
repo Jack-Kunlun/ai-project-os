@@ -10,5 +10,6 @@ test("versioned English resources match the reviewed source dictionaries", async
   assert.equal(englishUiMessages["未关联项目"], "No project linked");
   assert.equal(englishUiMessages["未设置上限"], "No limit set");
   assert.equal(englishUiMessages["条"], " items");
+  assert.equal(englishUiMessages["删除原始资料"], "Delete original source");
   assert.equal(englishUiMessages["客户自己的原始正文"], undefined);
 });

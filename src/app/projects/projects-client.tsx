@@ -318,7 +318,7 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
           {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
         </form>
       </div>
-      <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
+      <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-4 px-7 py-5 sm:px-8`}>
         <button data-dialog-close type="button" onClick={close} disabled={pending} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600"><UiText text="取消" /></button>
         <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="app-action-button rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
       </footer>

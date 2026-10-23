@@ -795,7 +795,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
                         </div>
                         <div className={styles.sourceActions}>
                           <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { status: itemStatus, search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className={styles.detailAction}><UiText text={"查看详情"} /></Link>
-                          <button type="button" onClick={() => void handleDeleteSource(source)} disabled={deletingSourceId !== null} className={styles.deleteAction} aria-label={`删除原始资料 ${source.preview.slice(0, 24)}`}>{deletingSourceId === source.id ? <UiText text={"删除中…"} /> : <UiText text={"删除"} />}</button>
+                          <button type="button" onClick={() => void handleDeleteSource(source)} disabled={deletingSourceId !== null} className={styles.deleteAction} aria-label={`${translateUi("删除原始资料")} ${source.preview.slice(0, 24)}`}>{deletingSourceId === source.id ? <UiText text={"删除中…"} /> : <UiText text={"删除"} />}</button>
                         </div>
                       </li>
                     ))}

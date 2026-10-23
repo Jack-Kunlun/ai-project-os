@@ -46,8 +46,9 @@ test("project creation dialog traps focus, restores its opener, and stays open w
   });
 
   for (const appearance of [
-    { width: 1440, height: 900, language: "zh-CN", theme: "light", openerName: "＋ 新建项目", dialogName: "创建项目空间", closeName: "关闭", cancelName: "取消" },
-    { width: 390, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "Create a project workspace", closeName: "Close", cancelName: "Cancel" },
+    { width: 1440, height: 900, language: "zh-CN", theme: "light", openerName: "＋ 新建项目", dialogName: "创建项目空间", closeName: "关闭", cancelName: "取消", createName: "创建项目" },
+    { width: 390, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "Create a project workspace", closeName: "Close", cancelName: "Cancel", createName: "Create project" },
+    { width: 320, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "Create a project workspace", closeName: "Close", cancelName: "Cancel", createName: "Create project" },
   ] as const) {
     await page.setViewportSize({ width: appearance.width, height: appearance.height });
     const origin = new URL(page.url()).origin;
@@ -63,10 +64,16 @@ test("project creation dialog traps focus, restores its opener, and stays open w
     await opener.click();
     const dialog = page.getByRole("dialog", { name: appearance.dialogName, exact: true });
     const close = dialog.getByRole("button", { name: appearance.closeName, exact: true });
+    const cancel = dialog.getByRole("button", { name: appearance.cancelName, exact: true });
+    const create = dialog.getByRole("button", { name: appearance.createName, exact: true });
     await expect(dialog).toBeVisible();
+    const [cancelBox, createBox] = await Promise.all([cancel.boundingBox(), create.boundingBox()]);
+    if (cancelBox === null || createBox === null) throw new Error("PROJECT_CREATE_FOOTER_BUTTON_BOUNDS_MISSING");
+    expect(createBox.y).toBeCloseTo(cancelBox.y, 1);
+    expect(createBox.x - (cancelBox.x + cancelBox.width)).toBeCloseTo(16, 1);
     await expect(close).toBeFocused();
     await page.keyboard.press("Shift+Tab");
-    await expect(dialog.getByRole("button", { name: appearance.cancelName, exact: true })).toBeFocused();
+    await expect(cancel).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(close).toBeFocused();
     await page.keyboard.press("Escape");
@@ -82,6 +89,7 @@ test("project creation dialog traps focus, restores its opener, and stays open w
     expect(projectCreateRequests).toEqual([]);
   }
 
+  await page.setViewportSize({ width: 390, height: 844 });
   const opener = page.getByRole("button", { name: "＋ New project", exact: true }).first();
   await opener.click();
   const dialog = page.getByRole("dialog", { name: "Create a project workspace", exact: true });

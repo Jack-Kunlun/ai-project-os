@@ -6,9 +6,20 @@ import { safeResponseError } from "@/lib/safe-error-presentation";
 import { UiText } from "@/components/appearance-provider";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { InfoSection, PublicInfoPage } from "@/components/public-info-page";
+import styles from "@/components/public-info-page.module.css";
 
 export function AcceptInvitationClient({ token }: { token: string }) {
   const router = useRouter(); const [pending, setPending] = useState(false); const [error, setError] = useState<string | null>(null);
   async function accept() { setPending(true); setError(null); try { const response = await fetch("/api/workspace-invitations/accept", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, returnTo: "/dashboard" }) }); if (!response.ok) { throw new Error((await safeResponseError(response, "邀请接受失败")).message); } router.replace("/dashboard"); router.refresh(); } catch (cause) { setError(cause instanceof Error ? cause.message : "邀请接受失败"); setPending(false); } }
-  return <main className="flex min-h-screen items-center justify-center bg-[#f5f7fb] px-6"><section className="w-full max-w-lg rounded-[2rem] border border-slate-200 bg-white p-9 text-center shadow-xl"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-600 font-bold text-white"><UiText text={"OS"} /></span><h1 className="mt-6 text-3xl font-semibold"><UiText text={"加入工作区"} /></h1><p className="mt-3 text-sm leading-6 text-slate-500"><UiText text={"确认后，系统会按邀请中指定的工作区与项目角色授权当前账户。邀请令牌只会使用一次。"} /></p>{error ? <p role="alert" className="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}<button onClick={() => void accept()} disabled={pending} className="mt-7 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? <UiText text={"正在加入…"} /> : <UiText text={"接受邀请"} />}</button></section></main>;
+  return (
+    <PublicInfoPage eyebrow="接受邀请" title="加入工作区" description="确认后，系统会按邀请中指定的工作区与项目角色授权当前账户。邀请令牌只会使用一次。">
+      <InfoSection title="接受邀请">
+        {error ? <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
+        <div>
+          <button type="button" onClick={() => void accept()} disabled={pending} className={`app-action-button ${styles.formSubmit}`}><UiText text={pending ? "正在加入…" : "接受邀请"} /></button>
+        </div>
+      </InfoSection>
+    </PublicInfoPage>
+  );
 }

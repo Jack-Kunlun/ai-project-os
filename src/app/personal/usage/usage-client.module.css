@@ -25,9 +25,9 @@
 .title {
   margin: 0;
   color: var(--app-text);
-  font-size: clamp(23px, 2.4vw, 30px);
-  font-weight: 650;
-  line-height: 1.25;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .description {
@@ -40,17 +40,18 @@
 
 .creditLink {
   flex: 0 0 auto;
-  min-height: 38px;
+  min-height: var(--app-action-min-height);
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--app-border);
   border-radius: 6px;
-  padding: 0 13px;
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   background: var(--app-surface);
   color: var(--app-text);
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
+  line-height: var(--app-action-line-height);
 }
 
 .creditLink:hover { border-color: var(--app-accent); color: var(--app-link); }
@@ -95,6 +96,11 @@
   color: var(--app-muted);
   font-size: 11px;
   font-weight: 600;
+}
+
+.projectSearch {
+  width: min(100%, 420px);
+  margin-top: 16px;
 }
 
 .filterLabel select,
@@ -220,14 +226,15 @@
 
 .retryButton,
 .loadButton {
-  min-height: 36px;
+  min-height: var(--app-action-small-height);
   border: 1px solid var(--app-border);
   border-radius: 6px;
-  padding: 0 13px;
+  padding: 5px 12px;
   background: var(--app-surface);
   color: var(--app-text);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
   font-weight: 600;
   cursor: pointer;
 }

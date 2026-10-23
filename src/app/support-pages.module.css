@@ -28,6 +28,45 @@
   margin-bottom: 24px;
 }
 
+.notificationTabs {
+  display: flex;
+  max-width: 100%;
+  gap: 25px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--app-border);
+  margin-top: 24px;
+}
+
+.notificationTab {
+  flex: 0 0 auto;
+  min-height: 32px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0 0 10px;
+  background: transparent;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.notificationTab[aria-pressed="true"] {
+  border-bottom-color: var(--app-accent);
+  color: var(--app-link);
+  font-weight: 500;
+}
+
+.notificationTab:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -2px;
+}
+
+@media (max-width: 700px) {
+  .notificationTabs { gap: 20px; }
+  .notificationTab { font-size: 12px; }
+}
+
 .pageHeader :global(.uppercase) {
   display: none;
 }

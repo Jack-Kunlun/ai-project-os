@@ -178,7 +178,7 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
               <button
                 type="button"
                 onClick={onRetry}
-                className="mt-3 whitespace-nowrap rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"
+                className="app-action-button app-action-button--compact mt-3 whitespace-nowrap rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"
               >
                 {t("重新读取")}
               </button>

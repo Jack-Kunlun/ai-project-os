@@ -97,7 +97,7 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
             <label className="block text-sm font-medium text-slate-700">{t("显示名称")}<input aria-label={t("显示名称")} value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={160} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
             <label className="block text-sm font-medium text-slate-700">{t("邮箱")}<input aria-label={t("邮箱")} type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
             {message && openOperation === "profile" ? <p role="status" className="text-sm text-rose-700"><UiFeedbackText text={message} /></p> : null}
-            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "保存中…" : "保存个人资料")}</button>
+            <button disabled={pending || profile === null} className="app-action-button min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "保存中…" : "保存个人资料")}</button>
           </form>
         </OperationPanel>
       </section>
@@ -110,7 +110,7 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
             <label className="block text-sm font-medium text-slate-700">{t("新密码")}<input aria-label={t("新密码")} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400" /></label>
             <p className="text-xs leading-5 text-slate-500">{t("8–128 位，同时包含字母和数字。更新后需要重新登录。")}</p>
             {message && openOperation === "password" ? <p role="alert" className="text-sm text-rose-700"><UiFeedbackText text={message} /></p> : null}
-            <button disabled={pending || profile === null} className="min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "更新中…" : "更新密码")}</button>
+            <button disabled={pending || profile === null} className="app-action-button min-h-11 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{t(pending ? "更新中…" : "更新密码")}</button>
           </form>
         </OperationPanel>
       </section>

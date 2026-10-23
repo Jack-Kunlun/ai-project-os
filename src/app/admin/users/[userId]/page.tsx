@@ -9,10 +9,10 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
   await requireSystemAdminPage();
   const { userId } = await params;
   return <div className="w-full pb-12">
-    <div className="px-4 py-3 sm:px-5 lg:px-6">
+    <div className="mb-3">
       <ParentPageLink href="/admin/users" label="返回用户运营" />
     </div>
     <AdminUserDetailClient userId={userId} />
-    <div className="w-full px-4 sm:px-5 lg:px-6"><PlatformCreditGovernancePanel focusUserId={userId} /></div>
+    <div className="mt-6 w-full"><PlatformCreditGovernancePanel focusUserId={userId} /></div>
   </div>;
 }

@@ -28,12 +28,14 @@
 .primaryAction,
 .secondaryAction {
   display: inline-flex;
-  min-height: 2.5rem;
+  min-height: var(--app-action-min-height);
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  padding: 0.625rem 1rem;
-  font-size: 0.8125rem;
+  gap: var(--app-action-gap);
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
   font-weight: 500;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }

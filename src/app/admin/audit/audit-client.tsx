@@ -255,7 +255,7 @@ export function AdminAuditClient() {
       </div>
 
       <div className="mt-4 border-t border-slate-100 pt-4">
-        <button type="button" aria-expanded={advancedOpen} aria-controls={advancedPanelId} onClick={() => setAdvancedOpen((open) => !open)} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
+        <button type="button" aria-expanded={advancedOpen} aria-controls={advancedPanelId} onClick={() => setAdvancedOpen((open) => !open)} className="app-action-button app-action-button--compact whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
           {t(advancedOpen ? "收起高级筛选" : "高级筛选")}{!advancedOpen && advancedActive ? ` (${t("已填写")})` : ""}
         </button>
         <div id={advancedPanelId} hidden={!advancedOpen} className="mt-4 rounded-2xl bg-slate-50 p-4">
@@ -277,8 +277,8 @@ export function AdminAuditClient() {
           )) : <span className="text-xs text-slate-400">{t("未设置，显示全部来源")}</span>}
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={resetFilters} disabled={!hasActiveFilters && !advancedActive} className="whitespace-nowrap rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("重置")}</button>
-          <button type="submit" className="whitespace-nowrap rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("应用筛选")}</button>
+          <button type="button" onClick={resetFilters} disabled={!hasActiveFilters && !advancedActive} className="app-action-button whitespace-nowrap rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("重置")}</button>
+          <button type="submit" className="app-action-button whitespace-nowrap rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("应用筛选")}</button>
         </div>
       </div>
     </form>
@@ -291,8 +291,8 @@ export function AdminAuditClient() {
         </div>
         <div className="flex items-center gap-2">
           <span className="whitespace-nowrap text-xs text-slate-500">{t("第")} {page} {t("页")}</span>
-          <button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("上一页")}</button>
-          <button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("下一页")}</button>
+          <button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="app-action-button app-action-button--compact whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("上一页")}</button>
+          <button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="app-action-button app-action-button--compact whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("下一页")}</button>
         </div>
       </div>
       {loading ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("正在读取审计快照…")}</div> : error ? <div role="status" className="px-6 py-16 text-center"><p className="text-sm font-semibold text-rose-700"><UiErrorText text={error} /></p><p className="mt-2 text-xs text-slate-500">{t("请刷新页面或缩小筛选范围。")}</p></div> : data?.events.length === 0 ? <div role="status" className="px-6 py-16 text-center text-sm text-slate-500">{t("当前快照没有符合条件的记录。")}</div> : <div className="overflow-x-auto">
@@ -327,7 +327,7 @@ export function AdminAuditClient() {
                   <p className="mt-1 text-slate-400">{auditReferenceSummary(auditEvent.references).replace(/^(\d+) 项安全引用$/u, (_, count: string) => `${count} ${t("项安全引用")}`).replace("无安全引用", t("无安全引用")).replace("仅类别标记", t("仅类别标记"))}</p>
                 </td>
                 <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-4">
-                  <button type="button" onClick={(clickEvent) => openDetail(auditEvent, clickEvent.currentTarget)} className="w-full whitespace-nowrap rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("查看详情")}</button>
+                  <button type="button" onClick={(clickEvent) => openDetail(auditEvent, clickEvent.currentTarget)} className="app-action-button app-action-button--compact w-full whitespace-nowrap rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("查看详情")}</button>
                 </td>
               </tr>;
             })}

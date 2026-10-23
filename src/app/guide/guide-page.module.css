@@ -16,15 +16,16 @@
 
 .adminGuideLink {
   display: inline-flex;
-  min-height: 34px;
+  min-height: var(--app-action-min-height);
   align-items: center;
   margin-top: 14px;
   border: 1px solid var(--app-border);
-  border-radius: 4px;
-  padding: 6px 10px;
+  border-radius: 6px;
+  padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   background: var(--app-surface);
   color: var(--app-link);
-  font-size: 12px;
+  font-size: var(--app-action-font-size);
+  line-height: var(--app-action-line-height);
   font-weight: 500;
   text-decoration: none;
 }

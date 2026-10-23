@@ -143,6 +143,8 @@ button:not(:disabled) {
   --app-action-padding-block: 8px;
   --app-action-padding-inline: 16px;
   --app-action-gap: 8px;
+  --app-action-group-gap: 16px;
+  --app-action-small-height: 32px;
 }
 
 /* Shared business actions only; tabs, icon-only controls and auth fields opt out. */
@@ -158,6 +160,23 @@ button:not(:disabled) {
   line-height: var(--app-action-line-height);
   text-align: center;
   white-space: normal;
+}
+
+.app-action-button--compact {
+  min-height: var(--app-action-small-height);
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+
+.app-action-button.whitespace-nowrap {
+  white-space: nowrap;
+}
+
+.page-back-nav {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  margin: -4px 0 12px;
 }
 
 svg.app-icon {
@@ -204,6 +223,13 @@ svg.app-icon {
   width: 24px;
   height: 24px;
   border-radius: 1000px;
+}
+
+:root .app-icon-button[data-dialog-close] {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
 }
 
 .parent-page-link {

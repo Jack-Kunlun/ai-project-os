@@ -33,10 +33,16 @@
   line-height: 1.65;
 }
 
-.headingActions,
-.toolbarActions,
 .detailDialog [data-inquiry-header] > :global(.in-operation-launcher) {
   top: 0;
+}
+
+.headingActions,
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--app-action-group-gap);
 }
 
 .rowActions {

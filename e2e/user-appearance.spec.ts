@@ -819,6 +819,9 @@ test("dashboard feedback keeps direct actions, title counts, independent graph a
   await expect(page.getByRole("heading", { name: "待处理问题", exact: true })).toBeVisible();
   await expect(page.getByText("当前没有待处理质量问题", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "重新检查", exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/\/governance\?tab=quality$/u);
+  // Tab content can settle before Next.js finishes updating navigation metadata.
+  await expect(page).toHaveTitle("AI Project OS");
   await expectR02NoAccessibilityViolations(page, "shared quality client in project management");
 
   await page.goto("/personal/projects?create=1");

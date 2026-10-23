@@ -386,7 +386,6 @@
 }
 
 @media (max-width: 700px) {
-  .content{ padding:var(--app-page-padding); }
   .toolbar { align-items: stretch; flex-direction: column; }
   .searchBox { width: 100%; }
   .projectGrid { grid-template-columns: minmax(0, 1fr); gap: 11px; }
@@ -394,7 +393,6 @@
 }
 
 @media (max-width: 480px) {
-  .content{ padding:var(--app-page-padding); }
   .heading { align-items: flex-start; flex-direction: column; gap: 14px; }
   .projectStats { gap: 5px; }
   .stat { padding: 8px 7px; }

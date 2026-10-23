@@ -74,6 +74,10 @@ test("credit report aggregates settled allocation credits while preserving a zer
   const settledAt = new Date("2026-09-10T08:00:00.000Z");
   const now = new Date("2026-09-12T00:00:00.000Z");
   let rawSettledTokens: number | null = 25;
+  let projectName = "可见项目";
+  let linkedProjectId: string | null = projectId;
+  let projectVisible = true;
+  let hasReservation = true;
   const fakeDb = {
     platformTokenGrant: {
       findMany: async () => [{ id: "00000000-0000-4000-8000-000000000073", amount: 100, remainingTokens: 60, expiresAt: new Date("2026-10-01T00:00:00.000Z"), allocations: [{ grantId: "00000000-0000-4000-8000-000000000073", ordinal: 1, reservedTokens: 100, settledTokens: 40, releasedTokens: 60, reservation: { userId, grantId: "00000000-0000-4000-8000-000000000073", status: "settled" } }] }],
@@ -85,10 +89,10 @@ test("credit report aggregates settled allocation credits while preserving a zer
     },
     platformTokenLedgerEntry: {
       count: async () => 1,
-      findMany: async () => [{ id: "00000000-0000-4000-8000-000000000074", grantId: "00000000-0000-4000-8000-000000000073", entryKind: "settle", amount: 0, createdAt: settledAt, reservation: { status: "settled", operation: "generateWithContext", modelId: "gpt-test", webAiGrantProjectId: projectId, allocations: [{ grantId: "00000000-0000-4000-8000-000000000073", settledTokens: 40 }] }, grant: { expiresAt: new Date("2026-10-01T00:00:00.000Z"), revokedAt: null } }],
+      findMany: async () => [{ id: "00000000-0000-4000-8000-000000000074", grantId: "00000000-0000-4000-8000-000000000073", entryKind: "settle", amount: 0, createdAt: settledAt, reservation: hasReservation ? { status: "settled", operation: "generateWithContext", modelId: "gpt-test", webAiGrantProjectId: linkedProjectId, allocations: [{ grantId: "00000000-0000-4000-8000-000000000073", settledTokens: 40 }] } : null, grant: { expiresAt: new Date("2026-10-01T00:00:00.000Z"), revokedAt: null } }],
     },
     membershipApplication: { findMany: async () => [] },
-    project: { findMany: async () => [{ id: projectId, name: "可见项目" }] },
+    project: { findMany: async () => projectVisible ? [{ id: projectId, name: projectName }] : [] },
   } as unknown as EntitlementDb;
   const query = resolveCreditReportQuery(parseCreditReportQuery(new URLSearchParams("range=custom&from=2026-09-10&to=2026-09-10&timezone=UTC")), now);
   const report = await getCreditReportInTransaction(userId, fakeDb, query, now);
@@ -103,4 +107,16 @@ test("credit report aggregates settled allocation credits while preserving a zer
   assert.equal(report.ledger.entries[0]?.settledCredits, 40);
   assert.equal(report.ledger.entries[0]?.balanceDelta, 0);
   assert.equal(report.ledger.entries[0]?.projectName, "可见项目");
+  assert.equal(report.ledger.entries[0]?.projectDisplay, "name");
+  projectName = "未关联项目";
+  const sameName = await getCreditReportInTransaction(userId, fakeDb, query, now);
+  assert.equal(sameName.ledger.entries[0]?.projectName, "未关联项目");
+  assert.equal(sameName.ledger.entries[0]?.projectDisplay, "name", "A real project keeps its name even when it matches a system label");
+  linkedProjectId = null;
+  assert.equal((await getCreditReportInTransaction(userId, fakeDb, query, now)).ledger.entries[0]?.projectDisplay, "unlinked");
+  linkedProjectId = projectId;
+  projectVisible = false;
+  assert.equal((await getCreditReportInTransaction(userId, fakeDb, query, now)).ledger.entries[0]?.projectDisplay, "unavailable");
+  hasReservation = false;
+  assert.equal((await getCreditReportInTransaction(userId, fakeDb, query, now)).ledger.entries[0]?.projectDisplay, "unlinked");
 });

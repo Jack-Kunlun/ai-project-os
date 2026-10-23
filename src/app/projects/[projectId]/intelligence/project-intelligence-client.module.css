@@ -208,12 +208,6 @@
   }
 }
 
-@media (max-width: 1120px) {
-  .content {padding:var(--app-page-padding);   }
-}
 
-@media (max-width: 600px) {
-  .content {padding:var(--app-page-padding);  }
-}
 
 .pageHeader h1 { font-size: 25px; font-weight: 600; letter-spacing: 0; }

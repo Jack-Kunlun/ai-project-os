@@ -234,8 +234,8 @@ export function ProjectMaterialIntake({
   return (
     <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`${styles.drawerBackdrop} ${modalBackdropClassName}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`${styles.drawer} overflow-hidden ${modalSurfaceClassName}`}>
-        <div data-dialog-header className={`${styles.drawerHeader} flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-7`}>
-        <div>
+        <div data-dialog-header className={`${styles.drawerHeader} flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-7`}>
+        <div className="min-w-0 flex-1">
           <h2 id="add-source-dialog-title" className="text-lg font-semibold tracking-tight text-slate-950"><UiText text={"添加资料"} /></h2>
           <p id="add-source-dialog-description" className="mt-1 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"资料会保留原文和来源。需要模型处理时，会先显示本次范围并等待确认。"} /></p>
         </div>

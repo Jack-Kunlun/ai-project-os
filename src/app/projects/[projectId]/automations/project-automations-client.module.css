@@ -371,10 +371,6 @@
 }
 
 @media (max-width: 640px) {
-  .content {padding:var(--app-page-padding);
-
-
-  }
 
   .pageHeader {
     align-items: flex-start;

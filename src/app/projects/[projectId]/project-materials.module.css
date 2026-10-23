@@ -46,11 +46,6 @@
   color: var(--app-on-accent);
 }
 
-.primaryAction:hover {
-  border-color: var(--app-accent);
-  background: var(--app-accent);
-}
-
 .primaryAction:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -486,12 +481,4 @@
   .drawer {
     width: 100%;
   }
-}
-
-@media (max-width: 1120px) {
-  .content {padding:var(--app-page-padding);   }
-}
-
-@media (max-width: 600px) {
-  .content {padding:var(--app-page-padding);  }
 }

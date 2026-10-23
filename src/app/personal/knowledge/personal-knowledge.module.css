@@ -575,10 +575,6 @@
 }
 
 @media (max-width: 700px) {
-  .content{
-    padding:var(--app-page-padding);
-  }
-
   .heading {
     align-items: flex-start;
     flex-direction: column;

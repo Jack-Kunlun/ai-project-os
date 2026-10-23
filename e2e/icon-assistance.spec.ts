@@ -88,7 +88,7 @@ test("operation assistance stays in the secondary footer and icons align with re
       expect(afterLauncherDrag!.x).toBeGreaterThan(afterLauncherNudge!.x+40);
       expect(afterLauncherDrag!.y).toBeLessThan(afterLauncherNudge!.y-24);
       expect(await launcher.evaluate(element=>getComputedStyle(element).position)).toBe("fixed");
-      await expect(page.locator("#global-inquiry-panel")).not.toHaveAttribute("open");
+      await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);
     }
     await launcher.click();
     const ask=page.getByRole("dialog",{name:en?"Floating Ask AI":"智能问答悬浮窗",exact:true});
@@ -174,7 +174,7 @@ test("operation assistance stays in the secondary footer and icons align with re
       expect(afterDrag!.x).toBeLessThan(afterNudge!.x-40);
       expect(afterDrag!.y).toBeLessThan(afterNudge!.y-24);
       expect(afterDrag!.x+afterDrag!.width).toBeLessThanOrEqual(1440);
-      await expect(page.locator("#global-inquiry-panel")).not.toHaveAttribute("open");
+      await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);
     }
     if(mode.width===390){
       await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
@@ -204,7 +204,7 @@ test("basic project and team invitation forms hide Ask and use shared action dim
   await signInR02PersonalUser(page,user);
 
   await page.goto("/projects");
-  const newProject=page.getByRole("button",{name:"新建项目",exact:true});
+  const newProject=page.getByRole("button",{name:"＋ 新建项目",exact:true});
   await expectActionButtonGeometry(newProject,true);
   await newProject.click();
   const projectDialog=page.getByRole("dialog",{name:"创建项目空间",exact:true});

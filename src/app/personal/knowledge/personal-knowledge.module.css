@@ -388,6 +388,7 @@
   box-shadow: 0 22px 64px rgb(31 45 67 / 18%);
 }
 
+.knowledgeDialog[data-variant="create"],
 .knowledgeDialog[data-variant="edit"],
 .knowledgeDialog[data-variant="import"] {
   position: fixed;
@@ -401,10 +402,17 @@
   box-shadow: -14px 0 40px rgb(31 45 67 / 14%);
 }
 
+.knowledgeDialog[data-variant="create"],
+.knowledgeDialog[data-variant="edit"] {
+  width: min(560px, 100vw);
+  max-width: 560px;
+}
+
 .knowledgeDialog::backdrop {
   background: rgb(25 36 52 / 32%);
 }
 
+.knowledgeDialog[data-variant="create"]::backdrop,
 .knowledgeDialog[data-variant="edit"]::backdrop,
 .knowledgeDialog[data-variant="import"]::backdrop {
   background: rgb(25 36 52 / 42%);
@@ -607,6 +615,7 @@
     padding: 20px 16px 32px;
   }
 
+  .knowledgeDialog[data-variant="create"],
   .knowledgeDialog[data-variant="edit"],
   .knowledgeDialog[data-variant="import"] {
     width: 100vw;
@@ -668,6 +677,7 @@
   }
 
   .detailDialog,
+  .knowledgeDialog[data-variant="create"],
   .knowledgeDialog[data-variant="edit"],
   .knowledgeDialog[data-variant="import"] {
     inset: 0;

@@ -1223,7 +1223,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           className={styles.knowledgeDialog}
           data-variant={knowledgeModal === "editor" ? mode : knowledgeModal ?? undefined}
         >
-          {knowledgeModal === "editor" ? <div className={mode === "create" ? "h-[78dvh] max-h-[760px] min-h-0 max-sm:h-[88dvh]" : "h-dvh max-h-dvh min-h-0"}>
+          {knowledgeModal === "editor" ? <div className="h-dvh max-h-dvh min-h-0">
             <PersonalKnowledgeEditor mode={mode === "create" ? "create" : "edit"} draft={draft} saving={saving} error={message?.tone === "error" ? message.text : null} notice={message?.tone === "success" ? message.text : null} onDraftChange={updateDraft} onCancel={() => void requestCloseKnowledgeModal()} onSubmit={saveDraft} />
           </div> : null}
           {knowledgeModal === "import" ? <div className="flex h-dvh max-h-dvh min-h-0 flex-col">

@@ -775,6 +775,15 @@ test("dashboard feedback keeps direct actions, title counts, independent graph a
   expect(await shellHeader.boundingBox()).toEqual(headerBefore);
   expect(await page.locator("[data-user-shell-root]").getByRole("button", { name: "账户菜单", exact: true }).boundingBox()).toEqual(accountBefore);
   await page.screenshot({ path: "test-results/ui-feedback/docked-header.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("body")).not.toHaveClass(/inquiry-docked/u);
+  await expect(question.getByRole("button", { name: "并排停靠", exact: true })).toBeDisabled();
+  const narrowDockBounds = await question.boundingBox();
+  expect(narrowDockBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(narrowDockBounds!.x + narrowDockBounds!.width).toBeLessThanOrEqual(390);
+  await expectR02NoHorizontalOverflow(page, "docked Ask returns to floating layout at 390px");
+  await page.setViewportSize({ width: 1680, height: 960 });
+  await expect(page.locator("body")).toHaveClass(/inquiry-docked/u);
   await question.getByRole("button", { name: "恢复悬浮", exact: true }).click();
   const expand = question.getByRole("button", { name: "放大窗口", exact: true });
   const fullPage = question.getByRole("link", { name: "在完整页面打开", exact: true });

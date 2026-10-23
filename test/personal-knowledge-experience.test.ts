@@ -96,7 +96,7 @@ test("URL 指定内容的导航先确认草稿，取消时恢复已确认的 URL
   assert.doesNotMatch(loader, /requestedDocumentId(?!Ref)/u);
 });
 
-test("新建使用弹窗、编辑使用抽屉且不让旧列表响应覆盖草稿", async () => {
+test("新建与编辑使用抽屉且不让旧列表响应覆盖草稿", async () => {
   const source = await readFile("src/app/personal/knowledge/knowledge-client.tsx", "utf8");
   const modalStart = source.indexOf("function openKnowledgeModal");
   const modalEnd = source.indexOf("async function requestCloseKnowledgeModal", modalStart);

@@ -47,3 +47,25 @@ test("admin audit and failure status catalog labels have English display message
     assert.doesNotMatch(englishUiMessages[label], /\p{Script=Han}/u);
   }
 });
+
+test("admin readiness checklist and Worker inbox copy have English messages", () => {
+  const messages = [
+    "数据库连接",
+    "当前请求已完成只读健康检查。",
+    "Worker 心跳",
+    "平台托管模型",
+    "尚未取得可用的平台托管模型连接。",
+    "默认模型路由",
+    "尚未取得路由就绪证据。",
+    "备份状态源",
+    "仅初始超级管理员可读取备份详情。",
+    "无法确认初始超级管理员权限；备份状态、记录、新鲜度和恢复演练均未取得。",
+    "已取得权限，但备份状态读取失败；未取得可用证据。",
+    "Worker 心跳或后台任务状态未形成可确认的安全终态；收件箱不展示任务载荷、结果或外部请求细节。",
+    "核对 Worker 与后台任务的安全状态。",
+  ];
+  for (const message of messages) {
+    assert.ok(englishUiMessages[message], `Missing English readiness message: ${message}`);
+    assert.doesNotMatch(englishUiMessages[message], /\p{Script=Han}/u);
+  }
+});

@@ -224,7 +224,7 @@ export function AdminOverviewClient() {
         <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">{loading ? t("读取中…") : overview ? `${overview.setupChecklist.filter((item) => item.status === "ready").length}/${overview.setupChecklist.length} ${t("项完成")}` : t("未取得")}</span>
       </div>
       <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-3">
-        {(overview?.setupChecklist ?? []).map((item) => <article key={item.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{t(item.label)}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{t(checklistStatusLabel(item.status))}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{t(item.detail)}</p></article>)}
+        {(overview?.setupChecklist ?? []).map((item) => <article key={item.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{t(item.label)}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{t(checklistStatusLabel(item.status))}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{setupChecklistDetail(item, overview!, language, t)}</p></article>)}
         {!overview ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? t("正在读取就绪证据…") : t("未取得就绪证据。")}</div> : null}
       </div>
     </section>
@@ -276,6 +276,27 @@ function AnalyticsTrendSection({ overview, loading, language, t }: { overview: S
 
 function checklistStatusLabel(status: "ready" | "attention" | "unknown" | "restricted"): string {
   return { ready: "已就绪", attention: "需处理", unknown: "未知", restricted: "受限" }[status];
+}
+
+function setupChecklistDetail(item: SystemOverview["setupChecklist"][number], overview: SystemOverview, language: "zh-CN" | "en", t: (text: string) => string): string {
+  if (language === "zh-CN") return item.detail;
+  if (item.key === "worker") return t(workerLabel(overview.service.worker.status));
+  if (item.key === "platform-provider") {
+    const count = overview.counts.verifiedPlatformModels;
+    return count > 0 ? `${t("已验证平台连接")}: ${count.toLocaleString(language)}` : t(item.detail);
+  }
+  if (item.key === "default-routes") {
+    const { ready, total } = overview.defaultRoutes;
+    return ready === null ? t(item.detail) : `${ready}/${total} ${t("项控制面就绪")}; ${t("真实模型调用：")} ${t("未取得现场证据")}`;
+  }
+  if (item.key === "backup-source") {
+    const backup = overview.backup;
+    if (backup.access !== "full" || backup.snapshotRead === "error") return t(item.detail);
+    const { latestValidRecord, freshness, recoveryDrill } = backup;
+    const record = latestValidRecord.status === "none" ? t("无记录") : backupStatusLabel(latestValidRecord.state ?? "not_obtained", t);
+    return `${backupStatusLabel(backup.sourceStatus, t)} · ${t("最新记录")} ${record} · ${t("新鲜度")} ${backupStatusLabel(freshness.status, t)} · ${t("恢复演练")} ${backupStatusLabel(recoveryDrill.status, t)}`;
+  }
+  return t(item.detail);
 }
 
 function RouteCard({ route }: { route: SystemOverviewRoute }) {

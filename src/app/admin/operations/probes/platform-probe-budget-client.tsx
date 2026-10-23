@@ -143,7 +143,7 @@ export function PlatformProbeBudgetClient() {
           <label className="text-xs font-medium text-slate-600"><UiText text={"告警阈值"} /><input type="number" min={0} max={10_000} value={threshold} onChange={(event) => setThreshold(event.target.value)} required className={adminInputClass} /></label>
           <label className="text-xs font-medium text-slate-600"><UiText text={"开始时间"} /><input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required className={adminInputClass} /></label>
           <label className="text-xs font-medium text-slate-600"><UiText text={"结束时间"} /><input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} required className={adminInputClass} /></label>
-          <div className="sm:col-span-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : budget === null ? t("创建测试预算周期") : t("更新测试额度")}</button></div>
+          <div className="sm:col-span-2"><button disabled={pending} className="app-action-button rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : budget === null ? t("创建测试预算周期") : t("更新测试额度")}</button></div>
         </form>
       </OperationPanel></div>
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}

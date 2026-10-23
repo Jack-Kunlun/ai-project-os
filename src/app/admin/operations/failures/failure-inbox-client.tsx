@@ -118,14 +118,14 @@ export function AdminFailureInboxClient() {
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
         <p className="text-xs leading-5 text-slate-500">{t("近")} {data?.window.days ?? 7} {t("天终态失败，当前待对账状态不因窗口消失；责任人复核项按实时状态返回。排序按发生时间、来源和不透明记录标识稳定倒序；游标绑定当前筛选。")}</p>
-        <button type="submit" className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("应用筛选")}</button>
+        <button type="submit" className="app-action-button rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t("应用筛选")}</button>
       </div>
     </form>
 
     <section className="mt-6 rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="failure-inbox-list-title">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
         <div><h2 id="failure-inbox-list-title" className="text-lg font-semibold text-slate-950">{t("安全异常集合")}</h2><p className="mt-1 text-xs text-slate-500">{t("实时测量结果，不承诺跨页严格历史快照；状态已解决时允许在下一页消失。")}</p></div>
-        <div className="flex items-center gap-2"><button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">{t("上一页")}</button><button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">{t("下一页")}</button></div>
+        <div className="flex items-center gap-2"><button type="button" onClick={goPrevious} disabled={history.length === 0 || loading} className="app-action-button app-action-button--compact rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">{t("上一页")}</button><button type="button" onClick={goNext} disabled={data?.nextCursor === null || data?.nextCursor === undefined || loading} className="app-action-button app-action-button--compact rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40">{t("下一页")}</button></div>
       </div>
       {data && data.partialSources.length > 0 ? <aside role="status" className="mx-4 mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-900 sm:mx-6">{t("安全查询上限提示：")} {data.partialSources.map((value) => t(SYSTEM_FAILURE_INBOX_SOURCE_LABELS[value])).join(", ")} {t("仅展示受控上限内的部分结果，不是完整清单；请结合实时测量时间继续复核。")}</aside> : null}
       <div aria-live="polite">

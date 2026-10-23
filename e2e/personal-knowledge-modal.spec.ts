@@ -52,11 +52,14 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
     await expect(error).toContainText("2,000 字符");
     const measurements = await Promise.all([
       error.boundingBox(), modal.getByRole("button", { name: "创建知识", exact: true }).boundingBox(),
+      modal.getByRole("button", { name: "取消", exact: true }).boundingBox(),
       page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight, documentWidth: document.documentElement.scrollWidth })),
     ]);
-    const [errorBox, submitBox, viewport] = measurements;
+    const [errorBox, submitBox, cancelBox, viewport] = measurements;
     expect(errorBox).not.toBeNull();
     expect(submitBox).not.toBeNull();
+    expect(cancelBox).not.toBeNull();
+    expect(submitBox!.x - (cancelBox!.x + cancelBox!.width)).toBe(16);
     expect(errorBox!.y + errorBox!.height).toBeLessThanOrEqual(viewport.height);
     expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(viewport.height);
     expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.width);
@@ -103,6 +106,29 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await page.keyboard.press("Escape");
   await expectKnowledgeDialogsClosed(page);
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  const origin = new URL(page.url()).origin;
+  await page.context().addCookies([
+    { name: "aipos-language", value: "en", url: origin },
+    { name: "aipos-theme", value: "dark", url: origin },
+  ]);
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/personal/knowledge");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "New knowledge item", exact: true }).first().click();
+    const englishEditor = page.getByRole("dialog", { name: "New knowledge item", exact: true });
+    const [cancelBox, submitBox] = await Promise.all([
+      englishEditor.getByRole("button", { name: "Cancel", exact: true }).boundingBox(),
+      englishEditor.getByRole("button", { name: "Create knowledge", exact: true }).boundingBox(),
+    ]);
+    expect(cancelBox).not.toBeNull();
+    expect(submitBox).not.toBeNull();
+    expect(Math.abs(cancelBox!.y - submitBox!.y)).toBeLessThanOrEqual(1);
+    expect(submitBox!.x - (cancelBox!.x + cancelBox!.width)).toBe(16);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await englishEditor.getByRole("button", { name: "Close dialog", exact: true }).click();
+  }
   expect(pageErrors).toEqual([]);
   await page.screenshot({ path: "test-results/v110/personal-knowledge-desktop.png" });
 });

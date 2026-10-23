@@ -169,6 +169,39 @@ test("materials keep editing separate, retain drafts, and chain text import into
   expect(flow.executed[0]!.clientKey).toBe(flow.prepared[0]!.clientKey);
 });
 
+test("material intake keeps its close control beside translated headings at narrow widths", async ({ page }) => {
+  const projectId = await projectFixture(page);
+  const origin = new URL(page.url()).origin;
+  for (const appearance of [
+    { width: 1440, height: 1000, language: "zh-CN", theme: "light", title: "添加资料", close: "关闭窗口" },
+    { width: 390, height: 844, language: "zh-CN", theme: "light", title: "添加资料", close: "关闭窗口" },
+    { width: 1440, height: 1000, language: "en", theme: "dark", title: "Add materials", close: "Close dialog" },
+    { width: 390, height: 844, language: "en", theme: "dark", title: "Add materials", close: "Close dialog" },
+  ]) {
+    await page.setViewportSize({ width: appearance.width, height: appearance.height });
+    await page.context().addCookies([
+      { name: "aipos-language", value: appearance.language, url: origin },
+      { name: "aipos-theme", value: appearance.theme, url: origin },
+    ]);
+    await page.goto(`/projects/${projectId}/materials`);
+    await page.locator("#add-source-trigger").click();
+    const intake = page.getByRole("dialog", { name: appearance.title, exact: true });
+    const heading = intake.getByRole("heading", { name: appearance.title, exact: true });
+    await expect(heading).toBeVisible();
+    const close = intake.getByRole("button", { name: appearance.close, exact: true });
+    const [headingBox, closeBox] = await Promise.all([heading.boundingBox(), close.boundingBox()]);
+    expect(headingBox).not.toBeNull();
+    expect(closeBox).not.toBeNull();
+    expect(closeBox!.x).toBeGreaterThanOrEqual(headingBox!.x + headingBox!.width);
+    expect(Math.abs(closeBox!.y - headingBox!.y)).toBeLessThanOrEqual(4);
+    expect(closeBox!.width).toBe(32);
+    expect(closeBox!.height).toBe(32);
+    await page.screenshot({ path: `test-results/page-workflows-auto-facts/materials-header-${appearance.language}-${appearance.width}.png` });
+    await close.click();
+    await expect(intake).toBeHidden();
+  }
+});
+
 test("long PDF pages use a dedicated import workspace and fit each consent batch", async ({ page }) => {
   const projectId = await projectFixture(page);
   const flow = await mockModelFlow(page, projectId);

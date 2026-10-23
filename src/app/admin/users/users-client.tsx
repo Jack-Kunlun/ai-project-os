@@ -106,7 +106,7 @@ export function AdminUsersClient({ username }: { username: string }) {
             <span id="admin-users-search-title">{t("搜索普通用户")}</span>
             <input aria-label={t("搜索普通用户")} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={t("用户名或显示名称")} maxLength={160} className={adminInputClass} />
           </label>
-          <button type="button" onClick={() => void load()} disabled={loading} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-700 disabled:opacity-50">{t("刷新")}</button>
+          <button type="button" onClick={() => void load()} disabled={loading} className="app-action-button rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-700 disabled:opacity-50">{t("刷新")}</button>
         </div>
       </section>
 
@@ -150,7 +150,7 @@ export function AdminUsersClient({ username }: { username: string }) {
         </div>}
         <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4 text-xs text-slate-500 sm:px-6">
           <span>{t("第")} {payload?.page ?? page} {t("页")}</span>
-          <div className="flex gap-2"><button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={loading || page === 1} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">{t("上一页")}</button><button type="button" onClick={() => setPage((value) => value + 1)} disabled={loading || !payload?.hasNextPage} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">{t("下一页")}</button></div>
+          <div className="flex gap-2"><button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={loading || page === 1} className="app-action-button app-action-button--compact rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">{t("上一页")}</button><button type="button" onClick={() => setPage((value) => value + 1)} disabled={loading || !payload?.hasNextPage} className="app-action-button app-action-button--compact rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">{t("下一页")}</button></div>
         </div>
       </section>
     </div>;

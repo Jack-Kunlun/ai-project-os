@@ -33,10 +33,16 @@
   line-height: 1.65;
 }
 
-.headingActions,
-.toolbarActions,
 .detailDialog [data-inquiry-header] > :global(.in-operation-launcher) {
   top: 0;
+}
+
+.headingActions,
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--app-action-group-gap);
 }
 
 .rowActions {
@@ -369,38 +375,28 @@
 }
 
 .knowledgeDialog {
-  width: min(calc(100vw - 32px), 760px);
-  max-width: 760px;
-  max-height: 90dvh;
-  margin: auto;
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(560px, 100vw);
+  height: 100dvh;
+  max-width: 560px;
+  max-height: 100dvh;
+  margin: 0;
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 12px;
+  border-radius: 12px 0 0 12px;
   background: var(--app-surface);
   padding: 0;
   color: var(--app-text);
-  box-shadow: 0 22px 64px rgb(31 45 67 / 18%);
-}
-
-.knowledgeDialog[data-variant="edit"],
-.knowledgeDialog[data-variant="import"] {
-  position: fixed;
-  inset: 0 0 0 auto;
-  width: min(720px, 100vw);
-  height: 100dvh;
-  max-width: 720px;
-  max-height: 100dvh;
-  margin: 0;
-  border-radius: 12px 0 0 12px;
   box-shadow: -14px 0 40px rgb(31 45 67 / 14%);
 }
 
-.knowledgeDialog::backdrop {
-  background: rgb(25 36 52 / 32%);
+.knowledgeDialog[data-variant="import"] {
+  width: min(720px, 100vw);
+  max-width: 720px;
 }
 
-.knowledgeDialog[data-variant="edit"]::backdrop,
-.knowledgeDialog[data-variant="import"]::backdrop {
+.knowledgeDialog::backdrop {
   background: rgb(25 36 52 / 42%);
 }
 
@@ -527,7 +523,7 @@
   flex-shrink: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--app-action-group-gap);
   border-top: 1px solid var(--app-border);
   background: var(--app-surface);
   padding: 12px 22px;
@@ -563,48 +559,8 @@
 }
 
 @media (max-width: 640px) {
-  .content{
-    padding:var(--app-page-padding);
-  }
-
-  .heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .headingActions {
-    width: 100%;
-  }
-
-  .toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .row {
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .rowMeta {
-    flex-wrap: wrap;
-    white-space: normal;
-  }
-
   .detailDialog {
-    width: 100vw;
     border-left: 0;
-  }
-
-  .detailContent {
-    padding: 20px 16px 32px;
-  }
-
-  .knowledgeDialog[data-variant="edit"],
-  .knowledgeDialog[data-variant="import"] {
-    width: 100vw;
-    border-radius: 0;
   }
 }
 
@@ -619,10 +575,6 @@
 }
 
 @media (max-width: 700px) {
-  .content{
-    padding:var(--app-page-padding);
-  }
-
   .heading {
     align-items: flex-start;
     flex-direction: column;
@@ -662,8 +614,7 @@
   }
 
   .detailDialog,
-  .knowledgeDialog[data-variant="edit"],
-  .knowledgeDialog[data-variant="import"] {
+  .knowledgeDialog {
     inset: 0;
     width: 100vw;
     height: 100dvh;

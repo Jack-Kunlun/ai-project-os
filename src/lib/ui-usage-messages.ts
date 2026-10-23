@@ -27,6 +27,8 @@ export const uiUsageMessages: Readonly<Record<string, string>> = Object.freeze({
   "结果未知": "Outcome unknown",
   "已取消": "Cancelled",
   "请选择项目": "Select a project",
+  "未关联项目": "No project linked",
+  "项目已不可见": "Project no longer accessible",
   "正在加载项目…": "Loading projects…",
   "项目列表暂不可用": "Project list is temporarily unavailable",
   "搜索项目名称": "Search project names",

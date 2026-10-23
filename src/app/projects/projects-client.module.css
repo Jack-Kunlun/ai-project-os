@@ -15,7 +15,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 26px;
+  margin-bottom: 24px;
 }
 
 .heading h1 {
@@ -131,7 +131,7 @@
   background: var(--app-surface);
 }
 
-.searchBox svg {--app-icon-size: 15px;
+.searchBox svg {--app-icon-size: 16px;
 
 
   flex: 0 0 auto;
@@ -386,7 +386,6 @@
 }
 
 @media (max-width: 700px) {
-  .content{ padding:var(--app-page-padding); }
   .toolbar { align-items: stretch; flex-direction: column; }
   .searchBox { width: 100%; }
   .projectGrid { grid-template-columns: minmax(0, 1fr); gap: 11px; }
@@ -394,7 +393,6 @@
 }
 
 @media (max-width: 480px) {
-  .content{ padding:var(--app-page-padding); }
   .heading { align-items: flex-start; flex-direction: column; gap: 14px; }
   .projectStats { gap: 5px; }
   .stat { padding: 8px 7px; }

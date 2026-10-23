@@ -59,6 +59,7 @@ export type CreditReportLedgerEntry = Readonly<{
   operationLabel: string | null;
   modelId: string | null;
   projectName: string;
+  projectDisplay: "name" | "unlinked" | "unavailable";
   settledCredits: number;
   balanceDelta: number;
   status: "active" | "expired" | "revoked" | "reserved" | "settled" | "released" | "pending" | "adjusted";
@@ -317,6 +318,7 @@ export async function getCreditReportInTransaction(userId: string, db: ReportDb,
     const kind = row.entryKind as CreditReportLedgerKind;
     const reservation = row.reservation;
     const allocation = reservation?.allocations.find((candidate) => candidate.grantId === row.grantId);
+    const projectDisplay: CreditReportLedgerEntry["projectDisplay"] = typeof reservation?.webAiGrantProjectId !== "string" ? "unlinked" : projectNames.has(reservation.webAiGrantProjectId) ? "name" : "unavailable";
     const projectName = reservation === null ? "未关联项目" : reservation.webAiGrantProjectId === null ? "未关联项目" : projectNames.get(reservation.webAiGrantProjectId) ?? "项目已不可见";
     return Object.freeze({
       id: row.id,
@@ -327,6 +329,7 @@ export async function getCreditReportInTransaction(userId: string, db: ReportDb,
       operationLabel: operationLabel(reservation?.operation ?? null),
       modelId: reservation?.modelId ?? null,
       projectName,
+      projectDisplay,
       settledCredits: kind === "settle" ? allocation?.settledTokens ?? 0 : 0,
       balanceDelta: row.amount,
       status: statusForEntry(kind, reservation?.status ?? null, row.grant?.expiresAt ?? null, row.grant?.revokedAt ?? null, now),

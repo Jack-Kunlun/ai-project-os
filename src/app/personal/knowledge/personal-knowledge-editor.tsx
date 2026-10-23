@@ -58,8 +58,10 @@ export function PersonalKnowledgeEditor({
     </div>
     <div data-dialog-footer className="knowledge-editor-actions">
       {visibleError ? <div id="knowledge-editor-error" role="alert" className="knowledge-editor-error"><UiErrorText text={visibleError} /></div> : null}
+      <div className="flex gap-4">
       <button type="button" onClick={onCancel} disabled={saving} className="knowledge-editor-button app-action-button"><UiText text={"取消"} /></button>
       <button type="submit" disabled={saving} aria-describedby={visibleError ? "knowledge-editor-error" : undefined} className="knowledge-editor-submit app-action-button">{saving ? <UiText text={"保存中…"} /> : mode === "create" ? <UiText text={"创建知识"} /> : <UiText text={"保存新版本"} />}</button>
+      </div>
     </div>
   </form>;
 }

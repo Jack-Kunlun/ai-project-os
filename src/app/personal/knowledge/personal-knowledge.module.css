@@ -523,7 +523,7 @@
   flex-shrink: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--app-action-group-gap);
   border-top: 1px solid var(--app-border);
   background: var(--app-surface);
   padding: 12px 22px;

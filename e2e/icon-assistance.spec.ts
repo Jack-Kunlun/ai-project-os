@@ -238,6 +238,14 @@ test("basic project and team invitation forms hide Ask and use shared action dim
   await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);
   await memberDialog.locator("[data-dialog-close]").click();
   await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(1);
+  await page.context().addCookies([{name:"aipos-language",value:"en",url:new URL(page.url()).origin},{name:"aipos-theme",value:"dark",url:new URL(page.url()).origin}]);
+  await page.reload();
+  await page.getByRole("button",{name:"Add member",exact:true}).click();
+  const englishMember=page.getByRole("dialog",{name:"Add local member",exact:true});
+  const roleOptions=englishMember.getByRole("combobox",{name:"Workspace role",exact:true}).locator("option");
+  await expect(roleOptions).toHaveText(["Member: assigned projects only","Viewer: assigned projects only"]);
+  await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
+  await englishMember.locator("[data-dialog-close]").click();
 });
 
 test("model quota uses the real report envelope and Ask Escape preserves a confirmation input (isolated provider display fixture)", async ({page})=>{

@@ -1,5 +1,7 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "成员：仅访问授权项目": "Member: assigned projects only",
+  "查看者：仅访问授权项目": "Viewer: assigned projects only",
   "图片与截图": "Images & screenshots",
   "已形成 {confirmed} 条事实 · {review} 条待核对 · {duplicates} 条重复": "Facts created: {confirmed} · To review: {review} · Duplicates: {duplicates}",
   "识别完成，共 {count} 个片段等待人工核对": "Recognition completed. {count} segments await review",

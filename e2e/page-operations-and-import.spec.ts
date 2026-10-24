@@ -87,7 +87,7 @@ test("compact project creation dialog fits narrow screens, traps focus, and pres
     expect(createBox.y).toBeCloseTo(cancelBox.y, 1);
     expect(createBox.x - (cancelBox.x + cancelBox.width)).toBeCloseTo(16, 1);
     await expectR02NoAccessibilityViolations(page, `compact project dialog ${appearance.language} ${appearance.width}x${appearance.height}`);
-    await page.screenshot({ path: `test-results/compact-project-dialog/${appearance.language}-${appearance.width}x${appearance.height}.png` });
+    await test.info().attach(`compact-project-dialog-${appearance.language}-${appearance.width}x${appearance.height}`, { body: await page.screenshot(), contentType: "image/png" });
     await expect(close).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(cancel).toBeFocused();

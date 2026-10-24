@@ -840,7 +840,7 @@ test("dashboard feedback keeps direct actions, title counts, independent graph a
   await expectR02NoAccessibilityViolations(page, "shared quality client in project management");
 
   await page.goto("/personal/projects?create=1");
-  const projectModal = page.getByRole("dialog", { name: "创建项目空间", exact: true });
+  const projectModal = page.getByRole("dialog", { name: "新建项目", exact: true });
   await projectModal.getByRole("textbox", { name: "项目名称", exact: true }).fill("Do not create this project");
   await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
   await page.keyboard.press("Alt+j");

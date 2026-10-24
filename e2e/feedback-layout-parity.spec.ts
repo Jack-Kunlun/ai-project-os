@@ -34,7 +34,7 @@ for (const language of ["zh-CN", "en"] as const) {
     const t = (text: string) => language === "en" ? englishUiMessages[text] ?? text : text;
 
     await page.goto("/projects?create=1");
-    const createDialog = page.getByRole("dialog", { name: t("创建项目空间"), exact: true });
+    const createDialog = page.getByRole("dialog", { name: t("新建项目"), exact: true });
     await expect(createDialog).toBeVisible();
     await expect(page).toHaveURL(/\/personal\/projects(?:\?create=1)?$/u);
     await createDialog.getByRole("button", { name: t("取消"), exact: true }).click();

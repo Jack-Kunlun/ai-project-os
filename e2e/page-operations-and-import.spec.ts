@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { getDb } from "@/lib/db";
+import { getDb, getEntitlementDb } from "@/lib/db";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 import { signInR02Admin, signInR02PersonalUser, signOutR02User, expectR02NoAccessibilityViolations } from "./support/r02-admin-navigation";
 import { longTextPdf } from "./support/long-text-pdf";
@@ -23,9 +23,11 @@ async function projectFixture(page: Page) {
   return href!.slice("/projects/".length);
 }
 
-test("project creation dialog traps focus, restores its opener, and stays open while pending", async ({ page }) => {
+test("compact project creation dialog fits narrow screens, traps focus, and preserves pending drafts", async ({ page }) => {
   await signInR02Admin(page);
   const user = await seedBrowserPersonalUser(`browser-project-dialog-${randomUUID().slice(0, 8)}`, "BrowserProjectDialog2026Password!");
+  const workspaceName = "Project-workspace-with-a-long-unbroken-name-for-narrow-screen-checks";
+  await getEntitlementDb().workspace.update({ where: { id: user.workspaceId }, data: { name: workspaceName } });
   await signOutR02User(page);
   await signInR02PersonalUser(page, user);
 
@@ -46,9 +48,10 @@ test("project creation dialog traps focus, restores its opener, and stays open w
   });
 
   for (const appearance of [
-    { width: 1440, height: 900, language: "zh-CN", theme: "light", openerName: "＋ 新建项目", dialogName: "创建项目空间", closeName: "关闭", cancelName: "取消", createName: "创建项目" },
-    { width: 390, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "Create a project workspace", closeName: "Close", cancelName: "Cancel", createName: "Create project" },
-    { width: 320, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "Create a project workspace", closeName: "Close", cancelName: "Cancel", createName: "Create project" },
+    { width: 1440, height: 900, language: "zh-CN", theme: "light", openerName: "＋ 新建项目", dialogName: "新建项目", closeName: "关闭", cancelName: "取消", createName: "创建项目" },
+    { width: 390, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "New project", closeName: "Close", cancelName: "Cancel", createName: "Create project" },
+    { width: 320, height: 844, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "New project", closeName: "Close", cancelName: "Cancel", createName: "Create project" },
+    { width: 390, height: 568, language: "en", theme: "dark", openerName: "＋ New project", dialogName: "New project", closeName: "Close", cancelName: "Cancel", createName: "Create project" },
   ] as const) {
     await page.setViewportSize({ width: appearance.width, height: appearance.height });
     const origin = new URL(page.url()).origin;
@@ -67,10 +70,24 @@ test("project creation dialog traps focus, restores its opener, and stays open w
     const cancel = dialog.getByRole("button", { name: appearance.cancelName, exact: true });
     const create = dialog.getByRole("button", { name: appearance.createName, exact: true });
     await expect(dialog).toBeVisible();
-    const [cancelBox, createBox] = await Promise.all([cancel.boundingBox(), create.boundingBox()]);
-    if (cancelBox === null || createBox === null) throw new Error("PROJECT_CREATE_FOOTER_BUTTON_BOUNDS_MISSING");
+    await expect(dialog.locator("input, textarea")).toHaveCount(2);
+    await expect(dialog.locator("[data-dialog-body] p")).toHaveCount(0);
+    await expect(dialog.getByText(workspaceName, { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /智能问答|Ask AI/u })).toHaveCount(0);
+    const [dialogBox, closeBox, cancelBox, createBox] = await Promise.all([dialog.boundingBox(), close.boundingBox(), cancel.boundingBox(), create.boundingBox()]);
+    if (dialogBox === null || closeBox === null || cancelBox === null || createBox === null) throw new Error("PROJECT_CREATE_BOUNDS_MISSING");
+    expect(dialogBox.height).toBeLessThanOrEqual(500);
+    expect(dialogBox.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(appearance.height);
+    expect(await dialog.locator("[data-dialog-body]").evaluate(body => body.scrollHeight - body.clientHeight)).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+    expect(closeBox.height).toBeCloseTo(32, 1);
+    expect(cancelBox.height).toBeCloseTo(40, 1);
+    expect(createBox.height).toBeCloseTo(40, 1);
     expect(createBox.y).toBeCloseTo(cancelBox.y, 1);
     expect(createBox.x - (cancelBox.x + cancelBox.width)).toBeCloseTo(16, 1);
+    await expectR02NoAccessibilityViolations(page, `compact project dialog ${appearance.language} ${appearance.width}x${appearance.height}`);
+    await page.screenshot({ path: `test-results/compact-project-dialog/${appearance.language}-${appearance.width}x${appearance.height}.png` });
     await expect(close).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(cancel).toBeFocused();
@@ -92,7 +109,7 @@ test("project creation dialog traps focus, restores its opener, and stays open w
   await page.setViewportSize({ width: 390, height: 844 });
   const opener = page.getByRole("button", { name: "＋ New project", exact: true }).first();
   await opener.click();
-  const dialog = page.getByRole("dialog", { name: "Create a project workspace", exact: true });
+  const dialog = page.getByRole("dialog", { name: "New project", exact: true });
   await dialog.getByLabel("Project name", { exact: true }).fill("Pending project draft");
   await dialog.getByRole("button", { name: "Create project", exact: true }).click();
   await createStarted;

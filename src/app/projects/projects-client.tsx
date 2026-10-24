@@ -217,12 +217,29 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
   useInquiryOperation(true, dialogRef, false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [workspace, setWorkspace] = useState<{ id: string; name: string } | null>(null);
+  const workspaceName = workspace?.id === workspaceId ? workspace.name : "";
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/workspaces/current", { cache: "no-store", signal: controller.signal });
+        if (!response.ok) return;
+        const payload = await response.json() as { overview?: { workspace?: { id: string; name: string } }; availableWorkspaces?: Array<{ id: string; name: string }> };
+        const spaces = [payload.overview?.workspace, ...(Array.isArray(payload.availableWorkspaces) ? payload.availableWorkspaces : [])];
+        const target = spaces.find(space => space?.id === workspaceId && typeof space.name === "string");
+        if (!controller.signal.aborted && target) setWorkspace(target);
+      } catch { /* The current-workspace hint remains usable if the name cannot be read. */ }
+    })();
+    return () => controller.abort();
+  }, [workspaceId]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
@@ -303,24 +320,25 @@ function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId:
 
   return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="create-project-title" className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
-      <header data-dialog-header className={`${modalHeaderClassName} flex shrink-0 items-start justify-between gap-4 px-7 py-5 sm:px-8`}>
-        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"New project"} /></p><h2 id="create-project-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text="创建项目空间" /></h2></div>
+      <header data-dialog-header className={`${modalHeaderClassName} flex shrink-0 items-center justify-between gap-4 px-6 py-4`}>
+        <h2 id="create-project-title" className="text-lg font-semibold text-slate-950"><UiText text="新建项目" /></h2>
         <button ref={closeButtonRef} data-dialog-close type="button" onClick={close} disabled={pending} className="app-icon-button" aria-label={t("关闭")}><ShellIcon name="close" className="app-icon--control" /></button>
       </header>
-      <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
-        <p className="text-sm leading-6 text-slate-600"><UiText text="项目会隔离自己的资料、仓库和智能记忆；模型能力由平台默认模型或个人双确认委托提供。" /></p>
-        <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"><UiText text="创建到当前已选工作空间。提交后项目会出现在当前工作空间的项目列表中。" /></p>
-        <form id="projects-create-form" onSubmit={submit} className="mt-5">
+      <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5">
+        <form id="projects-create-form" onSubmit={submit}>
           <label htmlFor="projects-project-name" className="text-sm font-semibold text-slate-700"><UiText text="项目名称" /></label>
-          <input id="projects-project-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("例如：AI Project OS")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
+          <input id="projects-project-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("给项目一个清晰的名字")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           <label htmlFor="projects-project-description" className="mt-5 block text-sm font-semibold text-slate-700"><UiText text="项目描述" /> <span className="font-normal text-slate-400"><UiText text="（可选）" /></span></label>
-          <textarea id="projects-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder={t("这个项目在解决什么问题？当前最重要的目标是什么？")} className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
+          <textarea id="projects-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder={t("这个项目要达成什么？")} className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
           {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
         </form>
       </div>
-      <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-4 px-7 py-5 sm:px-8`}>
-        <button data-dialog-close type="button" onClick={close} disabled={pending} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600"><UiText text="取消" /></button>
-        <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="app-action-button rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
+      <footer data-dialog-footer className={`${modalFooterClassName} flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between`}>
+        <p className="min-w-0 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{workspaceName ? <><UiText text="创建在" /> <span>{workspaceName}</span></> : <UiText text="创建在当前工作区" />}</p>
+        <div className="flex shrink-0 justify-end gap-4">
+          <button data-dialog-close type="button" onClick={close} disabled={pending} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600"><UiText text="取消" /></button>
+          <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="app-action-button rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
+        </div>
       </footer>
     </section>
   </div>;

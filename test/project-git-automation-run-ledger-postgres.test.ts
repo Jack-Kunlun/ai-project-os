@@ -27,6 +27,7 @@ import {
 } from "../src/lib/project-git-automation-run-service";
 import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
+import { captureTransactionOptions, hasGitPublicationTransactionBudget } from "./project-git-publication-test-support";
 
 const shouldRun = process.env.PROJECT_GIT_AUTOMATION_RUN_LEDGER_POSTGRES_GATE === "1";
 const databaseName = "ai_project_os_project_git_automation_run_ledger_test";
@@ -832,9 +833,13 @@ test(
         expectedPublicationVersionId: null,
         expectedPublicationGeneration: 0,
       });
-      assert.equal((await markProjectGitAutomationRunDispatched(firstClaim.id, firstClaim.workerId, firstClaim.leaseToken, workerDb))?.accepted, true);
+      const dispatchMutation = await captureTransactionOptions(workerDb, () =>
+        markProjectGitAutomationRunDispatched(firstClaim.id, firstClaim.workerId, firstClaim.leaseToken, workerDb));
+      assert.equal(dispatchMutation.result?.accepted, true);
+      assert.equal(dispatchMutation.options.filter(hasGitPublicationTransactionBudget).length, 0,
+        "ordinary automation ledger mutations must keep the default transaction budget");
       const firstCommit = "1".repeat(40);
-      const firstResult = await finalizeProjectGitAutomationRunResult({
+      const finalization = await captureTransactionOptions(workerDb, () => finalizeProjectGitAutomationRunResult({
         runId: firstClaim.id,
         workerId: firstClaim.workerId,
         leaseToken: firstClaim.leaseToken,
@@ -844,7 +849,10 @@ test(
           { path: "README.md", blobOid: "a".repeat(40), body: "automatic first version" },
           { path: "docs/guide.md", blobOid: "b".repeat(40), body: "automatic first guide" },
         ],
-      }, workerDb);
+      }, workerDb));
+      const firstResult = finalization.result;
+      assert.equal(finalization.options.filter(hasGitPublicationTransactionBudget).length, 1,
+        "automatic finalization alone must use the bounded Git publication transaction budget");
       assert.equal(firstResult.accepted, true);
       assert.equal(firstResult.status, "succeeded");
       assert.equal(firstResult.publicationGeneration, 1);

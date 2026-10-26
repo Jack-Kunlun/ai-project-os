@@ -27,6 +27,8 @@ import { getDb } from "@/lib/db";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 import { lockActorAccess, withWebAiProjectAccessTransaction, type ProjectAccessAdmission } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
+import { GIT_PUBLICATION_TRANSACTION_OPTIONS } from "@/lib/project-git-publication-transaction";
+import { gitPublicationSourceRevisionKey, mapGitPublicationSourceIds } from "@/lib/project-git-publication-sources";
 
 const UUID = z.string().uuid();
 const requestSchema = z.object({ clientRequestKey: UUID }).strict();
@@ -2010,17 +2012,73 @@ async function publishResult(
         });
         if (retired.count !== oldEntries.length) throw new PublicationHeadCasConflict();
       }
+      const publicationSourceBatchSize = 250;
+      const sourceRevisions = files.map((file, ordinal) => ({
+        file,
+        ordinal,
+        sourceIdentity: deterministicUuid(`git-delegated-source:${snapshot.delegationId}:${snapshot.delegationVersion}:${snapshot.delegationFingerprint}:${file.path}`),
+        revisionKey: deterministicUuid(`git-delegated-revision:${snapshot.delegationId}:${snapshot.delegationVersion}:${snapshot.delegationFingerprint}:${result.commitSha}:${file.path}:${file.contentHash}`),
+      }));
+      const existingSources = await tx.projectSource.findMany({
+        where: {
+          projectId: snapshot.projectId,
+          OR: sourceRevisions.map(({ sourceIdentity, revisionKey }) => ({ sourceIdentity, revisionKey })),
+        },
+        select: { id: true, sourceIdentity: true, revisionKey: true },
+      });
+      const existingSourceIds = mapGitPublicationSourceIds(sourceRevisions, existingSources);
+      if (existingSourceIds === null) throw new PublicationHeadCasConflict();
+      if (existingSources.length > 0) {
+        const reactivated = await tx.projectSource.updateMany({
+          where: { projectId: snapshot.projectId, id: { in: existingSources.map(({ id }) => id) } },
+          data: { retiredAt: null },
+        });
+        if (reactivated.count !== existingSources.length) throw new PublicationHeadCasConflict();
+      }
+      const newSourceRevisions = sourceRevisions.filter((source) => !existingSourceIds?.has(gitPublicationSourceRevisionKey(source)));
+      const createdSourceRows: Array<{ id: string; sourceIdentity: string; revisionKey: string }> = [];
+      for (let offset = 0; offset < newSourceRevisions.length; offset += publicationSourceBatchSize) {
+        const createdSources = await tx.projectSource.createManyAndReturn({
+          data: newSourceRevisions.slice(offset, offset + publicationSourceBatchSize).map(({ file, sourceIdentity, revisionKey }) => ({
+            projectId: snapshot.projectId,
+            kind: "git",
+            originScope: "project",
+            projectRepositoryLinkId: null,
+            sourceIdentity,
+            revisionKey,
+            externalRef: null,
+            contentText: file.contentText,
+            contentHash: file.contentHash,
+            capturedAt: publishedAt,
+          })),
+          select: { id: true, sourceIdentity: true, revisionKey: true },
+        });
+        for (const source of createdSources) {
+          createdSourceRows.push(source);
+        }
+      }
+      const sourceIdsByRevision = mapGitPublicationSourceIds(sourceRevisions, [...existingSources, ...createdSourceRows]);
+      if (sourceIdsByRevision === null || sourceIdsByRevision.size !== sourceRevisions.length) throw new PublicationHeadCasConflict();
+
       const publicationEntries: Array<Readonly<{ projectSourceId: string; ordinal: number; normalizedPath: string; blobOid: string; contentHash: string; contentBytes: number; lineCount: number }>> = [];
-      for (let ordinal = 0; ordinal < files.length; ordinal += 1) {
-        const file = files[ordinal]!;
-        const sourceIdentity = deterministicUuid(`git-delegated-source:${snapshot.delegationId}:${snapshot.delegationVersion}:${snapshot.delegationFingerprint}:${file.path}`);
-        const revisionKey = deterministicUuid(`git-delegated-revision:${snapshot.delegationId}:${snapshot.delegationVersion}:${snapshot.delegationFingerprint}:${result.commitSha}:${file.path}:${file.contentHash}`);
-        const existing = await tx.projectSource.findUnique({ where: { projectId_sourceIdentity_revisionKey: { projectId: snapshot.projectId, sourceIdentity, revisionKey } }, select: { id: true } });
-        const source = existing === null
-          ? await tx.projectSource.create({ data: { projectId: snapshot.projectId, kind: "git", originScope: "project", projectRepositoryLinkId: null, sourceIdentity, revisionKey, externalRef: null, contentText: file.contentText, contentHash: file.contentHash, capturedAt: publishedAt }, select: { id: true } })
-          : await tx.projectSource.update({ where: { projectId_id: { projectId: snapshot.projectId, id: existing.id } }, data: { retiredAt: null }, select: { id: true } });
-        await tx.projectGitRepositoryManualRunEntry.create({ data: { projectId: snapshot.projectId, runId, delegationId: snapshot.delegationId, delegationVersion: snapshot.delegationVersion, delegationFingerprint: snapshot.delegationFingerprint, projectSourceId: source.id, ordinal, normalizedPath: file.path, blobOid: file.blobOid, contentHash: file.contentHash, contentBytes: file.contentBytes, lineCount: file.lineCount } });
-        publicationEntries.push({ projectSourceId: source.id, ordinal, normalizedPath: file.path, blobOid: file.blobOid, contentHash: file.contentHash, contentBytes: file.contentBytes, lineCount: file.lineCount });
+      for (const { file, ordinal, sourceIdentity, revisionKey } of sourceRevisions) {
+        const projectSourceId = sourceIdsByRevision.get(gitPublicationSourceRevisionKey({ sourceIdentity, revisionKey }));
+        if (projectSourceId === undefined) throw new PublicationHeadCasConflict();
+        publicationEntries.push({ projectSourceId, ordinal, normalizedPath: file.path, blobOid: file.blobOid, contentHash: file.contentHash, contentBytes: file.contentBytes, lineCount: file.lineCount });
+      }
+      for (let offset = 0; offset < publicationEntries.length; offset += publicationSourceBatchSize) {
+        const entries = publicationEntries.slice(offset, offset + publicationSourceBatchSize);
+        const createdEntries = await tx.projectGitRepositoryManualRunEntry.createMany({
+          data: entries.map((entry) => ({
+            projectId: snapshot.projectId,
+            runId,
+            delegationId: snapshot.delegationId,
+            delegationVersion: snapshot.delegationVersion,
+            delegationFingerprint: snapshot.delegationFingerprint,
+            ...entry,
+          })),
+        });
+        if (createdEntries.count !== entries.length) throw new PublicationHeadCasConflict();
       }
       const manifest = await canonicalManifest(tx, runId);
       const completed = await tx.projectGitRepositoryManualRun.update({
@@ -2099,7 +2157,10 @@ async function publishResult(
         throw new PublicationHeadCasConflict();
       }
       return completed;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      ...GIT_PUBLICATION_TRANSACTION_OPTIONS,
+    });
   } catch (error) {
     if (isSerializationConflict(error) || error instanceof PublicationHeadCasConflict) return null;
     throw error;

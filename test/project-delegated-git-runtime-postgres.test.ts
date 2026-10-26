@@ -22,6 +22,11 @@ import {
 } from "../src/lib/project-git-repository-delegation-service";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
+import {
+  captureTransactionOptions,
+  failSecondManualRunEntryBatch,
+  hasGitPublicationTransactionBudget,
+} from "./project-git-publication-test-support";
 
 const databaseUrl = process.env.DATABASE_URL;
 const enabled = process.env.PROJECT_DELEGATED_GIT_RUNTIME_POSTGRES_GATE === "1" && typeof databaseUrl === "string" && databaseUrl.length > 0;
@@ -1437,9 +1442,15 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     runGit(realGit, ["config", "user.email", "git-revocation@example.invalid"], worktree);
     runGit(realGit, ["remote", "add", "origin", bareRemote], worktree);
     await writeFile(join(worktree, "README.md"), "This remote must not publish after revocation.\n", "utf8");
+    await mkdir(join(worktree, "docs"), { recursive: true });
+    for (let index = 0; index < 300; index += 1) {
+      await writeFile(join(worktree, "docs", `guide-${index.toString().padStart(3, "0")}.md`), `manual Git batch fixture ${index}\n`, "utf8");
+    }
     runGit(realGit, ["add", "README.md"], worktree);
+    runGit(realGit, ["add", "docs"], worktree);
     runGit(realGit, ["commit", "-m", "revocation-race"], worktree);
     execFileSync(realGit, ["push", "origin", "main"], { cwd: worktree, stdio: "ignore" });
+    const firstRemoteCommit = runGit(realGit, ["rev-parse", "HEAD"], worktree);
 
     let revocationCallbackCount = 0;
     revocationServer = createServer((request, response) => {
@@ -1487,13 +1498,16 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     await chmod(shimPath, 0o700);
     process.env.PATH = `${shimDirectory}:${previousPath ?? ""}`;
 
-    const revocationBaseline = await runProjectDelegatedGitManualSync({
+    const manualPublication = await captureTransactionOptions(db, () => runProjectDelegatedGitManualSync({
       projectId,
       delegationId: delegation.id,
       request: { clientRequestKey: randomUUID() },
       actor: connectionOwnerActor,
-    }, db);
+    }, db));
+    const revocationBaseline = manualPublication.result;
     assert.equal(revocationBaseline.status, "succeeded", `baseline failureCode=${revocationBaseline.failureCode ?? "none"}`);
+    assert.equal(manualPublication.options.filter(hasGitPublicationTransactionBudget).length, 1,
+      "manual publication alone must use the bounded Git transaction budget");
 
     const firstPublication = await client.query<{
       versionId: string;
@@ -1528,7 +1542,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     );
     assert.equal(firstPublication.rowCount, 1);
     assert.equal(firstPublication.rows[0]!.generation, baseline.publicationGeneration + 1);
-    assert.ok(firstPublication.rows[0]!.fileCount > 0);
+    assert.equal(firstPublication.rows[0]!.fileCount, 301, "the publisher must handle hundreds of files across multiple insert batches");
     assert.equal(firstPublication.rows[0]!.runFileCount, firstPublication.rows[0]!.fileCount);
     assert.equal(firstPublication.rows[0]!.runManifestEntryCount, firstPublication.rows[0]!.fileCount);
     assert.equal(firstPublication.rows[0]!.sources.length, firstPublication.rows[0]!.runManifestEntryCount);
@@ -1557,9 +1571,11 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       currentSourcesActive: number;
       runFileCount: number;
       runManifestEntryCount: number;
+      manifestFingerprint: string;
       automaticVersions: string;
     }>(
       `SELECT version_row."id"::text AS "versionId", head."generation", version_row."runId"::text AS "runId",
+              version_row."manifestFingerprint",
               run."fileCount" AS "runFileCount",
               version_row."previousPublicationVersionId"::text AS "previousPublicationVersionId",
               version_row."previousGeneration", version_row."publishedAt",
@@ -1598,6 +1614,88 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     assert.equal(secondPublication.rows[0]!.currentSourceCount, secondPublicationRun.fileCount);
     assert.equal(secondPublication.rows[0]!.currentSourcesActive, secondPublicationRun.fileCount);
     assert.equal(secondPublication.rows[0]!.automaticVersions, "0");
+    assert.notEqual(secondPublication.rows[0]!.manifestFingerprint, firstPublication.rows[0]!.manifestFingerprint);
+
+    const pointerBeforeInjectedFailure = await client.query<{ value: string }>(
+      `SELECT json_build_object(
+         'runId', "runId", 'delegationVersion', "delegationVersion", 'delegationFingerprint', "delegationFingerprint",
+         'frozenCommitSha', "frozenCommitSha", 'manifestFingerprint', "manifestFingerprint", 'publishedAt', "publishedAt"
+       )::text AS value
+       FROM "ProjectGitRepositoryManualPointer"
+       WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    );
+    const sourcesBeforeInjectedFailure = await client.query<{ value: string }>(
+      `SELECT COALESCE(json_agg(json_build_object(
+         'id', "id", 'contentHash', "contentHash", 'capturedAt', "capturedAt", 'retiredAt', "retiredAt"
+       ) ORDER BY "id")::text, '[]') AS value
+       FROM "ProjectSource"
+       WHERE "projectId" = $1::uuid AND "kind" = 'git' AND "originScope" = 'project'`,
+      [projectId],
+    );
+    const versionsBeforeInjectedFailure = await db.projectGitRepositoryPublicationVersion.count({
+      where: { projectId, delegationId: delegation.id },
+    });
+    const entriesBeforeInjectedFailure = await db.projectGitRepositoryPublicationEntry.count({
+      where: { projectId, delegationId: delegation.id },
+    });
+
+    await writeFile(join(worktree, "README.md"), "A publication that fails after its first entry batch.\n", "utf8");
+    runGit(realGit, ["add", "README.md"], worktree);
+    runGit(realGit, ["commit", "-m", "publication-injected-batch-failure"], worktree);
+    execFileSync(realGit, ["push", "origin", "main"], { cwd: worktree, stdio: "ignore" });
+    const injectedFailure = await failSecondManualRunEntryBatch(db, () => runProjectDelegatedGitManualSync({
+      projectId,
+      delegationId: delegation.id,
+      request: { clientRequestKey: randomUUID() },
+      actor: connectionOwnerActor,
+    }, db));
+    assert.equal(injectedFailure.attemptedBatches, 2, "the injected failure must occur on the second run-entry batch");
+    assert.equal(injectedFailure.completedBatches, 1, "the first run-entry batch must reach PostgreSQL before injection");
+    assert.equal(injectedFailure.result.status, "unknown", "a dispatched read with a publication error remains uncertain");
+    assert.equal(injectedFailure.result.stage, "terminal");
+    assert.equal(injectedFailure.result.dispatchState, "dispatched");
+    assert.equal(injectedFailure.result.failureCode, "PROJECT_GIT_MANUAL_RUN_FAILED");
+    assert.equal(await db.projectGitRepositoryManualRunEntry.count({ where: { runId: injectedFailure.result.id } }), 0,
+      "the successful first entry batch must roll back with the failed second batch");
+    assert.equal(await db.projectGitRepositoryManualRunAudit.count({ where: { runId: injectedFailure.result.id, action: "unknown" } }), 1);
+    assert.equal(await db.projectGitRepositoryPublicationVersion.count({ where: { projectId, delegationId: delegation.id } }), versionsBeforeInjectedFailure);
+    assert.equal(await db.projectGitRepositoryPublicationEntry.count({ where: { projectId, delegationId: delegation.id } }), entriesBeforeInjectedFailure);
+    assert.deepEqual((await client.query<{ generation: number; versionId: string }>(
+      `SELECT "generation", "currentPublicationVersionId"::text AS "versionId"
+         FROM "ProjectGitRepositoryPublicationHead"
+        WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    )).rows, [{ generation: secondPublication.rows[0]!.generation, versionId: secondPublication.rows[0]!.versionId }]);
+    assert.deepEqual((await client.query<{ value: string }>(
+      `SELECT json_build_object(
+         'runId', "runId", 'delegationVersion', "delegationVersion", 'delegationFingerprint', "delegationFingerprint",
+         'frozenCommitSha', "frozenCommitSha", 'manifestFingerprint', "manifestFingerprint", 'publishedAt', "publishedAt"
+       )::text AS value
+       FROM "ProjectGitRepositoryManualPointer"
+       WHERE "projectId" = $1::uuid AND "delegationId" = $2::uuid`,
+      [projectId, delegation.id],
+    )).rows, pointerBeforeInjectedFailure.rows);
+    const sourcesAfterInjectedFailure = await client.query<{ value: string }>(
+      `SELECT COALESCE(json_agg(json_build_object(
+         'id', "id", 'contentHash', "contentHash", 'capturedAt', "capturedAt", 'retiredAt', "retiredAt"
+       ) ORDER BY "id")::text, '[]') AS value
+       FROM "ProjectSource"
+       WHERE "projectId" = $1::uuid AND "kind" = 'git' AND "originScope" = 'project'`,
+      [projectId],
+    );
+    assert.deepEqual(sourcesAfterInjectedFailure.rows, sourcesBeforeInjectedFailure.rows,
+      "source creation and prior-source retirement must roll back together");
+    const activeSourcesAfterInjectedFailure = await client.query<{ count: number }>(
+      `SELECT count(*)::integer AS count
+         FROM "ProjectGitRepositoryPublicationEntry" entry
+         JOIN "ProjectSource" source ON source."projectId" = entry."projectId" AND source."id" = entry."projectSourceId"
+        WHERE entry."projectId" = $1::uuid AND entry."delegationId" = $2::uuid
+          AND entry."publicationVersionId" = $3::uuid AND source."retiredAt" IS NULL`,
+      [projectId, delegation.id, secondPublication.rows[0]!.versionId],
+    );
+    assert.equal(activeSourcesAfterInjectedFailure.rows[0]?.count, secondPublication.rows[0]!.currentSourceCount,
+      "the current publication's sources must remain active after rollback");
 
     let invalidAutomaticSnapshotError: unknown;
     try {
@@ -1632,6 +1730,45 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       generation: secondPublication.rows[0]!.generation,
       versionId: secondPublication.rows[0]!.versionId,
     }]);
+
+    execFileSync(realGit, ["push", "--force", "origin", `${firstRemoteCommit}:refs/heads/main`], { cwd: worktree, stdio: "ignore" });
+    const returnedToFirstCommit = await runProjectDelegatedGitManualSync({
+      projectId,
+      delegationId: delegation.id,
+      request: { clientRequestKey: randomUUID() },
+      actor: connectionOwnerActor,
+    }, db);
+    assert.equal(returnedToFirstCommit.status, "succeeded", `return publication failureCode=${returnedToFirstCommit.failureCode ?? "none"}`);
+    const returnedPublication = await client.query<{
+      versionId: string;
+      generation: number;
+      manifestFingerprint: string;
+      sources: string[];
+      activeSources: number;
+      priorSourcesRetired: number;
+    }>(
+      `SELECT version_row."id"::text AS "versionId", head."generation", version_row."manifestFingerprint",
+              ARRAY(SELECT entry."projectSourceId"::text
+                      FROM "ProjectGitRepositoryPublicationEntry" entry
+                     WHERE entry."publicationVersionId" = version_row."id"
+                     ORDER BY entry."ordinal") AS sources,
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryPublicationEntry" current_entry
+                 JOIN "ProjectSource" source ON source."projectId" = current_entry."projectId" AND source."id" = current_entry."projectSourceId"
+                WHERE current_entry."publicationVersionId" = version_row."id" AND source."retiredAt" IS NULL) AS "activeSources",
+              (SELECT count(*)::integer FROM "ProjectGitRepositoryPublicationEntry" prior_entry
+                 JOIN "ProjectSource" source ON source."projectId" = prior_entry."projectId" AND source."id" = prior_entry."projectSourceId"
+                WHERE prior_entry."publicationVersionId" = $3::uuid AND source."retiredAt" IS NOT NULL) AS "priorSourcesRetired"
+         FROM "ProjectGitRepositoryPublicationHead" head
+         JOIN "ProjectGitRepositoryPublicationVersion" version_row ON version_row."id" = head."currentPublicationVersionId"
+        WHERE head."projectId" = $1::uuid AND head."delegationId" = $2::uuid`,
+      [projectId, delegation.id, secondPublication.rows[0]!.versionId],
+    );
+    assert.equal(returnedPublication.rowCount, 1);
+    assert.equal(returnedPublication.rows[0]!.generation, secondPublication.rows[0]!.generation + 1);
+    assert.equal(returnedPublication.rows[0]!.manifestFingerprint, firstPublication.rows[0]!.manifestFingerprint);
+    assert.deepEqual(returnedPublication.rows[0]!.sources, firstPublication.rows[0]!.sources);
+    assert.equal(returnedPublication.rows[0]!.activeSources, firstPublication.rows[0]!.fileCount);
+    assert.equal(returnedPublication.rows[0]!.priorSourcesRetired, secondPublicationRun.fileCount);
 
     await writeFile(join(worktree, "README.md"), "This changed remote must not publish after revocation.\n", "utf8");
     runGit(realGit, ["add", "README.md"], worktree);

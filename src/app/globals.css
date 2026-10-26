@@ -172,6 +172,17 @@ button:not(:disabled) {
   white-space: nowrap;
 }
 
+/* Dialog form geometry is shared by user and admin surfaces. */
+:root [data-operation-surface="modal"]:has(> [data-operation-content] > form) {
+  max-width: 720px;
+}
+
+[data-operation-content] > :is(form, div:has(form), section:has(form)) {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+}
+
 .page-back-nav {
   display: flex;
   align-items: center;

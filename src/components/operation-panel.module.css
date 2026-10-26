@@ -1,9 +1,0 @@
-.surface[data-operation-surface="modal"]:has(> .content > form) {
-  max-width: 720px;
-}
-
-.content > :is(form, div:has(form), section:has(form)) {
-  width: 100%;
-  max-width: none;
-  margin-inline: 0;
-}

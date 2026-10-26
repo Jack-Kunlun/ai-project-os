@@ -776,6 +776,7 @@ class ReleaseRiskClassificationTests(unittest.TestCase):
         (repository / 'docs/account-security.md').write_text(
             '# Updated account security guidance\n', encoding='utf-8',
         )
+        (repository / 'CHANGELOG.md').write_text('# Updated release notes\n', encoding='utf-8')
         (repository / 'src/app/auth/login.css').write_text(
             '.login { color: navy; }\n', encoding='utf-8',
         )
@@ -818,7 +819,33 @@ class ReleaseRiskClassificationTests(unittest.TestCase):
         self.assertEqual(classification['risk'], 'medium')
         self.assertFalse(classification['databaseRequired'])
         self.assertTrue(classification['browserRequired'])
-        self.assertTrue(classification['coverageRequired'])
+        self.assertFalse(classification['coverageRequired'])
+
+    def test_browser_regressions_need_not_share_a_component_basename(self):
+        repository, source, environment = self.create_repository()
+        target_path = repository / 'e2e/feedback-layout-parity.spec.ts'
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text('export const checks = 1;\n', encoding='utf-8')
+        target = self.commit_target(repository, environment)
+        classification = DEPLOYER.classify_release_risk(repository, source, target)
+        self.assertEqual(classification['risk'], 'medium')
+        self.assertFalse(classification['databaseRequired'])
+        self.assertFalse(classification['coverageRequired'])
+        self.assertTrue(classification['browserRequired'])
+
+    def test_sensitive_and_unregistered_browser_specs_fail_high(self):
+        for path in ('e2e/account-security.spec.ts', 'e2e/web-ai-confirmation.spec.ts',
+                     'e2e/system-audit.spec.ts', 'e2e/new-ui-feature.spec.ts'):
+            with self.subTest(path=path):
+                repository, source, environment = self.create_repository()
+                target_path = repository / path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_text('export const checks = 2;\n', encoding='utf-8')
+                target = self.commit_target(repository, environment)
+                classification = DEPLOYER.classify_release_risk(repository, source, target)
+                self.assertEqual(classification['risk'], 'high')
+                self.assertTrue(classification['databaseRequired'])
+                self.assertTrue(classification['coverageRequired'])
 
     def test_app_server_pages_sensitive_paths_and_unmatched_tests_are_high(self):
         cases = (

@@ -391,7 +391,7 @@ def _risk_result(risk, reasons):
         'risk': risk,
         'databaseRequired': risk == 'high',
         'browserRequired': risk in ('medium', 'high'),
-        'coverageRequired': risk in ('medium', 'high'),
+        'coverageRequired': risk == 'high',
         'reasons': reasons,
     }
 
@@ -411,6 +411,14 @@ def _sensitive_release_path(path):
 def _frontend_test_matches(path, frontend_sources):
     if not re.fullmatch(r'(?:test|tests|e2e)/.+\.(?:test|spec)\.tsx?', path):
         return False
+    # Only audited UI regressions may use the medium tier. A browser filename is
+    # not proof of harmless UI behavior (e.g. web-ai-confirmation/system-audit).
+    if path.startswith('e2e/'):
+        return path in {
+            'e2e/feedback-layout-parity.spec.ts',
+            'e2e/short-page-scroll.spec.ts',
+            'e2e/user-shell-navigation.spec.ts',
+        }
     test_name = PurePosixPath(path).name
     test_stem = re.sub(r'\.(?:test|spec)\.tsx?$', '', test_name)
     source_names = set()
@@ -500,7 +508,7 @@ def classify_release_risk(repository, source_revision, target_revision):
             if (path.endswith('.md') and (path.startswith('docs/') or path == 'README.md')
                     and PurePosixPath(path).name.lower() == 'agents.md'):
                 return _risk_result('high', ['sensitive-path'])
-            if path.endswith('.md') and (path.startswith('docs/') or path == 'README.md'):
+            if path.endswith('.md') and (path.startswith('docs/') or path in ('README.md', 'CHANGELOG.md')):
                 reasons.append('documentation')
                 continue
             if path.startswith('src/') and path.endswith('.css'):
@@ -2871,7 +2879,7 @@ def require_ci(target_tag, revision, bootstrap=False, source_revision=None, clas
             'RELEASE_CI_CLASSIFICATION_INVALID')
     require(classification['databaseRequired'] == (risk == 'high')
             and classification['browserRequired'] == (risk in ('medium', 'high'))
-            and classification['coverageRequired'] == (risk in ('medium', 'high')),
+            and classification['coverageRequired'] == (risk == 'high'),
             'RELEASE_CI_CLASSIFICATION_INVALID')
     tiers = {'low': 0, 'medium': 1, 'high': 2}
     for attested_risk in ('low', 'medium', 'high'):

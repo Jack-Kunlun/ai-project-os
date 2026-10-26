@@ -49,8 +49,12 @@ const DOMAIN_GATES = Object.freeze([
 const SENSITIVE_SOURCE_PATH = /^src\/(?:app\/admin\/|app\/(?:auth|login)\/|.*(?:auth|login|account|permission|authorization|role|entitlement|credits?|quotas?|billing|security|credential|secret|provider|grant|consent|approval|external|model|connection|mcp|action|oauth|oidc))/iu;
 const VERSION_METADATA_PATHS = new Set(["package.json", "src/lib/version.ts"]);
 const INFRA_PATH = /^(?:\.github\/|deploy\/|scripts\/(?:ci-|production-stable-|production-cache-maintenance\.mjs$|prepare-stable-|prepare-release-images|publish-release-images|release-image-manifest|run-local-release|run-browser-e2e|local-release-candidate|release-image|run-postgres-gates|postgres-gate-contract|run-phone-auth-postgres|run-database-principal-oid10-gate)|Dockerfile$|\.dockerignore$|docker-bake\.hcl$|compose(?:\.[^/]*)?\.ya?ml$|next\.config\.[^/]+$|config\/performance-budgets\.json$)/u;
-const CLIENT_PATH = /^(?:src\/components\/.*\.tsx?$|src\/app\/.*(?:-client\.tsx|\.css)$|public\/.*\.svg$|e2e\/.*\.spec\.tsx?$)/u;
+const CLIENT_PATH = /^(?:src\/components\/.*\.(?:tsx?|css)$|src\/app\/.*(?:-client\.tsx|\.css)$|public\/.*\.svg$|e2e\/.*\.spec\.tsx?$)/u;
 const PUBLIC_PASSIVE_ASSET_PATH = /^public\/.*\.(?:avif|eot|gif|ico|jpe?g|otf|png|ttf|woff2?)$/iu;
+const BROWSER_INFRA_PATHS = new Set([
+  ".github/workflows/ci.yml", "playwright.config.ts", "scripts/run-browser-e2e.ts",
+  "scripts/ci-test-plan.mjs", "scripts/ci-test-checks.mjs", "scripts/ci-unit-reporter.mjs", "config/ci-test-coverage.json",
+]);
 
 function failClosed(reason) {
   return {
@@ -96,7 +100,8 @@ export function planCiImpact(paths, { baseKnown = true, gatesByFile = new Map() 
     return { mode: "none", gateFilter: "none", phoneAuth: false, oid10: false, browser: false, candidate: false, schemaValidation: false, reason: "no-change" };
   }
 
-  if (paths.some((path) => path.startsWith("prisma/") || SENSITIVE_SOURCE_PATH.test(path))) {
+  if (paths.some((path) => path.startsWith("prisma/")
+      || (SENSITIVE_SOURCE_PATH.test(path) && !/^src\/.*\.css$/u.test(path)))) {
     return failClosed("security-account-or-schema-change");
   }
 
@@ -136,10 +141,9 @@ export function planCiImpact(paths, { baseKnown = true, gatesByFile = new Map() 
     if (CLIENT_PATH.test(path)) {
       hasApplicationSource = true;
       browser = true;
-      candidate = true;
       continue;
     }
-    if (path === "scripts/run-browser-e2e.ts") {
+    if (BROWSER_INFRA_PATHS.has(path)) {
       browser = true;
       candidate = true;
       continue;
@@ -173,7 +177,8 @@ export function planCiImpact(paths, { baseKnown = true, gatesByFile = new Map() 
       browser = true;
       continue;
     }
-    if (PUBLIC_PASSIVE_ASSET_PATH.test(path) || path.startsWith("docs/") || path === "README.md" || path === "AGENTS.md") continue;
+    if (PUBLIC_PASSIVE_ASSET_PATH.test(path) || path.startsWith("docs/")
+        || path === "README.md" || path === "CHANGELOG.md" || path === "AGENTS.md") continue;
     return failClosed(`unclassified-path:${path}`);
   }
 

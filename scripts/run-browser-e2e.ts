@@ -11,6 +11,7 @@ import {
 } from "./postgres-gate-contract";
 import { prepareReleaseImagesForCheck } from "./local-release-images";
 import type { ReleaseImageName } from "./release-image-manifest";
+import { browserFileArguments, resolveBrowserSelection, validateBrowserDiscovery, validateBrowserExecution, writeCheckReceipt } from "./ci-test-checks.mjs";
 
 const DATABASE_NAME = "ai_project_os_browser_e2e_test";
 const CLUSTER_ADMIN_ROLE = "ai_project_os_cluster_admin";
@@ -286,6 +287,10 @@ async function waitForHealthyApplication(port: number, app: string, worker: stri
 }
 
 async function main() {
+  const selection = resolveBrowserSelection({ args: process.argv.slice(2) });
+  const selectors = selection.mode === "full" ? [] : browserFileArguments(selection.files);
+  const strictOptions = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true" ? ["--forbid-only"] : [];
+  if (selection.plan && !process.env.CI_TEST_RECEIPT) throw new Error("CI_BROWSER_RECEIPT_PATH_REQUIRED");
   const adminUrl = validatePostgresGateAdminUrl(process.env.POSTGRES_GATE_ADMIN_URL);
   const packageManifest = JSON.parse(await readFile("package.json", "utf8")) as { version?: unknown };
   if (typeof packageManifest.version !== "string") throw new Error("BROWSER_E2E_PACKAGE_VERSION_INVALID");
@@ -299,6 +304,7 @@ async function main() {
   const workerName = `ai-project-os-browser-${identity}-worker`;
   let appContainer: string | null = null;
   let workerContainer: string | null = null;
+  let adminConnected = false;
   let provisionedRoles = false;
 
   try {
@@ -309,6 +315,7 @@ async function main() {
     ]);
     await mkdir(uploadsDirectory, { recursive: true, mode: 0o700 });
     await admin.connect();
+    adminConnected = true;
     const connection = await recreateDatabase(admin, adminUrl);
     provisionedRoles = true;
     const environment: NodeJS.ProcessEnv = {
@@ -356,7 +363,21 @@ async function main() {
     workerContainer = await startImageContainer(workerName, manifest.images.worker.id, workerEnvironment, temporaryDirectory);
     const browserEnvironment = { ...environment, BROWSER_E2E_BASE_URL: baseUrl, LOCAL_REGISTRATION_ENABLED: "true" };
     await waitForHealthyApplication(port, appName, workerName);
-    await run(process.execPath, ["node_modules/@playwright/test/cli.js", "test"], browserEnvironment);
+    const discoveryEnvironment: NodeJS.ProcessEnv = { ...browserEnvironment };
+    for (const name of Object.keys(discoveryEnvironment)) if (name.startsWith("PLAYWRIGHT_JSON_")) delete discoveryEnvironment[name];
+    const discovery = validateBrowserDiscovery(selection, JSON.parse(await capture(process.execPath,
+      ["node_modules/@playwright/test/cli.js", "test", "--list", "--reporter=json", ...strictOptions, ...selectors], discoveryEnvironment)));
+    console.log(`BROWSER_CHECK_SELECTION mode=${selection.mode} files=${discovery.files.length} tests=${discovery.testCount}`);
+    const resultPath = join(temporaryDirectory, "browser-result.json");
+    await run(process.execPath, ["node_modules/@playwright/test/cli.js", "test", "--reporter=line,html,json", ...strictOptions, ...selectors], {
+      ...browserEnvironment, PLAYWRIGHT_JSON_OUTPUT_FILE: resultPath, PLAYWRIGHT_HTML_OPEN: "never", PLAYWRIGHT_HTML_OUTPUT_DIR: "playwright-report",
+    });
+    const execution = validateBrowserExecution(selection, discovery, JSON.parse(await readFile(resultPath, "utf8")));
+    if (selection.plan) writeCheckReceipt(process.env.CI_TEST_RECEIPT!, { kind: "browser", plan: selection.plan, discovery: execution });
+    else if (process.env.CI_TEST_RECEIPT) await writeFile(process.env.CI_TEST_RECEIPT, `${JSON.stringify({
+      schemaVersion: 1, releaseEligible: false, revision, version: packageVersion,
+      mode: selection.mode, ...execution,
+    }, null, 2)}\n`, { mode: 0o600 });
   } catch (error) {
     if (workerContainer !== null) {
       const logs = await capture("docker", ["logs", "--tail", "200", workerName]).catch(() => "");
@@ -370,8 +391,10 @@ async function main() {
   } finally {
     await stopImageContainer(workerName);
     await stopImageContainer(appName);
-    await admin.query(`DROP DATABASE IF EXISTS "${DATABASE_NAME}" WITH (FORCE)`).catch(() => undefined);
-    if (provisionedRoles) await dropProvisionedRoles(admin);
+    if (adminConnected) {
+      await admin.query(`DROP DATABASE IF EXISTS "${DATABASE_NAME}" WITH (FORCE)`).catch(() => undefined);
+      if (provisionedRoles) await dropProvisionedRoles(admin);
+    }
     await admin.end().catch(() => undefined);
     await rm(temporaryDirectory, { recursive: true, force: true });
   }

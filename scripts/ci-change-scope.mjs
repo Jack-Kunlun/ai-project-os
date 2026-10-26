@@ -76,7 +76,7 @@ function normalizedClassification(value, base) {
   if (value.risk === "high" && (!value.databaseRequired || !value.browserRequired || !value.coverageRequired)) {
     throw new Error("RELEASE_RISK_CLASSIFICATION_INCOMPLETE");
   }
-  if (value.risk === "medium" && (!value.browserRequired || !value.coverageRequired)) {
+  if (value.risk === "medium" && !value.browserRequired) {
     throw new Error("RELEASE_RISK_CLASSIFICATION_INCOMPLETE");
   }
   return {

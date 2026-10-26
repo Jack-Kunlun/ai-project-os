@@ -140,13 +140,15 @@ test("browser gate stays isolated and exercises the production server", async ()
 
 test("CI uses pinned least-privilege actions and runs all bounded gates", async () => {
   const workflow = await read(".github/workflows/ci.yml");
+  const checks = await read("scripts/ci-test-checks.mjs");
 
   assert.match(workflow, /permissions:\n  contents: read/u);
   assert.match(workflow, /actions\/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd/u);
   assert.match(workflow, /actions\/setup-node@820762786026740c76f36085b0efc47a31fe5020/u);
   assert.match(workflow, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/u);
   assert.match(workflow, /pnpm install --frozen-lockfile/u);
-  assert.match(workflow, /pnpm test:coverage/u);
+  assert.match(workflow, /ci-test-checks\.mjs unit/u);
+  assert.match(checks, /\["test:coverage"\]/u);
   assert.match(workflow, /pnpm test:postgres-gates/u);
   assert.match(workflow, /playwright install --with-deps chromium/u);
   assert.match(workflow, /pnpm test:browser-e2e/u);

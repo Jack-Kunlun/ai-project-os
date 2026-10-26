@@ -28,7 +28,7 @@ RUN NODE_OPTIONS=--max-old-space-size=6144 pnpm build
 
 FROM base AS runtime-metadata
 
-ARG APP_VERSION="1.2.12"
+ARG APP_VERSION="1.2.13"
 ARG APP_REVISION=unknown
 LABEL org.opencontainers.image.title="AI Project OS" \
       org.opencontainers.image.version="${APP_VERSION}" \

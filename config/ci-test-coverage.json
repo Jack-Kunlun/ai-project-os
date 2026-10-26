@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "sharedShellPaths": [
+    "src/components/user-shell.tsx",
+    "src/components/user-shell.module.css",
+    "src/components/workspace-scope.tsx",
+    "src/components/app-header.tsx",
+    "src/app/user-workspace.css"
+  ],
+  "sharedShellBrowserSpecs": [
+    "e2e/feedback-layout-parity.spec.ts",
+    "e2e/short-page-scroll.spec.ts",
+    "e2e/user-shell-navigation.spec.ts"
+  ],
+  "sharedShellUnitTests": [
+    "test/user-navigation.test.ts",
+    "test/personal-workspace-experience.test.ts",
+    "test/project-information-architecture.test.ts",
+    "test/even-pixel-contract.test.ts"
+  ],
+  "globalPaths": [
+    "src/app/layout.tsx",
+    "src/app/globals.css",
+    "src/app/appearance.css"
+  ],
+  "routeGroups": [
+    {
+      "prefix": "/personal/knowledge",
+      "browserSpecs": [
+        "e2e/knowledge-localization.spec.ts",
+        "e2e/personal-knowledge-modal.spec.ts",
+        "e2e/personal-project-search.spec.ts"
+      ],
+      "unitTests": [
+        "test/personal-knowledge-experience.test.ts",
+        "test/personal-project-search.test.ts",
+        "test/personal-workspace-experience.test.ts"
+      ]
+    },
+    {
+      "prefix": "/projects/materials",
+      "browserSpecs": [
+        "e2e/materials-request-race.spec.ts",
+        "e2e/page-operations-and-import.spec.ts",
+        "e2e/prototype-detail-lists.spec.ts"
+      ],
+      "unitTests": [
+        "test/project-materials-workspace.test.ts",
+        "test/project-data-operations.test.ts"
+      ]
+    },
+    {
+      "prefix": "/projects/plan",
+      "browserSpecs": [
+        "e2e/usage-flow-guidance.spec.ts",
+        "e2e/feedback-layout-parity.spec.ts"
+      ],
+      "unitTests": [
+        "test/project-information-architecture.test.ts",
+        "test/project-flow-guide.test.ts",
+        "test/project-plan.test.ts"
+      ]
+    },
+    {
+      "prefix": "/projects/governance",
+      "browserSpecs": [
+        "e2e/usage-flow-guidance.spec.ts",
+        "e2e/feedback-layout-parity.spec.ts"
+      ],
+      "unitTests": [
+        "test/project-information-architecture.test.ts",
+        "test/project-governance.test.ts"
+      ]
+    },
+    {
+      "prefix": "/projects/intelligence",
+      "browserSpecs": [
+        "e2e/usage-flow-guidance.spec.ts",
+        "e2e/feedback-layout-parity.spec.ts"
+      ],
+      "unitTests": [
+        "test/project-information-architecture.test.ts",
+        "test/project-intelligence-contract.test.ts"
+      ]
+    },
+    {
+      "prefix": "/projects",
+      "browserSpecs": [
+        "e2e/prototype-detail-lists.spec.ts",
+        "e2e/usage-flow-guidance.spec.ts",
+        "e2e/feedback-layout-parity.spec.ts"
+      ],
+      "unitTests": [
+        "test/project-information-architecture.test.ts",
+        "test/project-list-experience.test.ts",
+        "test/project-overview-metrics.test.ts"
+      ]
+    },
+    {
+      "prefix": "/dashboard",
+      "browserSpecs": [
+        "e2e/user-shell-navigation.spec.ts",
+        "e2e/usage-flow-guidance.spec.ts"
+      ],
+      "unitTests": [
+        "test/user-navigation.test.ts",
+        "test/personal-workspace-experience.test.ts"
+      ]
+    },
+    {
+      "prefix": "/notifications",
+      "browserSpecs": ["e2e/prototype-ui-polish.spec.ts"],
+      "unitTests": ["test/personal-workspace-experience.test.ts"]
+    },
+    {
+      "prefix": "/connections",
+      "browserSpecs": ["e2e/connection-list-layout.spec.ts"],
+      "unitTests": ["test/personal-connections-experience.test.ts"]
+    },
+    {
+      "prefix": "/team",
+      "browserSpecs": [
+        "e2e/team-narrow-layout.spec.ts",
+        "e2e/team-overview-table.spec.ts"
+      ],
+      "unitTests": ["test/team-experience.test.ts"]
+    }
+  ]
+}

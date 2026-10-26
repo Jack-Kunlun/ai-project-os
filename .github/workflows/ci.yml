@@ -63,9 +63,17 @@ jobs:
     name: Verify source and client
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      plan_fingerprint: ${{ steps.test_plan.outputs.plan_fingerprint }}
+      browser_mode: ${{ steps.test_plan.outputs.browser_mode }}
+      unit_mode: ${{ steps.test_plan.outputs.unit_mode }}
+      unit_receipt_fingerprint: ${{ steps.unit_checks.outputs.receipt_fingerprint }}
     env:
       DATABASE_URL: postgresql://ci_static:ci_static@127.0.0.1:1/ci_static
       NEXT_TELEMETRY_DISABLED: "1"
+      CI_TEST_BASE: ${{ needs.scope.outputs.base }}
+      CI_TEST_TARGET: ${{ github.sha }}
+      CI_TEST_RISK: ${{ needs.scope.outputs.risk }}
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -86,6 +94,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Plan affected checks from the cumulative production diff
+        id: test_plan
+        run: node scripts/ci-test-checks.mjs plan "$RUNNER_TEMP/ci-test-plan.json"
+
       - name: Generate Prisma client for TypeScript checks
         run: pnpm db:generate
 
@@ -94,9 +106,20 @@ jobs:
           pnpm lint
           NODE_OPTIONS=--max-old-space-size=6144 pnpm typecheck
 
-      - name: Run default test suite with coverage thresholds
-        if: ${{ needs.scope.outputs.coverage == 'true' }}
-        run: pnpm test:coverage
+      - name: Run the applicable unit checks and record their exact plan
+        id: unit_checks
+        run: node scripts/ci-test-checks.mjs unit "$RUNNER_TEMP/ci-test-plan.json" "$RUNNER_TEMP/ci-unit-receipt.json"
+
+      - name: Save the source test plan and execution receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-source-checks
+          path: |
+            ${{ runner.temp }}/ci-test-plan.json
+            ${{ runner.temp }}/ci-unit-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   database:
     needs: scope
@@ -168,6 +191,10 @@ jobs:
     name: Build and verify release images
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    outputs:
+      plan_fingerprint: ${{ steps.test_plan.outputs.plan_fingerprint }}
+      browser_mode: ${{ steps.test_plan.outputs.browser_mode }}
+      browser_receipt_fingerprint: ${{ steps.browser_checks.outputs.receipt_fingerprint || steps.browser_none.outputs.receipt_fingerprint }}
     permissions:
       actions: read
       contents: read
@@ -191,6 +218,11 @@ jobs:
       POSTGRES_GATE_ADMIN_URL: postgresql://ai_project_os_ci_cluster_admin:AiProjectOsCiAdmin_20260831@127.0.0.1:56432/postgres
       POSTGRES_GATE_TEST_PASSWORD: AiProjectOsCiGate_20260831
       NEXT_TELEMETRY_DISABLED: "1"
+      CI_TEST_BASE: ${{ needs.scope.outputs.base }}
+      CI_TEST_TARGET: ${{ github.sha }}
+      CI_TEST_RISK: ${{ needs.scope.outputs.risk }}
+      CI_TEST_PLAN: ${{ runner.temp }}/ci-test-plan.json
+      CI_TEST_RECEIPT: ${{ runner.temp }}/ci-browser-receipt.json
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -210,6 +242,10 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Plan affected checks from the cumulative production diff
+        id: test_plan
+        run: node scripts/ci-test-checks.mjs plan "$CI_TEST_PLAN"
 
       - name: Generate Prisma client for runner-side release checks
         run: pnpm db:generate
@@ -269,12 +305,29 @@ jobs:
           pnpm performance:check
 
       - name: Install Chromium for affected browser checks
-        if: ${{ needs.scope.outputs.impact_browser == 'true' }}
+        if: ${{ steps.test_plan.outputs.browser_mode != 'none' }}
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run production browser and accessibility checks on the built images
-        if: ${{ needs.scope.outputs.impact_browser == 'true' }}
+        id: browser_checks
+        if: ${{ steps.test_plan.outputs.browser_mode != 'none' }}
         run: NODE_OPTIONS=--max-old-space-size=6144 pnpm test:browser-e2e
+
+      - name: Record that the cumulative diff requires no browser checks
+        id: browser_none
+        if: ${{ steps.test_plan.outputs.browser_mode == 'none' }}
+        run: node scripts/ci-test-checks.mjs browser-none "$CI_TEST_PLAN" "$CI_TEST_RECEIPT"
+
+      - name: Save the browser plan and discovery execution receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-browser-checks
+          path: |
+            ${{ runner.temp }}/ci-test-plan.json
+            ${{ runner.temp }}/ci-browser-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Run isolated release candidate with the same image IDs
         if: ${{ needs.scope.outputs.impact_candidate == 'true' }}
@@ -308,7 +361,7 @@ jobs:
           retention-days: 30
 
       - name: Upload browser diagnostics
-        if: ${{ always() && needs.scope.outputs.impact_browser == 'true' }}
+        if: ${{ always() && steps.test_plan.outputs.browser_mode != 'none' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-diagnostics
@@ -334,14 +387,28 @@ jobs:
           RISK: ${{ needs.scope.outputs.risk }}
           BASE: ${{ needs.scope.outputs.base }}
           DATABASE_REQUIRED: ${{ needs.scope.outputs.risk == 'high' }}
+          SOURCE_PLAN_FINGERPRINT: ${{ needs.source.outputs.plan_fingerprint }}
+          IMAGE_PLAN_FINGERPRINT: ${{ needs.build-images.outputs.plan_fingerprint }}
+          SOURCE_BROWSER_MODE: ${{ needs.source.outputs.browser_mode }}
+          IMAGE_BROWSER_MODE: ${{ needs.build-images.outputs.browser_mode }}
+          UNIT_MODE: ${{ needs.source.outputs.unit_mode }}
+          UNIT_RECEIPT_FINGERPRINT: ${{ needs.source.outputs.unit_receipt_fingerprint }}
+          BROWSER_RECEIPT_FINGERPRINT: ${{ needs.build-images.outputs.browser_receipt_fingerprint }}
         run: |
           set -euo pipefail
           test "$SCOPE_RESULT" = success
           test "$SOURCE_RESULT" = success
           test "$IMAGE_RESULT" = success
+          [[ "$SOURCE_PLAN_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          test "$SOURCE_PLAN_FINGERPRINT" = "$IMAGE_PLAN_FINGERPRINT"
+          test "$SOURCE_BROWSER_MODE" = "$IMAGE_BROWSER_MODE"
+          case "$SOURCE_BROWSER_MODE" in none|selected|full) ;; *) exit 1 ;; esac
+          case "$UNIT_MODE" in none|selected|full) ;; *) exit 1 ;; esac
+          [[ "$UNIT_RECEIPT_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$BROWSER_RECEIPT_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]] || exit 1
           case "$RISK" in low|medium|high) ;; *) exit 1 ;; esac
           if [[ "$BASE" != unknown ]]; then
-            [[ "$BASE" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$BASE" =~ ^[a-f0-9]{40}$ ]] || exit 1
           else
             test "$RISK" = high
           fi

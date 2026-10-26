@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 test("CI compiles the Next app once and reuses the same release images for browser and candidate checks", async () => {
@@ -53,4 +54,29 @@ test("CI publishes immutable image metadata only from main and exposes the docum
   assert.match(manifest, /ghcr\.io\/jack-kunlun\/ai-project-os-worker/u);
   assert.match(manifest, /ghcr\.io\/jack-kunlun\/ai-project-os-migrate/u);
   assert.match(manifest, /RELEASE_IMAGE_MANIFEST_RUN_ID_MISMATCH/u);
+});
+
+test("the release gate rejects mismatched test plans or missing execution receipts", async () => {
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const step = workflow.slice(workflow.indexOf("      - name: Require every applicable gate and the exact-sha image job"));
+  const program = step.slice(step.indexOf("        run: |\n") + "        run: |\n".length)
+    .split("\n  tag-attestation:")[0].replace(/^ {10}/gmu, "");
+  const environment = {
+    ...process.env, SCOPE_RESULT: "success", SOURCE_RESULT: "success", IMAGE_RESULT: "success",
+    DATABASE_RESULT: "skipped", DATABASE_REQUIRED: "false", RISK: "medium", BASE: "a".repeat(40),
+    SOURCE_PLAN_FINGERPRINT: "b".repeat(64), IMAGE_PLAN_FINGERPRINT: "b".repeat(64),
+    SOURCE_BROWSER_MODE: "selected", IMAGE_BROWSER_MODE: "selected", UNIT_MODE: "selected",
+    UNIT_RECEIPT_FINGERPRINT: "c".repeat(64), BROWSER_RECEIPT_FINGERPRINT: "d".repeat(64),
+  };
+  const run = (override: Record<string, string | undefined> = {}) => spawnSync("bash", ["-c", program], {
+    encoding: "utf8", env: { ...environment, ...override },
+  });
+  assert.equal(run().status, 0);
+  for (const invalid of [
+    { IMAGE_PLAN_FINGERPRINT: "e".repeat(64) }, { UNIT_RECEIPT_FINGERPRINT: "" },
+    { BROWSER_RECEIPT_FINGERPRINT: "" }, { IMAGE_BROWSER_MODE: "none" },
+    { UNIT_MODE: "unknown" }, { SOURCE_RESULT: "failure" },
+    { DATABASE_REQUIRED: "true" }, { BASE: "unknown" },
+  ]) assert.notEqual(run(invalid).status, 0, JSON.stringify(invalid));
+  assert.equal(run({ RISK: "high", DATABASE_REQUIRED: "true", DATABASE_RESULT: "success" }).status, 0);
 });

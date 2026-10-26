@@ -105,3 +105,18 @@ test("classifier errors and incomplete high-risk gates fail toward the full high
   });
   assert.deepEqual(incomplete, conservativeRiskScope(source));
 });
+
+test("pure client risk keeps browser coverage without demanding unrelated server unit coverage", () => {
+  const result = classifyProductionChange({
+    payload: healthy, targetRevision: target, runGit: sourceGit(),
+    classify: () => ({ risk: "medium", databaseRequired: false, browserRequired: true, coverageRequired: false }),
+  });
+  assert.equal(result.risk, "medium");
+  assert.equal(result.coverage, false);
+  assert.equal(result.browser, true);
+  assert.equal(result.database, false);
+  assert.equal(classifyProductionChange({
+    payload: healthy, targetRevision: target, runGit: sourceGit(),
+    classify: () => ({ risk: "medium", databaseRequired: false, browserRequired: false, coverageRequired: false }),
+  }).risk, "high");
+});

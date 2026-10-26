@@ -32,7 +32,7 @@ test("impact planning treats release infrastructure as image checks without Post
   const planned = planCiImpact([".github/workflows/ci.yml", "docker-bake.hcl", "scripts/production-stable-credentials.py", "scripts/production-cache-maintenance.mjs"]);
   assert.equal(planned.mode, "none");
   assert.equal(planned.gateFilter, "none");
-  assert.equal(planned.browser, false);
+  assert.equal(planned.browser, true);
   assert.equal(planned.candidate, true);
 
   const dockerfile = planCiImpact(["Dockerfile"]);
@@ -44,10 +44,27 @@ test("impact planning treats release infrastructure as image checks without Post
   assert.equal(sharedImagePlanner.browser, true);
   assert.equal(sharedImagePlanner.candidate, true);
 
-  const browserRunnerImpact = planCiImpact(["scripts/run-browser-e2e.ts"]);
-  assert.equal(browserRunnerImpact.mode, "none");
-  assert.equal(browserRunnerImpact.browser, true);
-  assert.equal(browserRunnerImpact.candidate, true);
+  for (const path of ["scripts/run-browser-e2e.ts", "scripts/ci-test-checks.mjs", "scripts/ci-unit-reporter.mjs"]) {
+    const browserRunnerImpact = planCiImpact([path]);
+    assert.equal(browserRunnerImpact.mode, "none");
+    assert.equal(browserRunnerImpact.browser, true);
+    assert.equal(browserRunnerImpact.candidate, true);
+  }
+});
+
+test("pure UI and component CSS require related browser checks without a Compose or database candidate", () => {
+  const planned = planCiImpact([
+    "CHANGELOG.md", "src/components/user-shell.module.css", "src/components/workspace-scope.tsx",
+    "src/app/user-workspace.css", "e2e/feedback-layout-parity.spec.ts",
+  ]);
+  assert.equal(planned.mode, "none");
+  assert.equal(planned.gateFilter, "none");
+  assert.equal(planned.browser, true);
+  assert.equal(planned.candidate, false);
+  assert.equal(planned.phoneAuth, false);
+  assert.equal(planned.schemaValidation, false);
+  assert.equal(planCiImpact(["src/app/admin/admin-workspace.module.css"]).mode, "none");
+  assert.equal(planCiImpact(["CHANGELOG.md"]).browser, false);
 });
 
 test("unknown source, authentication, permission, provider, and schema changes run full gates", () => {

@@ -297,6 +297,7 @@ test("personal knowledge hands off explicitly into project materials and guided 
     await expect(sourceOrganizer).toBeVisible();
     const panel = sourceOrganizer.locator("[data-operation-content] > section");
     await expect(panel).toBeVisible();
+    await expect(sourceOrganizer.getByRole("button", { name: appearance.submit, exact: true })).toBeVisible();
     const geometry = await sourceOrganizer.locator("[data-operation-content]").evaluate((body) => {
       const panelElement = body.firstElementChild;
       const action = panelElement?.querySelector<HTMLElement>("button");
@@ -332,7 +333,6 @@ test("personal knowledge hands off explicitly into project materials and guided 
     expect(geometry.actionRightInset, appearance.title).toBeLessThanOrEqual(1);
     expect(geometry.themeTextColor, appearance.title).toBe(appearance.theme === "dark" ? "rgb(230, 237, 246)" : "rgb(32, 36, 42)");
     await expect(sourceOrganizer.getByRole("heading", { name: appearance.title, exact: true })).toHaveCount(1);
-    await expect(sourceOrganizer.getByRole("button", { name: appearance.submit, exact: true })).toBeVisible();
     await expect.poll(() => extractCalls.filter((call) => call.phase === "prepare").length).toBe(prepareCount + 1);
     expect(extractCalls.filter((call) => call.phase === "prepare").at(-1)?.sourceIds).toEqual([sourceId]);
     expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(executeCountBeforeDetail);

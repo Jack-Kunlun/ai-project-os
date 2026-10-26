@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { getEntitlementDb } from "@/lib/db";
 import { englishUiMessages } from "@/lib/ui-dictionary-source";
@@ -19,13 +20,13 @@ async function fixture(page: Page) {
   });
   expect(response.status()).toBe(201);
   const { project } = await response.json() as { project: { id: string; name: string } };
-  return { project, workspaceName };
+  return { project, workspaceName, workspaceId: user.workspaceId };
 }
 
 for (const language of ["zh-CN", "en"] as const) {
   test(`approved overview rows and sticky sections remain usable in ${language}`, async ({ page }) => {
     test.setTimeout(120_000);
-    const { project, workspaceName } = await fixture(page);
+    const { project, workspaceName, workspaceId } = await fixture(page);
     const origin = new URL(page.url()).origin;
     await page.context().addCookies([
       { name: "aipos-language", value: language, url: origin },
@@ -71,14 +72,35 @@ for (const language of ["zh-CN", "en"] as const) {
 
       await page.goto("/dashboard");
       if (width === 390) await page.getByRole("button", { name: t("打开导航"), exact: true }).click();
+      await expect.poll(() => page.locator("#user-shell-navigation").evaluate(element => Math.round(element.getBoundingClientRect().x))).toBe(0);
       const picker = page.getByRole("combobox", { name: t("切换工作空间"), exact: true });
-      await expect(picker).toContainText(workspaceName);
-      await picker.click();
-      await expect(page.getByRole("listbox")).toBeVisible();
-      await picker.press("Escape");
-      await expect(page.getByRole("listbox")).toHaveCount(0);
-      await expect(picker).toBeFocused();
+      const projectPicker = page.getByRole("combobox", { name: t("切换当前项目"), exact: true });
+      await expect(picker).toHaveValue(workspaceId, { timeout: 15_000 });
+      await expect(picker.locator("option:checked")).toHaveText(workspaceName);
+      await expect(picker).toHaveAttribute("title", workspaceName);
+      await expect(projectPicker).toHaveValue(project.id, { timeout: 15_000 });
+      const navigation = page.getByRole("navigation", { name: t("全局入口"), exact: true });
+      for (const control of [picker, projectPicker]) {
+        await control.scrollIntoViewIfNeeded();
+        const before = await navigation.boundingBox();
+        expect(before).not.toBeNull();
+        await control.click();
+        const expanded = await navigation.boundingBox();
+        expect(expanded).toEqual(before);
+        await page.keyboard.press("Escape");
+        await expect(control).toBeFocused();
+        expect(await navigation.boundingBox()).toEqual(before);
+      }
+      const shapes = await Promise.all([picker, projectPicker].map(control => control.evaluate(element => {
+        const parent = element.parentElement!;
+        const style = getComputedStyle(parent);
+        return { height: parent.getBoundingClientRect().height, border: style.border, radius: style.borderRadius, fontSize: getComputedStyle(element).fontSize };
+      })));
+      expect(shapes[0]).toEqual(shapes[1]);
+      const accessibility = await new AxeBuilder({ page }).include("#user-shell-navigation").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      expect(accessibility.violations).toEqual([]);
       await expectR02NoHorizontalOverflow(page, `workspace picker ${language} ${width}px`);
+      await page.screenshot({ path: `evidence/sidebar-select-20261026/sidebar-${language}-${width}.png` });
     }
   });
 }

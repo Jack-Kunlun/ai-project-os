@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppearanceControls } from "./appearance-controls";
 import { HeaderAccount } from "./header-account";
-import { WorkspacePicker,selectWorkspace,useWorkspaceSelection } from "./workspace-scope";
+import { SidebarSelect, WorkspacePicker,selectWorkspace,useWorkspaceSelection } from "./workspace-scope";
 import { BrandMark } from "./brand-mark";
 import { useTranslate, UiText } from "./appearance-provider";
 import { NotificationBell } from "@/components/notification-bell";
@@ -363,23 +363,21 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
         <div className={styles.sectionDivider} />
         <div className={styles.projectHeading}>
           <span className={styles.sectionLabel}>{t("当前项目")}</span>
-          <label className={styles.projectPicker}>
-            <span className={styles.projectDot} aria-hidden="true">{selectedProject?.name.slice(0, 1) ?? "·"}</span>
-            <select
-              id="user-shell-project-picker"
-              value={selectedProject?.id ?? ""}
-              onChange={handleProjectSelect}
-              disabled={projectList.status !== "ready" || accessibleProjects.length === 0}
-              aria-label={t("切换当前项目")}
-              aria-describedby="user-shell-project-status"
-            >
+          <SidebarSelect
+            initial={selectedProject?.name ?? "·"}
+            id="user-shell-project-picker"
+            value={selectedProject?.id ?? ""}
+            onChange={handleProjectSelect}
+            disabled={projectList.status !== "ready" || accessibleProjects.length === 0}
+            aria-label={t("切换当前项目")}
+            aria-describedby="user-shell-project-status"
+            title={selectedProject?.name}
+          >
               <option value="">{t(projectSelectLabel)}</option>
               {(routeProject&&!accessibleProjects.some(p=>p.id===routeProject.id)?[routeProject,...accessibleProjects]:accessibleProjects).map((project) => (
                 <option key={project.id} value={project.id}>{project.name}{project.archived ? t("（已归档）") : ""}</option>
               ))}
-            </select>
-            <ShellIcon className={styles.icon} name="chevron" />
-          </label>
+          </SidebarSelect>
         </div>
         <p id="user-shell-project-status" className={styles.projectStatus} role={projectList.status === "error" ? "status" : undefined}>
           {projectList.status === "loading" ? t("正在读取有权访问的项目。") : projectList.status === "error" ? t("无法读取项目列表，请稍后重试。") : accessibleProjects.length === 0 ? t("当前没有可访问的项目。") : selectedProject ? `当前项目：${selectedProject.name}` : t("选择项目以查看项目入口。")}

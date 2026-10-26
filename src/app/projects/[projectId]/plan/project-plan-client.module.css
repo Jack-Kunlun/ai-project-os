@@ -447,11 +447,13 @@
 .cancelledDetails > summary span,
 .collapsibleSection > summary span { color: var(--app-muted); font-size: 9px; font-weight: 400; }
 .cancelledDetails > .listView { border: 0; border-top: 1px solid var(--app-border); border-radius: 0 0 7px 7px; }
+.collapsibleSection[open] { padding-bottom: 13px; }
 .collapsibleSection > :not(summary) { margin-right: 13px; margin-left: 13px; }
 .detailIntro { color: var(--app-muted); font-size: 9px; line-height: 1.6; }
 
 .objectiveList,
-.recommendations { display: grid; gap: 9px; padding: 0 0 13px; }
+.recommendations { display: grid; gap: 9px; padding: 0; }
+.recommendations { padding-bottom: 13px; }
 
 .objectiveCard,
 .recommendationCard {
@@ -479,7 +481,7 @@
 .recommendationCard button { border: 1px solid var(--app-border); border-radius: 6px; color: var(--app-muted); background: var(--app-surface-soft); font-weight: 620; }
 .recommendationCard button:disabled { opacity: 0.45; }
 
-.auditList { padding: 0 0 10px; }
+.auditList { padding: 0; }
 .auditList > div { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--app-border); padding: 9px 2px; font-size: 8px; }
 .auditList strong { color: var(--app-muted); font-weight: 600; }
 .auditList span { color: var(--app-muted); }

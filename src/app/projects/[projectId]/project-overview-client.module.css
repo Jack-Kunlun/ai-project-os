@@ -531,6 +531,7 @@
   font-weight: 400;
 }
 
+.governanceDetails[open] { padding-bottom: 12px; }
 .governanceDetails > :not(summary) { margin-right: 12px; margin-left: 12px; }
 
 .snapshotFooter {

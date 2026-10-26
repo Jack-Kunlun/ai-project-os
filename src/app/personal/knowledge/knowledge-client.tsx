@@ -1234,13 +1234,13 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
               <p className="max-w-2xl text-sm leading-6 text-slate-500"><UiText text="选择文本、Markdown、JSON、PDF、DOCX 或图片。提取结果会转入编辑弹窗，核对后再保存。" /></p>
               {message?.tone === "error" ? <div role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiFeedbackText text={message.text} /></div> : null}
-              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+              <div className="mt-5 border-t border-slate-100 pt-4">
                 <label className="block text-sm font-semibold text-slate-700"><UiText text="选择文件" />
                   <input type="file" accept=".txt,.md,.json,.pdf,.docx,.png,.jpg,.jpeg,.webp" disabled={importing} onChange={(event) => void importFile(event)} className="mt-2 block w-full text-sm disabled:opacity-50" />
                 </label>
                 {importing ? <p role="status" className="mt-3 text-sm text-indigo-700"><UiText text="正在提取文件内容…" /></p> : null}
               </div>
-              <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4 text-sm text-slate-600">
+              <div className="mt-5 border-t border-slate-100 pt-4 text-sm text-slate-600">
                 <label className="block font-semibold text-slate-700"><UiText text="图片及扫描 PDF 识别模型" />
                   <select value={visionProviderId} disabled={importing || visionProviderLoadState !== "ready"} onChange={(event) => setVisionProviderId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal disabled:bg-slate-100">
                     <option value=""><UiText text="选择视觉模型" /></option>

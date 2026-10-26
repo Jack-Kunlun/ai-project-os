@@ -925,24 +925,24 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
             </div>
           </form>
 
-          <div className="min-w-0 max-w-full rounded-2xl border border-indigo-100 bg-indigo-50/60 p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Selected source"} /></p>
-            <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950"><UiText text={"所选原始资料"} /></h3>
+          <div className="min-w-0 max-w-full">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"><UiText text={"Selected source"} /></p>
+            <h3 className="mt-3 text-xl font-semibold text-slate-900"><UiText text={"所选原始资料"} /></h3>
             <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={"复制下方原文中的连续片段到“精确原文摘录”，服务端会验证它确实来自当前原始资料。"} /></p>
             {selectedSource && "contentText" in selectedSource ? (
-              <div className="mt-5 min-w-0 max-w-full rounded-xl border border-indigo-100 bg-white p-4">
+              <div className="mt-5 min-w-0 max-w-full">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span className="rounded-full bg-indigo-100 px-2.5 py-1 font-semibold uppercase tracking-wide text-indigo-700">{selectedSource.kind}</span>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedSource.kind}</span>
                   <span><UiText text={"接入于："} />{formatSourceDate(selectedSource.ingestedAt, language, translateUi)}</span>
                 </div>
                 <pre className="mt-4 min-w-0 max-w-full max-h-[34rem] overflow-auto whitespace-pre-wrap border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">{selectedSource.contentText}</pre>
               </div>
             ) : selectedSource ? (
-              <div className="mt-5 rounded-xl border border-dashed border-indigo-200 bg-white/70 px-5 py-10 text-center text-sm leading-6 text-slate-500">
+              <div className="mt-5 border-t border-slate-200 py-4 text-sm leading-6 text-slate-500">
                 {isSourceDetailLoading ? <UiText text={"正在加载资料原文…"} /> : <UiText text={"正在准备资料原文…"} />}
               </div>
             ) : (
-              <div className="mt-5 rounded-xl border border-dashed border-indigo-200 bg-white/70 px-5 py-10 text-center text-sm leading-6 text-slate-500">
+              <div className="mt-5 border-t border-slate-200 py-4 text-sm leading-6 text-slate-500">
                 {sources.length === 0 ? <UiText text={"请先在上方添加一条原始资料。"} /> : <UiText text={"请选择一条原始资料查看完整内容。"} />}
               </div>
             )}

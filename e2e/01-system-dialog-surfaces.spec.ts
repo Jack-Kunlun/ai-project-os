@@ -319,6 +319,53 @@ async function attachDialogScreenshot(testInfo: TestInfo, name: string, dialog: 
   await testInfo.attach(name, { body: await dialog.screenshot({ animations: "disabled" }), contentType: "image/png" });
 }
 
+test("project status and configuration drawers render embedded content without page card shells", async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
+  await signInR02Admin(page);
+  await signOutR02User(page);
+  const user = await seedBrowserPersonalUser(`embedded-surface-${randomUUID().slice(0, 8)}`, "EmbeddedSurface2026Password!");
+  await signInR02PersonalUser(page, user);
+  const projectId = await createProject(page, user.workspaceId, randomUUID().slice(0, 8));
+  const attemptedWrites = await blockApiWrites(page);
+
+  for (const mode of APPEARANCE_MODES) {
+    await setAppearance(page, mode);
+    await page.goto(`/projects/${projectId}/governance`);
+    await page.getByRole("button", { name: text(mode, "状态与审计 →"), exact: true }).click();
+    const status = await expectSingleDialog(page, text(mode, "项目状态与审计"));
+    const metrics = status.getByRole("region", { name: text(mode, "项目状态指标"), exact: true }).locator(":scope > article");
+    await expect(metrics).toHaveCount(6);
+    for (const metric of await metrics.all()) {
+      await expect(metric).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(metric).toHaveCSS("padding", "0px");
+      await expect(metric).toHaveCSS("border-radius", "0px");
+      await expect(metric).toHaveCSS("border-width", "0px");
+    }
+    await expectR02NoHorizontalOverflow(page, `embedded status ${mode.width}px`);
+    await attachDialogScreenshot(testInfo, `embedded-status-${mode.width}-${mode.language}-${mode.theme}`, status);
+    await status.locator("[data-operation-header] [data-dialog-close]").click();
+
+    await page.getByRole("button", { name: text(mode, "项目设置"), exact: true }).click();
+    const settings = await expectSingleDialog(page, text(mode, "项目设置"));
+    for (const title of ["项目管理", "模型路由", "代码仓库", "MCP 连接委托", "MCP 工具授权"]) {
+      const heading = settings.getByRole("heading", { name: text(mode, title), exact: true });
+      await expect(heading).toHaveCount(1);
+      const geometry = await heading.evaluate(element => {
+        const section = element.closest("section")!;
+        const style = getComputedStyle(section);
+        return { background: style.backgroundColor, radius: style.borderRadius, paddingLeft: style.paddingLeft, paddingRight: style.paddingRight, borderLeft: style.borderLeftWidth, borderRight: style.borderRightWidth };
+      });
+      expect(geometry, `${title} uses the drawer's existing surface`).toEqual({ background: "rgba(0, 0, 0, 0)", radius: "0px", paddingLeft: "0px", paddingRight: "0px", borderLeft: "0px", borderRight: "0px" });
+    }
+    const body = settings.locator("[data-operation-content]");
+    expect(await body.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    await expectR02NoHorizontalOverflow(page, `embedded configuration ${mode.width}px`);
+    await attachDialogScreenshot(testInfo, `embedded-configuration-${mode.width}-${mode.language}-${mode.theme}`, settings);
+    await settings.locator("[data-operation-header] [data-dialog-close]").click();
+  }
+  expect(attemptedWrites, "inspecting embedded state and configuration must not perform an action").toEqual([]);
+});
+
 test("manual and automatic repository proposal dialogs fit and retain drafts in both appearance modes", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   await signInR02Admin(page);

@@ -356,10 +356,10 @@ export function PersonalOverviewClient(): React.JSX.Element {
         {state.loading ? <div className="mt-6 grid gap-4 md:grid-cols-2"><div className="h-36 animate-pulse rounded-2xl bg-slate-100" /><div className="h-36 animate-pulse rounded-2xl bg-slate-100" /></div> : state.projects.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700"><UiText text={"当前没有可访问的进行中项目"} /></p><p className="mt-2 text-xs text-slate-500"><UiText text={"个人知识库和个人连接仍可独立使用；获得项目权限后会显示在这里。"} /></p></div> : <div className="mt-6 grid gap-4 md:grid-cols-2">{state.projects.map((project) => <ProjectCard key={project.id} project={project} />)}</div>}
       </section>
 
-      <section className="mt-7 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 text-sm leading-7 text-indigo-950 sm:p-7">
-        <h2 className="text-lg font-semibold"><UiText text={"生效顺序"} /></h2>
+      <section className="mt-7 border-t border-slate-200 pt-5 text-sm leading-7 text-slate-600">
+        <h2 className="text-lg font-semibold text-slate-900"><UiText text={"生效顺序"} /></h2>
         <p className="mt-2"><UiText text={"我的空间保存个人资源所有权；项目配置保存该项目的委托、选择和限制。进入项目执行任务时，以项目当前有效配置为准，不会因为个人连接存在就自动启用。"} /></p>
-        <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-full bg-white px-3 py-1.5 text-indigo-800"><UiText text={"Git 已关联项目"} />{" "}{countLabel(state.gitProjectCount)}</span><span className="rounded-full bg-white px-3 py-1.5 text-indigo-800"><UiText text={"MCP 已关联项目"} />{" "}{countLabel(state.mcpProjectCount)}</span></div>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs font-medium text-slate-500"><span><UiText text={"Git 已关联项目"} />{" "}{countLabel(state.gitProjectCount)}</span><span><UiText text={"MCP 已关联项目"} />{" "}{countLabel(state.mcpProjectCount)}</span></div>
       </section>
     </div>
   );

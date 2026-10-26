@@ -282,17 +282,15 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
     }
   }
 
-  return <form onSubmit={submit} className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5 sm:p-6" aria-labelledby="mcp-review-form-title">
+  return <form onSubmit={submit} aria-label={t("记录管理员审核")}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Review decision</p>
-        <h3 id="mcp-review-form-title" className="mt-2 text-lg font-semibold text-slate-950"><UiText text={"记录管理员审核"} /></h3>
-        <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-600"><UiText text={"服务端会再次核对候选快照、账号版本和 V2 不变量。本表单不会接收或读取个人连接材料。"} /></p>
+        <p className="max-w-2xl text-xs leading-5 text-slate-600"><UiText text={"服务端会再次核对候选快照、账号版本和 V2 不变量。本表单不会接收或读取个人连接材料。"} /></p>
       </div>
       <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600"><UiText text={"当前工具："} />{candidate.tool.name}</span>
     </div>
 
-    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+    <div className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
       <label className="text-xs font-semibold text-slate-700"><UiText text={"审核结论"} /><select value={conclusion} onChange={(event) => changeConclusion(event.target.value as ReviewConclusion)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-normal text-slate-900 focus:border-indigo-400 focus:outline-2 focus:outline-indigo-100" disabled={pending}>
           {(Object.keys(conclusionLabels) as ReviewConclusion[]).map((value) => <option key={value} value={value}>{t(conclusionLabels[value])}</option>)}
         </select>
@@ -309,7 +307,7 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
       </label>
     </div>
 
-    <label className="mt-5 flex items-start gap-3 rounded-2xl border border-indigo-100 bg-white px-4 py-3 text-xs leading-5 text-slate-700">
+    <label className="mt-5 flex items-start gap-3 border-t border-slate-100 pt-4 text-xs leading-5 text-slate-700">
       <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 accent-indigo-600" disabled={pending} />
       <span><UiText text={"我确认审核内容只针对当前净化快照；提交只记录安全证据，不会触发远端操作。"} /></span>
     </label>
@@ -384,7 +382,7 @@ export function McpReviewWorkbench() {
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader title="MCP 工具安全审核" description="审核已经净化的工具快照；审核记录只表达受控结论，不开放远端工具操作。" meta="安全审核工作台" />
     {selectedId === "" ? <><div className="mt-4 grid gap-3 sm:grid-cols-2">
-      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-indigo-950"><UiText text={"远端 Schema 与 annotations 属于不可信远端声明，仅供人工审核，不能替代平台安全判断。"} /></div>
+      <div className="text-xs leading-5 text-amber-800"><UiText text={"远端 Schema 与 annotations 属于不可信远端声明，仅供人工审核，不能替代平台安全判断。"} /></div>
       <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></div>
     </div>
 

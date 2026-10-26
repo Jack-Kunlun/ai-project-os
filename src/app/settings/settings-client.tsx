@@ -217,7 +217,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
     <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
         <AdminPageHeader title="模型与能力" description="先查看当前已配置连接；新增供应商时填写官方固定端点的模型与密钥配置。连接测试会单独消耗探测预算。" actions={canManageProviders ? <button ref={createTriggerRef} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"新增供应商"} /></button> : undefined} />
 
-        {!canManageProviders ? <section className="mt-7 rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><h2 className="text-xl font-semibold"><UiText text={"平台模型由系统管理员管理"} /></h2><p className="mt-3 text-sm leading-7 text-slate-600"><UiText text={"普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。"} />{activeMembership ? t("当前会员有效，你可以在“我的空间”配置自己的模型连接。") : membershipStatus === "expired" ? t("会员资格已到期；重新获得资格后才可配置个人模型。") : membershipStatus === "revoked" ? t("会员资格已撤销；重新获得资格后才可配置个人模型。") : t("如需配置个人模型，请先完成会员申请。")}</p>{activeMembership ? <a href="/personal/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"><UiText text={"配置个人模型"} /></a> : null}</section> : null}
+        {!canManageProviders ? <section className="mt-7 border-t border-slate-200 pt-6"><h2 className="text-xl font-semibold"><UiText text={"平台模型由系统管理员管理"} /></h2><p className="mt-3 text-sm leading-7 text-slate-600"><UiText text={"普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。"} />{activeMembership ? t("当前会员有效，你可以在“我的空间”配置自己的模型连接。") : membershipStatus === "expired" ? t("会员资格已到期；重新获得资格后才可配置个人模型。") : membershipStatus === "revoked" ? t("会员资格已撤销；重新获得资格后才可配置个人模型。") : t("如需配置个人模型，请先完成会员申请。")}</p>{activeMembership ? <a href="/personal/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"><UiText text={"配置个人模型"} /></a> : null}</section> : null}
         {canManageProviders && error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
 
         {canManageProviders ? <section className="mt-5 space-y-4">
@@ -244,7 +244,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
 
         {canManageProviders ? <PlatformOperationCards providers={providers} /> : null}
 
-        {adminMode ? <section className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5" aria-labelledby="platform-probe-budget-summary-title">
+        {adminMode ? <section className="mt-6 border-t border-slate-200 pt-5" aria-labelledby="platform-probe-budget-summary-title">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 id="platform-probe-budget-summary-title" className="text-base font-semibold text-slate-950"><UiText text={"连接测试额度"} /></h2>
@@ -252,7 +252,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
             </div>
             <a href="/admin/operations/probes" className="shrink-0 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50"><UiText text={"更新测试额度"} /></a>
           </div>
-          {probeBudgetLoading ? <p className="mt-4 text-xs text-slate-500"><UiText text={"读取当前测试额度…"} /></p> : probeBudget ? <dl className="mt-4 grid gap-3 rounded-xl bg-white/80 p-4 text-xs sm:grid-cols-4"><div><dt className="text-slate-400"><UiText text={"可用单位"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.availableUnits} / {probeBudget.unitLimit}</dd></div><div><dt className="text-slate-400"><UiText text={"已结算 / 待核对"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.settledUnits} / {probeBudget.heldUnits}</dd></div><div><dt className="text-slate-400"><UiText text={"预算版本"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.version} · {t(probeBudget.status === "active" ? "已启用" : probeBudget.status === "scheduled" ? "待生效" : "已过期")}</dd></div><div><dt className="text-slate-400"><UiText text={"有效期"} /></dt><dd className="mt-1 font-semibold text-slate-800">{dateLabel(probeBudget.startsAt, language, t)} — {dateLabel(probeBudget.expiresAt, language, t)}</dd></div></dl> : <p className="mt-4 rounded-xl bg-white/80 px-4 py-3 text-xs text-amber-800"><UiText text={"尚未启用连接测试额度；配置后才能验证供应商连接。"} /></p>}
+          {probeBudgetLoading ? <p className="mt-4 text-xs text-slate-500"><UiText text={"读取当前测试额度…"} /></p> : probeBudget ? <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-xs sm:grid-cols-4"><div><dt className="text-slate-400"><UiText text={"可用单位"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.availableUnits} / {probeBudget.unitLimit}</dd></div><div><dt className="text-slate-400"><UiText text={"已结算 / 待核对"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.settledUnits} / {probeBudget.heldUnits}</dd></div><div><dt className="text-slate-400"><UiText text={"预算版本"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.version} · {t(probeBudget.status === "active" ? "已启用" : probeBudget.status === "scheduled" ? "待生效" : "已过期")}</dd></div><div><dt className="text-slate-400"><UiText text={"有效期"} /></dt><dd className="mt-1 font-semibold text-slate-800">{dateLabel(probeBudget.startsAt, language, t)} — {dateLabel(probeBudget.expiresAt, language, t)}</dd></div></dl> : <p className="mt-4 text-xs text-amber-800"><UiText text={"尚未启用连接测试额度；配置后才能验证供应商连接。"} /></p>}
         </section> : null}
 
         {canManageProviders && createOpen ? <ProviderCreateDialog open catalog={catalog} onCreated={handleProviderCreated} onClose={() => setCreateOpen(false)} restoreFocusRef={createTriggerRef} /> : null}
@@ -490,8 +490,7 @@ function ProviderCreateDialog({
     <div ref={dialogRef} data-operation-surface="modal" role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className={`relative z-10 flex max-h-[min(44rem,calc(100dvh-1.5rem))] w-full max-w-6xl flex-col overflow-hidden rounded-2xl sm:max-h-[min(44rem,calc(100dvh-3rem))] ${modalSurfaceClassName}`}>
       <header data-operation-header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-5 py-4 sm:px-6`}>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"新增供应商"} /></p>
-          <h2 id="provider-create-dialog-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text={"新增供应商"} /></h2>
+          <h2 id="provider-create-dialog-title" className="text-lg font-semibold text-slate-950"><UiText text={"新增供应商"} /></h2>
           <p id="provider-create-dialog-description" className="mt-2 text-xs leading-5 text-slate-600"><UiText text={"使用官方固定端点先测试未保存凭据，测试成功后才能保存为已验证连接。"} /></p>
         </div>
         <button ref={closeRef} type="button" aria-label={t("关闭新增供应商")} onClick={close} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>

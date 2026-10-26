@@ -87,7 +87,7 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
       <div><p className="text-xs font-semibold text-slate-400">{t("活动会话")}</p><p className="mt-2 font-semibold">{profile ? profile.activeSessionCount.toLocaleString(language) : t("读取中…")}</p></div>
       <div><p className="text-xs font-semibold text-slate-400">{t("最近活动")}</p><p className="mt-2 text-sm font-semibold">{profile ? dateTime(profile.lastSeenAt, language, t) : t("读取中…")}</p></div>
     </section>
-    {message && openOperation === null ? <p role="status" className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"><UiFeedbackText text={message} /></p> : null}
+    {message && openOperation === null ? <p role="status" className="mt-5 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}
     <div className="mt-6 grid gap-6 lg:grid-cols-2">
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold">{t("基本资料")}</h2>

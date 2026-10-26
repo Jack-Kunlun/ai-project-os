@@ -229,17 +229,17 @@ export function AdminOverviewClient() {
       </div>
     </section>
 
-    <section className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 shadow-sm sm:p-7" aria-labelledby="default-route-title">
+    <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="default-route-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700"><UiText text={"平台默认路由"} /></p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"平台默认路由"} /></p>
           <h2 id="default-route-title" className="mt-2 text-xl font-semibold text-slate-950"><UiText text={"默认模型路由"} /></h2>
           <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"控制面状态来自 active 路由、平台供应商归属、验证版本和能力匹配检查。当前数据没有真实调用凭证，因此每项都单独标记为“真实调用证据未取得”。"} /></p>
         </div>
         <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${overview?.defaultRoutes.controlPlane === "ready" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{loading ? t("读取中…") : routeReady === null || routeReady === undefined || overview === null ? t("未取得路由证据") : `${routeReady}/${overview.defaultRoutes.total} ${t("项控制面就绪")}`}</span>
       </div>
       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-2xl border border-dashed border-indigo-200 bg-white/70 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? t("正在读取默认路由状态…") : t("未取得默认路由证据。")}</div>}
+        {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? t("正在读取默认路由状态…") : t("未取得默认路由证据。")}</div>}
       </div>
     </section>
 

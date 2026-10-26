@@ -490,10 +490,6 @@
 
 .workDetail {
   margin-bottom: 16px;
-  border: 1px solid var(--app-border);
-  border-radius: 6px;
-  padding: 15px;
-  background: var(--app-surface-soft);
 }
 
 .detailBadges { flex-wrap: wrap; gap: 7px; }
@@ -517,7 +513,7 @@
 .detailActions button { border: 1px solid var(--app-border); border-radius: 6px; color: var(--app-muted); background: var(--app-surface); font-weight: 620; }
 .detailActions button:disabled { opacity: 0.45; }
 
-.form { display: grid; max-width: 850px; gap: 13px; border: 1px solid var(--app-border); border-radius: 8px; padding: 17px; background: var(--app-surface); }
+.form { display: grid; max-width: 850px; gap: 13px; }
 .form label { display: grid; gap: 6px; color: var(--app-muted); font-size: 9px; font-weight: 600; }
 .form input,
 .form textarea,

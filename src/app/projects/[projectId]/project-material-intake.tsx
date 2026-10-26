@@ -249,10 +249,10 @@ export function ProjectMaterialIntake({
       </div>
 
       {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700"><UiErrorText text={error} /></p> : null}
-      {message ? <p role="status" aria-live="polite" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800"><UiFeedbackText text={message} /></p> : null}
+      {message ? <p role="status" aria-live="polite" className="mt-5 border-t border-slate-200 pt-4 text-sm leading-6 text-slate-700"><UiFeedbackText text={message} /></p> : null}
 
       <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-2">
-        <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-slate-900">
+        <form id="manual-text" onSubmit={saveText} className="min-w-0 text-slate-900">
           <h3 className="text-sm font-semibold text-slate-950"><UiText text={"手工文本"} /></h3>
           <p className="mt-1 text-xs leading-5 text-slate-600"><UiText text={"粘贴会议记录、进展或其他项目原文。"} /></p>
           <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder={translateUi("直接输入或粘贴项目资料…")} className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" />
@@ -264,7 +264,7 @@ export function ProjectMaterialIntake({
           <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? <UiText text={"保存中…"} /> : <UiText text={"加入原始资料"} />}</button>
         </form>
 
-        <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold text-slate-950"><UiText text={"图片、文档或文件夹"} /></h3>
           <p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"支持常用文本、Office、PDF 与图片格式；图片识别需经本次确认。"} /></p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -286,7 +286,7 @@ export function ProjectMaterialIntake({
       </div>
 
       {savedAssetCount > 0 && factSourceIds.length === 0 ? <div role="status" className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"><p><UiText text={"文件已保存，暂未有可整理的文字。下一步查看解析进度；图片和扫描件需先确认识别并核对文字。"} /></p><Link href={`/projects/${projectId}/assets`} className="mt-2 inline-flex min-h-11 items-center font-semibold underline"><UiText text={"继续解析或核对识别文字 →"} /></Link></div> : null}
-      <ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={onChanged} />
+      <div className={factSourceIds.length > 0 ? "mt-5" : undefined}><ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={onChanged} /></div>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Link href={`/projects/${projectId}/external-sources`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-800"><UiText text={"添加网页资料"} /></Link>

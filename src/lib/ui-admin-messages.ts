@@ -393,6 +393,7 @@ export const englishAdminMessages: Readonly<Record<string, string>> = {
   "企业短信 SendSms。": "Business SMS via SendSms.",
   "会员列表加载失败": "Could not load memberships",
   "会员变更失败": "Membership change failed",
+  "会员变更预览": "Membership change preview",
   "会员变更预览失败": "Could not preview the membership change",
   "会员影响预览失败": "Could not preview membership impact",
   "会员撤销预览失败": "Could not preview membership revocation",

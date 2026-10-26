@@ -188,9 +188,9 @@ export function SystemOperationsClient({
 
         <RecoveryDrillPanel drill={snapshot.recoveryDrill} sourceStatus={snapshot.recoveryDrillSourceStatus} language={language} t={t} timeZone={timeZone} />
 
-        <section className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/70 px-6 py-5 text-sm leading-6 text-indigo-950">
-          <h2 className="font-semibold"><UiText text={"只读安全边界"} /></h2>
-          <p className="mt-1 text-indigo-800"><UiText text={"备份服务只向专用目录原子写入状态、时间、对象路径、大小、校验摘要和安全错误码；应用仅以只读挂载读取该目录。任何控制操作仍必须在服务器受限流程中执行。"} /></p>
+        <section className="mt-6 border-t border-slate-200 pt-5 text-sm leading-6 text-slate-600">
+          <h2 className="font-semibold text-slate-800"><UiText text={"只读安全边界"} /></h2>
+          <p className="mt-1"><UiText text={"备份服务只向专用目录原子写入状态、时间、对象路径、大小、校验摘要和安全错误码；应用仅以只读挂载读取该目录。任何控制操作仍必须在服务器受限流程中执行。"} /></p>
         </section>
       </div>
     </OperationsFrame>

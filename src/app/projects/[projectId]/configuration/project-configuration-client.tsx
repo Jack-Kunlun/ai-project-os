@@ -510,6 +510,7 @@ function SnapshotPanel({
   state,
   managementHref,
   managementLabel,
+  embedded = false,
   children,
 }: Readonly<{
   eyebrow: string;
@@ -518,14 +519,15 @@ function SnapshotPanel({
   state: SnapshotState<unknown>;
   managementHref: string;
   managementLabel: string;
+  embedded?: boolean;
   children: ReactNode;
 }>): React.JSX.Element {
   return (
-    <section className="flex h-full min-w-0 flex-col rounded-md border border-slate-200/80 bg-white p-5  sm:p-6">
+    <section className={embedded ? "flex min-w-0 flex-col border-t border-slate-200 pt-5" : "flex h-full min-w-0 flex-col rounded-md border border-slate-200/80 bg-white p-5 sm:p-6"}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="sr-only">{eyebrow}</p>
-          <h2 className="mt-2 text-base font-semibold">{title}</h2>
+          <h2 className={embedded ? "text-base font-semibold" : "mt-2 text-base font-semibold"}>{title}</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500"><UiText text={description} /></p>
         </div>
         <button type="button" onClick={state.refresh} disabled={state.loading} className="min-h-10 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
@@ -584,7 +586,7 @@ function McpGrantsView({ snapshot }: { snapshot: McpSnapshot }): React.JSX.Eleme
 
 type ProjectManagementProject = ProjectConfigurationClientProps["project"];
 
-function ProjectManagement({ project, onChanged }: { project: ProjectManagementProject; onChanged: (action: LifecycleAction) => void }): React.JSX.Element {
+function ProjectManagement({ project, onChanged, embedded = false }: { project: ProjectManagementProject; onChanged: (action: LifecycleAction) => void; embedded?: boolean }): React.JSX.Element {
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [lifecycle, setLifecycle] = useState<LifecycleAction | null>(null);
@@ -619,11 +621,11 @@ function ProjectManagement({ project, onChanged }: { project: ProjectManagementP
   }
 
   return (
-    <section className="mt-7 rounded-md border border-indigo-100 bg-white p-5  sm:p-6">
+    <section className={embedded ? "mt-5 border-b border-slate-200 pb-5" : "mt-7 rounded-md border border-indigo-100 bg-white p-5 sm:p-6"}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Project management"} /></p>
-          <h2 className="mt-2 text-base font-semibold"><UiText text={"项目管理"} /></h2>
+          {!embedded ? <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Project management"} /></p> : null}
+          <h2 className={embedded ? "text-base font-semibold" : "mt-2 text-base font-semibold"}><UiText text={"项目管理"} /></h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500"><UiText text={"导出和项目生命周期操作集中在这里，项目卡片保持单一入口。导出会记录审计信息；归档、恢复和删除仍会要求确认。"} /></p>
         </div>
         <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700"><UiText text={"仅项目 Owner 可操作"} /></span>
@@ -717,7 +719,7 @@ export function ProjectConfigurationClient({ username, projectId, isSystemAdmin,
         </div></div> : <h3 className="text-base font-semibold">{project.name}</h3>}
         {!embedded ? <p className={`${ui.muted} mb-5`}><UiText text="四个分区独立读取；更新时间可能不同，所有实际操作仍由原接口在提交前重新校验。" /></p> : null}
 
-        {project.canManage ? <ProjectManagement project={project} onChanged={(action) => {
+        {project.canManage ? <ProjectManagement embedded={embedded} project={project} onChanged={(action) => {
           if (action === "delete") {
             router.push("/projects");
             return;
@@ -725,17 +727,17 @@ export function ProjectConfigurationClient({ username, projectId, isSystemAdmin,
           router.refresh();
         }} /> : null}
 
-        <div className="mt-7 grid gap-6 xl:grid-cols-2">
-          <SnapshotPanel eyebrow="Model routing" title={translateUi("模型路由")} description="显示 operation、当前选择来源、版本、能力标签与费用承担摘要，不展示个人连接名称或凭据。" state={ai} managementHref={buildProjectHref(projectId, "control")} managementLabel="前往项目 AI 工作台">
+        <div className={embedded ? "mt-7 space-y-6" : "mt-7 grid gap-6 xl:grid-cols-2"}>
+          <SnapshotPanel embedded={embedded} eyebrow="Model routing" title={translateUi("模型路由")} description="显示 operation、当前选择来源、版本、能力标签与费用承担摘要，不展示个人连接名称或凭据。" state={ai} managementHref={buildProjectHref(projectId, "control")} managementLabel="前往项目 AI 工作台">
             <AiSnapshotView snapshot={ai.data as AiSnapshot} />
           </SnapshotPanel>
-          <SnapshotPanel eyebrow="Project code repository" title={translateUi("代码仓库")} description="管理本项目的 Git 连接选择、仓库读取范围与授权状态；个人凭据仍由连接所有者管理。" state={git} managementHref={buildProjectHref(projectId, "repositories")} managementLabel="管理代码仓库">
+          <SnapshotPanel embedded={embedded} eyebrow="Project code repository" title={translateUi("代码仓库")} description="管理本项目的 Git 连接选择、仓库读取范围与授权状态；个人凭据仍由连接所有者管理。" state={git} managementHref={buildProjectHref(projectId, "repositories")} managementLabel="管理代码仓库">
             <GitSnapshotView snapshot={git.data as GitSnapshot} />
           </SnapshotPanel>
-          <SnapshotPanel eyebrow="MCP delegation" title={translateUi("MCP 连接委托")} description="显示连接委托的 effective 状态、原因和到期时间；远端工具动作仍保持冻结。" state={mcp} managementHref={buildProjectHref(projectId, "tools")} managementLabel="前往 MCP 工具管理">
+          <SnapshotPanel embedded={embedded} eyebrow="MCP delegation" title={translateUi("MCP 连接委托")} description="显示连接委托的 effective 状态、原因和到期时间；远端工具动作仍保持冻结。" state={mcp} managementHref={buildProjectHref(projectId, "tools")} managementLabel="前往 MCP 工具管理">
             <McpConnectionsView snapshot={mcp.data as McpSnapshot} />
           </SnapshotPanel>
-          <SnapshotPanel eyebrow="MCP tool grants" title={translateUi("MCP 工具授权")} description="显示工具授权的 effective、reviewRequired 和委托状态摘要，不提供远端动作入口。" state={mcpGrants} managementHref={buildProjectHref(projectId, "tools")} managementLabel="前往 MCP 工具管理">
+          <SnapshotPanel embedded={embedded} eyebrow="MCP tool grants" title={translateUi("MCP 工具授权")} description="显示工具授权的 effective、reviewRequired 和委托状态摘要，不提供远端动作入口。" state={mcpGrants} managementHref={buildProjectHref(projectId, "tools")} managementLabel="前往 MCP 工具管理">
             <McpGrantsView snapshot={mcpGrants.data as McpSnapshot} />
           </SnapshotPanel>
         </div>

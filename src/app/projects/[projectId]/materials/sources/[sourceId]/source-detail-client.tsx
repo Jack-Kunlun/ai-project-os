@@ -103,7 +103,7 @@ export function ProjectSourceDetailClient({ username, isSystemAdmin }: { usernam
               </dl>
               <div className="mt-4 border-t border-slate-100 pt-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"SHA-256"} /></p><code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code></div>
             </section>
-            <section aria-label={translateUi("资料下一步")} className="rounded-md border border-indigo-100 bg-indigo-50/50 p-5">
+            <section aria-label={translateUi("资料下一步")} className="border-t border-slate-200 pt-5">
               <h2 className="text-sm font-semibold"><UiText text={"资料已保存，接下来做什么？"} /></h2>
               <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={"可直接整理这份资料；有原文依据且符合条件的内容形成事实，其余结果待核对。想查资料时，再单独确认更新问答索引。"} /></p>
               <div className="mt-4 flex flex-wrap items-center gap-3">

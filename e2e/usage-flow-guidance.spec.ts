@@ -269,15 +269,80 @@ test("personal knowledge hands off explicitly into project materials and guided 
   await expectR02NoHorizontalOverflow(page, "project source detail 390px");
   await expectR02NoAccessibilityViolations(page, "project source detail 390px");
 
-  await page.getByRole("button", { name: "继续 AI 整理", exact: true }).click();
-  const sourceOrganizer = page.getByRole("dialog", { name: "整理这份资料", exact: true });
-  await expect(sourceOrganizer).toBeVisible();
-  await expect(sourceOrganizer.getByRole("button", { name: "确认发送并加入队列", exact: true })).toBeVisible();
-  await expect.poll(() => extractCalls.filter((call) => call.phase === "prepare").length).toBe(2);
-  expect(extractCalls.filter((call) => call.phase === "prepare")[1]?.sourceIds).toEqual([sourceId]);
-  expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(executeCountBeforeDetail);
-  await expectR02NoHorizontalOverflow(page, "source organize dialog 390px");
-  await expectR02NoAccessibilityViolations(page, "source organize dialog 390px");
+  for (const appearance of [
+    { width: 1440, language: "zh-CN", theme: "light", title: "整理这份资料", trigger: "继续 AI 整理", submit: "确认发送并加入队列" },
+    { width: 390, language: "en", theme: "dark", title: "Organize this source", trigger: "Continue AI extraction", submit: "Confirm submission and queue" },
+  ] as const) {
+    const origin = new URL(page.url()).origin;
+    await page.context().addCookies([
+      { name: "aipos-language", value: appearance.language, url: origin },
+      { name: "aipos-theme", value: appearance.theme, url: origin },
+    ]);
+    await page.setViewportSize({ width: appearance.width, height: appearance.width === 390 ? 844 : 900 });
+    await page.goto(`/projects/${projectId}/materials/sources/${sourceId}`);
+    await expect(page.locator("html")).toHaveAttribute("lang", appearance.language);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", appearance.theme);
+
+    const nextSteps = page.locator("aside section").filter({ has: page.getByRole("button", { name: appearance.trigger, exact: true }) });
+    await expect(nextSteps).toHaveCount(1);
+    await expect(nextSteps).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(nextSteps).toHaveCSS("border-radius", "0px");
+    await expect(nextSteps).toHaveCSS("padding-left", "0px");
+    await expect(nextSteps).toHaveCSS("padding-right", "0px");
+    await test.info().attach(`source-next-step-${appearance.width}-${appearance.language}-${appearance.theme}`, { body: await nextSteps.screenshot({ animations: "disabled" }), contentType: "image/png" });
+
+    const prepareCount = extractCalls.filter((call) => call.phase === "prepare").length;
+    await page.getByRole("button", { name: appearance.trigger, exact: true }).click();
+    const sourceOrganizer = page.getByRole("dialog", { name: appearance.title, exact: true });
+    await expect(sourceOrganizer).toBeVisible();
+    const panel = sourceOrganizer.locator("[data-operation-content] > section");
+    await expect(panel).toBeVisible();
+    const geometry = await sourceOrganizer.locator("[data-operation-content]").evaluate((body) => {
+      const panelElement = body.firstElementChild;
+      const action = panelElement?.querySelector<HTMLElement>("button");
+      if (!(panelElement instanceof HTMLElement) || !action) throw new Error("SOURCE_ORGANIZER_PANEL_MISSING");
+      const bodyStyle = getComputedStyle(body);
+      const panelStyle = getComputedStyle(panelElement);
+      const bodyRect = body.getBoundingClientRect();
+      const panelRect = panelElement.getBoundingClientRect();
+      const actionRect = action.getBoundingClientRect();
+      return {
+        bodyPadding: [bodyStyle.paddingTop, bodyStyle.paddingRight, bodyStyle.paddingBottom, bodyStyle.paddingLeft],
+        panelPadding: [panelStyle.paddingTop, panelStyle.paddingRight, panelStyle.paddingBottom, panelStyle.paddingLeft],
+        panelMarginTop: panelStyle.marginTop,
+        panelBorderWidths: [panelStyle.borderTopWidth, panelStyle.borderRightWidth, panelStyle.borderBottomWidth, panelStyle.borderLeftWidth],
+        panelRadius: panelStyle.borderRadius,
+        panelBackground: panelStyle.backgroundColor,
+        verticalInset: panelRect.top - bodyRect.top - Number.parseFloat(bodyStyle.paddingTop),
+        actionHeight: actionRect.height,
+        actionRightInset: panelRect.right - actionRect.right,
+        themeTextColor: getComputedStyle(panelElement.querySelector("h3")!).color,
+      };
+    });
+    expect(geometry.bodyPadding, appearance.title).toEqual(["24px", "24px", "24px", "24px"]);
+    expect(geometry.panelPadding, appearance.title).toEqual(["0px", "0px", "0px", "0px"]);
+    expect(geometry.panelMarginTop, appearance.title).toBe("0px");
+    expect(geometry.panelBorderWidths, appearance.title).toEqual(["0px", "0px", "0px", "0px"]);
+    expect(geometry.panelRadius, appearance.title).toBe("0px");
+    expect(geometry.panelBackground, appearance.title).toBe("rgba(0, 0, 0, 0)");
+    // The preserved scroll margin can move the focused panel up by at most 5px inside the padded body.
+    expect(geometry.verticalInset, appearance.title).toBeGreaterThanOrEqual(-5);
+    expect(geometry.verticalInset, appearance.title).toBeLessThanOrEqual(1);
+    expect(geometry.actionHeight, appearance.title).toBeGreaterThanOrEqual(40);
+    expect(geometry.actionRightInset, appearance.title).toBeLessThanOrEqual(1);
+    expect(geometry.themeTextColor, appearance.title).toBe(appearance.theme === "dark" ? "rgb(230, 237, 246)" : "rgb(32, 36, 42)");
+    await expect(sourceOrganizer.getByRole("heading", { name: appearance.title, exact: true })).toHaveCount(1);
+    await expect(sourceOrganizer.getByRole("button", { name: appearance.submit, exact: true })).toBeVisible();
+    await expect.poll(() => extractCalls.filter((call) => call.phase === "prepare").length).toBe(prepareCount + 1);
+    expect(extractCalls.filter((call) => call.phase === "prepare").at(-1)?.sourceIds).toEqual([sourceId]);
+    expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(executeCountBeforeDetail);
+    await expectR02NoHorizontalOverflow(page, `source organize dialog ${appearance.width}px`);
+    await expectR02NoAccessibilityViolations(page, `source organize dialog ${appearance.width}px`);
+    await test.info().attach(`source-organize-${appearance.width}-${appearance.language}-${appearance.theme}`, {
+      body: await sourceOrganizer.screenshot({ animations: "disabled" }),
+      contentType: "image/png",
+    });
+  }
   await page.goto(`/projects/${projectId}/materials?view=ask`);
   await expect(page).toHaveURL(`/ask?scope=project&projectId=${projectId}`);
 });

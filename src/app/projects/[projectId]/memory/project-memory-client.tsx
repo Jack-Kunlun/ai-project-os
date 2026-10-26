@@ -679,7 +679,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
             <button type="button" onClick={selectFirstSources} disabled={pending || sources.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"选中前 10 条"} /></button>
             <button type="button" onClick={invertSources} disabled={pending || sources.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"反选"} /></button>
           </div>
-          <div className="mt-3 min-h-72 min-w-0 max-w-full flex-1 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-2 pr-1 lg:min-h-0" aria-label={translateUi("可选项目资料")}>
+          <div className="mt-3 min-h-72 min-w-0 max-w-full flex-1 space-y-2 overflow-y-auto pr-1 lg:min-h-0" aria-label={translateUi("可选项目资料")}>
             {sources.length === 0 ? <p className="flex h-full min-h-64 items-center justify-center rounded-xl p-4 text-sm text-slate-500"><UiText text={"还没有项目资料。"} /></p> : sources.map((source) => (
               <label key={source.id} className={`flex min-w-0 max-w-full cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 text-xs transition ${selected.includes(source.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
                 <input type="checkbox" checked={selected.includes(source.id)} onChange={() => toggle(source.id)} disabled={pending} className="mt-0.5 shrink-0" />
@@ -703,9 +703,9 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
             <button type="button" onClick={() => void batchReview("accept")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{batchReviewAction === "accept" ? <UiText text={"批量确认中…"} /> : <UiText text={"批量确认"} />}</button>
             <button type="button" onClick={() => void batchReview("dismiss")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-40">{batchReviewAction === "dismiss" ? <UiText text={"批量驳回中…"} /> : <UiText text={"批量驳回"} />}</button>
           </div>
-          <div className="mt-3 min-h-72 max-h-[34rem] min-w-0 max-w-full flex-1 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-3 pr-2 lg:min-h-0" aria-label={translateUi("待处理内容列表")}>
+          <div className="mt-3 min-h-72 max-h-[34rem] min-w-0 max-w-full flex-1 overflow-y-auto pr-2 lg:min-h-0" aria-label={translateUi("待处理内容列表")}>
             {pendingCandidates.length === 0 ? (
-              <p className="flex h-full min-h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500"><UiText text={"暂无待处理内容。"} /></p>
+              <p className="flex h-full min-h-64 items-center justify-center py-6 text-center text-sm text-slate-500"><UiText text={"暂无待处理内容。"} /></p>
             ) : (
               <div className="space-y-3">{pendingCandidates.map((candidate) => (
                 <article key={candidate.id} className={`min-w-0 max-w-full rounded-2xl border bg-white p-5 transition ${activeSelectedCandidates.includes(candidate.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200"}`}>

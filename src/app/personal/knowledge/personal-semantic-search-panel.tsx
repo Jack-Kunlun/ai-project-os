@@ -205,10 +205,10 @@ export function PersonalSemanticSearchPanel({
   const confirmationSummary = confirmation?.safeSummary;
 
   return (
-    <section className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5 shadow-sm sm:p-6" aria-labelledby="personal-semantic-search-title">
+    <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="personal-semantic-search-title">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Semantic search"} /></p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"Semantic search"} /></p>
           <h3 id="personal-semantic-search-title" className="mt-2 text-lg font-semibold text-slate-900"><UiText text={"搜索我的知识库"} /></h3>
           <p className="mt-1 text-xs leading-5 text-slate-600"><UiText text={"只检索当前个人知识版本。发送前会列出完整文档范围、片段数量和向量模型，并需要你单独确认。"} /></p>
           {onManageIndex ? <button type="button" onClick={onManageIndex} className="mt-2 min-h-9 text-left text-xs font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-900"><UiText text={"第一次使用或索引失效？先去检查索引"} /></button> : null}

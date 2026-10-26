@@ -10,6 +10,10 @@ import {
 } from "@/lib/db";
 import { GIT_REPOSITORY_SCAN_POLICY } from "@/lib/git/scan-policy";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
+import {
+  GIT_PUBLICATION_TRANSACTION_OPTIONS,
+  type GitPublicationTransactionOptions,
+} from "@/lib/project-git-publication-transaction";
 
 const DUE_CANDIDATE_BATCH_SIZE = 50;
 const EXPIRED_LEASE_BATCH_SIZE = 50;
@@ -141,11 +145,16 @@ function parseMutation(value: unknown): ProjectGitAutomationLeaseMutationResult 
   });
 }
 
-async function serializable<T>(db: LedgerDb, operation: (tx: LedgerTx) => Promise<T>): Promise<T> {
+async function serializable<T>(
+  db: LedgerDb,
+  operation: (tx: LedgerTx) => Promise<T>,
+  publicationOptions?: GitPublicationTransactionOptions,
+): Promise<T> {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       return await db.$transaction(operation, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        ...publicationOptions,
       });
     } catch (error) {
       if (!isSerializationConflict(error)) throw error;
@@ -361,6 +370,6 @@ export async function finalizeProjectGitAutomationRunResult(
         ${commitSha.data}::varchar, ${outcome.data}::varchar, ${JSON.stringify(files)}::jsonb
       ) AS "result"
     `);
-  });
+  }, GIT_PUBLICATION_TRANSACTION_OPTIONS);
   return parsePublicationResult(rows[0]?.result ?? null);
 }

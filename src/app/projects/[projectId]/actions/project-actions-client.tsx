@@ -225,7 +225,7 @@ function ProjectActionsContent({ username, projectId, isSystemAdmin, confirm, em
   const capabilitiesPanel = (
 <OperationPanel title="可执行能力" triggerLabel="新建动作" disabled={!center || center.archived}>
         <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"Capability registry"} /></p><h2 className="mt-2 text-base font-semibold"><UiText text={"可执行能力"} /></h2><p className="mt-2 text-sm text-slate-500"><UiText text={"本版仅开放现有只读外部同步和本地治理能力，不包含代码写入、Shell、合并或部署。"} /></p></div>
+          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"Capability registry"} /></p><p className="mt-2 text-sm text-slate-500"><UiText text={"本版仅开放现有只读外部同步和本地治理能力，不包含代码写入、Shell、合并或部署。"} /></p></div>
           {center?.canManagePolicies ? <OperationPanel title={translateUi("管理项目动作策略")} triggerLabel="管理策略" disabled={center.archived} description="策略只影响之后创建的新动作。外部只读能力改为自动执行时仍会要求再次确认。">
             {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
             <div className="grid gap-4 lg:grid-cols-2">

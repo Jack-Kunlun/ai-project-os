@@ -117,11 +117,11 @@ function MemberRoleEditor({ member, disabled, error, onSave }: { member: Member;
   const [role, setRole] = useState<"editor" | "viewer" | "">(member.projectRole === "editor" || member.projectRole === "viewer" ? member.projectRole : "");
   const [open, setOpen] = useState(false);
   return <OperationPanel title={`编辑 @${member.username} 的项目权限`} triggerLabel="编辑权限" open={open} onOpenChange={setOpen} disabled={disabled} description="只修改当前项目的显式授权，变更原因和操作人会写入审计记录。">
-    <div className="max-w-xl rounded-md border border-slate-200 bg-white p-5">
+    <div>
       <label className="block text-sm font-semibold text-slate-700"><UiText text={"项目权限"} /><select value={role} onChange={(event) => setRole(event.target.value as typeof role)} disabled={disabled} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal"><option value=""><UiText text={"不单独授权"} /></option>{member.canGrant || member.projectRole === "viewer" ? <option value="viewer" disabled={!member.canGrant}><UiText text={"Viewer · 查看"} /></option> : null}{member.canGrant || member.projectRole === "editor" ? <option value="editor" disabled={!member.canGrant}><UiText text={"Editor · 编辑"} /></option> : null}</select></label>
       {!member.canGrant ? <p className="mt-3 text-xs text-amber-700"><UiText text={"该成员已离开团队或账号停用，只能撤销现有项目授权。"} /></p> : null}
       {error ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
-      <button type="button" disabled={disabled || (role || null) === member.projectRole} onClick={async () => { if (await onSave(role || null)) setOpen(false); }} className="mt-4 min-h-10 rounded-xl bg-indigo-600 px-4 text-xs font-semibold text-white disabled:opacity-50"><UiText text={"保存权限"} /></button>
+      <div className="mt-4 flex justify-end"><button type="button" disabled={disabled || (role || null) === member.projectRole} onClick={async () => { if (await onSave(role || null)) setOpen(false); }} className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white disabled:opacity-50"><UiText text={"保存权限"} /></button></div>
     </div>
   </OperationPanel>;
 }

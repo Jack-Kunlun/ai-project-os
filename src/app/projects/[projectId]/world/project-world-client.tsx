@@ -291,21 +291,21 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
         {canEdit ? <section className="mt-10 flex flex-wrap gap-3">
           <OperationPanel title={translateUi("建立事实关系")} triggerLabel="建立事实关系" open={relationOperationOpen} onOpenChange={(open) => { setRelationOperationOpen(open); if (open) setError(null); }} disabled={pending !== null} description="关系只连接已确认的当前事实，并固定双方当前证据版本；事实变化后旧关系会自动标记为陈旧。">
           {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
-          <Workbench title={translateUi("建立事实关系")} eyebrow="Relation workbench" description="关系只连接已确认的当前事实，并固定双方当前证据版本；事实变化后旧关系会自动标记为陈旧。">
+          <Workbench>
             <SelectField label={translateUi("起点事实")} value={sourceItemId} onChange={setSourceItemId} disabled={!canEdit}><option value=""><UiText text={"选择事实"} /></option>{activeFacts.map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <SelectField label={translateUi("关系")} value={relationKind} onChange={(value) => setRelationKind(value as RelationKind)} disabled={!canEdit}>{(Object.keys(relationLabels) as RelationKind[]).map((kind) => <option key={kind} value={kind}>{translateUi(relationLabels[kind])}</option>)}</SelectField>
             <SelectField label={translateUi("终点事实")} value={targetItemId} onChange={setTargetItemId} disabled={!canEdit}><option value=""><UiText text={"选择事实"} /></option>{activeFacts.filter((fact) => fact.id !== sourceItemId).map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <TextField label={translateUi("关系依据")} value={relationRationale} onChange={setRelationRationale} placeholder={translateUi("说明为何建立这条关系，便于后续人工复核。")} disabled={!canEdit} />
-            <button type="button" onClick={async () => { if (await createRelation()) setRelationOperationOpen(false); }} disabled={pending !== null || !sourceItemId || !targetItemId || !relationRationale.trim()} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">{pending === "create-relation" ? <UiText text={"建立中…"} /> : <UiText text={"建立关系"} />}</button>
+            <div className="flex justify-end"><button type="button" onClick={async () => { if (await createRelation()) setRelationOperationOpen(false); }} disabled={pending !== null || !sourceItemId || !targetItemId || !relationRationale.trim()} className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">{pending === "create-relation" ? <UiText text={"建立中…"} /> : <UiText text={"建立关系"} />}</button></div>
           </Workbench>
           </OperationPanel>
           <OperationPanel title={translateUi("建立事实替代链")} triggerLabel="建立事实替代链" open={supersessionOperationOpen} onOpenChange={(open) => { setSupersessionOperationOpen(open); if (open) setError(null); }} disabled={pending !== null} description="选择同类型的新事实替代旧事实。旧事实会成为只读历史；该操作不能撤销或形成循环。">
           {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
-          <Workbench title={translateUi("建立事实替代链")} eyebrow="Supersession workbench" description="选择同类型的新事实替代旧事实。旧事实会成为只读历史；该操作不能撤销或形成循环。">
+          <Workbench>
             <SelectField label={translateUi("被替代的旧事实")} value={predecessorItemId} onChange={(value) => { setPredecessorItemId(value); setSuccessorItemId(""); }} disabled={!canEdit}><option value=""><UiText text={"选择旧事实"} /></option>{activeFacts.map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <SelectField label={translateUi("作为当前版本的新事实")} value={successorItemId} onChange={setSuccessorItemId} disabled={!canEdit || !predecessor}><option value=""><UiText text={"选择同类型新事实"} /></option>{successorOptions.map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <TextField label={translateUi("替代理由")} value={supersessionReason} onChange={setSupersessionReason} placeholder={translateUi("说明变化原因和新事实适用范围。")} disabled={!canEdit} />
-            <button type="button" onClick={async () => { if (await supersede()) setSupersessionOperationOpen(false); }} disabled={pending !== null || !predecessorItemId || !successorItemId || !supersessionReason.trim()} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{pending === "supersede" ? <UiText text={"建立中…"} /> : <UiText text={"确认建立替代链"} />}</button>
+            <div className="flex justify-end"><button type="button" onClick={async () => { if (await supersede()) setSupersessionOperationOpen(false); }} disabled={pending !== null || !predecessorItemId || !successorItemId || !supersessionReason.trim()} className="app-action-button app-action-button--compact rounded-xl bg-slate-950 font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{pending === "supersede" ? <UiText text={"建立中…"} /> : <UiText text={"确认建立替代链"} />}</button></div>
           </Workbench>
           </OperationPanel>
         </section> : null}
@@ -377,8 +377,8 @@ function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, er
   </article>;
 }
 
-function Workbench({ title, eyebrow, description, children }: { title: string; eyebrow: string; description: string; children: React.ReactNode }) {
-  return <section className="rounded-md border border-slate-200 bg-white p-6  sm:p-7"><SectionHeading eyebrow={eyebrow} title={title} detail={description} compact /><div className="mt-6 space-y-4">{children}</div></section>;
+function Workbench({ children }: { children: React.ReactNode }) {
+  return <div className="space-y-4">{children}</div>;
 }
 
 function SelectField({ label, value, onChange, disabled, children }: { label: string; value: string; onChange: (value: string) => void; disabled: boolean; children: React.ReactNode }) {

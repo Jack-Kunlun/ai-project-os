@@ -310,7 +310,7 @@ for (const appearance of APPEARANCE_CASES) {
         const editor = page.locator("[data-connection-dialog]");
         await expect(editor).toBeVisible();
         await expect(editor.getByRole("heading", { level: 2 })).toHaveCount(1);
-        await expect(editor.locator("[data-dialog-body] > section")).toHaveCSS("padding-left", "0px");
+        await expect(editor.locator("[data-dialog-body] > :first-child")).toHaveCSS("padding-left", "0px");
         const action = editor.getByRole("button", { name: tr("测试连接"), exact: true });
         await expect(action).toHaveCSS("background-color", appearance.theme === "dark" ? "rgb(71, 116, 198)" : "rgb(53, 102, 201)");
         if (route.endsWith("/git")) {
@@ -646,7 +646,7 @@ test("Git creation waits for its real provider catalog before accepting a click"
     const dialog = page.getByRole("dialog", { name: "添加 Git 服务", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("heading", { name: "添加 Git 服务", exact: true })).toHaveCount(1);
-    await expect(dialog.locator("[data-dialog-body] > section")).toHaveCSS("padding-left", "0px");
+    await expect(dialog.locator("[data-dialog-body] > :first-child")).toHaveCSS("padding-left", "0px");
     const palette = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--app-accent").trim());
     const expectedColor = await page.evaluate(color => { const element = document.createElement("div"); element.style.color = color; document.body.append(element); const resolved = getComputedStyle(element).color; element.remove(); return resolved; }, palette);
     await expect(dialog.getByRole("button", { name: "测试连接", exact: true })).toHaveCSS("background-color", expectedColor);

@@ -224,7 +224,7 @@ test("basic project and team invitation forms hide Ask and use shared action dim
   await createInvitation.click();
   const invitationDialog=page.getByRole("dialog",{name:"创建邀请链接",exact:true});
   await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
-  const submitInvitation=invitationDialog.locator("form .app-action-button");
+  const submitInvitation=invitationDialog.getByRole("button",{name:"生成 7 天邀请",exact:true});
   await expect(submitInvitation).toHaveCount(1);
   await expectActionButtonGeometry(submitInvitation,true);
   await page.keyboard.press("Alt+j");

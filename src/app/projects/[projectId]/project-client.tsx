@@ -824,42 +824,40 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
 
         <OperationPanel title={isEditingItem ? translateUi("编辑事实") : translateUi("手动补充事实")} triggerLabel={isEditingItem ? "继续编辑事实" : "手动补充"} open={itemEditorOpen} onOpenChange={setItemEditorOpen} className="mt-6" description="自动整理后的事实可在下方查看；只有需要手动补充或纠正时才使用此操作区。">
           {itemError ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={itemError} /></p> : null}
-        <div className="mt-8 grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
-          <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300"><UiText text={"Fact candidate"} /></p>
-            <h3 id="item-form-heading" className="mt-3 text-xl font-semibold tracking-tight text-white">{isEditingItem ? <UiText text={"编辑事实候选"} /> : <UiText text={"补充事实候选"} />}</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-400">{isEditingItem ? <UiText text={"编辑后会回到待确认状态；原始资料归属保持不变。"} /> : <UiText text={"选择当前项目的原始资料，填写可以被原文精确支持的事实候选。"} />}</p>
+        <div className="grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
+          <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full" aria-label={translateUi(isEditingItem ? "编辑事实候选" : "补充事实候选")}>
+            <p className="mb-5 text-sm leading-6 text-slate-600">{isEditingItem ? <UiText text={"编辑后会回到待确认状态；原始资料归属保持不变。"} /> : <UiText text={"选择当前项目的原始资料，填写可以被原文精确支持的事实候选。"} />}</p>
 
-            <label className="mt-6 block text-sm font-medium text-slate-200" htmlFor="item-source"><UiText text={"Source"} />{" "}<span className="text-rose-300"><UiText text={"（必选）"} /></span></label>
+            <label className="block text-sm font-medium text-slate-700" htmlFor="item-source"><UiText text={"Source"} />{" "}<span className="text-rose-600"><UiText text={"（必选）"} /></span></label>
               <select
               id="item-source"
               value={itemForm.sourceId}
               onChange={(event) => updateItemForm((current) => ({ ...current, sourceId: event.target.value }))}
               disabled={isEditingItem || isSavingItem || sourceOptions.length === 0}
               required
-              className="mt-2 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             >
-                <option value="" className="bg-slate-950"><UiText text={"选择当前项目的原始资料"} /></option>
+                <option value=""><UiText text={"选择当前项目的原始资料"} /></option>
               {sourceOptions.map((source) => (
-                <option key={source.id} value={source.id} className="bg-slate-950">
+                <option key={source.id} value={source.id}>
                   {source.kind} · {sourcePreview(source.preview).slice(0, 52)}
                 </option>
               ))}
             </select>
             {isEditingItem ? <p className="mt-2 text-xs text-slate-500"><UiText text={"编辑时 Source 不可更换。"} /></p> : null}
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-type"><UiText text={"类型"} />{" "}<span className="text-rose-300"><UiText text={"（必选）"} /></span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="item-type"><UiText text={"类型"} />{" "}<span className="text-rose-600"><UiText text={"（必选）"} /></span></label>
             <select
               id="item-type"
               value={itemForm.type}
               onChange={(event) => updateItemForm((current) => ({ ...current, type: event.target.value as ProjectItem["type"] }))}
               disabled={isSavingItem}
-              className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             >
-              {itemTypes.map((itemType) => <option key={itemType.value} value={itemType.value} className="bg-slate-950">{itemType.label}</option>)}
+              {itemTypes.map((itemType) => <option key={itemType.value} value={itemType.value}>{itemType.label}</option>)}
             </select>
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-title"><UiText text={"标题"} />{" "}<span className="text-rose-300"><UiText text={"（必填）"} /></span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="item-title"><UiText text={"标题"} />{" "}<span className="text-rose-600"><UiText text={"（必填）"} /></span></label>
             <input
               id="item-title"
               value={itemForm.title}
@@ -868,10 +866,10 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               required
               disabled={isSavingItem}
               placeholder={translateUi("例如：本周确定采用 cursor pagination")}
-              className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             />
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-content"><UiText text={"内容"} />{" "}<span className="text-rose-300"><UiText text={"（必填）"} /></span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="item-content"><UiText text={"内容"} />{" "}<span className="text-rose-600"><UiText text={"（必填）"} /></span></label>
             <textarea
               id="item-content"
               value={itemForm.content}
@@ -881,10 +879,10 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               required
               disabled={isSavingItem}
               placeholder={translateUi("描述事实、进展、问题或风险……")}
-              className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             />
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-source-excerpt"><UiText text={"精确原文摘录"} />{" "}<span className="text-rose-300"><UiText text={"（必填）"} /></span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="item-source-excerpt"><UiText text={"精确原文摘录"} />{" "}<span className="text-rose-600"><UiText text={"（必填）"} /></span></label>
             <textarea
               id="item-source-excerpt"
               value={itemForm.sourceExcerpt}
@@ -894,24 +892,24 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               required
               disabled={isSavingItem}
               placeholder={translateUi("从下方所选 Source 原文复制一段完全一致的文字")}
-              className="mt-2 w-full resize-y rounded-xl border border-indigo-300/30 bg-indigo-300/10 px-4 py-3 font-mono text-sm leading-6 text-white outline-none transition placeholder:font-sans placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm leading-6 text-slate-900 outline-none transition placeholder:font-sans placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             />
 
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="item-occurred-at"><UiText text={"发生时间"} />{" "}<span className="font-normal text-slate-500"><UiText text={"（可选）"} /></span></label>
+            <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="item-occurred-at"><UiText text={"发生时间"} />{" "}<span className="font-normal text-slate-500"><UiText text={"（可选）"} /></span></label>
             <input
               id="item-occurred-at"
               type="datetime-local"
               value={itemForm.occurredAt}
               onChange={(event) => updateItemForm((current) => ({ ...current, occurredAt: event.target.value }))}
               disabled={isSavingItem}
-              className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             />
 
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
               <button
                 type="submit"
                 disabled={isSavingItem || isItemsLoading || !itemForm.sourceId || sourceOptions.length === 0}
-                className="flex flex-1 items-center justify-center rounded-xl bg-indigo-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
+                className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSavingItem ? <UiText text={"保存中…"} /> : isEditingItem ? <UiText text={"保存编辑"} /> : <UiText text={"保存候选条目"} />}
               </button>
@@ -920,7 +918,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
                   type="button"
                   onClick={handleCancelEdit}
                   disabled={isSavingItem}
-                  className="rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="app-action-button app-action-button--compact rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <UiText text={"取消编辑"} /></button>
               ) : null}

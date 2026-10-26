@@ -61,15 +61,10 @@ body:has([data-user-shell-root]) :is(.shadow-sm,.shadow-xl){box-shadow:none}
 
 /* Connection forms already have a dialog heading and padded reading area. */
 body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-header]{min-height:76px}
-body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>p:first-of-type{margin-top:0}
 body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-header],
 body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body],
 body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-footer]{padding-left:24px;padding-right:24px}
 body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]{padding-top:24px;padding-bottom:24px}
-body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section{border:0;padding:0;background:transparent}
-body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>h2,
-body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>div:first-child>p.uppercase{display:none}
-body:has([data-user-shell-root]) [data-connection-dialog] [data-dialog-body]>section>div:first-child{float:right;margin-left:8px}
 @media(max-width:700px){body:has([data-user-shell-root]) [data-connection-dialog] :is([data-dialog-header],[data-dialog-body],[data-dialog-footer]){padding-left:20px;padding-right:20px}}
 
 /* Filled actions and form fields follow the approved workspace controls. */

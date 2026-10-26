@@ -58,6 +58,10 @@ test("CI publishes immutable image metadata only from main and exposes the docum
 
 test("the release gate rejects mismatched test plans or missing execution receipts", async () => {
   const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const imageJob = workflow.split("  build-images:\n", 2)[1]!.split("  verify:\n", 1)[0]!;
+  assert.doesNotMatch(imageJob.split("    steps:\n", 1)[0]!, /\$\{\{ runner\./u);
+  assert.match(imageJob, /CI_TEST_PLAN=%s\/ci-test-plan\.json/u);
+  assert.match(imageJob, /CI_TEST_RECEIPT=%s\/ci-browser-receipt\.json/u);
   const step = workflow.slice(workflow.indexOf("      - name: Require every applicable gate and the exact-sha image job"));
   const program = step.slice(step.indexOf("        run: |\n") + "        run: |\n".length)
     .split("\n  tag-attestation:")[0].replace(/^ {10}/gmu, "");

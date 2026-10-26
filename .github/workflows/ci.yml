@@ -221,8 +221,6 @@ jobs:
       CI_TEST_BASE: ${{ needs.scope.outputs.base }}
       CI_TEST_TARGET: ${{ github.sha }}
       CI_TEST_RISK: ${{ needs.scope.outputs.risk }}
-      CI_TEST_PLAN: ${{ runner.temp }}/ci-test-plan.json
-      CI_TEST_RECEIPT: ${{ runner.temp }}/ci-browser-receipt.json
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -242,6 +240,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Resolve runner-local check paths
+        run: |
+          printf 'CI_TEST_PLAN=%s/ci-test-plan.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'CI_TEST_RECEIPT=%s/ci-browser-receipt.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - name: Plan affected checks from the cumulative production diff
         id: test_plan

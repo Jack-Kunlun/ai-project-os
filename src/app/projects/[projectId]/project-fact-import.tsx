@@ -200,7 +200,7 @@ export function ProjectFactImport({ projectId, projectName, sourceIds, sourceLab
   if (result?.review) links.push([buildProjectHref(projectId, "materials", { view: "review", from: "materials" }), "处理待核对内容"]);
   const footerActions = confirmAction ?? (result ? links.map(([href, label]) => <Link key={href} href={href} className="app-action-button font-semibold text-indigo-700 underline"><UiText text={label} /></Link>) : null);
   const dateLabel = (value: string) => formatUiDateTime(new Date(value), language, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-  return <section ref={panelRef} tabIndex={-1} aria-label={translateUi("导入资料自动整理")} className="scroll-mt-5">
+  return <section ref={panelRef} tabIndex={-1} aria-label={translateUi("导入资料自动整理")} className="flow-root scroll-mt-5">
     {currentBatches.length > 0 ? <div data-extract-consent-summary className="mt-3 border-y border-[var(--app-border)] py-3">
       <dl className="grid gap-3 text-sm sm:grid-cols-2">
         <div><dt className="text-xs text-[var(--app-muted)]"><UiText text={"当前项目"} /></dt><dd className="mt-1 font-medium text-[var(--app-text)]">{projectName ?? translateUi("当前项目")}</dd></div>

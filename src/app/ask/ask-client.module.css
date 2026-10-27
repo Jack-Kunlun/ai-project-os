@@ -35,6 +35,33 @@
 .sessionUsage{display:block;margin-top:6px;font-size:11px;line-height:1.7;font-weight:400;color:var(--app-muted)}
 
 .renameActions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-left:auto}
+.answer > [data-token-usage] { margin-top: 12px; }
+
+.rounds,
+.railList {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--app-muted) 30%, transparent) transparent;
+}
+
+.rounds:hover,
+.rounds:focus-within,
+.railList:hover,
+.railList:focus-within {
+  scrollbar-color: color-mix(in srgb, var(--app-muted) 55%, transparent) transparent;
+}
+
+@media (forced-colors: active) {
+  .rounds,
+  .rounds:hover,
+  .rounds:focus-within,
+  .railList,
+  .railList:hover,
+  .railList:focus-within {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+}
+
 @media(max-height:800px){.welcome{padding:8px 16px}.welcome h2{font-size:20px}.suggestions button{padding:8px 10px}}
 
 @media(max-height:760px) and (min-width:701px){.conversationPane .chat[data-empty="true"]>.conversationTitle{display:none}.conversationPane .rounds>.welcome{padding:0 16px}.conversationPane .rounds>.welcome h2{margin:0 0 4px;font-size:20px;line-height:1.4}.conversationPane .rounds>.welcome p{margin:4px 0;line-height:1.45}.conversationPane .rounds>.suggestions{gap:6px;padding:0 8px}.conversationPane .rounds>.suggestions button{min-height:40px;padding:6px 8px;font-size:12px;line-height:1.45}}

@@ -274,7 +274,25 @@
   font-size: 9px;
 }
 
-.boardCards { display: grid; gap: 8px; }
+.boardCards {
+  --board-card-height: 200px;
+  --board-card-gap: 8px;
+  display: grid;
+  grid-auto-rows: var(--board-card-height);
+  gap: var(--board-card-gap);
+  /* Keep at most five cards in view; shorter screens use a smaller queue. */
+  max-height: min(calc(5 * var(--board-card-height) + 4 * var(--board-card-gap)), 65dvh);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--app-muted) 30%, transparent) transparent;
+}
+
+.boardCards:hover,
+.boardCards:focus-within {
+  scrollbar-color: color-mix(in srgb, var(--app-muted) 55%, transparent) transparent;
+}
 
 .workCard {
   display: flex;
@@ -361,7 +379,7 @@
 }
 
 .cardFooter span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.assignee { border-top: 1px solid var(--app-border); padding-top: 7px; color: var(--app-muted); font-size: 8px; }
+.assignee { margin-top: auto; border-top: 1px solid var(--app-border); padding-top: 7px; color: var(--app-muted); font-size: 8px; }
 
 .columnEmpty {
   margin: 13px 0;
@@ -590,4 +608,13 @@
   .workCard,
   .listItem { transition: none; }
   .loading > div { animation: none; }
+}
+
+@media (forced-colors: active) {
+  .boardCards,
+  .boardCards:hover,
+  .boardCards:focus-within {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
 }

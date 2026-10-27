@@ -44,9 +44,9 @@ const active = {
   id: "00000000-0000-4000-8000-0000000000a2",
   version: 1,
   providerConnectionId: fixtureId,
-  modelId: "gpt-4.1-mini",
+  modelId: "text-embedding-3-small",
   embeddingDimensions: 1536,
-  maxOutputTokens: 2048,
+  maxOutputTokens: null,
   quotaMultiplierBps: 10_000,
   validatedAt: fixtureTimestamp,
 };
@@ -55,11 +55,11 @@ const platformOperations = {
   candidates: Object.fromEntries(operations.map((operation) => [operation, {
     readiness: operation === "embedding" ? "ready" : "missing",
     active: operation === "embedding" ? active : null,
-    candidates: [candidate],
+    candidates: [{ ...candidate, modelId: operation === "embedding" ? "text-embedding-3-small" : "gpt-4.1-mini", embeddingDimensions: operation === "embedding" ? 1536 : null, maxOutputTokens: operation === "embedding" ? null : 2048 }],
   }])),
 };
 
-test("admin models use compact lists and open read-only drawers across narrow and desktop layouts", async ({ page }) => {
+test("admin models use inline capability selection and read-only provider drawers across narrow and desktop layouts", async ({ page }) => {
   await signInR02Admin(page);
   const mutationRequests: string[] = [];
   page.on("request", (request) => {
@@ -101,7 +101,7 @@ test("admin models use compact lists and open read-only drawers across narrow an
     await expect(providerRow.getByRole("button", { name: "Manage connection", exact: true })).toBeVisible();
     const embeddingRow = page.locator('[data-operation="embedding"]');
     await expect(embeddingRow).toContainText(fixtureName);
-    await expect(embeddingRow).toContainText("gpt-4.1-mini");
+    await expect(embeddingRow).toContainText("text-embedding-3-small");
     await expectR02NoHorizontalOverflow(page, `admin models en-dark ${width}`);
 
     const manage = providerRow.getByRole("button", { name: "Manage connection", exact: true });
@@ -130,14 +130,14 @@ test("admin models use compact lists and open read-only drawers across narrow an
     await reopenedEditDialog.getByRole("button", { name: "Close dialog", exact: true }).click();
     await reopenedProviderDrawer.getByRole("button", { name: "Close dialog", exact: true }).click();
 
-    const configure = embeddingRow.getByRole("button", { name: "Configure", exact: true });
-    await configure.click();
-    const operationDrawer = page.locator('[data-operation-config="embedding"]').locator('xpath=ancestor::*[@role="dialog"]');
-    await expect(operationDrawer).toBeVisible();
-    await expectR02NoHorizontalOverflow(page, `capability drawer en-dark ${width}`);
-    await operationDrawer.getByRole("combobox", { name: "Select a verified connection and capability model", exact: true }).waitFor();
-    await operationDrawer.getByRole("button", { name: "Close dialog", exact: true }).click();
-    await expect(configure).toBeFocused();
+    await expect(embeddingRow.getByRole("combobox")).toBeVisible();
+    await expect(embeddingRow.getByRole("checkbox")).not.toBeChecked();
+    await page.getByRole("button", { name: "Select all", exact: true }).click();
+    await expect(embeddingRow.getByRole("checkbox")).toBeChecked();
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await expect(embeddingRow.getByRole("checkbox")).not.toBeChecked();
+    await expect(page.getByRole("button", { name: "Test and enable selected", exact: true })).toBeDisabled();
+    await expectR02NoHorizontalOverflow(page, `inline capabilities en-dark ${width}`);
   }
 
   for (const [width, height] of [[1440, 900], [390, 480]] as const) {
@@ -190,3 +190,56 @@ test("admin models use compact lists and open read-only drawers across narrow an
 
   expect(mutationRequests, "opening and closing drawers must not test or change provider settings").toEqual([]);
 });
+
+for (const uncertain of [false, true]) {
+  test(`capability batch confirms once and ${uncertain ? "stops after an uncertain test" : "enables each successful item immediately"}`, async ({ page }) => {
+    await signInR02Admin(page);
+    const origin = new URL(page.url()).origin;
+    await page.context().addCookies([{ name: "aipos-language", value: "en", url: origin }]);
+    const calls: string[] = [];
+    const bodies = new Map<string, { clientRequestKey: string; modelId: string }>();
+    await page.route("**/api/settings/providers", (route) => route.fulfill({ json: { providers: [provider], catalog } }));
+    await page.route("**/api/admin/platform-provider-probe/budget", (route) => {
+      expect(route.request().method()).toBe("GET");
+      return route.fulfill({ json: { budget: { version: 1, status: "active", unitLimit: 10, availableUnits: 10, reservedUnits: 0, settledUnits: 0, heldUnits: 0, alertThresholdUnits: 8, startsAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString() } } });
+    });
+    await page.route("**/api/settings/platform-ai-operations", (route) => route.fulfill({ json: platformOperations }));
+    await page.route("**/api/settings/platform-ai-operations/*/probe", async (route) => {
+      const operation = new URL(route.request().url()).pathname.split("/").at(-2)!;
+      const body = route.request().postDataJSON();
+      bodies.set(operation, body);
+      calls.push(`probe:${operation}`);
+      expect(body).not.toHaveProperty("providerName");
+      expect(body).not.toHaveProperty("providerKind");
+      expect(body.modelId).toBe(operation === "embedding" ? "text-embedding-3-small" : "gpt-4.1-mini");
+      expect(body.embeddingDimensions).toBe(operation === "embedding" ? 1536 : null);
+      expect(body.maxOutputTokens).toBe(operation === "embedding" ? null : 2048);
+      return route.fulfill({ json: uncertain && operation === "autoExtract"
+        ? { status: "held", probeId: null, expiresAt: null, safeErrorCode: "PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD" }
+        : { status: "settled", probeId: `proof-${operation}`, expiresAt: new Date(Date.now() + 300_000).toISOString(), safeErrorCode: null } });
+    });
+    await page.route("**/api/settings/platform-ai-operations/*/apply", async (route) => {
+      const operation = new URL(route.request().url()).pathname.split("/").at(-2)!;
+      const body = route.request().postDataJSON();
+      calls.push(`apply:${operation}`);
+      expect(body.clientRequestKey).toBe(bodies.get(operation)?.clientRequestKey);
+      expect(body.modelId).toBe(bodies.get(operation)?.modelId);
+      expect(body.probeId).toBe(`proof-${operation}`);
+      expect(body).not.toHaveProperty("expiresAt");
+      return route.fulfill({ json: { route: { status: "active" } } });
+    });
+    await page.goto("/admin/models");
+    await expect(page.locator('[data-operation="embedding"]').getByRole("combobox")).toBeVisible();
+    await page.getByRole("button", { name: "Select all", exact: true }).click();
+    await page.getByRole("button", { name: "Test and enable selected", exact: true }).click();
+    const confirmation = page.getByRole("dialog", { name: "Confirm model batch", exact: true });
+    await expect(confirmation).toBeVisible();
+    expect(calls).toEqual([]);
+    await confirmation.getByRole("button", { name: "Confirm test and enable", exact: true }).evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click(); });
+    await expect(page.getByRole("dialog", { name: "Batch results", exact: true })).toBeVisible();
+    expect(calls).toEqual(uncertain
+      ? ["probe:embedding", "apply:embedding", "probe:visionExtract", "apply:visionExtract", "probe:autoExtract"]
+      : operations.flatMap((operation) => [`probe:${operation}`, `apply:${operation}`]));
+    expect(new Set([...bodies.values()].map((body) => body.clientRequestKey)).size).toBe(bodies.size);
+  });
+}

@@ -36,7 +36,7 @@ export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin/models/routes", heading: "模型与能力", terminal: { kind: "heading", name: "能力分配" }, pendingTexts: ["读取中…"] },
   { path: "/admin/sms", heading: "短信服务", terminal: { kind: "text", name: "尚未配置短信供应商" }, pendingTexts: ["正在读取供应商配置…"] },
   { path: "/admin/credits", heading: "平台额度", terminal: { kind: "text", name: "平台额度治理" }, pendingTexts: ["读取中…"] },
-  { path: "/admin/operations/probes", heading: "连接探测预算", terminal: { kind: "text", name: "平台连接探测预算" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/operations/probes", heading: "模型测试额度", terminal: { kind: "text", name: "测试额度" }, pendingTexts: ["读取中…"] },
   { path: "/admin/connectors/mcp", heading: "MCP 工具安全审核", terminal: { kind: "text", name: "当前没有候选记录" }, pendingTexts: ["正在读取安全快照…"] },
   { path: "/admin/users", heading: "用户运营", terminal: { kind: "text", name: "普通用户" }, pendingTexts: ["读取中…"] },
   { path: "/admin/users/memberships", heading: "会员资格管理", terminal: { kind: "text", name: "Git / MCP 私有连接与平台自动化属于独立配置", exact: false }, pendingTexts: ["读取中…"] },

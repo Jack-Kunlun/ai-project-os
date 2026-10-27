@@ -18,7 +18,7 @@ export const adminNavigationGroups: ReadonlyArray<Readonly<{ key: string; label:
   { key: "operations", label: "运行维护", links: [
     { label: "资源与备份", href: "/admin/operations/backups", icon: "M3 7l9-4 9 4-9 4z M3 7v10l9 4 9-4V7 M12 11v10" },
     { label: "失败收件箱", href: "/admin/operations/failures", icon: "M4 4h16l2 13v4H2v-4z M2 14h6l2 3h4l2-3h6" },
-    { label: "探测预算", href: "/admin/operations/probes", icon: "M3 12h4l3-8 4 16 3-8h4" },
+    { label: "模型测试额度", href: "/admin/operations/probes", icon: "M3 12h4l3-8 4 16 3-8h4" },
   ] },
   { key: "settings", label: "设置", links: [
     { label: "管理员账户", href: "/admin/account", icon: "M20 21v-2a7 7 0 0 0-14 0v2 M13 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8" },

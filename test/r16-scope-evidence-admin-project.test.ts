@@ -40,14 +40,14 @@ test("ADM-014 persistent configuration cards expose honest scope evidence", asyn
   assert.match(settings, /当前有[\s\S]*?provider\._count\.platformDefaultAiRoutes[\s\S]*?条活动默认路由引用/u);
   assert.match(settings, /尚无活动默认路由引用；暂无项目影响证据/u);
   assert.doesNotMatch(settings, /affectedProjects:\s*provider\._count\.platformDefaultAiRoutes > 0 \? `被/u);
-  assert.match(probeBudget, /function budgetEvidence\(budget: ProbeBudgetSummary \| null, loading: boolean, language: "zh-CN" \| "en", t:/u);
-  assert.match(probeBudget, /尚未启用预算；暂无探测预算状态证据/u);
-  assert.match(probeBudget, /ScopeEvidenceCard title="平台探测预算边界"/u);
-  assert.match(probeBudget, /平台 · 供应商连通性探测/u);
-  assert.match(probeBudget, /平台管理员/u);
-  assert.match(probeBudget, /平台探测预算/u);
-  assert.match(probeBudget, /项目不适用 · 仅平台供应商连通性探测/u);
-  assert.match(probeBudget, /budgetEvidence\(budget, loading, language, t\)/u);
+  assert.doesNotMatch(probeBudget, /ScopeEvidenceCard/u, "test allowance uses an explicit flat explanation");
+  assert.match(probeBudget, /此处统计测试请求次数，不是平台 Token、人民币费用或供应商余额/u);
+  assert.match(probeBudget, /六项全部测试最多计 6 次/u);
+  assert.match(probeBudget, /供应商连接测试按生成、向量、图片模型计 1–3 次/u);
+  assert.match(probeBudget, /结果未知的请求会占用次数/u);
+  assert.match(probeBudget, /不会自动重试/u);
+  assert.match(probeBudget, /旧周期立即停用，剩余次数不结转/u);
+  assert.match(probeBudget, /loadFailed \? t\("读取失败"\)/u, "failed reads cannot appear as missing evidence");
 
   for (const source of [platform, team, automations, settings, probeBudget]) {
     const pixelValues = [...source.matchAll(/(?<![\d.])(\d+)px/gu)].map((match) => Number(match[1]));

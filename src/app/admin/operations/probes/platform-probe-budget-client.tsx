@@ -1,15 +1,11 @@
 "use client";
-import { UiFeedbackText } from "@/components/ui-error-text";
 
-
-import { UiText, useAppearance } from "@/components/appearance-provider";
-
-import { useEffect, useState, type FormEvent } from "react";
+import { UiFeedbackText, UiText, useAppearance } from "@/components/appearance-provider";
 import { OperationPanel } from "@/components/operation-panel";
-import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 
-type ProbeBudgetSummary = Readonly<{
+export type ProbeBudgetSummary = Readonly<{
   version: number;
   status: "active" | "scheduled" | "expired";
   unitLimit: number;
@@ -22,11 +18,23 @@ type ProbeBudgetSummary = Readonly<{
   expiresAt: string;
 }>;
 
+type PlatformProbeBudgetClientProps = Readonly<{
+  compact?: boolean;
+  disabled?: boolean;
+  onBudgetChanged?: (budget: ProbeBudgetSummary | null) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  refreshKey?: number;
+}>;
+
 const statusLabels: Record<ProbeBudgetSummary["status"], string> = {
-  active: "已启用",
+  active: "生效中",
   scheduled: "待生效",
   expired: "已过期",
 };
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const MAX_BUDGET_DURATION_MS = 90 * DAY_MS;
+const adminInputClass = "mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 
 async function readError(response: Response, fallback: string): Promise<string> {
   return (await safeResponseError(response, fallback)).message;
@@ -39,8 +47,6 @@ function dateLabel(value: string, language: "zh-CN" | "en"): string {
   }).format(new Date(value));
 }
 
-const adminInputClass = "mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
-
 function padDatePart(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -51,102 +57,231 @@ export function formatDateTimeLocal(value: Date): string {
 }
 
 export function parseDateTimeLocal(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u.test(value)) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/u.exec(value);
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (Number.isNaN(parsed.getTime())
+    || parsed.getFullYear() !== Number(year)
+    || parsed.getMonth() + 1 !== Number(month)
+    || parsed.getDate() !== Number(day)
+    || parsed.getHours() !== Number(hour)
+    || parsed.getMinutes() !== Number(minute)) return null;
+  return parsed;
 }
 
-function budgetEvidence(budget: ProbeBudgetSummary | null, loading: boolean, language: "zh-CN" | "en", t: (text: string) => string): string {
-  if (loading) return t("正在读取预算状态");
-  if (budget === null) return t("尚未启用预算；暂无探测预算状态证据");
-  return `${t("预算状态证据：版本")} ${budget.version} · ${t(statusLabels[budget.status])} · ${t("有效期")} ${dateLabel(budget.startsAt, language)} — ${dateLabel(budget.expiresAt, language)}`;
+function defaultStartsAt(): string {
+  return formatDateTimeLocal(new Date());
 }
 
-export function PlatformProbeBudgetClient() {
+function defaultExpiresAt(): string {
+  return formatDateTimeLocal(new Date(Date.now() + DAY_MS));
+}
+
+function metric(label: string, value: string | number, hint?: string, compact = false) {
+  return <div className={`min-w-0 ${compact ? "border-l border-slate-200 pl-3 first:border-l-0 first:pl-0" : "rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"}`}>
+    <dt className="text-xs text-slate-500"><UiText text={label} /></dt>
+    <dd className="mt-1 break-words text-sm font-semibold tabular-nums text-slate-900">{value}</dd>
+    {hint ? <dd className="mt-1 text-xs leading-5 text-slate-500"><UiText text={hint} /></dd> : null}
+  </div>;
+}
+
+export function PlatformProbeBudgetClient({
+  compact = false,
+  disabled = false,
+  onBudgetChanged,
+  open,
+  onOpenChange,
+  refreshKey = 0,
+}: PlatformProbeBudgetClientProps) {
   const { language, t } = useAppearance();
   const [budget, setBudget] = useState<ProbeBudgetSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const [unitLimit, setUnitLimit] = useState("10");
   const [threshold, setThreshold] = useState("8");
-  const [startsAt, setStartsAt] = useState(() => formatDateTimeLocal(new Date()));
-  const [expiresAt, setExpiresAt] = useState(() => formatDateTimeLocal(new Date(Date.now() + 24 * 60 * 60 * 1_000)));
+  const [startsAt, setStartsAt] = useState(defaultStartsAt);
+  const [expiresAt, setExpiresAt] = useState(defaultExpiresAt);
   const [message, setMessage] = useState<string | null>(null);
-  const [operationOpen, setOperationOpen] = useState(false);
+  const [messageType, setMessageType] = useState<"error" | "status">("error");
+  const [localOpen, setLocalOpen] = useState(false);
+  const formId = useId();
+  const controlledOpen = open !== undefined;
+  const operationOpen = open ?? localOpen;
+  const onBudgetChangedRef = useRef(onBudgetChanged);
+  const onOpenChangeRef = useRef(onOpenChange);
+  const loadRequestRef = useRef(0);
+  const pendingRef = useRef(false);
+  const draftTouchedRef = useRef(false);
 
-  async function load() {
+  useEffect(() => { onBudgetChangedRef.current = onBudgetChanged; }, [onBudgetChanged]);
+  useEffect(() => { onOpenChangeRef.current = onOpenChange; }, [onOpenChange]);
+
+  const load = useCallback(async (): Promise<ProbeBudgetSummary | null> => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     try {
       const response = await fetch("/api/admin/platform-provider-probe/budget", { cache: "no-store" });
-      if (!response.ok) throw new Error(await readError(response, "探测预算读取失败"));
+      if (!response.ok) throw new Error(await readError(response, "测试额度读取失败"));
       const payload = await response.json() as { budget: ProbeBudgetSummary | null };
+      if (requestId !== loadRequestRef.current) return null;
       setBudget(payload.budget);
+      setLoadFailed(false);
       setMessage(null);
+      onBudgetChangedRef.current?.(payload.budget);
+      if (!draftTouchedRef.current) {
+        setUnitLimit(String(payload.budget?.unitLimit ?? 10));
+        setThreshold(String(payload.budget?.alertThresholdUnits ?? 8));
+        setStartsAt(defaultStartsAt());
+        setExpiresAt(defaultExpiresAt());
+      }
+      return payload.budget;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "探测预算读取失败");
+      if (requestId !== loadRequestRef.current) return null;
+      const failure = error instanceof Error ? error.message : "测试额度读取失败";
+      setLoadFailed(true);
+      setMessageType("error");
+      setMessage(failure);
+      return null;
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+    return () => {
+      window.clearTimeout(timer);
+      loadRequestRef.current += 1;
+    };
+  }, [load, refreshKey]);
+
+  function requestOpenChange(next: boolean, force = false) {
+    if (next && (disabled || pendingRef.current)) return;
+    if (!next && pendingRef.current && !force) return;
+    if (!controlledOpen) setLocalOpen(next);
+    onOpenChangeRef.current?.(next);
+    if (next) setMessage(null);
+  }
 
   async function activate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPending(true);
+    if (disabled || loading || pendingRef.current) return;
     setMessage(null);
+
+    const parsedStartsAt = parseDateTimeLocal(startsAt);
+    const parsedExpiresAt = parseDateTimeLocal(expiresAt);
+    const parsedLimit = Number(unitLimit);
+    const parsedThreshold = Number(threshold);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 10_000) {
+      setMessageType("error");
+      setMessage("最大测试次数须为 1–10,000 之间的整数。");
+      return;
+    }
+    if (!Number.isInteger(parsedThreshold) || parsedThreshold < 0 || parsedThreshold > parsedLimit) {
+      setMessageType("error");
+      setMessage("告警阈值须为 0 至最大测试次数之间的整数。");
+      return;
+    }
+    if (parsedStartsAt === null || parsedExpiresAt === null || parsedExpiresAt <= parsedStartsAt) {
+      setMessageType("error");
+      setMessage("请填写有效的生效时间与有效至；结束时间必须晚于开始时间。");
+      return;
+    }
+    if (parsedExpiresAt.getTime() - parsedStartsAt.getTime() > MAX_BUDGET_DURATION_MS) {
+      setMessageType("error");
+      setMessage("测试额度周期最长为 90 天。");
+      return;
+    }
+
+    pendingRef.current = true;
+    setPending(true);
     try {
-      const parsedStartsAt = parseDateTimeLocal(startsAt);
-      const parsedExpiresAt = parseDateTimeLocal(expiresAt);
-      if (parsedStartsAt === null || parsedExpiresAt === null || parsedExpiresAt <= parsedStartsAt) {
-        throw new Error("请填写有效的本地开始和结束时间，结束时间必须晚于开始时间。");
-      }
       const response = await fetch("/api/admin/platform-provider-probe/budget", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          unitLimit: Number(unitLimit),
-          alertThresholdUnits: Number(threshold),
+          unitLimit: parsedLimit,
+          alertThresholdUnits: parsedThreshold,
           startsAt: parsedStartsAt.toISOString(),
           expiresAt: parsedExpiresAt.toISOString(),
         }),
       });
-      if (!response.ok) throw new Error(await readError(response, "探测预算启用失败"));
-      await load();
-      setOperationOpen(false);
-      setMessage("新的平台连接探测预算已启用；未知外发不会自动重试。 ");
+      if (!response.ok) throw new Error(await readError(response, "测试额度保存失败"));
+      draftTouchedRef.current = false;
+      const refreshedBudget = await load();
+      requestOpenChange(false, true);
+      setMessageType("status");
+      setMessage(refreshedBudget
+        ? "新的测试额度周期已保存；若生效时间在未来，到时才可使用。"
+        : "测试额度已保存，但最新状态暂时无法读取；请稍后重新打开此页面。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "探测预算启用失败");
+      setMessageType("error");
+      setMessage(error instanceof Error ? error.message : "测试额度保存失败");
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
   }
 
-  return (
-    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-labelledby="platform-probe-budget-title">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Operations budget</p>
-          <h2 id="platform-probe-budget-title" className="mt-2 text-2xl font-semibold"><UiText text={"平台连接探测预算"} /></h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500"><UiText text={"每个已配置能力的连接测试消耗 1 个单位：生成、向量和图片识别分别计量。预算只控制测试外部流量与成本，不是用户 Token 额度，也不会启用或切换能力；预算周期更新后旧周期立即停用，剩余单位不转移。"} /></p>
-        </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{loading ? t("读取中…") : budget === null ? t("未启用") : t(statusLabels[budget.status])}</span>
+  const visibleAvailable = budget?.status === "active" ? budget.availableUnits : 0;
+  const editDisabled = disabled || pending || loading || loadFailed;
+  const feedback = message ? <p role={messageType === "error" ? "alert" : "status"} className={`mt-3 rounded-lg border px-3 py-2 text-xs leading-5 ${messageType === "error" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>{messageType === "error" ? <UiFeedbackText text={message} /> : <UiText text={message} />}</p> : null;
+  const summary = <section aria-label={t("模型测试额度摘要")} className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${compact ? "p-4" : "mt-6 p-5 sm:p-6"}`}>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="text-sm font-semibold text-slate-900"><UiText text={"测试额度"} /></span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{loading ? t("读取中…") : loadFailed ? t("读取失败") : budget ? t(statusLabels[budget.status]) : t("未设置")}</span>
       </div>
-      <div className="mt-6"><ScopeEvidenceCard title="平台探测预算边界" evidence={{ scope: t("平台 · 供应商连通性探测"), owner: t("平台管理员"), payer: t("平台探测预算"), affectedProjects: t("项目不适用 · 仅平台供应商连通性探测"), latestSuccess: budgetEvidence(budget, loading, language, t) }} /></div>
-      {budget ? <dl className="mt-6 grid gap-4 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-4"><div><dt className="text-slate-400"><UiText text={"版本"} /></dt><dd className="mt-1 font-medium text-slate-700">{budget.version}</dd></div><div><dt className="text-slate-400"><UiText text={"可用单位"} /></dt><dd className="mt-1 font-medium text-slate-700">{budget.availableUnits} / {budget.unitLimit}</dd></div><div><dt className="text-slate-400"><UiText text={"已结算 / 待核对"} /></dt><dd className="mt-1 font-medium text-slate-700">{budget.settledUnits} / {budget.heldUnits}</dd></div><div><dt className="text-slate-400"><UiText text={"有效期"} /></dt><dd className="mt-1 font-medium text-slate-700">{dateLabel(budget.startsAt, language)} — {dateLabel(budget.expiresAt, language)}</dd></div></dl> : null}
-      <div className="mt-6 border-t border-slate-100 pt-6"><OperationPanel title={budget === null ? "创建平台连接探测预算" : "更新平台连接探测预算"} triggerLabel={budget === null ? "创建预算周期" : "更新预算额度"} description="预算周期变更会立即停用旧周期，未使用单位不会转移。" open={operationOpen} onOpenChange={setOperationOpen} disabled={loading || pending}>
-        <form onSubmit={activate} className="grid gap-4 sm:grid-cols-2">
-          <label className="text-xs font-medium text-slate-600"><UiText text={"单位上限"} /><input type="number" min={1} max={10_000} value={unitLimit} onChange={(event) => setUnitLimit(event.target.value)} required className={adminInputClass} /></label>
-          <label className="text-xs font-medium text-slate-600"><UiText text={"告警阈值"} /><input type="number" min={0} max={10_000} value={threshold} onChange={(event) => setThreshold(event.target.value)} required className={adminInputClass} /></label>
-          <label className="text-xs font-medium text-slate-600"><UiText text={"开始时间"} /><input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required className={adminInputClass} /></label>
-          <label className="text-xs font-medium text-slate-600"><UiText text={"结束时间"} /><input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} required className={adminInputClass} /></label>
-          <div className="sm:col-span-2"><button disabled={pending} className="app-action-button rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("保存中…") : budget === null ? t("创建测试预算周期") : t("更新测试额度")}</button></div>
-        </form>
-      </OperationPanel></div>
-      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}
-    </section>
-  );
+      <OperationPanel
+        title="设置模型测试额度"
+        triggerLabel={budget ? "调整测试额度" : "设置测试额度"}
+        description="保存会替换当前周期，旧周期立即停用；生效时间在未来时，新周期到时才生效。旧周期未用次数不结转；系统不会自动补充额度。"
+        open={operationOpen}
+        onOpenChange={(next) => requestOpenChange(next)}
+        disabled={editDisabled}
+        inquiryEnabled={false}
+        footer={<div className="flex w-full flex-wrap items-center justify-between gap-3">
+          <span className="text-xs leading-5 text-slate-500"><UiText text={"最大 10,000 次；周期最长 90 天。保存后旧周期立即停用，剩余次数不结转。"} /></span>
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={pending} onClick={() => requestOpenChange(false)} className="app-action-button rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"><UiText text={"取消"} /></button>
+          <button type="submit" form={formId} disabled={editDisabled} className="app-action-button rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("保存中…") : t("保存新周期")}</button>
+          </div>
+        </div>}
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-600">
+            <p><UiText text={"此处统计测试请求次数，不是平台 Token、人民币费用或供应商余额。供应商可能另收 Token 费用。"} /></p>
+            <p className="mt-2"><UiText text={"每次单项能力连通性测试最多计 1 次，六项全部测试最多计 6 次；再次手动测试另计。供应商连接测试按生成、向量、图片模型计 1–3 次。"} /></p>
+            <p className="mt-2"><UiText text={"结果未知的请求会占用次数并显示为待核对，不会自动重试。达到告警阈值会通知管理员，不会自动补充额度。"} /></p>
+          </div>
+          {operationOpen ? feedback : null}
+          <form id={formId} noValidate onSubmit={activate} className="grid gap-4 sm:grid-cols-2">
+            <label className="text-xs font-medium text-slate-700"><UiText text={"最大测试次数"} /><input type="number" min={1} max={10_000} step={1} value={unitLimit} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setUnitLimit(event.target.value); }} className={adminInputClass} aria-label={t("最大测试次数")} /></label>
+            <label className="text-xs font-medium text-slate-700"><UiText text={"有效至"} /><input type="datetime-local" value={expiresAt} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setExpiresAt(event.target.value); }} className={adminInputClass} aria-label={t("有效至")} /></label>
+            <details className="rounded-xl border border-slate-200 px-4 py-3 sm:col-span-2">
+              <summary className="cursor-pointer text-xs font-semibold text-indigo-700"><UiText text={"高级设置"} /></summary>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="text-xs font-medium text-slate-700"><UiText text={"生效时间"} /><input type="datetime-local" value={startsAt} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setStartsAt(event.target.value); }} className={adminInputClass} aria-label={t("生效时间")} /></label>
+                <label className="text-xs font-medium text-slate-700"><UiText text={"告警阈值"} /><input type="number" min={0} max={10_000} step={1} value={threshold} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setThreshold(event.target.value); }} className={adminInputClass} aria-label={t("告警阈值")} /></label>
+              </div>
+            </details>
+          </form>
+        </div>
+      </OperationPanel>
+      {loadFailed ? <button type="button" onClick={() => void load()} className="app-action-button rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">{t("重新读取")}</button> : null}
+    </div>
+    <dl className={`mt-4 grid grid-cols-2 gap-2 ${compact ? "sm:grid-cols-5" : "sm:grid-cols-5"}`}>
+      {metric("可用测试次数", budget ? `${visibleAvailable} / ${budget.unitLimit}` : "—", undefined, compact)}
+      {metric("已计入", budget?.settledUnits ?? "—", "已完成的测试请求", compact)}
+      {metric("进行中", budget?.reservedUnits ?? "—", "已预留、尚未完成", compact)}
+      {metric("结果待核对", budget?.heldUnits ?? "—", "未知结果占用的次数", compact)}
+      {metric("有效至", budget ? dateLabel(budget.expiresAt, language) : "—", budget?.status === "scheduled" ? "当前周期尚未生效" : undefined, compact)}
+    </dl>
+    <p className="mt-3 text-xs leading-5 text-slate-600"><UiText text={"额度按测试请求次数统计，不是平台 Token 或人民币余额；供应商可能另收 Token 费用。未知请求会保留待核对状态，不自动重试。"} /></p>
+    {!operationOpen ? feedback : null}
+  </section>;
+
+  return summary;
 }

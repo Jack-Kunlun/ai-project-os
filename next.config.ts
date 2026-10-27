@@ -60,6 +60,12 @@ const nextConfig: NextConfig = {
       const splitChunks = config.optimization.splitChunks;
       splitChunks.cacheGroups = {
         ...splitChunks.cacheGroups,
+        // Small framework entry wrappers otherwise repeat below the split threshold.
+        frameworkEntries: {
+          test: /[\\/]next[\\/](?:dist[\\/]api[\\/]navigation\.js|dist[\\/]compiled[\\/]react(?:-experimental)?[\\/](?:index|jsx-runtime)\.js)(?:\?|$)/,
+          name: "framework-entries",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 55,
+        },
         appearance: {
           test: /[\\/]src[\\/](?:components[\\/](?:appearance-provider|appearance-controls|ui-error-text)\.tsx|lib[\\/]ui-core-messages\.json)$/,
           name: "appearance",
@@ -158,7 +164,7 @@ const nextConfig: NextConfig = {
           chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
         },
         sharedPresentation: {
-          test: /[\\/]src[\\/](?:components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)|app[\\/]projects[\\/]\[projectId\][\\/](?:memory-quality[\\/]project-memory-quality-client|members[\\/]project-members-client)\.tsx)$/,
+          test: /[\\/]src[\\/](?:components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)|app[\\/]projects[\\/]\[projectId\][\\/](?:memory-quality[\\/]project-memory-quality-client|members[\\/]project-members-client)\.tsx|app[\\/]support-pages\.module\.css)$/,
           name(module: { resource?: string }) {
             return `ui-${(module.resource?.split(/[\\/]/).pop() ?? "common").replace(/\.(?:tsx|ts|module\.css)$/u, "")}`;
           },

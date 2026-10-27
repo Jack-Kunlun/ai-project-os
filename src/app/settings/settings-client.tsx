@@ -13,6 +13,7 @@ import { AdminPageHeader } from "@/components/admin-page-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { OperationPanel } from "@/components/operation-panel";
+import { PlatformOperationAssignments } from "./platform-operation-assignments";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { ShellIcon } from "@/components/shell-icon";
 import { safeResponseError } from "@/lib/safe-error-presentation";
@@ -70,23 +71,6 @@ type ProbeBudgetSummary = Readonly<{
   expiresAt: string;
 }>;
 
-const PLATFORM_OPERATIONS = ["embedding", "visionExtract", "autoExtract", "sourceSummary", "projectAnalysis", "generateWithContext"] as const;
-type PlatformOperation = typeof PLATFORM_OPERATIONS[number];
-type PlatformOperationCandidate = Readonly<{ providerConnectionId: string; providerName: string; providerKind: ProviderKind; modelId: string; embeddingDimensions: number | null; maxOutputTokens: number | null }>;
-type PlatformOperationView = Readonly<{
-  operations: readonly PlatformOperation[];
-  candidates: Record<PlatformOperation, Readonly<{ readiness: string; active: Readonly<{ id: string; version: number; providerConnectionId: string; modelId: string; embeddingDimensions: number | null; maxOutputTokens: number | null; quotaMultiplierBps: number; validatedAt: string | null }> | null; candidates: readonly PlatformOperationCandidate[] }>>;
-}>;
-
-const operationLabels: Record<PlatformOperation, string> = {
-  embedding: "向量检索",
-  visionExtract: "图片识别",
-  autoExtract: "自动抽取",
-  sourceSummary: "资料摘要",
-  projectAnalysis: "项目分析",
-  generateWithContext: "带上下文生成",
-};
-
 async function readError(response: Response, fallback: string): Promise<string> {
   return (await safeResponseError(response, fallback)).message;
 }
@@ -110,9 +94,9 @@ function describeProviderCheck(check: ProviderCheck, t: (text: string) => string
   if (messages.length === 0) {
     const code = check.attempt.safeErrorCode;
     const detail = t(code === "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED"
-      ? "尚未启用连接测试额度，请先创建测试预算周期。"
+      ? "尚未设置模型测试额度，请先设置最大测试次数和有效期。"
       : code === "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED"
-        ? "连接测试额度不足；请创建新的测试预算周期后重试。"
+        ? "模型测试次数不足；请设置新的有效周期后重试。"
         : code === "PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED"
           ? "供应商拒绝了凭据，请检查 API Key 是否有效并重新保存。"
           : code === "PLATFORM_PROVIDER_PROBE_PROVIDER_RATE_LIMITED"
@@ -142,10 +126,10 @@ function requiredProbeUnits(provider: Provider, catalog?: ProviderCatalogEntry):
 
 function probeBudgetMessage(budget: ProbeBudgetSummary | null, requiredUnits: number, t: (text: string) => string): string | null {
   if (requiredUnits === 0) return t("请先为该连接配置至少一个可测试模型，再执行连接测试。");
-  if (budget === null) return t("连接测试需要平台探测预算，请先配置预算。");
-  if (budget.status === "scheduled") return t("平台探测预算尚未生效，请检查开始时间。");
-  if (budget.status === "expired") return t("平台探测预算已过期，请先创建新的测试预算周期。");
-  if (budget.availableUnits < requiredUnits) return `${t("平台探测预算可用单位不足（需要")} ${requiredUnits}，${t("当前")} ${budget.availableUnits}），${t("请先创建新的测试预算周期。")}`;
+  if (budget === null) return t("连接测试需要模型测试额度，请先设置最大测试次数和有效期。");
+  if (budget.status === "scheduled") return t("模型测试额度尚未生效，请检查开始时间。");
+  if (budget.status === "expired") return t("模型测试额度已过期，请设置新的有效周期。");
+  if (budget.availableUnits < requiredUnits) return t("模型测试次数不足，请减少本次测试模型或设置新的测试额度。");
   return null;
 }
 
@@ -157,11 +141,10 @@ const statusLabel = {
 } as const;
 
 export function SettingsClient({ username, canManageProviders, activeMembership, membershipStatus, adminMode = false }: { username: string; canManageProviders: boolean; activeMembership: boolean; membershipStatus: "active" | "expired" | "revoked" | "none"; adminMode?: boolean }) {
-  const { language, t } = useAppearance();
+  const { t } = useAppearance();
   const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [probeBudget, setProbeBudget] = useState<ProbeBudgetSummary | null>(null);
-  const [probeBudgetLoading, setProbeBudgetLoading] = useState(adminMode);
+  const [operationsBusy, setOperationsBusy] = useState(false);
   const [loading, setLoading] = useState(canManageProviders);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -176,21 +159,12 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
       setProviders(payload.providers);
       setCatalog(payload.catalog);
       setError(null);
-      if (adminMode) {
-        setProbeBudgetLoading(true);
-        const budgetResponse = await fetch("/api/admin/platform-provider-probe/budget", { cache: "no-store" });
-        if (budgetResponse.ok) {
-          const budgetPayload = await budgetResponse.json() as { budget: ProbeBudgetSummary | null };
-          setProbeBudget(budgetPayload.budget);
-        }
-      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "供应商配置加载失败");
     } finally {
       setLoading(false);
-      if (adminMode) setProbeBudgetLoading(false);
     }
-  }, [adminMode]);
+  }, []);
 
   useEffect(() => {
     if (!canManageProviders) {
@@ -215,12 +189,12 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
 
   const content = (
     <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
-        <AdminPageHeader title="模型与能力" description="先查看当前已配置连接；新增供应商时填写官方固定端点的模型与密钥配置。连接测试会单独消耗探测预算。" actions={canManageProviders ? <button ref={createTriggerRef} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"新增供应商"} /></button> : undefined} />
+        <AdminPageHeader title="模型与能力" description="先验证供应商连接，再勾选需要的能力，一次测试并启用。测试额度按请求次数计量。" actions={canManageProviders ? <button ref={createTriggerRef} disabled={operationsBusy} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"新增供应商"} /></button> : undefined} />
 
         {!canManageProviders ? <section className="mt-7 border-t border-slate-200 pt-6"><h2 className="text-xl font-semibold"><UiText text={"平台模型由系统管理员管理"} /></h2><p className="mt-3 text-sm leading-7 text-slate-600"><UiText text={"普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。"} />{activeMembership ? t("当前会员有效，你可以在“我的空间”配置自己的模型连接。") : membershipStatus === "expired" ? t("会员资格已到期；重新获得资格后才可配置个人模型。") : membershipStatus === "revoked" ? t("会员资格已撤销；重新获得资格后才可配置个人模型。") : t("如需配置个人模型，请先完成会员申请。")}</p>{activeMembership ? <a href="/personal/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"><UiText text={"配置个人模型"} /></a> : null}</section> : null}
         {canManageProviders && error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
 
-        {canManageProviders ? <section className="mt-5 space-y-4">
+        {canManageProviders ? <fieldset disabled={operationsBusy} className="mt-5 min-w-0 space-y-4">
           <div className="flex items-end justify-between px-1">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"平台供应商"} /></p>
@@ -240,20 +214,9 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
               {providers.map((provider) => <ProviderCard key={provider.id} provider={provider} catalog={catalog.find((entry) => entry.kind === provider.kind)} onChanged={handleProviderChanged} onRemoved={handleProviderRemoved} onProbeFinished={reload} />)}
             </div>
           </div>}
-        </section> : null}
+        </fieldset> : null}
 
-        {canManageProviders ? <PlatformOperationCards providers={providers} /> : null}
-
-        {adminMode ? <section className="mt-6 border-t border-slate-200 pt-5" aria-labelledby="platform-probe-budget-summary-title">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 id="platform-probe-budget-summary-title" className="text-base font-semibold text-slate-950"><UiText text={"连接测试额度"} /></h2>
-              <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"每测试一个已配置能力（生成、向量或图片识别）消耗 1 个单位。该额度只控制连接测试的外部流量和成本，不是用户 Token 额度，也不会启用或切换默认路由。"} /></p>
-            </div>
-            <a href="/admin/operations/probes" className="shrink-0 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50"><UiText text={"更新测试额度"} /></a>
-          </div>
-          {probeBudgetLoading ? <p className="mt-4 text-xs text-slate-500"><UiText text={"读取当前测试额度…"} /></p> : probeBudget ? <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-xs sm:grid-cols-4"><div><dt className="text-slate-400"><UiText text={"可用单位"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.availableUnits} / {probeBudget.unitLimit}</dd></div><div><dt className="text-slate-400"><UiText text={"已结算 / 待核对"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.settledUnits} / {probeBudget.heldUnits}</dd></div><div><dt className="text-slate-400"><UiText text={"预算版本"} /></dt><dd className="mt-1 font-semibold text-slate-800">{probeBudget.version} · {t(probeBudget.status === "active" ? "已启用" : probeBudget.status === "scheduled" ? "待生效" : "已过期")}</dd></div><div><dt className="text-slate-400"><UiText text={"有效期"} /></dt><dd className="mt-1 font-semibold text-slate-800">{dateLabel(probeBudget.startsAt, language, t)} — {dateLabel(probeBudget.expiresAt, language, t)}</dd></div></dl> : <p className="mt-4 text-xs text-amber-800"><UiText text={"尚未启用连接测试额度；配置后才能验证供应商连接。"} /></p>}
-        </section> : null}
+        {canManageProviders ? <PlatformOperationAssignments providers={providers} onBusyChange={setOperationsBusy} /> : null}
 
         {canManageProviders && createOpen ? <ProviderCreateDialog open catalog={catalog} onCreated={handleProviderCreated} onClose={() => setCreateOpen(false)} restoreFocusRef={createTriggerRef} /> : null}
     </div>
@@ -270,155 +233,6 @@ const dialogFocusableSelector = [
   "textarea:not([disabled])",
   "[tabindex]:not([tabindex=\"-1\"])",
 ].join(",");
-
-function PlatformOperationCards({ providers }: { providers: Provider[] }) {
-  const { t } = useAppearance();
-  const [view, setView] = useState<PlatformOperationView | null>(null);
-  const [selection, setSelection] = useState<Partial<Record<PlatformOperation, string>>>({});
-  const [proofs, setProofs] = useState<Partial<Record<PlatformOperation, { probeId: string; clientRequestKey: string }>>>({});
-  const [pending, setPending] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [openOperation, setOpenOperation] = useState<PlatformOperation | null>(null);
-  const { confirm, dialog } = useAppConfirmDialog();
-
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch("/api/settings/platform-ai-operations", { cache: "no-store" });
-      if (!response.ok) throw new Error(await readError(response, "平台能力配置加载失败"));
-      const payload = await response.json() as PlatformOperationView;
-      setView(payload);
-      setSelection((current) => {
-        const next = { ...current };
-        for (const operation of PLATFORM_OPERATIONS) {
-          if (next[operation] === undefined) next[operation] = payload.candidates[operation].active?.providerConnectionId ?? payload.candidates[operation].candidates[0]?.providerConnectionId;
-        }
-        return next;
-      });
-      setMessage(null);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "平台能力配置加载失败");
-    }
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-
-  function selectedCandidate(operation: PlatformOperation): PlatformOperationCandidate | undefined {
-    const candidates = view?.candidates[operation].candidates ?? [];
-    return candidates.find((candidate) => candidate.providerConnectionId === selection[operation]) ?? candidates[0];
-  }
-
-  const localizedMessage = message === null ? null : PLATFORM_OPERATIONS.map((operation) => {
-    if (message === `${operationLabels[operation]}真实测试通过，可以启用。`) return `${t(operationLabels[operation])}${t("真实测试通过，可以启用。")}`;
-    if (message === `${operationLabels[operation]}已启用。`) return `${t(operationLabels[operation])}${t("已启用。")}`;
-    return null;
-  }).find((candidate) => candidate !== null) ?? null;
-
-  async function probe(operation: PlatformOperation): Promise<void> {
-    const candidate = selectedCandidate(operation);
-    if (candidate === undefined) return;
-    const clientRequestKey = crypto.randomUUID();
-    setPending(`${operation}:probe`);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/settings/platform-ai-operations/${operation}/probe`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientRequestKey, providerConnectionId: candidate.providerConnectionId, modelId: candidate.modelId, embeddingDimensions: candidate.embeddingDimensions, maxOutputTokens: candidate.maxOutputTokens, quotaMultiplierBps: 10_000 }),
-      });
-      if (!response.ok) throw new Error(await readError(response, "能力模型测试失败"));
-      const payload = await response.json() as { probeId: string | null; safeErrorCode: string | null };
-      if (payload.probeId === null) throw new Error(payload.safeErrorCode ?? "能力模型测试未通过");
-      setProofs((current) => ({ ...current, [operation]: { probeId: payload.probeId as string, clientRequestKey } }));
-      setMessage(`${operationLabels[operation]}真实测试通过，可以启用。`);
-    } catch (error) {
-      setProofs((current) => { const next = { ...current }; delete next[operation]; return next; });
-      setMessage(error instanceof Error ? error.message : "能力模型测试失败");
-    } finally {
-      setPending(null);
-    }
-  }
-
-  async function apply(operation: PlatformOperation): Promise<void> {
-    const candidate = selectedCandidate(operation);
-    const proof = proofs[operation];
-    if (candidate === undefined || proof === undefined) return;
-    let confirmEmbeddingImpact = true;
-    if (operation === "embedding") {
-      const confirmation = await confirm({
-        eyebrow: t("向量能力"),
-        title: t("确认启用新的向量模型？"),
-        description: t("切换向量模型或维度可能影响现有索引。请确认已安排相关索引重建；停用后不可恢复，需要新建配置或版本。"),
-        confirmLabel: t("确认启用"),
-        cancelLabel: t("取消"),
-        tone: "warning",
-      });
-      confirmEmbeddingImpact = confirmation.confirmed;
-    }
-    if (!confirmEmbeddingImpact) return;
-    setPending(`${operation}:apply`);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/settings/platform-ai-operations/${operation}/apply`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ probeId: proof.probeId, clientRequestKey: proof.clientRequestKey, providerConnectionId: candidate.providerConnectionId, modelId: candidate.modelId, embeddingDimensions: candidate.embeddingDimensions, maxOutputTokens: candidate.maxOutputTokens, quotaMultiplierBps: 10_000, confirmEmbeddingImpact }),
-      });
-      if (!response.ok) throw new Error(await readError(response, "能力启用失败"));
-      setProofs((current) => { const next = { ...current }; delete next[operation]; return next; });
-      await load();
-      setMessage(`${operationLabels[operation]}已启用。`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "能力启用失败");
-    } finally {
-      setPending(null);
-    }
-  }
-
-  return <><section className="mt-6 space-y-4" aria-labelledby="platform-operation-cards-title">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"平台能力配置"} /></p><h2 id="platform-operation-cards-title" className="mt-2 text-xl font-semibold text-slate-950"><UiText text={"能力分配"} /></h2><p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500"><UiText text={"候选仅来自已验证且启用的连接。每项能力都必须用选定模型完成一次真实测试后才能启用；此处不展示供应商全量目录。"} /></p></div>
-      <button type="button" onClick={() => void load()} disabled={pending !== null} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"><UiText text={"刷新能力"} /></button>
-    </div>
-    <div role="table" aria-label={t("能力分配")} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-      <div role="rowgroup" className="hidden border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 md:block">
-        <div role="row" className="grid grid-cols-[minmax(0,1.1fr)_minmax(6rem,.75fr)_minmax(0,1.7fr)_auto] items-center gap-4">
-          <span role="columnheader"><UiText text={"能力"} /></span><span role="columnheader"><UiText text={"状态"} /></span><span role="columnheader"><UiText text={"当前模型来源"} /></span><span role="columnheader" className="sr-only"><UiText text={"操作"} /></span>
-        </div>
-      </div>
-      <div role="rowgroup" className="divide-y divide-slate-200">
-      {PLATFORM_OPERATIONS.map((operation) => {
-        const group = view?.candidates[operation];
-        const candidate = selectedCandidate(operation);
-        const proof = proofs[operation];
-        const active = group?.active ?? null;
-        const activeCandidate = active === null ? undefined : group?.candidates.find((item) => item.providerConnectionId === active.providerConnectionId && item.modelId === active.modelId);
-        const configured = active !== null;
-        const activeProvider = activeCandidate?.providerName ?? providers.find((provider) => provider.id === active?.providerConnectionId)?.name;
-        const ready = group?.readiness === "ready";
-        const stateLabel = group === undefined ? "读取配置中…" : ready ? "已配置并生效" : "未配置生效模型";
-        return <div key={operation} role="row" className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-4 md:grid-cols-[minmax(0,1.1fr)_minmax(6rem,.75fr)_minmax(0,1.7fr)_auto] md:items-center md:gap-4" data-operation={operation}>
-          <div role="cell" className="min-w-0"><h3 className="font-semibold text-slate-900">{t(operationLabels[operation])}</h3></div>
-          <div role="cell" className="justify-self-end md:justify-self-start"><span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-xs font-semibold ${ready ? "bg-emerald-50 text-emerald-700" : group === undefined ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-900"}`}>{t(stateLabel)}</span></div>
-          <div role="cell" className="col-span-2 min-w-0 text-xs leading-5 text-slate-600 md:col-span-1">{active ? <span className="break-words">{activeProvider ? `${activeProvider} · ` : ""}{active.modelId}{active.embeddingDimensions ? ` · ${active.embeddingDimensions} ${t("维")}` : ""}</span> : <span className="text-slate-400"><UiText text={group === undefined ? "读取配置中…" : "尚未配置"} /></span>}</div>
-          <div role="cell" className="col-span-2 flex justify-end md:col-span-1 md:justify-start"><OperationPanel title={`${t(operationLabels[operation])} · ${t("能力配置")}`} translateTitle={false} triggerLabel="配置" variant="drawer" open={openOperation === operation} onOpenChange={(open) => setOpenOperation(open ? operation : null)}>
-            <div className="space-y-4" data-operation-config={operation}>
-              {configured ? <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800"><UiText text={"当前生效模型："} />{activeProvider ? `${activeProvider} · ` : ""}{active.modelId}{active.embeddingDimensions ? ` · ${active.embeddingDimensions} ${t("维")}` : ""}</p> : view !== null ? <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"><UiText text={"尚未配置当前生效模型；测试通过后才能启用。"} /></p> : null}
-              <label className="block text-xs font-medium text-slate-600"><UiText text={"选择已验证连接与能力模型"} /><select value={selection[operation] ?? ""} onChange={(event) => { setSelection((current) => ({ ...current, [operation]: event.target.value })); setProofs((current) => { const next = { ...current }; delete next[operation]; return next; }); }} disabled={pending !== null || (group?.candidates.length ?? 0) === 0} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400">{group?.candidates.length ? group.candidates.map((item) => <option key={`${item.providerConnectionId}:${item.modelId}`} value={item.providerConnectionId}>{item.providerName} · {item.providerKind} · {item.modelId}{item.embeddingDimensions ? ` · ${item.embeddingDimensions} ${t("维")}` : ""}</option>) : <option value=""><UiText text={"暂无合格候选"} /></option>}</select></label>
-              {candidate ? <p className="text-xs text-slate-500"><UiText text={"当前选择："} />{candidate.providerName} / {candidate.providerKind} / {candidate.modelId}{candidate.embeddingDimensions ? ` · ${candidate.embeddingDimensions} ${t("维")}` : ""}</p> : null}
-              <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void probe(operation)} disabled={pending !== null || candidate === undefined} className="min-h-10 rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-40">{pending === `${operation}:probe` ? t("测试中…") : t("测试所选模型")}</button><button type="button" onClick={() => void apply(operation)} disabled={pending !== null || proof === undefined} className="min-h-10 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{pending === `${operation}:apply` ? t("启用中…") : t("启用能力")}</button></div>
-              {proof ? <p className="text-xs font-semibold text-emerald-700"><UiText text={"真实测试证明有效，可启用"} /></p> : null}
-            </div>
-          </OperationPanel></div>
-        </div>;
-      })}
-      </div>
-    </div>
-    {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{localizedMessage ?? <UiFeedbackText text={message} />}</p> : null}
-  </section>{dialog}</>;
-}
 
 function ProviderCreateDialog({
   open,
@@ -643,7 +457,7 @@ function ProviderCreateForm({
         ) : <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><UiText text={"DeepSeek 当前作为生成供应商使用；语义索引需为项目另选 OpenAI、Qwen 或 GLM。"} /></p>}
         <details className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
           <summary className="cursor-pointer font-semibold text-slate-800"><UiText text={"能力说明与推荐模型"} /></summary>
-          <p className="mt-1"><UiText text={"生成模型用于文本、摘要和计划；图片识别模型可选，留空即关闭；向量模型可选，维度必须匹配，切换模型或维度后需重建相关索引。API Key 只在服务端加密保存；连接测试会单独消耗平台探测预算。"} /></p>
+          <p className="mt-1"><UiText text={"生成模型用于文本、摘要和计划；图片识别模型可选，留空即关闭；向量模型可选，维度必须匹配，切换模型或维度后需重建相关索引。API Key 只在服务端加密保存；连接测试按实际模型类型使用 1–3 次模型测试额度。"} /></p>
           {definition ? <div className="mt-3 space-y-1 text-slate-500"><p><UiText text={"生成推荐："} />{definition.generationModelSuggestions.join("、") || "暂无"}</p><p><UiText text={"图片推荐："} />{definition.visionModelSuggestions.join("、") || "暂无"}</p><p><UiText text={"向量推荐："} />{definition.embeddingModelSuggestions.map((item) => `${item.id}（${item.dimensions} 维）`).join("、") || "暂无"}</p></div> : null}
         </details>
       </div>
@@ -691,7 +505,7 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
     setProbeBudgetHref(null);
     try {
       const budgetResponse = await fetch("/api/admin/platform-provider-probe/budget", { cache: "no-store" });
-      if (!budgetResponse.ok) throw new Error(await readError(budgetResponse, "平台探测预算读取失败，请稍后重试。"));
+      if (!budgetResponse.ok) throw new Error(await readError(budgetResponse, "测试额度读取失败"));
       const budgetPayload = await budgetResponse.json() as { budget: ProbeBudgetSummary | null };
       const budgetMessage = probeBudgetMessage(budgetPayload.budget, requiredProbeUnits(provider, catalog), t);
       if (budgetMessage !== null) {
@@ -804,7 +618,7 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
           <dl className="grid gap-3 rounded-2xl border border-slate-200 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400"><UiText text={"生成模型"} /></dt><dd className="mt-1 break-words font-medium text-slate-700">{provider.defaultGenerationModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"图片识别"} /></dt><dd className="mt-1 break-words font-medium text-slate-700">{provider.defaultVisionModelId ?? t("未配置")}</dd></div><div><dt className="text-slate-400"><UiText text={"向量模型"} /></dt><dd className="mt-1 break-words font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} ${t("维")}` : t("未配置")}</dd></div></dl>
           <ScopeEvidenceCard title="供应商配置边界" evidence={{ scope: t("平台供应商连接"), owner: t("平台管理员"), payer: t("使用平台默认路由时由当前发起人扣减平台额度"), affectedProjects: provider._count.platformDefaultAiRoutes > 0 ? `${t("项目影响需经活动默认路由影响预览核实；当前有")} ${provider._count.platformDefaultAiRoutes} ${t("条活动默认路由引用")}` : t("尚无活动默认路由引用；暂无项目影响证据"), latestSuccess: provider.lastTestedAt ? `${t("最近连接测试")}：${dateLabel(provider.lastTestedAt, language, t)}` : t("尚未完成连接测试") }} />
           {provider.status === "disabled" ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700"><UiText text={"永久删除仅适用于没有活动平台默认路由或历史审计引用的连接，并会同时删除加密凭据。"} /></p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="min-h-10 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40"><UiText text={"永久删除"} /></button></div> : null}
-          {(checkResult || message) && !editing ? <p role="status" className="text-xs leading-5 text-slate-600">{checkResult ? describeProviderCheck(checkResult, t) : <UiFeedbackText text={message ?? ""} />}{probeBudgetHref ? <> <a href={probeBudgetHref} className="font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"配置探测预算"} /></a></> : null}</p> : null}
+          {(checkResult || message) && !editing ? <p role="status" className="text-xs leading-5 text-slate-600">{checkResult ? describeProviderCheck(checkResult, t) : <UiFeedbackText text={message ?? ""} />}{probeBudgetHref ? <> <a href={probeBudgetHref} className="font-semibold text-indigo-700 underline underline-offset-2"><UiText text={"设置模型测试额度"} /></a></> : null}</p> : null}
           {provider.lastErrorCode ? <p className="text-xs text-rose-600"><UiText text={"最近一次连接测试未通过："} />{describeProviderCheck({ attempt: { status: "failed", safeErrorCode: provider.lastErrorCode, capabilities: { generation: "notConfigured", embedding: "notConfigured", vision: "notConfigured" }, embeddingDimensions: null } }, t)}</p> : null}
         </div>
       </OperationPanel></div>

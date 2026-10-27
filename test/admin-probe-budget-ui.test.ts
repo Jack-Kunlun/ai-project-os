@@ -13,7 +13,12 @@ test("platform probe UI uses local immediate datetime values and preflights budg
   assert.match(budgetClient, /parsedStartsAt\.toISOString\(\)/u);
   assert.match(budgetClient, /parsedExpiresAt\.toISOString\(\)/u);
   assert.match(settingsClient, /api\/admin\/platform-provider-probe\/budget/u);
-  assert.match(settingsClient, /可用单位不足/u);
+  assert.match(settingsClient, /模型测试次数不足/u);
   assert.match(settingsClient, /\/admin\/operations\/probes/u);
+  const batchClient = await readFile("src/app/settings/platform-operation-assignments.tsx", "utf8");
+  assert.match(batchClient, /batchBudgetProblem\(currentBudget, operations.length\)/u);
+  assert.match(batchClient, /PlatformProbeBudgetClient compact disabled=\{busy\}/u);
+  assert.match(budgetClient, /form=\{formId\}/u, "allowance save action is in the panel footer");
+  assert.match(budgetClient, /pendingRef.current/u, "duplicate save submits cannot create two periods");
   assert.doesNotMatch(settingsClient, /安全错误码：\$\{check\.attempt\.safeErrorCode\}/u);
 });

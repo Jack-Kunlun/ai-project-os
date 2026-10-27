@@ -603,7 +603,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
   assert.match(adminDocs, /管理工作台/u);
   assert.match(adminDocs, /在 `\/admin\/models` 配置并测试/u);
-  assert.match(adminDocs, /在 `\/admin\/models` 的能力卡片中分别为视觉、抽取、向量和生成能力选择已验证可用的模型/u);
+  assert.match(adminDocs, /在 `\/admin\/models` 的能力分配列表中为六项能力选择已验证可用的模型/u);
   assert.doesNotMatch(adminDocs, /`\/admin\/models\/routes`/u);
   assert.match(adminDocs, /普通用户使用平台额度；只有有效会员可以维护个人模型连接，且个人模型必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用/u);
   assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users\/memberships`/u);
@@ -616,7 +616,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(userDocs, /自动化、写入\/提交和旧版 PAT 路径保持关闭/u);
   assert.match(readme, /只读仓库内容/u);
   assert.match(adminGuide, /AdminPageHeader title="管理员操作指南" description="按当前控制面流程完成预算、供应商连接、能力模型和用户治理/u);
-  assert.match(adminGuide, /<GuideCard title="1\. 先准备探测预算" summary=/u);
+  assert.match(adminGuide, /<GuideCard title="1\. 先了解模型测试额度" summary=/u);
   assert.match(adminGuide, /<GuideCard title="2\. 新增供应商：先测试后保存" summary=/u);
   assert.match(adminGuide, /<GuideCard title="3\. 六项能力：选择、测试、启用" summary=/u);
   assert.match(adminGuide, /成功条件：/u);

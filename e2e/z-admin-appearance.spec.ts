@@ -140,17 +140,17 @@ for (const appearance of cases) {
     await searchButton.click();
     const searchDialog = page.getByRole("dialog", { name: tr("搜索功能页面"), exact: true });
     await expect(searchDialog).toBeVisible();
-    await searchDialog.getByRole("searchbox").fill(tr("探测预算"));
+    await searchDialog.getByRole("searchbox").fill(tr("模型测试额度"));
     await expect(searchDialog.getByRole("link")).toHaveCount(1);
-    await searchDialog.getByRole("link", { name: tr("探测预算"), exact: true }).click();
+    await searchDialog.getByRole("link", { name: tr("模型测试额度"), exact: true }).click();
     await expect(page).toHaveURL(/\/admin\/operations\/probes$/u);
     await expect(searchDialog).toBeHidden();
-    await expect(page.getByRole("heading", { name: tr("连接探测预算"), exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: tr("模型测试额度"), exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: tr("账户菜单"), exact: true }).click();
     await expect(page.getByRole("link", { name: tr("账户设置"), exact: true })).toHaveAttribute("href", "/admin/account");
     await expect(page.getByRole("button", { name: tr("退出"), exact: true })).toBeVisible();
-    await page.getByRole("heading", { name: tr("连接探测预算"), exact: true }).click();
+    await page.getByRole("heading", { name: tr("模型测试额度"), exact: true }).click();
     await expect(page.locator(".header-account-popover")).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });

@@ -917,4 +917,5 @@ export const englishAdminMessages: Readonly<Record<string, string>> = {
   "模型未验证、供应商已停用、能力类型不匹配或向量维度冲突；先修正连接或模型，再显式重新测试。": "The model may be unverified, the provider disabled, the capability type mismatched, or the embedding dimensions conflicting. Fix the connection or model before explicitly retesting.",
   "当前额度周期有待核对请求，再次测试前请先核对供应商记录。逐项测试结果仅保留在当前页面，刷新后不会恢复。": "This period has requests awaiting reconciliation. Check provider records before testing again. Per-item test results are kept only on this page and are not restored after a reload.",
   "连接测试按实际模型类型使用 1–3 次模型测试额度。": "Connection tests use 1\u20133 test units for the configured model types.",
+  "生成模型用于文本、摘要和计划；图片识别模型可选，留空即关闭；向量模型可选，维度必须匹配，切换模型或维度后需重建相关索引。API Key 只在服务端加密保存；连接测试按实际模型类型使用 1–3 次模型测试额度。": "Generation models handle text, summaries, and plans. Vision models are optional; leave blank to disable. Embedding models are optional and their dimensions must match. Rebuild affected indexes after changing the embedding model or dimensions. API keys are encrypted on the server. Connection tests use 1\u20133 test units for the configured model types.",
 };

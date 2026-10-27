@@ -212,6 +212,15 @@ test("personal knowledge hands off explicitly into project materials and guided 
   const organize = intake.getByRole("button", { name: "确认发送并加入队列", exact: true });
   await expect(organize).toBeVisible();
   await expect(organize).toBeInViewport();
+  const operationFooter = intake.locator("[data-operation-footer][data-inquiry-footer]");
+  await expect(operationFooter).toBeVisible();
+  await expect(operationFooter.getByRole("button", { name: "智能问答", exact: true })).toBeVisible();
+  expect(await organize.evaluate((button) => Boolean(button.closest("[data-operation-actions]")))).toBe(true);
+  const intakeBodyBounds = await intake.locator("[data-dialog-body]").boundingBox();
+  const operationFooterBounds = await operationFooter.boundingBox();
+  expect(intakeBodyBounds).not.toBeNull();
+  expect(operationFooterBounds).not.toBeNull();
+  expect(operationFooterBounds!.y).toBeGreaterThanOrEqual(intakeBodyBounds!.y + intakeBodyBounds!.height - 1);
   await expect.poll(() => extractCalls.filter((call) => call.phase === "prepare").length).toBe(1);
   expect(extractCalls[0]?.sourceIds).toEqual([sourceId]);
   expect(extractCalls.filter((call) => call.phase === "execute")).toHaveLength(0);

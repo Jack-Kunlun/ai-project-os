@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
 import { ShellIcon } from "./shell-icon";
 
-const OperationPanelFooterTargetContext = createContext<HTMLDivElement | null>(null);
+export const OperationPanelFooterTargetContext = createContext<HTMLDivElement | null>(null);
 
 /** Lets long-running operation content place its primary action in the fixed footer. */
 export function useOperationPanelFooterTarget() {

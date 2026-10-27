@@ -104,7 +104,7 @@ async function expectModalGeometry(dialog: Locator, viewportWidth: number): Prom
   expect(geometry.width).toBeLessThanOrEqual(920);
   expect(geometry.left).toBeGreaterThanOrEqual(-1);
   expect(geometry.right).toBeLessThanOrEqual(viewportWidth + 1);
-  expect(geometry.titleSize).toBe("17px");
+  expect(geometry.titleSize).toBe("16px");
   expect(geometry.iconCenterOffsetX).toBeLessThanOrEqual(1);
   expect(geometry.iconCenterOffsetY).toBeLessThanOrEqual(1);
 }

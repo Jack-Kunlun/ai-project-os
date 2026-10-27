@@ -3,9 +3,10 @@ import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 import {  UiText, useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
+import { OperationPanelFooterTargetContext } from "@/components/operation-panel";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
-import { modalBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { modalBackdropClassName, modalFooterClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { useInquiryOperation } from "@/components/inquiry-operation";
 import { awaitImportedAsset } from "./imported-asset-readiness";
 import { ProjectFactImport } from "./project-fact-import";
@@ -61,6 +62,7 @@ export function ProjectMaterialIntake({
   const [factSourceIds, setFactSourceIds] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [footerTarget, setFooterTarget] = useState<HTMLDivElement | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useInquiryOperation(open, dialogRef);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -232,6 +234,7 @@ export function ProjectMaterialIntake({
   if (!hasOpened) return null;
 
   return (
+    <OperationPanelFooterTargetContext.Provider value={footerTarget}>
     <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`${styles.drawerBackdrop} ${modalBackdropClassName}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`${styles.drawer} overflow-hidden ${modalSurfaceClassName}`}>
         <div data-dialog-header className={`${styles.drawerHeader} flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-7`}>
@@ -293,7 +296,11 @@ export function ProjectMaterialIntake({
         <Link href={`/projects/${projectId}/repositories`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-800"><UiText text={"连接代码仓库"} /></Link>
       </div>
       </div>
+      <footer data-operation-footer className={`${modalFooterClassName} px-5 py-3 sm:px-7`}>
+        <div data-operation-actions ref={setFooterTarget} />
+      </footer>
       </div>
     </div>
+    </OperationPanelFooterTargetContext.Provider>
   );
 }

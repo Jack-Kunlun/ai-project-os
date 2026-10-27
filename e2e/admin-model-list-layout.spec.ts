@@ -167,7 +167,7 @@ test("admin models use compact lists and open read-only drawers across narrow an
     expect(dialogGeometry.left).toBeGreaterThanOrEqual(0);
     expect(dialogGeometry.right).toBeLessThanOrEqual(width);
     expect(dialogGeometry.borderRadius).toBe("6px");
-    expect(dialogGeometry.headingFontSize).toBe("17px");
+    expect(dialogGeometry.headingFontSize).toBe("16px");
     await expectR02NoHorizontalOverflow(page, `add provider dialog en-dark ${width}`);
 
     if (width === 390) {

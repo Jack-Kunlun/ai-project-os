@@ -211,7 +211,7 @@ test("basic project and team invitation forms hide Ask and use shared action dim
   await newProject.click();
   const projectDialog=page.getByRole("dialog",{name:"新建项目",exact:true});
   await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
-  const projectActions=projectDialog.locator("footer .app-action-button");
+  const projectActions=projectDialog.locator("[data-dialog-footer] .app-action-button");
   await expectActionRowGeometry(projectActions);
   await page.keyboard.press("Alt+j");
   await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);

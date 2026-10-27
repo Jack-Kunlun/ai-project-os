@@ -2,18 +2,18 @@
 import { UiErrorText } from "@/components/ui-error-text";
 
 import Link from "next/link";
-import { useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent } from "react";
+import { ProjectDialog } from "@/components/lazy-project-dialog";
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 import { ListPagination } from "@/components/list-pagination";
-import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
-import { useInquiryOperation } from "@/components/inquiry-operation";
 import { useWorkspaceSelection } from "@/components/workspace-scope";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
 import styles from "./projects-client.module.css";
-import { notifyUserProjectsChanged } from "@/lib/user-navigation";
+
+
 
 type ProjectsView = "active" | "archived";
 type ProjectsPayload = {
@@ -69,6 +69,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [createWorkspaceId, setCreateWorkspaceId] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ project: WorkspaceProject; workspaceId: string } | null>(null);
   const [view, setView] = useState<ProjectsView>("active");
   const requestSequence = useRef(0);
   const activeController = useRef<AbortController | null>(null);
@@ -106,6 +107,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
     if (previousWorkspaceId.current === workspaceId) return;
     previousWorkspaceId.current = workspaceId;
     setPage(1);
+    setDeleteTarget(null);
     setPayload(emptyPayload);
     setError(null);
     setLoading(true);
@@ -173,18 +175,22 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             </div>
           ) : (
             <><div className={styles.projectGrid}>
-              {payload.projects.map((project) => <ProjectCard key={project.id} project={project} language={language} t={t} />)}
+              {payload.projects.map((project) => <ProjectCard key={project.id} project={project} language={language} t={t} onDelete={() => setDeleteTarget({ project, workspaceId })} />)}
             </div>{payload.pagination.totalPages > 1 ? <ListPagination {...payload.pagination} onPageChange={setPage} disabled={loading} /> : null}</>
           )}
         </section>
       </div>
 
-      {createOpen && payload.canCreateProject ? <CreateProjectDialog workspaceId={createWorkspaceId} onClose={() => setCreateOpen(false)} onCreated={load} /> : null}
+      {deleteTarget?.workspaceId === workspaceId ? <ProjectDialog kind="lifecycle" project={deleteTarget.project} action="delete" onClose={() => setDeleteTarget(null)} onRefresh={() => void load({ showLoading: true })} onChanged={() => {
+        setDeleteTarget(current => current?.project.id === deleteTarget.project.id && current.workspaceId === deleteTarget.workspaceId ? null : current);
+        if (previousWorkspaceId.current === deleteTarget.workspaceId) void load({ showLoading: true });
+      }} /> : null}
+      {createOpen && payload.canCreateProject ? <ProjectDialog kind="create" workspaceId={createWorkspaceId} onClose={() => setCreateOpen(false)} onCreated={load} /> : null}
     </main>
   );
 }
 
-function ProjectCard({ project, language, t }: { project: WorkspaceProject; language: "zh-CN" | "en"; t: (text: string) => string }) {
+function ProjectCard({ project, language, t, onDelete }: { project: WorkspaceProject; language: "zh-CN" | "en"; t: (text: string) => string; onDelete: () => void }) {
   const archived = project.archivedAt !== null;
   const latestJob = project.backgroundJobs[0];
 
@@ -198,7 +204,10 @@ function ProjectCard({ project, language, t }: { project: WorkspaceProject; lang
       {archived ? <p className={styles.archiveNote}>{t("归档于")} {formatDate(project.archivedAt!, language)}{t("。项目数据仍可恢复使用。")}</p> : null}
       <div className={styles.cardFooter}>
         <span>{t("更新于")} {formatDate(project.updatedAt, language)}{latestJob ? ` · ${t(jobLabels[latestJob.kind])} ${t(jobStatusLabels[latestJob.status])}` : ""}</span>
-        <Link href={`/projects/${project.id}`} aria-label={`${t("查看项目")} ${project.name}`}><UiText text="进入项目 →" /></Link>
+        <div className={styles.cardActions}>
+          {archived ? <button type="button" onClick={onDelete} className={styles.deleteButton} aria-label={`${t("永久删除")} ${project.name}`}><UiText text="永久删除" /></button> : null}
+          <Link href={`/projects/${project.id}`} aria-label={`${t("查看项目")} ${project.name}`}><UiText text="进入项目 →" /></Link>
+        </div>
       </div>
     </article>
   );
@@ -206,140 +215,4 @@ function ProjectCard({ project, language, t }: { project: WorkspaceProject; lang
 
 function SmallStat({ label, value }: { label: string; value: number }) {
   return <div className={styles.stat}><strong>{value}</strong><span>{label}</span></div>;
-}
-
-function CreateProjectDialog({ workspaceId, onClose, onCreated }: { workspaceId: string; onClose: () => void; onCreated: () => Promise<void> }) {
-  const t = useTranslate();
-  const dialogRef = useRef<HTMLElement | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const pendingRef = useRef(false);
-  const onCloseRef = useRef(onClose);
-  useInquiryOperation(true, dialogRef, false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [workspace, setWorkspace] = useState<{ id: string; name: string } | null>(null);
-  const workspaceName = workspace?.id === workspaceId ? workspace.name : "";
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        const response = await fetch("/api/workspaces/current", { cache: "no-store", signal: controller.signal });
-        if (!response.ok) return;
-        const payload = await response.json() as { overview?: { workspace?: { id: string; name: string } }; availableWorkspaces?: Array<{ id: string; name: string }> };
-        const spaces = [payload.overview?.workspace, ...(Array.isArray(payload.availableWorkspaces) ? payload.availableWorkspaces : [])];
-        const target = spaces.find(space => space?.id === workspaceId && typeof space.name === "string");
-        if (!controller.signal.aborted && target) setWorkspace(target);
-      } catch { /* The current-workspace hint remains usable if the name cannot be read. */ }
-    })();
-    return () => controller.abort();
-  }, [workspaceId]);
-
-  useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    closeButtonRef.current?.focus();
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented) return;
-      const dialog = dialogRef.current;
-      if (!dialog?.isConnected) return;
-      const target = event.target instanceof Element ? event.target : null;
-      const nestedDialog = target?.closest<HTMLElement>('[role="dialog"]');
-      if (nestedDialog && nestedDialog !== dialog) return;
-
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (!pendingRef.current) onCloseRef.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>([
-        "a[href]",
-        "button:not([disabled])",
-        "input:not([disabled])",
-        "select:not([disabled])",
-        "textarea:not([disabled])",
-        '[tabindex]:not([tabindex="-1"])',
-      ].join(","))).filter((element) => element.getClientRects().length > 0 && !element.closest("[hidden], [inert], [aria-hidden='true']"));
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || !dialog.contains(active))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousOverflow;
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }, []);
-
-  const close = () => {
-    if (!pendingRef.current) onCloseRef.current();
-  };
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!name.trim()) return;
-    pendingRef.current = true;
-    setPending(true); setError(null);
-    try {
-      const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, description, workspaceId }) });
-      if (!response.ok) throw new Error(t(await readError(response, "项目创建失败")));
-      await onCreated();
-      notifyUserProjectsChanged();
-      onCloseRef.current();
-    } catch (submitError) {
-      setError(t(submitError instanceof Error ? submitError.message : "项目创建失败"));
-    } finally {
-      pendingRef.current = false;
-      setPending(false);
-    }
-  }
-
-  return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-    <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="create-project-title" className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
-      <header data-dialog-header className={`${modalHeaderClassName} flex shrink-0 items-center justify-between gap-4 px-6 py-4`}>
-        <h2 id="create-project-title" className="text-lg font-semibold text-slate-950"><UiText text="新建项目" /></h2>
-        <button ref={closeButtonRef} data-dialog-close type="button" onClick={close} disabled={pending} className="app-icon-button" aria-label={t("关闭")}><ShellIcon name="close" className="app-icon--control" /></button>
-      </header>
-      <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5">
-        <form id="projects-create-form" onSubmit={submit}>
-          <label htmlFor="projects-project-name" className="text-sm font-semibold text-slate-700"><UiText text="项目名称" /></label>
-          <input id="projects-project-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("给项目一个清晰的名字")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-          <label htmlFor="projects-project-description" className="mt-5 block text-sm font-semibold text-slate-700"><UiText text="项目描述" /> <span className="font-normal text-slate-400"><UiText text="（可选）" /></span></label>
-          <textarea id="projects-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder={t("这个项目要达成什么？")} className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-          {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
-        </form>
-      </div>
-      <footer data-dialog-footer className={`${modalFooterClassName} flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between`}>
-        <p className="min-w-0 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{workspaceName ? <><UiText text="创建在" /> <span>{workspaceName}</span></> : <UiText text="创建在当前工作区" />}</p>
-        <div className="flex shrink-0 justify-end gap-4">
-          <button data-dialog-close type="button" onClick={close} disabled={pending} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600"><UiText text="取消" /></button>
-          <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="app-action-button rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
-        </div>
-      </footer>
-    </section>
-  </div>;
 }

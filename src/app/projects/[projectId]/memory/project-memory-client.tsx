@@ -8,6 +8,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { OperationPanel } from "@/components/operation-panel";
 import { ProjectFlowGuide } from "@/components/project-flow-guide";
+import { ProjectFactImport } from "../project-fact-import";
 import { parseProjectPageState } from "@/lib/project-navigation";
 import { AppHeader } from "@/components/app-header";
 import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
@@ -158,7 +159,7 @@ function endFlight(ref: { current: symbol | null }, token: symbol): void {
   if (ref.current === token) ref.current = null;
 }
 
-function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void }) {
+function ConfirmationCard({ confirmation, pending, executeLabel, onExecute, showAction = true }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void; showAction?: boolean }) {
   const { language } = useAppearance();
   const defaultCount = (confirmation.safeSummary.scope as { personalDefaultCount?: unknown } | undefined)?.personalDefaultCount;
   return <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4" role="status">
@@ -166,7 +167,7 @@ function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { 
     <p className="mt-2 text-xs leading-5 text-indigo-800"><UiText text={"动作："} />{confirmation.targetAction} {" "}<UiText text={"· 路由："} />{summaryText(confirmation.safeSummary.route)} {" "}<UiText text={"· 范围："} />{summaryText(confirmation.safeSummary.scope)}</p>
     {typeof defaultCount === "number" && defaultCount > 0 ? <p className="mt-2 text-xs leading-5 text-indigo-800"><UiText text={"本次还会发送你标记的"} />{" "}{defaultCount} {" "}<UiText text={"条个人通用记忆；当前项目约定优先。原始文档仍属于个人知识库，但项目成员可查看生成结果，结果可能复述其中内容。"} /></p> : null}
     <p className="mt-2 text-xs text-indigo-700"><UiText text={"确认有效期至"} />{" "}{dateLabel(confirmation.expiresAt, language)}<UiText text={"。摘要不包含原文、问题或指纹。"} /></p>
-    <button type="button" onClick={onExecute} disabled={pending} className="mt-4 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? <UiText text={"执行中…"} /> : executeLabel}</button>
+    {showAction ? <button type="button" onClick={onExecute} disabled={pending} className="mt-4 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? <UiText text={"执行中…"} /> : executeLabel}</button> : null}
   </div>;
 }
 
@@ -244,7 +245,7 @@ export function ProjectMemoryClient({ username, isSystemAdmin }: { username: str
     return () => window.clearTimeout(timer);
   }, [loading, hasIndexStatus, requestedFocus]);
 
-  return <main className={supportStyles.supportPage}><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" isSystemAdmin={isSystemAdmin} /><div data-page-content className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600"><UiText text={"AI memory workspace"} /></p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600"><UiText text={"查看项目记忆状态，通过语义检索和引用式问答找到答案。整理资料、维护索引和处理不确定内容均在独立操作区完成。"} /></p></section>{currentError ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={currentError} /> <button type="button" disabled={loading} onClick={() => void reload({ showLoading: true })} className="ml-3 inline-flex min-h-9 items-center rounded border border-current px-3 text-xs disabled:opacity-50"><UiText text="重试" /></button></div> : null}{loading || (!hasIndexStatus && !currentError) ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : index && hasIndexStatus ? <><ProjectFlowGuide projectId={projectId} stage="memory" sourceCount={index.inputs.projectSourceCount + index.inputs.repositoryMaterialGenerationCount + (index.inputs.hasCodeSnapshot ? 1 : 0)} pendingCount={candidates.filter((candidate) => candidate.reviewStatus === "candidate").length} indexReady={index.readiness === "ready"} /><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} index={index} answers={answers} onReload={reload} /></> : null}</div></main>;
+  return <main className={supportStyles.supportPage}><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" isSystemAdmin={isSystemAdmin} /><div data-page-content className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600"><UiText text={"AI memory workspace"} /></p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600"><UiText text={"查看项目记忆状态，通过语义检索和引用式问答找到答案。整理资料、维护索引和处理不确定内容均在独立操作区完成。"} /></p></section>{currentError ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={currentError} /> <button type="button" disabled={loading} onClick={() => void reload({ showLoading: true })} className="ml-3 inline-flex min-h-9 items-center rounded border border-current px-3 text-xs disabled:opacity-50"><UiText text="重试" /></button></div> : null}{loading || (!hasIndexStatus && !currentError) ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : index && hasIndexStatus ? <><ProjectFlowGuide projectId={projectId} stage="memory" sourceCount={index.inputs.projectSourceCount + index.inputs.repositoryMaterialGenerationCount + (index.inputs.hasCodeSnapshot ? 1 : 0)} pendingCount={candidates.filter((candidate) => candidate.reviewStatus === "candidate").length} indexReady={index.readiness === "ready"} /><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} projectName={projectName} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} index={index} answers={answers} onReload={reload} /></> : null}</div></main>;
 }
 
 function IndexPanel({ projectId, index, onReload }: { projectId: string; index: IndexStatus; onReload: () => Promise<IndexStatus | null> }) {
@@ -259,6 +260,7 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
   const [mode, setMode] = useState<"full" | "incremental">("full");
   const [plan, setPlan] = useState<IndexPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
+  const [planErrorCode, setPlanErrorCode] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   function invalidatePrepareRequest() {
@@ -273,13 +275,20 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
     setConfirmation(null);
     setClientKey(null);
     setPlanLoading(true);
+    let failureCode: string | null = null;
     try {
       const response = await fetch(`/api/projects/${projectId}/memory/index?mode=${mode}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(await readError(response, "索引计划读取失败"));
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "索引计划读取失败");
+        failureCode = failure.code ?? null;
+        throw new Error(failure.message ?? "索引计划读取失败");
+      }
       setPlan((await response.json() as { plan: IndexPlan }).plan);
+      setPlanErrorCode(null);
     } catch (planError) {
       setPlan(null);
-      setMessage(planError instanceof Error ? planError.message : "索引计划读取失败");
+      setPlanErrorCode(failureCode);
+      setMessage(failureCode === "MEMORY_INDEX_TOO_LARGE" ? null : planError instanceof Error ? planError.message : "索引计划读取失败");
     } finally { setPlanLoading(false); }
   }, [index.route, mode, projectId]);
 
@@ -309,6 +318,7 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
       if (sequence !== prepareSequence.current || controller.signal.aborted) return;
       if (!response.ok) {
         const failure = await readApiFailure(response, "外发摘要读取失败");
+        setPlanErrorCode(failure.code ?? null);
         throw new Error(failure.message ?? "外发摘要读取失败");
       }
       const payload = await response.json() as { confirmation: Confirmation };
@@ -344,6 +354,11 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
       });
       if (!response.ok) {
         const failure = await readApiFailure(response, "索引构建失败");
+        setPlanErrorCode(failure.code ?? null);
+        if (failure.code === "MEMORY_INDEX_TOO_LARGE") {
+          setConfirmation(null);
+          setClientKey(null);
+        }
         const nextStep = confirmationMessage(failure.code);
         if (nextStep !== null) {
           setConfirmation(null);
@@ -407,63 +422,79 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
     inputsChanged: "资料输入已变化，需要重建",
     ready: "索引可用",
   };
+  const tooLarge = planErrorCode === "MEMORY_INDEX_TOO_LARGE";
   const ready = index.readiness === "ready";
 
-  const changeMode = (nextMode: "full" | "incremental") => { invalidatePrepareRequest(); setMode(nextMode); setConfirmation(null); setClientKey(null); setPlan(null); };
-  return <section id="memory-index" tabIndex={-1} className="scroll-mt-28 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Unified vector memory"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"项目语义索引"} /></h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={"使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败或未知不会替换上一个可用索引。"} /></p></div><div className="grid grid-cols-3 gap-2"><Metric label={translateUi("资料")} value={index.inputs.projectSourceCount} /><Metric label={translateUi("代码")} value={translateUi(index.inputs.hasCodeSnapshot ? "已冻结" : "无")} /><Metric label={translateUi("仓库资料")} value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${ready ? "text-emerald-900" : "text-amber-900"}`}>{translateUi(readinessLabels[index.readiness])} · {index.activeIndex.generation.recordCount} {" "}<UiText text={"条记忆"} /></p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}><UiText text={"索引："} />{index.activeIndex.generation.providerConnection?.name ?? index.activeIndex.generation.providerConnection?.kind ?? <UiText text={"个人连接"} />} · {index.activeIndex.generation.modelId ?? <UiText text={"模型信息受限"} />} · {index.activeIndex.generation.dimensions === null ? <UiText text={"维度受限"} /> : `${index.activeIndex.generation.dimensions} 维`} · {dateLabel(index.activeIndex.publishedAt, language)}</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}><UiText text={"当前路由："} />{index.route ? `${index.route.providerConnection?.name ?? index.route.providerConnection?.kind ?? "个人连接"} · ${index.route.modelId ?? "模型信息受限"} · ${index.route.embeddingDimensions ?? "未知"} 维` : <UiText text={"未配置"} />}</p></div>{index.activeIndex.generation.inputManifestFingerprint ? <code className={`text-[10px] ${ready ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code> : null}</div>{!ready ? <p className="mt-3 text-xs leading-5 text-amber-800">{index.readiness === "providerUnavailable" ? <UiText text={"当前向量供应商未通过连接测试或已停用，语义查询和项目智能体已暂停。"} /> : index.readiness === "legacyIndex" ? <UiText text={"这是旧版索引格式，升级后需首次全量重建；重建前语义查询和项目智能体保持暂停。"} /> : index.readiness === "inputsChanged" ? <UiText text={"资料或仓库快照已变化，旧索引不会混用新输入；请重建后恢复语义能力。"} /> : <UiText text={"当前向量供应商、模型或维度与该索引不一致，重建前已停用语义查询和项目智能体。"} />}</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">{translateUi(readinessLabels[index.readiness])}</div>}{ready ? <a href="#memory-query" className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white"><UiText text={"索引已就绪，去提问 →"} /></a> : null}{index.latestJob?.status === "unknown" && index.latestJob.reconciliationRequired ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p><UiText text={"上一次索引请求结果未知，不能自动重试模型。"} /></p><button type="button" onClick={() => void reconcile()} disabled={pending} className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold"><UiText text={"人工收口未知结果"} /></button></div> : null}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800"><UiText text={"当前没有可用的向量路由。普通用户使用平台默认模型；会员用户请先在"} />{" "}<Link href="/personal/models" className="font-semibold underline"><UiText text={"个人模型设置"} /></Link> {" "}<UiText text={"配置向量能力，项目 Owner 确认后才能使用个人模型。"} /></p> : <OperationPanel title={translateUi("维护项目语义索引")} triggerLabel={index.activeIndex ? "更新语义索引" : "建立语义索引"} className="mt-5">{message ? <p role="status" className="mb-3 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}<div className="mt-5"><p className="text-sm font-semibold text-slate-700"><UiText text={"选择构建方式"} /></p><div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600"><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "full"} onChange={() => changeMode("full")} /><UiText text={"全量构建（不复用旧向量）"} /></label><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "incremental"} onChange={() => changeMode("incremental")} /><UiText text={"增量构建（仅复用兼容向量）"} /></label></div>{planLoading ? <p className="mt-3 text-xs text-slate-500"><UiText text={"正在计算当前计划…"} /></p> : plan ? <p className="mt-3 text-xs leading-5 text-slate-500"><UiText text={"当前路由："} />{plan.providerName ?? plan.providerKind ?? <UiText text={"当前路由"} />} · {plan.modelId ?? <UiText text={"模型信息受限"} />} · {plan.dimensions ?? <UiText text={"未知"} />} {" "}<UiText text={"维；输入"} />{" "}{plan.expectedInputCount} {" "}<UiText text={"条，需生成"} />{" "}{plan.generateCount} {" "}<UiText text={"条，复用"} />{" "}{plan.reuseCount} {" "}<UiText text={"条，删除"} />{" "}{plan.deleteCount} {" "}<UiText text={"条。"} />{plan.ineligibleCode === "MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED" ? <UiText text={"当前没有可复用的兼容全量基线，请先执行全量构建。"} /> : !plan.deadlineEligible ? <UiText text={"规模无法在一次请求期限内安全完成。"} /> : <UiText text={"计划可执行，读取摘要后才会发送选中内容。所有待生成片段会发送给该供应商；复用片段不会再次外发。"} />}</p> : null}</div>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={index.activeIndex ? `${mode === "full" ? "全量重建" : "增量重建"}并切换索引` : "建立语义索引"} onExecute={() => void build()} /> : <div className="mt-4 flex justify-end"><button type="button" onClick={() => void prepare()} disabled={pending || planLoading || plan === null || !plan.deadlineEligible || plan.ineligibleCode !== null} className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white disabled:opacity-40">{pending ? <UiText text={"读取摘要中…"} /> : <UiText text={"读取本次外发摘要"} />}</button></div>}</OperationPanel>}{message ? <p role="status" className="mt-3 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}</section>;
+  const changeMode = (nextMode: "full" | "incremental") => { invalidatePrepareRequest(); setMode(nextMode); setConfirmation(null); setClientKey(null); setPlan(null); setPlanErrorCode(null); setMessage(null); };
+  return <section id="memory-index" tabIndex={-1} className="scroll-mt-28 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Unified vector memory"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"项目语义索引"} /></h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={"使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败或未知不会替换上一个可用索引。"} /></p></div><div className="grid grid-cols-3 gap-2"><Metric label={translateUi("资料")} value={index.inputs.projectSourceCount} /><Metric label={translateUi("代码")} value={translateUi(index.inputs.hasCodeSnapshot ? "已冻结" : "无")} /><Metric label={translateUi("仓库资料")} value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${ready ? "text-emerald-900" : "text-amber-900"}`}>{translateUi(readinessLabels[index.readiness])} · {index.activeIndex.generation.recordCount} {" "}<UiText text={"条记忆"} /></p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}><UiText text={"索引："} />{index.activeIndex.generation.providerConnection?.name ?? index.activeIndex.generation.providerConnection?.kind ?? <UiText text={"个人连接"} />} · {index.activeIndex.generation.modelId ?? <UiText text={"模型信息受限"} />} · {index.activeIndex.generation.dimensions === null ? <UiText text={"维度受限"} /> : `${index.activeIndex.generation.dimensions} 维`} · {dateLabel(index.activeIndex.publishedAt, language)}</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}><UiText text={"当前路由："} />{index.route ? `${index.route.providerConnection?.name ?? index.route.providerConnection?.kind ?? "个人连接"} · ${index.route.modelId ?? "模型信息受限"} · ${index.route.embeddingDimensions ?? "未知"} 维` : <UiText text={"未配置"} />}</p></div>{index.activeIndex.generation.inputManifestFingerprint ? <code className={`text-[10px] ${ready ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code> : null}</div>{!ready ? <p className="mt-3 text-xs leading-5 text-amber-800">{index.readiness === "providerUnavailable" ? <UiText text={"当前向量供应商未通过连接测试或已停用，语义查询和项目智能体已暂停。"} /> : index.readiness === "legacyIndex" ? <UiText text={"这是旧版索引格式，升级后需首次全量重建；重建前语义查询和项目智能体保持暂停。"} /> : index.readiness === "inputsChanged" ? <UiText text={"资料或仓库快照已变化，旧索引不会混用新输入；请重建后恢复语义能力。"} /> : <UiText text={"当前向量供应商、模型或维度与该索引不一致，重建前已停用语义查询和项目智能体。"} />}</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">{translateUi(readinessLabels[index.readiness])}</div>}{ready ? <a href="#memory-query" className="mt-4 inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white"><UiText text={"索引已就绪，去提问 →"} /></a> : null}{index.latestJob?.status === "unknown" && index.latestJob.reconciliationRequired ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p><UiText text={"上一次索引请求结果未知，不能自动重试模型。"} /></p><button type="button" onClick={() => void reconcile()} disabled={pending} className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold"><UiText text={"人工收口未知结果"} /></button></div> : null}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800"><UiText text={"当前没有可用的向量路由。普通用户使用平台默认模型；会员用户请先在"} />{" "}<Link href="/personal/models" className="font-semibold underline"><UiText text={"个人模型设置"} /></Link> {" "}<UiText text={"配置向量能力，项目 Owner 确认后才能使用个人模型。"} /></p>  : <OperationPanel
+    title={translateUi("维护项目语义索引")}
+    triggerLabel={index.activeIndex ? "更新语义索引" : "建立语义索引"}
+    className="mt-5"
+    footer={confirmation ? <button type="button" onClick={() => void build()} disabled={pending} className="app-action-button app-action-button--compact w-full rounded-xl bg-indigo-600 font-semibold text-white disabled:opacity-40 sm:w-auto">{pending ? <UiText text={"执行中…"} /> : index.activeIndex ? `${mode === "full" ? "全量重建" : "增量重建"}并切换索引` : <UiText text={"建立语义索引"} />}</button> : <button type="button" onClick={() => void prepare()} disabled={pending || planLoading || plan === null || !plan.deadlineEligible || plan.ineligibleCode !== null || tooLarge} className="app-action-button app-action-button--compact w-full rounded-xl bg-indigo-600 font-semibold text-white disabled:opacity-40 sm:w-auto">{pending ? <UiText text={"读取摘要中…"} /> : <UiText text={"读取本次外发摘要"} />}</button>}
+  >
+    {message && !tooLarge ? <p role="status" className="mb-3 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}
+    {tooLarge ? <div role="alert" className="mb-4 border-y border-amber-200 py-4 text-sm leading-6 text-amber-900">
+      <p className="font-semibold"><code>MEMORY_INDEX_TOO_LARGE</code></p>
+      <p className="mt-2"><UiText text={"单次索引超限（5,000 个片段或 24 MiB 文本），具体触发项未知。"} /></p>
+      <p className="mt-2"><UiText text={"已有索引保留；当前不支持分段续建。"} /></p>
+    </div> : null}
+    <div className="mt-5">
+      <p className="text-sm font-semibold text-slate-700"><UiText text={"选择构建方式"} /></p>
+      <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600">
+        <label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "full"} onChange={() => changeMode("full")} /><UiText text={"全量构建（不复用旧向量）"} /></label>
+        <label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "incremental"} onChange={() => changeMode("incremental")} /><UiText text={"增量构建（仅复用兼容向量）"} /></label>
+      </div>
+      {planLoading ? <p className="mt-3 text-xs text-slate-500"><UiText text={"正在计算当前计划…"} /></p> : plan ? <p className="mt-3 text-xs leading-5 text-slate-500"><UiText text={"当前路由："} />{plan.providerName ?? plan.providerKind ?? <UiText text={"当前路由"} />} · {plan.modelId ?? <UiText text={"模型信息受限"} />} · {plan.dimensions ?? <UiText text={"未知"} />} {" "}<UiText text={"维；输入"} />{" "}{plan.expectedInputCount} {" "}<UiText text={"条，需生成"} />{" "}{plan.generateCount} {" "}<UiText text={"条，复用"} />{" "}{plan.reuseCount} {" "}<UiText text={"条，删除"} />{" "}{plan.deleteCount} {" "}<UiText text={"条。"} />{plan.ineligibleCode === "MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED" ? <UiText text={"当前没有可复用的兼容全量基线，请先执行全量构建。"} /> : !plan.deadlineEligible ? <UiText text={"规模无法在一次请求期限内安全完成。"} /> : <UiText text={"计划可执行，读取摘要后才会发送选中内容。所有待生成片段会发送给该供应商；复用片段不会再次外发。"} />}</p> : null}
+    </div>
+    {confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} showAction={false} executeLabel={index.activeIndex ? `${mode === "full" ? "全量重建" : "增量重建"}并切换索引` : "建立语义索引"} onExecute={() => void build()} /> : null}
+  </OperationPanel>}{message ? <p role="status" className="mt-3 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}</section>;
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) { return <div className="min-w-20 rounded-xl bg-slate-50 px-3 py-3 text-center"><p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>; }
 
-const MAX_BATCH_SELECTION = 10;
+const MAX_CANDIDATE_BATCH_SELECTION = 10;
 
-function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId: string; sources: Source[]; candidates: Candidate[]; onReload: () => Promise<unknown> }) {
+function ExtractPanel({ projectId, projectName, sources, candidates, onReload }: { projectId: string; projectName: string; sources: Source[]; candidates: Candidate[]; onReload: () => Promise<unknown> }) {
   const translateUi = useTranslate();
-  const [selected, setSelected] = useState<string[]>([]);
+  const sourceScopeKey = JSON.stringify(sources.map((source) => source.id).sort());
+  const [sourceSelection, setSourceSelection] = useState<{ scopeKey: string; ids: string[] }>(() => ({ scopeKey: sourceScopeKey, ids: [] }));
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [importRunning, setImportRunning] = useState(false);
+  const selected = sourceSelection.scopeKey === sourceScopeKey || importRunning ? sourceSelection.ids : [];
   const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
-  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const [clientKey, setClientKey] = useState<string | null>(null);
-  const prepareSequence = useRef(0);
-  const prepareController = useRef<AbortController | null>(null);
-  const flightRef = useRef<symbol | null>(null);
-  const [pending, setPending] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [batchReviewAction, setBatchReviewAction] = useState<"accept" | "dismiss" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const pendingCandidates = candidates.filter((candidate) => candidate.reviewStatus === "candidate");
   const pendingCandidateIds = new Set(pendingCandidates.map((candidate) => candidate.id));
   const activeSelectedCandidates = selectedCandidates.filter((id) => pendingCandidateIds.has(id));
+  const selectedSourceSetIsCurrent = sourceSelection.scopeKey === sourceScopeKey;
+  const visibleSummaryOpen = summaryOpen && (selectedSourceSetIsCurrent || importRunning);
 
-  function invalidatePrepareRequest() {
-    prepareSequence.current += 1;
-    prepareController.current?.abort();
-    prepareController.current = null;
+  function invalidateExtractSummary() {
+    if (importRunning) return;
+    setSummaryOpen(false);
   }
 
   function toggle(sourceId: string) {
-    invalidatePrepareRequest();
-    setConfirmation(null);
-    setClientKey(null);
-    setSelected((current) => current.includes(sourceId)
-      ? current.filter((id) => id !== sourceId)
-      : current.length < MAX_BATCH_SELECTION ? [...current, sourceId] : current);
-  }
-
-  function selectFirstSources() {
-    invalidatePrepareRequest();
-    setConfirmation(null);
-    setClientKey(null);
-    setSelected(sources.slice(0, MAX_BATCH_SELECTION).map((source) => source.id));
-  }
-
-  function invertSources() {
-    invalidatePrepareRequest();
-    setConfirmation(null);
-    setClientKey(null);
-    setSelected((current) => {
-      const selectedSet = new Set(current);
-      return sources.filter((source) => !selectedSet.has(source.id)).slice(0, MAX_BATCH_SELECTION).map((source) => source.id);
+    if (importRunning) return;
+    invalidateExtractSummary();
+    setSourceSelection({
+      scopeKey: sourceScopeKey,
+      ids: selected.includes(sourceId) ? selected.filter((id) => id !== sourceId) : [...selected, sourceId],
     });
+  }
+
+  function selectAllSources() {
+    if (importRunning) return;
+    invalidateExtractSummary();
+    setSourceSelection({ scopeKey: sourceScopeKey, ids: sources.map((source) => source.id) });
+  }
+
+  function clearSources() {
+    if (importRunning) return;
+    invalidateExtractSummary();
+    setSourceSelection({ scopeKey: sourceScopeKey, ids: [] });
   }
 
   function toggleCandidate(candidateId: string) {
@@ -471,134 +502,17 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       const available = current.filter((id) => pendingCandidateIds.has(id));
       return available.includes(candidateId)
         ? available.filter((id) => id !== candidateId)
-        : available.length < MAX_BATCH_SELECTION ? [...available, candidateId] : available;
+        : available.length < MAX_CANDIDATE_BATCH_SELECTION ? [...available, candidateId] : available;
     });
   }
 
   function selectFirstCandidates() {
-    setSelectedCandidates(pendingCandidates.slice(0, MAX_BATCH_SELECTION).map((candidate) => candidate.id));
+    setSelectedCandidates(pendingCandidates.slice(0, MAX_CANDIDATE_BATCH_SELECTION).map((candidate) => candidate.id));
   }
 
   function invertCandidates() {
     const selectedSet = new Set(activeSelectedCandidates);
-    setSelectedCandidates(pendingCandidates.filter((candidate) => !selectedSet.has(candidate.id)).slice(0, MAX_BATCH_SELECTION).map((candidate) => candidate.id));
-  }
-
-  async function prepareExtract() {
-    if (selected.length === 0) {
-      setMessage("请先选择要分析的资料。");
-      return;
-    }
-    const preparedClientKey = crypto.randomUUID();
-    const flightToken = beginFlight(flightRef);
-    if (flightToken === null) return;
-    invalidatePrepareRequest();
-    const sequence = prepareSequence.current;
-    const controller = new AbortController();
-    prepareController.current = controller;
-    setPending(true);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/projects/${projectId}/memory/extract`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey, sourceIds: selected }),
-        signal: controller.signal,
-      });
-      if (sequence !== prepareSequence.current || controller.signal.aborted) return;
-      if (!response.ok) {
-        const failure = await readApiFailure(response, "外发摘要读取失败");
-        throw new Error(failure.message ?? "外发摘要读取失败");
-      }
-      const payload = await response.json() as { confirmation: Confirmation };
-      setConfirmation(payload.confirmation);
-      setClientKey(preparedClientKey);
-      setMessage("已读取本次外发摘要。请核对路由和范围后，点击确认并执行。");
-    } catch (prepareError) {
-      if (controller.signal.aborted || sequence !== prepareSequence.current) return;
-      setMessage(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
-    } finally {
-      if (sequence === prepareSequence.current) {
-        setPending(false);
-        if (prepareController.current === controller) prepareController.current = null;
-      }
-      endFlight(flightRef, flightToken);
-    }
-  }
-
-  async function extract() {
-    if (confirmation === null || clientKey === null) {
-      setMessage("请先读取本次外发摘要。");
-      return;
-    }
-    const flightToken = beginFlight(flightRef);
-    if (flightToken === null) return;
-    setPending(true);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/projects/${projectId}/memory/extract`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey, sourceIds: selected }),
-      });
-      if (!response.ok) {
-        const failure = await readApiFailure(response, "自动抽取失败");
-        const nextStep = confirmationMessage(failure.code);
-        if (nextStep !== null) {
-          setConfirmation(null);
-          setClientKey(null);
-        }
-        throw new Error(nextStep ?? failure.message ?? "自动抽取失败");
-      }
-      const payload = await response.json() as { job?: { status?: string; result?: {
-        candidateCount?: number;
-        confirmedCount?: number;
-        reviewRequiredCount?: number;
-        duplicateCount?: number;
-        returnedCandidateCount?: number;
-        rejectedCandidateCount?: number;
-        recoveredExcerptCount?: number;
-        anchoredExcerptCount?: number;
-      } | null } };
-      if (payload.job?.status === "queued" || payload.job?.status === "running") {
-        setSelected([]);
-        setConfirmation(null);
-        setClientKey(null);
-        setMessage("资料整理任务已进入后台，可继续添加资料。在项目资料的「识别任务」栏目查看进度和已保存结果。");
-        await onReload();
-        return;
-      }
-      const result = payload.job?.result;
-      const created = result?.candidateCount ?? 0;
-      const confirmed = result?.confirmedCount ?? 0;
-      const reviewRequired = result?.reviewRequiredCount ?? created;
-      const duplicates = result?.duplicateCount ?? 0;
-      const returned = result?.returnedCandidateCount ?? created + duplicates;
-      const rejected = result?.rejectedCandidateCount ?? 0;
-      const recovered = result?.recoveredExcerptCount ?? 0;
-      const anchored = result?.anchoredExcerptCount ?? 0;
-      setSelected([]);
-      setConfirmation(null);
-      setClientKey(null);
-      if (returned > 0 && created === 0 && duplicates === 0 && rejected > 0) {
-        setMessage(`供应商调用成功并返回 ${returned} 条，但 ${rejected} 条既未引用有效证据块，也不是原文中的连续摘录，因此系统未写入候选。建议一次只选 1 条较短资料重试，或在智能控制台切换生成模型。`);
-      } else if (returned === 0) {
-        setMessage("供应商调用成功，但模型未发现有充分原文证据的决策、进展、问题或风险；本次未生成候选。可换一条资料或缩小范围后重试。");
-      } else {
-        const details = [`自动形成 ${confirmed} 条事实`, `${reviewRequired} 条待处理`];
-        if (rejected > 0) details.push(`跳过 ${rejected} 条无有效证据定位的输出`);
-        if (anchored > 0) details.push(`通过证据块定位 ${anchored} 条原文`);
-        if (recovered > 0) details.push(`校正 ${recovered} 条仅有空白差异的摘录`);
-        if (duplicates > 0) details.push(`忽略 ${duplicates} 条重复记录`);
-        setMessage(`${details.join("；")}。有证据的事实已入库，仅待处理内容需要人工介入。`);
-      }
-      await onReload();
-    } catch (extractError) {
-      setMessage(extractError instanceof Error ? extractError.message : "自动抽取失败");
-    } finally {
-      setPending(false);
-      endFlight(flightRef, flightToken);
-    }
+    setSelectedCandidates(pendingCandidates.filter((candidate) => !selectedSet.has(candidate.id)).slice(0, MAX_CANDIDATE_BATCH_SELECTION).map((candidate) => candidate.id));
   }
 
   async function submitReview(candidate: Candidate, action: "accept" | "dismiss") {
@@ -628,7 +542,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
   async function batchReview(action: "accept" | "dismiss") {
     if (batchReviewAction !== null || reviewingId !== null || activeSelectedCandidates.length === 0) return;
     const selectedSet = new Set(activeSelectedCandidates);
-    const batch = pendingCandidates.filter((candidate) => selectedSet.has(candidate.id)).slice(0, MAX_BATCH_SELECTION);
+    const batch = pendingCandidates.filter((candidate) => selectedSet.has(candidate.id)).slice(0, MAX_CANDIDATE_BATCH_SELECTION);
     if (batch.length === 0) return;
     setBatchReviewAction(action);
     setMessage(null);
@@ -658,6 +572,11 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
     }
   }
 
+  const sourceLabels = Object.fromEntries(sources.filter((source) => selected.includes(source.id)).map((source) => {
+    const reference = source.externalRef?.replace(/[?#].*$/u, "") || source.contentHash.slice(0, 12);
+    return [source.id, `${source.kind} · ${reference.slice(0, 120)}`];
+  }));
+
   const reviewBusy = reviewingId !== null || batchReviewAction !== null;
 
   return (
@@ -669,62 +588,73 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       </div>
 
       <div className="mt-6 flex flex-wrap gap-4">
-        <OperationPanel title={translateUi("整理已有项目资料")} triggerLabel="整理已有资料">{message ? <p role="status" className="mb-4 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}
-        <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold"><UiText text={"选择资料（最多 10 条）"} /></h3>
-            <span className="text-xs text-slate-400"><UiText text={"已选"} />{" "}{selected.length} {" "}<UiText text={"条"} /></span>
+        <OperationPanel
+          title={translateUi("整理已有项目资料")}
+          triggerLabel="整理已有资料"
+          footer={!visibleSummaryOpen ? <button type="button" onClick={() => setSummaryOpen(true)} disabled={selected.length === 0 || importRunning} className="app-action-button app-action-button--compact w-full rounded-xl bg-indigo-600 font-semibold text-white disabled:opacity-40 sm:w-auto"><UiText text={"读取本次外发摘要"} /></button> : <button type="button" onClick={() => { if (!importRunning) setSummaryOpen(false); }} disabled={importRunning} className="app-action-button app-action-button--compact w-full rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 sm:w-auto"><UiText text={"返回选择"} /></button>}
+        >
+          <div className="flex min-h-0 min-w-0 flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold"><UiText text={"选择项目资料"} /></h3>
+              <span className="text-xs text-slate-500"><UiText text={"共"} /> {sources.length} <UiText text={"份 · 已选"} /> {selected.length} <UiText text={"份"} /></span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={selectAllSources} disabled={importRunning || sources.length === 0 || selected.length === sources.length} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"全选"} /></button>
+              <button type="button" onClick={clearSources} disabled={importRunning || selected.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"清空"} /></button>
+            </div>
+            <div className="mt-3 min-h-72 min-w-0 max-w-full flex-1 space-y-2 overflow-y-auto pr-1 lg:min-h-0" aria-label={translateUi("可选项目资料")}>
+              {sources.length === 0 ? <p className="flex h-full min-h-64 items-center justify-center rounded-xl p-4 text-sm text-slate-500"><UiText text={"还没有项目资料。"} /></p> : sources.map((source) => (
+                <label key={source.id} className={`flex min-w-0 max-w-full cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 text-xs transition ${selected.includes(source.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
+                  <input type="checkbox" checked={selected.includes(source.id)} onChange={() => toggle(source.id)} disabled={importRunning} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 max-w-full"><span className="block font-semibold text-slate-700">{source.kind} · {source.originScope === "project" ? <UiText text={"项目资料"} /> : <UiText text={"仓库资料"} />}</span><span className="mt-1 block text-slate-400 [overflow-wrap:anywhere]">{source.externalRef ?? source.contentHash}</span></span>
+                </label>
+              ))}
+            </div>
+            {visibleSummaryOpen && selected.length > 0 ? <ProjectFactImport key={selected.join(",")} projectId={projectId} projectName={projectName} sourceIds={selected} sourceLabels={sourceLabels} onChanged={onReload} onRunningChange={setImportRunning} /> : null}
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={selectFirstSources} disabled={pending || sources.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"选中前 10 条"} /></button>
-            <button type="button" onClick={invertSources} disabled={pending || sources.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"反选"} /></button>
-          </div>
-          <div className="mt-3 min-h-72 min-w-0 max-w-full flex-1 space-y-2 overflow-y-auto pr-1 lg:min-h-0" aria-label={translateUi("可选项目资料")}>
-            {sources.length === 0 ? <p className="flex h-full min-h-64 items-center justify-center rounded-xl p-4 text-sm text-slate-500"><UiText text={"还没有项目资料。"} /></p> : sources.map((source) => (
-              <label key={source.id} className={`flex min-w-0 max-w-full cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 text-xs transition ${selected.includes(source.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
-                <input type="checkbox" checked={selected.includes(source.id)} onChange={() => toggle(source.id)} disabled={pending} className="mt-0.5 shrink-0" />
-                <span className="min-w-0 max-w-full"><span className="block font-semibold text-slate-700">{source.kind} · {source.originScope === "project" ? <UiText text={"项目资料"} /> : <UiText text={"仓库资料"} />}</span><span className="mt-1 block text-slate-400 [overflow-wrap:anywhere]">{source.externalRef ?? source.contentHash}</span></span>
-              </label>
-            ))}
-          </div>
-          {confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={`抽取 ${selected.length} 条资料`} onExecute={() => void extract()} /> : <button type="button" onClick={() => void prepareExtract()} disabled={pending || selected.length === 0} className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? <UiText text={"读取摘要中…"} /> : <UiText text={"读取本次外发摘要"} />}</button>}
-        </div>
-
         </OperationPanel>
-        <OperationPanel title={translateUi("处理不确定内容")} triggerLabel={translateUi("处理待确认内容（{count}）").replace("{count}", String(pendingCandidates.length))}>{message ? <p role="status" className="mb-4 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}
-        <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold"><UiText text={"待处理内容"} /></h3>
-            <span className="shrink-0 text-xs text-slate-400">{pendingCandidates.length} {" "}<UiText text={"条 · 已选"} />{" "}{activeSelectedCandidates.length} {" "}<UiText text={"条"} /></span>
+        <OperationPanel
+          title={translateUi("处理不确定内容")}
+          triggerLabel={translateUi("处理待确认内容（{count}）").replace("{count}", String(pendingCandidates.length))}
+          footer={
+            <>
+              <button type="button" onClick={() => void batchReview("accept")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="app-action-button app-action-button--compact w-full rounded-xl bg-emerald-600 font-semibold text-white disabled:opacity-40 sm:w-auto">{batchReviewAction === "accept" ? <UiText text={"批量确认中…"} /> : <UiText text={"批量确认"} />}</button>
+              <button type="button" onClick={() => void batchReview("dismiss")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="app-action-button app-action-button--compact w-full rounded-xl border border-rose-200 bg-rose-50 font-semibold text-rose-700 disabled:opacity-40 sm:w-auto">{batchReviewAction === "dismiss" ? <UiText text={"批量驳回中…"} /> : <UiText text={"批量驳回"} />}</button>
+            </>
+          }
+        >
+          {message ? <p role="status" className="mb-4 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}
+          <div className="flex min-h-0 min-w-0 flex-col">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold"><UiText text={"待处理内容"} /></h3>
+              <span className="shrink-0 text-xs text-slate-400">{pendingCandidates.length} <UiText text={"条 · 已选"} /> {activeSelectedCandidates.length} <UiText text={"条"} /></span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={selectFirstCandidates} disabled={reviewBusy || pendingCandidates.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"选中前 10 条"} /></button>
+              <button type="button" onClick={invertCandidates} disabled={reviewBusy || pendingCandidates.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"反选"} /></button>
+            </div>
+            <div className="mt-3 min-h-72 max-h-[34rem] min-w-0 max-w-full flex-1 overflow-y-auto pr-2 lg:min-h-0" aria-label={translateUi("待处理内容列表")}>
+              {pendingCandidates.length === 0 ? (
+                <p className="flex h-full min-h-64 items-center justify-center py-6 text-center text-sm text-slate-500"><UiText text={"暂无待处理内容。"} /></p>
+              ) : (
+                <div className="space-y-3">{pendingCandidates.map((candidate) => (
+                  <article key={candidate.id} className={`min-w-0 max-w-full rounded-2xl border bg-white p-5 transition ${activeSelectedCandidates.includes(candidate.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200"}`}>
+                    <label className="flex min-w-0 cursor-pointer items-start gap-3">
+                      <input type="checkbox" checked={activeSelectedCandidates.includes(candidate.id)} onChange={() => toggleCandidate(candidate.id)} disabled={reviewBusy} className="mt-1 shrink-0" aria-label={`选择候选：${candidate.projectItem.title}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex min-w-0 max-w-full flex-wrap items-center gap-2"><span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">{candidate.projectItem.type}</span><span className="min-w-0 text-[12px] text-slate-400 [overflow-wrap:anywhere]">{candidate.providerConnection?.name ?? candidate.providerConnection?.kind ?? <UiText text={"个人连接"} />} · {candidate.modelId ?? <UiText text={"模型信息受限"} />}</span></span>
+                        <span className="mt-3 block [overflow-wrap:anywhere] font-semibold text-slate-900">{candidate.projectItem.title}</span>
+                      </span>
+                    </label>
+                    <p className="mt-2 text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">{candidate.projectItem.content}</p>
+                    {candidate.projectItem.admission ? <p className="mt-3 text-xs font-medium text-amber-800"><UiText text={"待处理原因："} />{({ content_too_short: "原文信息不足", content_not_exact_source_text: "正文包含模型改写，需要核对", source_contains_uncertainty: "来源含计划、示例或未决内容", conflicting_confirmed_fact: "与同类已有事实存在冲突", source_requires_manual_review: "外部来源或工具结果需要人工核对" } as Record<string, string>)[candidate.projectItem.admission.reason] ?? <UiText text={"需要核对原文证据"} />}</p> : null}
+                    <blockquote className="mt-4 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{candidate.projectItem.sourceExcerpt}</blockquote>
+                    <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void review(candidate, "accept")} disabled={reviewBusy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{reviewingId === candidate.id ? <UiText text={"确认中…"} /> : <UiText text={"确认记忆"} />}</button><button type="button" onClick={() => void review(candidate, "dismiss")} disabled={reviewBusy} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{reviewingId === candidate.id ? <UiText text={"处理中…"} /> : <UiText text={"驳回"} />}</button></div>
+                  </article>
+                ))}</div>
+              )}
+            </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={selectFirstCandidates} disabled={reviewBusy || pendingCandidates.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"选中前 10 条"} /></button>
-            <button type="button" onClick={invertCandidates} disabled={reviewBusy || pendingCandidates.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40"><UiText text={"反选"} /></button>
-            <button type="button" onClick={() => void batchReview("accept")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{batchReviewAction === "accept" ? <UiText text={"批量确认中…"} /> : <UiText text={"批量确认"} />}</button>
-            <button type="button" onClick={() => void batchReview("dismiss")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-40">{batchReviewAction === "dismiss" ? <UiText text={"批量驳回中…"} /> : <UiText text={"批量驳回"} />}</button>
-          </div>
-          <div className="mt-3 min-h-72 max-h-[34rem] min-w-0 max-w-full flex-1 overflow-y-auto pr-2 lg:min-h-0" aria-label={translateUi("待处理内容列表")}>
-            {pendingCandidates.length === 0 ? (
-              <p className="flex h-full min-h-64 items-center justify-center py-6 text-center text-sm text-slate-500"><UiText text={"暂无待处理内容。"} /></p>
-            ) : (
-              <div className="space-y-3">{pendingCandidates.map((candidate) => (
-                <article key={candidate.id} className={`min-w-0 max-w-full rounded-2xl border bg-white p-5 transition ${activeSelectedCandidates.includes(candidate.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200"}`}>
-                  <label className="flex min-w-0 cursor-pointer items-start gap-3">
-                    <input type="checkbox" checked={activeSelectedCandidates.includes(candidate.id)} onChange={() => toggleCandidate(candidate.id)} disabled={reviewBusy} className="mt-1 shrink-0" aria-label={`选择候选：${candidate.projectItem.title}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex min-w-0 max-w-full flex-wrap items-center gap-2"><span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">{candidate.projectItem.type}</span><span className="min-w-0 text-[12px] text-slate-400 [overflow-wrap:anywhere]">{candidate.providerConnection?.name ?? candidate.providerConnection?.kind ?? <UiText text={"个人连接"} />} · {candidate.modelId ?? <UiText text={"模型信息受限"} />}</span></span>
-                      <span className="mt-3 block [overflow-wrap:anywhere] font-semibold text-slate-900">{candidate.projectItem.title}</span>
-                    </span>
-                  </label>
-                  <p className="mt-2 text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">{candidate.projectItem.content}</p>
-                  {candidate.projectItem.admission ? <p className="mt-3 text-xs font-medium text-amber-800"><UiText text={"待处理原因："} />{({ content_too_short: "原文信息不足", content_not_exact_source_text: "正文包含模型改写，需要核对", source_contains_uncertainty: "来源含计划、示例或未决内容", conflicting_confirmed_fact: "与同类已有事实存在冲突", source_requires_manual_review: "外部来源或工具结果需要人工核对" } as Record<string, string>)[candidate.projectItem.admission.reason] ?? <UiText text={"需要核对原文证据"} />}</p> : null}
-                  <blockquote className="mt-4 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{candidate.projectItem.sourceExcerpt}</blockquote>
-                  <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void review(candidate, "accept")} disabled={reviewBusy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{reviewingId === candidate.id ? <UiText text={"确认中…"} /> : <UiText text={"确认记忆"} />}</button><button type="button" onClick={() => void review(candidate, "dismiss")} disabled={reviewBusy} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{reviewingId === candidate.id ? <UiText text={"处理中…"} /> : <UiText text={"驳回"} />}</button></div>
-                </article>
-              ))}</div>
-            )}
-          </div>
-        </div>
         </OperationPanel>
       </div>
       {message ? <p role="status" className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600"><UiFeedbackText text={message} /></p> : null}

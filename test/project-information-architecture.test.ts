@@ -86,21 +86,46 @@ test("platform provider form keeps GLM embedding-only defaults optional", async 
   assert.doesNotMatch(settings, /setMessage\(payload\.check\.(generation|vision)/u);
 });
 
-test("grounded extraction uses bounded scrolling and explicit batch operations", async () => {
-  const memory = await readFile("src/app/projects/[projectId]/memory/project-memory-client.tsx", "utf8");
+test("project memory uses all-source consent batches and fixed operation footers", async () => {
+  const [memory, operationPanel, importFlow, world] = await Promise.all([
+    readFile("src/app/projects/[projectId]/memory/project-memory-client.tsx", "utf8"),
+    readFile("src/components/operation-panel.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/project-fact-import.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/world/project-world-client.tsx", "utf8"),
+  ]);
 
-  assert.match(memory, /MAX_BATCH_SELECTION = 10/u);
+  assert.match(memory, /MAX_CANDIDATE_BATCH_SELECTION = 10/u);
   assert.match(memory, /选中前 10 条/u);
   assert.match(memory, /反选/u);
+  assert.match(memory, /全选/u);
+  assert.match(memory, /清空/u);
   assert.match(memory, /批量确认/u);
   assert.match(memory, /批量驳回/u);
-  assert.match(memory, /<OperationPanel title=\{translateUi\("整理已有项目资料"\)\}/u);
-  assert.match(memory, /<OperationPanel title=\{translateUi\("处理不确定内容"\)\}/u);
+  assert.match(memory, /title=\{translateUi\("整理已有项目资料"\)\}/u);
+  assert.match(memory, /title=\{translateUi\("处理不确定内容"\)\}/u);
   assert.match(memory, /aria-label=\{translateUi\("可选项目资料"\)\}/u);
   assert.match(memory, /aria-label=\{translateUi\("待处理内容列表"\)\}/u);
+  assert.match(memory, /sources\.map\(\(source\) => source\.id\)/u);
+  assert.match(memory, /ProjectFactImport key=\{selected\.join\(","\)\}/u);
+  assert.match(memory, /MEMORY_INDEX_TOO_LARGE/u);
+  assert.match(memory, /const ready = index\.readiness === "ready"/u);
+  assert.doesNotMatch(memory, /sourceIds: selected/u);
   assert.match(memory, /overflow-y-auto/u);
   assert.match(memory, /expectedItemUpdatedAt: candidate\.projectItem\.updatedAt/u);
   assert.match(memory, /for \(const candidate of batch\)/u);
+
+  assert.match(operationPanel, /data-operation-footer/u);
+  assert.match(operationPanel, /min-h-\[72px\]/u);
+  assert.match(operationPanel, /useOperationPanelFooterTarget/u);
+  assert.match(importFlow, /createPortal\(footerActions, footerTarget\)/u);
+  assert.match(importFlow, /const preparationKey = `\$\{projectId\}:\$\{sourceKey\}:\$\{retry\}`/u);
+  assert.match(importFlow, /preparedForKey === preparationKey \? batches : \[\]/u);
+  assert.match(importFlow, /onRunningChange\?\.\(true\)/u);
+  assert.match(importFlow, /onRunningChange\?\.\(false\)/u);
+  assert.match(importFlow, /data-extract-consent-batch/u);
+  assert.match(importFlow, /一次确认全部批次/u);
+  assert.match(world, /embedded \? "grid-cols-2 sm:grid-cols-3"/u);
+  assert.match(world, /embedded \? "grid-cols-1"/u);
 });
 
 test("project material and repository pages return to their immediate parent", async () => {

@@ -3,18 +3,17 @@ import { UiErrorText } from "@/components/ui-error-text";
 
 
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
-import { notifyUserProjectsChanged } from "@/lib/user-navigation";
 
 import Link from "next/link";
+import { ProjectDialog } from "@/components/lazy-project-dialog";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ShellIcon } from "@/components/shell-icon";
+import type { ProjectLifecycleAction } from "@/components/project-lifecycle-dialog";
 import { AppHeader } from "@/components/app-header";
-import { modalBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
-import { useInquiryOperation } from "@/components/inquiry-operation";
 import { buildProjectHref } from "@/lib/project-navigation";
 import ui from "@/components/workspace-ui.module.css";
 import { formatUiDateTimeOrFallback } from "@/lib/ui-date-format";
+
 
 /** Trusted identity and project context supplied by the protected server page. */
 type ProjectConfigurationClientProps = Readonly<{
@@ -32,7 +31,7 @@ type ProjectConfigurationClientProps = Readonly<{
   }>;
 }>;
 
-type LifecycleAction = "archive" | "restore" | "delete";
+type LifecycleAction = ProjectLifecycleAction;
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
@@ -626,7 +625,7 @@ function ProjectManagement({ project, onChanged, embedded = false }: { project: 
         <div>
           {!embedded ? <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Project management"} /></p> : null}
           <h2 className={embedded ? "text-base font-semibold" : "mt-2 text-base font-semibold"}><UiText text={"项目管理"} /></h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500"><UiText text={"导出和项目生命周期操作集中在这里，项目卡片保持单一入口。导出会记录审计信息；归档、恢复和删除仍会要求确认。"} /></p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500"><UiText text={"导出会记录审计信息；归档、恢复和删除仍会要求确认。"} /></p>
         </div>
         <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700"><UiText text={"仅项目 Owner 可操作"} /></span>
       </div>
@@ -638,68 +637,11 @@ function ProjectManagement({ project, onChanged, embedded = false }: { project: 
         </> : <button type="button" onClick={() => setLifecycle("archive")} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50"><UiText text={"归档项目"} /></button>}
       </div>
       {exportMessage ? <p role="status" className="mt-3 text-xs leading-5 text-slate-500">{exportMessage}</p> : null}
-      {lifecycle ? <LifecycleDialog project={project} action={lifecycle} onClose={() => setLifecycle(null)} onChanged={(action) => { setLifecycle(null); onChanged(action); }} /> : null}
+      {lifecycle ? <ProjectDialog kind="lifecycle" project={project} action={lifecycle} onClose={() => setLifecycle(null)} onChanged={(action) => { setLifecycle(null); onChanged(action); }} /> : null}
     </section>
   );
 }
 
-function LifecycleDialog({ project, action, onClose, onChanged }: { project: ProjectManagementProject; action: LifecycleAction; onClose: () => void; onChanged: (action: LifecycleAction) => void }): React.JSX.Element {
-  const t = useTranslate();
-  const dialogRef = useRef<HTMLElement | null>(null);
-  useInquiryOperation(true, dialogRef);
-  const [confirmation, setConfirmation] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const archive = action === "archive";
-  const remove = action === "delete";
-  const confirmed = action === "restore" || confirmation === project.name;
-
-  async function submit() {
-    if (!confirmed || pending) return;
-    setPending(true);
-    setError(null);
-    try {
-      const response = await fetch(remove ? `/api/projects/${project.id}` : `/api/projects/${project.id}/lifecycle`, {
-        method: remove ? "DELETE" : "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(remove ? { confirmationName: confirmation, expectedUpdatedAt: project.updatedAt } : { action, expectedUpdatedAt: project.updatedAt }),
-      });
-      if (!response.ok) throw new Error(await readError(response, archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败"));
-      notifyUserProjectsChanged();
-      onChanged(action);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败");
-      setPending(false);
-    }
-  }
-
-  const title = t(archive ? "归档「{name}」" : remove ? "永久删除「{name}」" : "恢复「{name}」").replace("{name}", project.name);
-  const description = t(archive
-    ? "归档后项目将移出进行中列表，并拒绝修改和新任务。数据、历史审计和模型用量不会删除。"
-    : remove
-      ? "此操作不可恢复：项目资料、文件、仓库快照、候选、记忆索引、智能体记录和项目审计都会删除。建议先导出 JSON；系统仅保留不含项目名称或内容的最小删除回执。"
-      : "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。");
-  const actionLabel = pending ? "处理中…" : archive ? "确认归档" : remove ? "确认永久删除" : "恢复项目";
-
-  return <div className={`fixed inset-0 z-50 flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}>
-    <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="project-management-dialog-title" className={`w-full max-w-lg rounded-md p-7 sm:p-8 ${modalSurfaceClassName}`}>
-      <div data-dialog-header className="flex items-start justify-between gap-4">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Project lifecycle"} /></p>
-        <h2 id="project-management-dialog-title" className="mt-1 text-lg font-semibold text-slate-950">{title}</h2></div>
-        <button data-dialog-close type="button" disabled={pending} onClick={onClose} aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control"/></button>
-      </div>
-      <div data-dialog-body>
-        <p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-600"}`}>{description}</p>
-        {archive || remove ? <label className="mt-5 block text-sm font-semibold text-slate-700"><UiText text={"输入项目名称以确认"} /><input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className={`mt-2 w-full rounded-lg border bg-white px-4 py-3 text-sm outline-none focus:ring-4 ${remove ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-amber-300 focus:ring-amber-100"}`} /></label> : null}
-        {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
-      </div>
-      <div data-dialog-footer className="mt-7 flex justify-end gap-3">
-        <button data-dialog-close type="button" onClick={onClose} disabled={pending} className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600"><UiText text={"取消"} /></button>
-        <button type="button" onClick={() => void submit()} disabled={!confirmed || pending} className={`rounded-lg px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 ${remove ? "bg-rose-600" : archive ? "bg-amber-600" : "bg-indigo-600"}`}><UiText text={actionLabel} /></button>
-      </div>
-    </section>
-  </div>;
-}
 
 export function ProjectConfigurationClient({ username, projectId, isSystemAdmin, project, embedded = false }: ProjectConfigurationClientProps): React.JSX.Element {
   const translateUi = useTranslate();

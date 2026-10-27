@@ -259,7 +259,7 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
         {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-md border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void reload()} className="inline-flex min-h-9 items-center justify-center font-semibold underline underline-offset-4"><UiText text={"重试"} /></button></div> : null}
         {message ? <div role="status" className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700"><UiFeedbackText text={message} /></div> : null}
 
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6" aria-label={translateUi("项目状态指标")}>
+        <section className={`mt-6 grid gap-4 ${embedded ? "grid-cols-2 sm:grid-cols-3" : "sm:grid-cols-2 lg:grid-cols-6"}`} aria-label={translateUi("项目状态指标")}>
           <Metric embedded={embedded} label={translateUi("当前事实")} value={world?.state.counts.activeFacts ?? 0} detail={translateUi("关联工作项 {count}").replace("{count}", String(world?.state.counts.linkedWorkItems ?? 0))} loading={loading} />
           <Metric embedded={embedded} label={translateUi("决策")} value={world?.state.counts.decisions ?? 0} detail="当前有效" loading={loading} />
           <Metric embedded={embedded} label={translateUi("问题与风险")} value={(world?.state.counts.issues ?? 0) + (world?.state.counts.risks ?? 0)} detail={translateUi("问题 {issues} · 风险 {risks}").replace("{issues}", String(world?.state.counts.issues ?? 0)).replace("{risks}", String(world?.state.counts.risks ?? 0))} loading={loading} />
@@ -268,10 +268,10 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
           <Metric embedded={embedded} label={translateUi("状态快照")} value={world?.snapshots.length ?? 0} detail="不可变历史" loading={loading} />
         </section>
 
-        <section className="mt-8 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
+        <section className={`mt-8 grid min-w-0 gap-6 ${embedded ? "grid-cols-1" : "xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]"}`}>
           <div className="min-w-0">
             <SectionHeading embedded={embedded} eyebrow="Current facts" title={translateUi("当前项目事实")} detail="仅当前有效事实参与状态判断；尚未生效、已过期、被替代和来源退役的事实保留在历史中。" />
-            <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-2">
+            <div className={`mt-4 grid min-w-0 gap-4 ${embedded ? "grid-cols-1" : "lg:grid-cols-2"}`}>
               {!loading && activeFacts.length === 0 ? <Empty embedded={embedded} title={translateUi("尚无当前有效事实")} detail="先在“资料与条目”中新增或确认带证据的项目事实。" href={`/projects/${projectId}`} action="管理项目事实" /> : activeFacts.map((fact) => <FactCard embedded={embedded} key={fact.id} fact={fact} />)}
             </div>
           </div>
@@ -352,7 +352,7 @@ function SectionHeading({ eyebrow, title, detail, compact = false, embedded = fa
 function FactCard({ fact, embedded = false }: { fact: WorldFact; embedded?: boolean }) {
   const translateUi = useTranslate();
   const meta = factMeta[fact.type];
-  return <article className={`min-w-0 max-w-full overflow-hidden ${embedded ? "border-b border-slate-200 pb-4" : "rounded-md border border-slate-200 bg-white p-5"}`}><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{translateUi(meta.label)}</span><span className="text-[12px] text-slate-400"><UiText text={"证据版本 #"} />{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-slate-900">{fact.title}</h3><p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-slate-600">{fact.content}</p><div className={`mt-4 min-w-0 max-w-full overflow-hidden text-xs text-slate-500 ${embedded ? "border-t border-slate-200 pt-3" : "rounded-md bg-slate-50 p-4"}`}><p className="max-w-full [overflow-wrap:anywhere]"><UiText text={"来源："} />{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}><UiText text={"证据清单"} />{" "}{shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]"><UiText text={"工作项："} />{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
+  return <article className={`min-w-0 max-w-full overflow-hidden ${embedded ? "border-b border-slate-200 pb-4" : "rounded-md border border-slate-200 bg-white p-5"}`}><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{translateUi(meta.label)}</span><span className="text-[12px] text-slate-400"><UiText text={"证据版本 #"} />{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-slate-900">{fact.title}</h3>{fact.content.trim() !== fact.title.trim() ? <p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-slate-600">{fact.content}</p> : null}<div className={`mt-4 min-w-0 max-w-full overflow-hidden text-xs text-slate-500 ${embedded ? "border-t border-slate-200 pt-3" : "rounded-md bg-slate-50 p-4"}`}><p className="max-w-full [overflow-wrap:anywhere]"><UiText text={"来源："} />{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}><UiText text={"证据清单"} />{" "}{shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]"><UiText text={"工作项："} />{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
 }
 
 function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, error, onErrorDismiss, onRetire, embedded = false }: {

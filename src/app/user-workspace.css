@@ -31,10 +31,10 @@ body:has([data-user-shell-root]) [data-operation-surface="drawer"] {
   border-radius: 0;
 }
 body:has([data-user-shell-root]) [data-operation-header] h2 {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
 }
-body:has([data-user-shell-root]) [data-operation-header] button {
+body:has([data-user-shell-root]) [data-operation-header] button:not([data-dialog-close]) {
   border-radius: 4px;
   padding: 6px 10px;
   font-size: 12px;
@@ -50,7 +50,7 @@ body:has([data-user-shell-root]) [data-sticky-page-tabs]{position:sticky;top:var
 /* Shared surface geometry follows the reviewed prototype. */
 body:has([data-user-shell-root]) [data-operation-surface="drawer"]{max-width:720px}
 body:has([data-user-shell-root]) [data-operation-content]{padding:24px}
-body:has([data-user-shell-root]) [data-operation-header]{min-height:76px;padding:20px 24px}
+body:has([data-user-shell-root]) [data-operation-header]{min-height:72px;padding:20px 24px}
 body:has([data-user-shell-root]) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){padding-left:12px;padding-right:12px;min-height:40px}
 body:has([data-user-shell-root]) :is(input[type=checkbox],input[type=radio]){flex-shrink:0}
 body:has([data-user-shell-root]) :is(.rounded-3xl,.rounded-2xl){border-radius:8px}

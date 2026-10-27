@@ -298,7 +298,30 @@
   white-space: nowrap;
 }
 
-.cardFooter a {
+.cardActions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.deleteButton {
+  min-height: 32px;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cardFooter .deleteButton { color: var(--app-danger-ink); }
+
+.deleteButton:hover { text-decoration: underline; text-underline-offset: 3px; }
+.deleteButton:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+.cardFooter :is(a, button) {
   flex: 0 0 auto;
   color: var(--app-muted);
   font-size: 10px;

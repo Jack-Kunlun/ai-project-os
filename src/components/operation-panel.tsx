@@ -1,19 +1,27 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslate } from "./appearance-provider";
 import { useInquiryOperation } from "./inquiry-operation";
 import { createPortal } from "react-dom";
-import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
+import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
 import { ShellIcon } from "./shell-icon";
 
+const OperationPanelFooterTargetContext = createContext<HTMLDivElement | null>(null);
+
+/** Lets long-running operation content place its primary action in the fixed footer. */
+export function useOperationPanelFooterTarget() {
+  return useContext(OperationPanelFooterTargetContext);
+}
+
 /** Keep mutations out of the reading surface while preserving parent-owned drafts. */
-export function OperationPanel({ title, translateTitle = true, triggerLabel, description, children, open, onOpenChange, className, disabled, triggerId, variant = "modal", inquiryEnabled = true }: {
+export function OperationPanel({ title, translateTitle = true, triggerLabel, description, children, footer, open, onOpenChange, className, disabled, triggerId, variant = "modal", inquiryEnabled = true }: {
   title: string;
   translateTitle?: boolean;
   triggerLabel?: string;
   description?: string;
   children: ReactNode;
+  footer?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   className?: string;
@@ -33,6 +41,7 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
   const backdropStarted = useRef(false);
   const owned = useInquiryOperation(isOpen, dialogRef, inquiryEnabled);
   const descriptionId = useId();
+  const [footerTarget, setFooterTarget] = useState<HTMLDivElement | null>(null);
 
   function changeOpen(value: boolean) {
     if (open === undefined) setLocalOpen(value);
@@ -89,13 +98,18 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
     <button data-operation-trigger id={triggerId} type="button" disabled={disabled} onClick={() => changeOpen(true)} aria-haspopup="dialog" aria-expanded={isOpen} className="app-action-button inline-flex items-center justify-center rounded-xl border border-indigo-200 bg-white font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{t(triggerLabel ?? title)}</button>
     {hasOpened && typeof document !== "undefined" ? createPortal(
       <div hidden={!isOpen} inert={!isOpen} aria-hidden={!isOpen || undefined} style={isOpen ? undefined : { display: "none" }} className={`fixed inset-0 z-[60] flex ${modalBackdropClassName} p-0 ${variant === "drawer" ? "items-stretch justify-end" : "items-end justify-center sm:items-center sm:p-5"}`} onPointerDown={(event) => { backdropStarted.current=event.target===event.currentTarget; if (backdropStarted.current) event.preventDefault(); }} onClick={(event) => { if (backdropStarted.current && event.target === event.currentTarget) changeOpen(false); }}>
+        <OperationPanelFooterTargetContext.Provider value={footerTarget}>
         <section data-inquiry-owned={String(owned)} data-operation-surface={variant} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} tabIndex={-1} onKeyDown={handleKeyDown} className={`flex w-full flex-col overflow-hidden outline-none ${variant === "drawer" ? "h-dvh max-h-dvh max-w-3xl rounded-none" : "max-h-[95dvh] max-w-6xl rounded-t-2xl sm:rounded-2xl"} ${modalSurfaceClassName}`}>
-          <header data-operation-header className={`flex items-start justify-between gap-5 px-6 py-5 sm:px-8 ${modalHeaderClassName}`}>
-            <div><h2 id={titleId} className="text-xl font-semibold text-slate-950">{translateTitle ? t(title) : title}</h2>{description ? <p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-600">{t(description)}</p> : null}</div>
+          <header data-operation-header className={`flex min-h-[72px] shrink-0 items-center justify-between gap-4 px-6 py-5 ${modalHeaderClassName}`}>
+            <h2 id={titleId} className="min-w-0 text-base font-semibold text-slate-950">{translateTitle ? t(title) : title}</h2>
             <button data-dialog-close type="button" onClick={() => changeOpen(false)} className="app-icon-button" aria-label={t("关闭窗口")}><ShellIcon name="close" className="app-icon--control" /></button>
           </header>
-          <div data-operation-content className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6 sm:px-8">{children}</div>
+          <div data-operation-content className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">{description ? <p id={descriptionId} className="mb-5 text-sm leading-6 text-slate-600">{t(description)}</p> : null}{children}</div>
+          {inquiryEnabled || footer !== undefined ? <footer data-operation-footer className={modalFooterClassName}>
+            <div data-operation-actions ref={setFooterTarget}>{footer}</div>
+          </footer> : null}
         </section>
+        </OperationPanelFooterTargetContext.Provider>
       </div>, document.body,
     ) : null}
   </div>;

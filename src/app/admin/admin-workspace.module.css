@@ -149,8 +149,8 @@
 :global(body):has(.workspace) :global([data-operation-surface]) { border-radius: 6px; color: var(--app-text); box-shadow: 0 20px 100px #1e355a26; }
 :global(body):has(.workspace) :global([data-operation-surface="modal"]) { max-width: 920px; }
 :global(body):has(.workspace) :global([data-operation-surface="drawer"]) { border-radius: 0; max-width: 720px; }
-:global(body):has(.workspace) :global([data-operation-header]) { min-height: 76px; padding: 20px 24px; }
-:global(body):has(.workspace) :global([data-operation-header] h2) { font-size: 17px; }
+:global(body):has(.workspace) :global([data-operation-header]) { min-height: 72px; padding: 20px 24px; }
+:global(body):has(.workspace) :global([data-operation-header] h2) { font-size: 16px; }
 :global(body):has(.workspace) :global([data-operation-content]) { padding: 24px; }
 :global(body):has(.workspace) :global([data-operation-content] input:not([type=checkbox]):not([type=radio])),
 :global(body):has(.workspace) :global([data-operation-content] select),

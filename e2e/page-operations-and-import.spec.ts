@@ -168,6 +168,9 @@ test("materials keep editing separate, retain drafts, and chain text import into
   await editTrigger.click();
   const editor = page.getByRole("dialog", { name: "手动补充事实", exact: true });
   await expect(editor).toBeVisible();
+  const explanation = "自动整理后的事实可在下方查看；只有需要手动补充或纠正时才使用此操作区。";
+  await expect(editor.locator("[data-operation-header]").getByText(explanation, { exact: true })).toHaveCount(0);
+  await expect(editor.locator("[data-operation-content]").getByText(explanation, { exact: true })).toBeVisible();
   await editor.locator("#item-title").fill("保留草稿");
   await page.keyboard.press("Escape");
   await expect(editor).toBeHidden();

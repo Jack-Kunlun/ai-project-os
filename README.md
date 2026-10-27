@@ -168,7 +168,7 @@ pnpm dev
 | 公网部署与正式版本更新 | [部署安全](docs/deployment-security.md) · [正式发布](docs/production-release.md) |
 | 服务监控、备份与恢复 | [运行监控](docs/monitoring.md) · [备份](docs/production-backup.md) · [迁移与恢复](docs/production-host-migration.md) |
 | 验证自己接入的模型、Git、OIDC 或 MCP | [外部服务验收](docs/external-service-acceptance.md) |
-| 版本变化与历史记录 | [当前源码版本 1.2.17](docs/releases/v1.2.17.md) · [更新记录](CHANGELOG.md) |
+| 版本变化与历史记录 | [当前源码版本 1.2.18](docs/releases/v1.2.18.md) · [更新记录](CHANGELOG.md) |
 
 ## 许可与商业授权
 

@@ -183,6 +183,34 @@ button:not(:disabled) {
   margin-inline: 0;
 }
 
+/* Operation content scrolls independently from inquiry and primary actions. */
+[data-operation-footer][data-inquiry-footer] {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}
+
+[data-operation-footer] > [data-operation-actions] {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 24px;
+}
+
+[data-operation-footer] > [data-operation-actions]:empty {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  [data-operation-footer] > [data-operation-actions] { padding: 10px 16px; }
+}
+
 .page-back-nav {
   display: flex;
   align-items: center;

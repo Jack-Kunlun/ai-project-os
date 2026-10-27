@@ -7,8 +7,8 @@ import { ShellIcon } from "./shell-icon";
 import styles from "./workspace-ui.module.css";
 
 /** A native modal keeps reading, confirmation and editing separate from lists. */
-export function WorkspaceDialog({ title, open, onClose, children, footer, drawer = false, busy = false }: {
-  title: string; open: boolean; onClose: () => void; children: ReactNode; footer?: ReactNode; drawer?: boolean; busy?: boolean;
+export function WorkspaceDialog({ title, open, onClose, children, footer, drawer = false, busy = false, inquiryEnabled = true, compact = false, closeLabel = "关闭窗口" }: {
+  title: string; open: boolean; onClose: () => void; children: ReactNode; footer?: ReactNode; drawer?: boolean; busy?: boolean; inquiryEnabled?: boolean; compact?: boolean; closeLabel?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -27,7 +27,7 @@ export function WorkspaceDialog({ title, open, onClose, children, footer, drawer
       document.body.style.overflow = previous;
     };
   }, [open]);
-  const owned = useInquiryOperation(open, dialog);
+  const owned = useInquiryOperation(open, dialog, inquiryEnabled);
   function containTab(event: KeyboardEvent<HTMLDialogElement>) {
     if (event.defaultPrevented || event.key !== "Tab" || !event.currentTarget.open || !(event.target instanceof Element) || !event.currentTarget.contains(event.target)) return;
     const activeSurface = event.target.closest<HTMLElement>('[role="dialog"], dialog[open]');
@@ -41,12 +41,12 @@ export function WorkspaceDialog({ title, open, onClose, children, footer, drawer
     if (event.shiftKey && (current === first || current === event.currentTarget)) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && (current === last || current === event.currentTarget)) { event.preventDefault(); first.focus(); }
   }
-  return <dialog ref={dialog} className={`${styles.dialog} ${drawer ? styles.drawer : ""}`} aria-labelledby={titleId} data-inquiry-owned={String(owned)}
+  return <dialog ref={dialog} className={`${styles.dialog} ${drawer ? styles.drawer : ""} ${compact ? styles.compactDialog : ""}`} aria-labelledby={titleId} data-inquiry-owned={String(owned)}
     onKeyDown={containTab}
     onCancel={(event) => { event.preventDefault(); event.stopPropagation(); if (!busy) onClose(); }}
     onPointerDown={(event) => { const r=event.currentTarget.getBoundingClientRect(); backdropStarted.current=event.target===event.currentTarget&&(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom); }}
     onClick={(event) => { if (event.target === event.currentTarget && backdropStarted.current && !busy) { const rect=event.currentTarget.getBoundingClientRect(); if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)onClose(); } }}>
-    <div data-dialog-header className={styles.dialogHeader}><h2 id={titleId}>{t(title)}</h2><button data-dialog-close type="button" disabled={busy} onClick={onClose} aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></div>
+    <div data-dialog-header className={styles.dialogHeader}><h2 id={titleId}>{t(title)}</h2><button data-dialog-close type="button" disabled={busy} onClick={onClose} aria-label={t(closeLabel)} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></div>
     <div data-dialog-body className={styles.dialogBody}>{open ? children : null}</div>
     {footer ? <div data-dialog-footer className={styles.dialogFooter}>{footer}</div> : null}
   </dialog>;

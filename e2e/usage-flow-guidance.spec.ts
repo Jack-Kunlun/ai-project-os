@@ -309,8 +309,12 @@ test("personal knowledge hands off explicitly into project materials and guided 
     await expect(sourceOrganizer.getByRole("button", { name: appearance.submit, exact: true })).toBeVisible();
     const geometry = await sourceOrganizer.locator("[data-operation-content]").evaluate((body) => {
       const panelElement = body.firstElementChild;
-      const action = panelElement?.querySelector<HTMLElement>("button");
-      if (!(panelElement instanceof HTMLElement) || !action) throw new Error("SOURCE_ORGANIZER_PANEL_MISSING");
+      const surface = body.closest("[data-operation-surface]");
+      const actions = surface?.querySelector<HTMLElement>("[data-operation-actions]");
+      const action = actions?.querySelector<HTMLElement>("button");
+      const scopeText = panelElement?.querySelector<HTMLElement>("[data-extract-consent-summary] dd");
+      const footer = actions?.closest<HTMLElement>("[data-operation-footer]");
+      if (!(panelElement instanceof HTMLElement) || !actions || !action || !scopeText || !footer) throw new Error("SOURCE_ORGANIZER_PANEL_MISSING");
       const bodyStyle = getComputedStyle(body);
       const panelStyle = getComputedStyle(panelElement);
       const bodyRect = body.getBoundingClientRect();
@@ -325,8 +329,9 @@ test("personal knowledge hands off explicitly into project materials and guided 
         panelBackground: panelStyle.backgroundColor,
         verticalInset: panelRect.top - bodyRect.top - Number.parseFloat(bodyStyle.paddingTop),
         actionHeight: actionRect.height,
-        actionRightInset: panelRect.right - actionRect.right,
-        themeTextColor: getComputedStyle(panelElement.querySelector("h3")!).color,
+        actionRightInset: actions.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(actions).paddingRight) - actionRect.right,
+        footerBelowBody: footer.getBoundingClientRect().top >= bodyRect.bottom - 1,
+        themeTextColor: getComputedStyle(scopeText).color,
       };
     });
     expect(geometry.bodyPadding, appearance.title).toEqual(["24px", "24px", "24px", "24px"]);
@@ -339,7 +344,10 @@ test("personal knowledge hands off explicitly into project materials and guided 
     expect(geometry.verticalInset, appearance.title).toBeGreaterThanOrEqual(-5);
     expect(geometry.verticalInset, appearance.title).toBeLessThanOrEqual(1);
     expect(geometry.actionHeight, appearance.title).toBeGreaterThanOrEqual(40);
+    expect(geometry.actionRightInset, appearance.title).toBeGreaterThanOrEqual(-1);
     expect(geometry.actionRightInset, appearance.title).toBeLessThanOrEqual(1);
+    expect(geometry.footerBelowBody, appearance.title).toBe(true);
+    await expect(sourceOrganizer.locator("[data-operation-actions]").getByRole("button", { name: appearance.submit, exact: true })).toBeInViewport();
     expect(geometry.themeTextColor, appearance.title).toBe(appearance.theme === "dark" ? "rgb(230, 237, 246)" : "rgb(32, 36, 42)");
     await expect(sourceOrganizer.getByRole("heading", { name: appearance.title, exact: true })).toHaveCount(1);
     await expect.poll(() => extractCalls.filter((call) => call.phase === "prepare").length).toBe(prepareCount + 1);

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { classifyProductionChange, invokePinnedRiskClassifier } from "./ci-change-scope.mjs";
+import { fetchProductionHealth } from "./production-stable-health.mjs";
 
 export const CANONICAL_REPOSITORY = "Jack-Kunlun/ai-project-os";
 export const MAIN_SOURCE_JOB = "Verify source and client";
@@ -622,14 +623,7 @@ function validateSshHost(host) {
 export { validateSshHost };
 
 async function healthJson() {
-  const response = await fetch("https://ai-project-os.com/api/health", {
-    headers: { Accept: "application/json" },
-    redirect: "error",
-    signal: AbortSignal.timeout(20_000),
-  });
-  requireCondition(response.status === 200, "PUBLIC_HEALTH_HTTP_INVALID");
-  const payload = await response.json();
-  return payload;
+  return fetchProductionHealth();
 }
 
 function candidateContext() {

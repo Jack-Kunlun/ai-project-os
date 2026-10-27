@@ -2,6 +2,7 @@ import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { planRepositoryImpact } from "./ci-impact-plan.mjs";
+import { fetchProductionHealth } from "./production-stable-health.mjs";
 
 const shaPattern = /^[a-f0-9]{40}$/u;
 const stableVersionPattern = /^([1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
@@ -126,16 +127,6 @@ export function invokePinnedRiskClassifier(repository, sourceRevision, targetRev
   ], { encoding: "utf8", maxBuffer: 1024 * 1024 });
   if (result.status !== 0) throw new Error("RELEASE_RISK_CLASSIFIER_FAILED");
   return JSON.parse(result.stdout);
-}
-
-async function fetchProductionHealth() {
-  const response = await fetch("https://ai-project-os.com/api/health", {
-    headers: { Accept: "application/json" },
-    redirect: "error",
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (response.status !== 200) throw new Error("PRODUCTION_HEALTH_HTTP_INVALID");
-  return response.json();
 }
 
 function writeScope(scope, impact = planRepositoryImpact(process.cwd(), scope.base, process.env.CI_HEAD_SHA ?? "")) {

@@ -517,5 +517,17 @@
   "单次索引超限（5,000 个片段或 24 MiB 文本），具体触发项未知。": "Index input exceeds 5,000 chunks or 24 MiB of text per build. The triggering limit is unknown.",
   "已有索引保留；当前不支持分段续建。": "The existing index is retained. Resumable indexing is not supported.",
   "一次确认全部批次；失败不自动重发。摘要不含原文。": "One confirmation covers all batches. Failures are not retried automatically. Source text is excluded.",
-  "项目状态已变化，请重新读取后确认。": "Project status changed. Reload before confirming."
+  "项目状态已变化，请重新读取后确认。": "Project status changed. Reload before confirming.",
+  "项目不存在": "Project not found",
+  "项目已归档，请先恢复后再操作": "This project is archived. Restore it before continuing.",
+  "项目当前未归档": "This project is not archived.",
+  "项目状态已变化，请刷新后重试": "Project status changed. Reload before trying again.",
+  "项目仍有运行中或待人工收口的任务，暂不能归档或永久删除": "This project still has running tasks or tasks awaiting manual resolution. Resolve them before archiving or permanently deleting it.",
+  "项目状态正在变化，请稍后重试": "Project status is changing. Try again shortly.",
+  "只有已归档项目可以永久删除": "Only archived projects can be permanently deleted.",
+  "项目名称确认不一致，未执行删除": "The project name does not match. Nothing was deleted.",
+  "项目仍有上传请求或文件解析租约，请稍后再删除": "This project still has uploads or file parsing in progress. Try deleting it again later.",
+  "项目删除依赖正在变化或仍有受保护引用，请刷新后重试": "Project dependencies are changing or still have protected references. Reload before trying again.",
+  "项目仍有未完成的 MCP 授权留痕，请先撤销授权并完成审计记录": "This project still has incomplete MCP grant records. Revoke the grants and complete the audit records first.",
+  "项目仍有待审批或已批准的 MCP 动作，请先取消或完成处理": "This project still has MCP actions awaiting approval or execution. Cancel or complete them first."
 }

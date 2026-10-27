@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { translateUiErrorText } from "../src/lib/ui-error-text";
 import { safeResponseError } from "../src/lib/safe-error-presentation";
+import { englishUiMessages } from "../src/lib/ui-dictionary-source";
 
 const messages = { "项目搜索失败": "Project search failed" };
 
@@ -50,5 +51,18 @@ test("feedback SSR uses neutral copy before the interpreter loads in both langua
       assert.match(markup, language === "en" ? /current status/iu : /当前状态/u);
       if (language === "en") assert.doesNotMatch(markup, /\p{Script=Han}/u);
     }
+  }
+});
+
+test("project lifecycle conflicts retain actionable reviewed guidance in both languages", () => {
+  for (const text of [
+    "项目仍有运行中或待人工收口的任务，暂不能归档或永久删除",
+    "项目仍有上传请求或文件解析租约，请稍后再删除",
+    "项目仍有待审批或已批准的 MCP 动作，请先取消或完成处理",
+    "项目状态已变化，请刷新后重试",
+  ]) {
+    assert.ok(englishUiMessages[text]);
+    assert.equal(translateUiErrorText(text, "zh-CN", englishUiMessages), text);
+    assert.equal(translateUiErrorText(text, "en", englishUiMessages), englishUiMessages[text]);
   }
 });

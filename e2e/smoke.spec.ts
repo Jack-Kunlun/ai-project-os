@@ -744,14 +744,15 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByRole("button", { name: "预览并确认", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "添加自动化", exact: true }).click();
   await page.getByRole("button", { name: "预览并确认", exact: true }).click();
-  const automationPreview = page.getByRole("region", { name: "创建前影响预览" });
+  const automationDialog = page.getByRole("dialog", { name: "添加自动化", exact: true });
+  const automationPreview = automationDialog.getByRole("region", { name: "创建前影响预览" });
   await expect(automationPreview).toBeVisible();
   await expect(automationPreview.getByRole("heading", { name: "本次自动化边界", exact: true })).toBeVisible();
   await expect(automationPreview.getByText("不使用模型或个人连接", { exact: true })).toBeVisible();
   await expect(automationPreview.getByText("不产生模型费用", { exact: true })).toBeVisible();
   await expect(automationPreview.getByText("下一次预计运行（UTC）", { exact: true })).toBeVisible();
   await expect(automationPreview.getByText("业务执行失败不会在当前周期内自动重试；Worker 租约过期会按恢复策略安排后续运行；连续失败 3 次后自动暂停规则", { exact: true })).toBeVisible();
-  await automationPreview.getByRole("button", { name: "返回修改", exact: true }).click();
+  await automationDialog.locator("[data-operation-footer]").getByRole("button", { name: "返回修改", exact: true }).click();
 
   await page.goto("/dashboard");
   const dashboardJobLink = page.locator(`a[href="/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}"]`);

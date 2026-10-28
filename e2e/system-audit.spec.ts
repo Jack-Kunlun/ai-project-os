@@ -382,6 +382,7 @@ test("audit detail drawer handles loading, failure, close and restores focus and
     await page.keyboard.press("Enter");
     const drawer = page.getByRole("dialog");
     await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "关闭窗口", exact: true })).toBeVisible();
     await expect(drawer.getByText("正在读取详情…", { exact: true })).toBeVisible();
     await expect(page.getByText("完整技术引用", { exact: true })).toBeVisible();
     await expect(drawer.getByText(fixture.projectId, { exact: true })).toBeVisible();

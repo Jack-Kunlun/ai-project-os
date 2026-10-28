@@ -275,7 +275,15 @@ test("personal Git and MCP connection lists match the prototype across desktop a
         const reason = "Keep this disable preview for Escape regression";
         const reasonInput = governance.getByRole("textbox", { name: "变更原因", exact: true });
         await reasonInput.fill(reason);
-        await governance.getByRole("button", { name: "生成停用连接预览", exact: true }).click();
+        const governanceForm = governance.locator("form");
+        await expect(governanceForm).toHaveCount(1);
+        expect(await governanceForm.evaluate((form) => form.closest("[data-dialog-body]") !== null)).toBe(true);
+        const governanceFormId = await governanceForm.getAttribute("id");
+        expect(governanceFormId).toBeTruthy();
+        const drawerFooter = drawer.locator("[data-dialog-footer] [data-dialog-footer-actions]");
+        const generatePreview = drawerFooter.getByRole("button", { name: "生成停用连接预览", exact: true });
+        await expect(generatePreview).toHaveAttribute("form", governanceFormId!);
+        await generatePreview.click();
 
         const preview = governance.locator('[aria-live="polite"]');
         await expect(preview).toBeVisible();
@@ -284,7 +292,8 @@ test("personal Git and MCP connection lists match the prototype across desktop a
 
         // A pending opener can lose focus before a confirmation is mounted.
         // Force that case and exercise the native :modal host fallback.
-        await governance.getByRole("button", { name: "继续停用连接", exact: true }).evaluate(button => {
+        const continueButton = drawerFooter.getByRole("button", { name: "继续停用连接", exact: true });
+        await continueButton.evaluate(button => {
           if (!(button instanceof HTMLButtonElement)) throw new Error("expected governance button");
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           if (document.activeElement?.closest("dialog[open]")) throw new Error("native fallback setup did not release focus");
@@ -300,7 +309,7 @@ test("personal Git and MCP connection lists match the prototype across desktop a
         await expect(drawer).toBeVisible();
         await expect(governance).toBeVisible();
         await expect(reasonInput).toHaveValue(reason);
-        await expect(governance.getByRole("button", { name: "继续停用连接", exact: true })).toBeFocused();
+        await expect(continueButton).toBeFocused();
         await expect(preview).toBeVisible();
         await expect(preview.getByText("可在确认后执行", { exact: true })).toBeVisible();
         expect(governanceFixture.executeRequests).toEqual([]);

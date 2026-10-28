@@ -65,13 +65,15 @@ test("ADM-008 user operations stay within the safe admin boundary and preserve a
 
     await expect(page.getByLabel("操作原因", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "管理账号状态", exact: true }).click();
-    const accountReason = page.getByRole("dialog").getByLabel("操作原因", { exact: true });
+    const accountDialog = page.getByRole("dialog").filter({ has: page.getByLabel("操作原因", { exact: true }) });
+    const accountReason = accountDialog.getByLabel("操作原因", { exact: true });
+    const accountFooter = accountDialog.locator("[data-operation-footer]");
     await accountReason.fill("ADM008 browser disable regression");
     await page.getByRole("button", { name: "预览停用", exact: true }).click();
     const disablePreview = page.getByRole("region", { name: "账号状态变更预览", exact: true });
     await expect(disablePreview).toBeVisible();
     await disablePreview.getByLabel("输入用户名确认", { exact: true }).fill(username);
-    await disablePreview.getByRole("button", { name: "确认并执行", exact: true }).click();
+    await accountFooter.getByRole("button", { name: "确认并执行", exact: true }).click();
     await expect(page.getByText("账号已停用", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "管理账号状态", exact: true }).click();
@@ -80,7 +82,7 @@ test("ADM-008 user operations stay within the safe admin boundary and preserve a
     const restorePreview = page.getByRole("region", { name: "账号状态变更预览", exact: true });
     await expect(restorePreview).toBeVisible();
     await restorePreview.getByLabel("输入用户名确认", { exact: true }).fill(username);
-    await restorePreview.getByRole("button", { name: "确认并执行", exact: true }).click();
+    await accountFooter.getByRole("button", { name: "确认并执行", exact: true }).click();
     await expect(page.getByText("账号已启用", { exact: true })).toBeVisible();
   } finally {
     await page.request.post("/api/auth/logout", {

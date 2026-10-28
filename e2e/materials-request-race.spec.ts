@@ -293,6 +293,7 @@ test("materials tabs remain responsive during slow requests and a refused deleti
   const projectId = await createProject(page);
   const sourceId = "33333333-3333-4333-8333-333333333333";
   const calls = { project: 0, sources: 0, items: 0, jobs: 0, rsc: 0 };
+  const rscRequests: Array<{ url: string; prefetch: string | undefined }> = [];
   let holdReview = false;
   const releases: Array<() => void> = [];
   await page.route(`**/api/projects/${projectId}`, route => {
@@ -326,7 +327,11 @@ test("materials tabs remain responsive during slow requests and a refused deleti
     const initial = { ...calls };
     // A query-only tab click must not need this server-rendered route at all.
     await page.route(`**/projects/${projectId}/materials?*`, route => {
-      if (route.request().headers().rsc === "1") { calls.rsc++; return route.abort(); }
+      if (route.request().headers().rsc === "1") {
+        calls.rsc++;
+        rscRequests.push({ url: route.request().url(), prefetch: route.request().headers()["next-router-prefetch"] });
+        return route.abort();
+      }
       return route.fallback();
     });
     holdReview = true;
@@ -337,12 +342,15 @@ test("materials tabs remain responsive during slow requests and a refused deleti
     await expect.poll(() => calls.jobs).toBe(1);
     expect(calls.project).toBe(initial.project);
     expect(calls.sources).toBe(initial.sources);
-    expect(calls.rsc).toBe(0);
+    expect(calls.rsc, JSON.stringify(rscRequests)).toBe(0);
 
     holdReview = false;
     releases.splice(0).forEach(release => release());
     await page.goBack();
     await expect(tabs.getByRole("link", { name: /^整理结果/ })).toHaveAttribute("aria-current", "page");
+    await page.getByRole("link", { name: "查看已确认事实 →", exact: true }).click();
+    await expect(page).toHaveURL(/status=confirmed/u);
+    expect(calls.rsc, JSON.stringify(rscRequests)).toBe(0);
     await tabs.getByRole("link", { name: "资料", exact: true }).click();
     await expect(page.getByText("引用资料仍然保留", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "删除原始资料 引用资料仍然保留", exact: true }).click();

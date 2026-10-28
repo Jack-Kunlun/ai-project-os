@@ -152,15 +152,25 @@ async function setEnglishDarkAppearance(page: Page): Promise<void> {
   ]);
 }
 
-async function expectSingleLineFooterAction(form: Locator, expectedLabel: string): Promise<void> {
-  const geometry = await form.getByRole("button", { name: expectedLabel, exact: true }).evaluate((button) => {
-    const footer = button.parentElement;
-    if (!footer) throw new Error("ADMIN_FOOTER_ACTION_PARENT_MISSING");
+async function expectSingleLineFooterAction(dialog: Locator, form: Locator, expectedLabel: string): Promise<void> {
+  await expect(dialog.locator("[data-operation-content]")).toBeVisible();
+  await expect(form).toHaveCount(1);
+  await expect(form).toBeVisible();
+  expect(await form.evaluate((element) => element.closest("[data-operation-content]") !== null)).toBe(true);
+  const formId = await form.getAttribute("id");
+  expect(formId).toBeTruthy();
+
+  const action = dialog.locator("[data-operation-footer] [data-dialog-actions]").getByRole("button", { name: expectedLabel, exact: true });
+  await expect(action).toHaveAttribute("form", formId!);
+  const geometry = await action.evaluate((button) => {
+    const footer = button.closest<HTMLElement>("[data-operation-footer]");
+    const actionRow = button.closest<HTMLElement>("[data-dialog-actions]");
+    if (!footer || !actionRow) throw new Error("ADMIN_FOOTER_ACTION_PARENT_MISSING");
     const range = document.createRange();
     range.selectNodeContents(button);
     const buttonRect = button.getBoundingClientRect();
     const footerRect = footer.getBoundingClientRect();
-    const paragraphRect = footer.querySelector("p")?.getBoundingClientRect() ?? null;
+    const paragraphRect = actionRow.querySelector("p")?.getBoundingClientRect() ?? null;
     return {
       label: button.textContent?.trim() ?? "",
       textLineCount: range.getClientRects().length,
@@ -502,12 +512,12 @@ test("English credit operation footer actions stay single-line at 390px without 
   await expectR02NoHorizontalOverflow(page, "admin credits at 390px English dark");
 
   let operation = await openOperation(page, "新建策略版本", "创建新注册赠送策略草稿");
-  await expectSingleLineFooterAction(operation.dialog.locator("form"), translated("创建策略草稿"));
+  await expectSingleLineFooterAction(operation.dialog, operation.dialog.locator("[data-operation-content] form"), translated("创建策略草稿"));
   await expectR02NoHorizontalOverflow(page, "admin signup policy modal at 390px English dark");
   await closeOperation(operation.trigger, operation.dialog);
 
   operation = await openOperation(page, "额度操作", "补发平台额度");
-  await expectSingleLineFooterAction(operation.dialog.locator("form"), translated("预览补发"));
+  await expectSingleLineFooterAction(operation.dialog, operation.dialog.locator("[data-operation-content] form"), translated("预览补发"));
   await expectR02NoHorizontalOverflow(page, "admin credit grant modal at 390px English dark");
   await closeOperation(operation.trigger, operation.dialog);
   expect(attemptedWrites).toEqual([]);

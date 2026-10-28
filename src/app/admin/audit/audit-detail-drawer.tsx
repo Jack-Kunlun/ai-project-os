@@ -137,7 +137,7 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
             ref={closeRef}
             data-dialog-close
             type="button"
-            aria-label={t("关闭详情")}
+            aria-label={t("关闭窗口")}
             onClick={onClose}
             className="app-icon-button"
           >

@@ -61,8 +61,11 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expectActionButtonGeometry(createWorkItem,true);
     await createWorkItem.click();
     const dialog=page.getByRole("dialog",{name:en?"Add a work item":"添加人工工作项",exact:true});
-    const workItemAction=dialog.locator(".app-action-button");
+    const workItemFooter=dialog.locator("[data-operation-footer]");
+    const workItemAction=workItemFooter.getByRole("button",{name:en?"Add to project plan":"加入项目计划",exact:true});
     await expect(workItemAction).toHaveCount(1);
+    await expect(workItemAction).toHaveClass(/app-action-button/u);
+    await expect(workItemFooter.getByRole("button",{name:en?"Cancel":"取消",exact:true})).toHaveCount(1);
     await expectActionButtonGeometry(workItemAction,true);
     const title=dialog.getByRole("textbox",{name:en?"Work item name":"工作项名称",exact:true});
     await title.fill("Unsaved work item");

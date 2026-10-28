@@ -13,6 +13,7 @@ import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigatio
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { isReviewType, parseReviewType, type ReviewType } from "./materials/materials-navigation";
 import { buildProjectQuestionHref } from "./materials/materials-navigation";
+import { MaterialsTabLink } from "./materials/materials-tab-link";
 import styles from "./project-materials.module.css";
 import { formatUiDateTime } from "@/lib/ui-date-format";
 
@@ -66,6 +67,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged, embedded = fa
   const [message, setMessage] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
+  const ConfirmedFactsLink = embedded ? MaterialsTabLink : Link;
 
   function replaceReviewQuery(input: { search?: string; type?: ReviewType; cursor?: string | null }): void {
     if (embedded) {
@@ -200,7 +202,7 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged, embedded = fa
           <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void reviewCandidate(review, "accept")} disabled={pending !== null} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{pending === `${review.source}:${review.id}:accept` ? <UiText text={"确认中…"} /> : <UiText text={"确认进入已确认事实"} />}</button><button type="button" onClick={() => void reviewCandidate(review, "dismiss")} disabled={pending !== null} className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{pending === `${review.source}:${review.id}:dismiss` ? <UiText text={"驳回中…"} /> : <UiText text={"驳回"} />}</button></div>
         </article>
       ))}</div>}
-      <div className="mt-4 flex flex-wrap gap-3 text-xs font-semibold text-indigo-700"><Link href={buildProjectHref(projectId, "materials", { view: "review", status: "confirmed", focus: "confirmed-facts", from: "materials" })}><UiText text={"查看已确认事实 →"} /></Link><Link href={buildProjectQuestionHref(projectId)}><UiText text={"智能问答 →"} /></Link><Link href={buildProjectHref(projectId, "plan", { from: "materials" })}><UiText text={"安排任务 →"} /></Link></div>
+      <div className="mt-4 flex flex-wrap gap-3 text-xs font-semibold text-indigo-700"><ConfirmedFactsLink href={buildProjectHref(projectId, "materials", { view: "review", status: "confirmed", focus: "confirmed-facts", from: "materials" })}><UiText text={"查看已确认事实 →"} /></ConfirmedFactsLink><Link href={buildProjectQuestionHref(projectId)}><UiText text={"智能问答 →"} /></Link><Link href={buildProjectHref(projectId, "plan", { from: "materials" })}><UiText text={"安排任务 →"} /></Link></div>
       <CursorPagination page={history.length + 1} hasPrevious={history.length > 0} hasNext={nextCursor !== null} disabled={loading || pending !== null} onPrevious={() => { const previous = history.at(-1) ?? null; setHistory((current) => current.slice(0, -1)); replaceReviewQuery({ cursor: previous }); }} onNext={() => { if (!nextCursor) return; setHistory((current) => [...current, cursor]); replaceReviewQuery({ cursor: nextCursor }); }} />
     </section>
   );

@@ -392,6 +392,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
               <Link
                 key={item.key}
                 href={getProjectNavigationHref(selectedProject.id, item.key)}
+                prefetch={active ? false : undefined}
                 aria-current={active ? "page" : undefined}
                 className={className}
                 onClick={projectLinkClick}

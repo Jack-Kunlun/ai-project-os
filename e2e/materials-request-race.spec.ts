@@ -355,10 +355,12 @@ test("materials tabs remain responsive during slow requests and a refused deleti
     await expect(page.getByText("引用资料仍然保留", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "删除原始资料 引用资料仍然保留", exact: true }).click();
     await page.getByRole("button", { name: "确认删除", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("原始资料已被项目记录引用");
-    await expect(page.getByRole("alert")).not.toContainText("private reference details");
-    await expect(page.getByText("引用资料仍然保留", { exact: true })).toBeVisible();
-    await expect(page.getByText("读取失败", { exact: true })).toHaveCount(0);
+    const sourceLibrary = page.getByRole("region", { name: "资料来源", exact: true });
+    const deletionAlert = sourceLibrary.getByRole("alert");
+    await expect(deletionAlert).toContainText("原始资料已被项目记录引用");
+    await expect(deletionAlert).not.toContainText("private reference details");
+    await expect(sourceLibrary.getByText("引用资料仍然保留", { exact: true })).toBeVisible();
+    await expect(sourceLibrary.getByText("读取失败", { exact: true })).toHaveCount(0);
   } finally {
     holdReview = false;
     releases.splice(0).forEach(release => release());

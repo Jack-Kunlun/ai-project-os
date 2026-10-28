@@ -14,6 +14,16 @@ test("file upload guidance retains its reviewed reason and code in both language
   assert.doesNotMatch(english, /\p{Script=Han}|private file internals/u);
 });
 
+test("referenced source deletion retains safe guidance in both languages", async () => {
+  const error = await safeResponseError(new Response(JSON.stringify({ error: { code: "SOURCE_IN_USE", message: "private reference details" } }), { status: 409 }), "资料删除失败");
+  const chinese = translateUiErrorText(error.message, "zh-CN", englishUiMessages);
+  assert.match(chinese, /原始资料已被项目记录引用.*保留该资料以便追溯.*SOURCE_IN_USE/u);
+  assert.doesNotMatch(chinese, /private reference details/u);
+  const english = translateUiErrorText(error.message, "en", englishUiMessages);
+  assert.match(english, /referenced by project records.*Keep this source for traceability.*SOURCE_IN_USE/u);
+  assert.doesNotMatch(english, /\p{Script=Han}|private reference details/u);
+});
+
 test("system errors preserve only reviewed dictionary messages in either language", () => {
   assert.equal(translateUiErrorText("项目搜索失败", "zh-CN", messages), "项目搜索失败");
   assert.equal(translateUiErrorText("项目搜索失败", "en", messages), "Project search failed");

@@ -1,4 +1,6 @@
 "use client";
+
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 import { ShellIcon } from "@/components/shell-icon";
 import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
@@ -223,16 +225,16 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
         <div><p className={styles.eyebrow}><UiText text={"PROJECT PLAN"} /></p><h1>{currentPlan?.project.name ?? <UiText text={"项目计划"} />}</h1><p className={styles.subtitle}><UiText text={"维护目标、工作项、负责人、期限和验收证据。"} /></p></div>
         {currentPlan ? <div className={styles.headingActions}>
           <OperationPanel title={t("创建项目目标")} triggerLabel={t("新建目标")} open={objectiveOpen} onOpenChange={setObjectiveOpen} disabled={!currentPlan.canEdit} description={t("目标先保存为草稿，后续由项目成员明确决定何时启动或完成。")}>
-            <form onSubmit={createObjective} className={styles.form}>
+            <DialogForm onSubmit={createObjective} className={styles.form}>
               {error ? <p role="alert" className={styles.formError}><UiErrorText text={error} /></p> : null}
               <label><UiText text={"目标名称"} /><input required maxLength={160} value={objectiveForm.title} onChange={(event) => setObjectiveForm((value) => ({ ...value, title: event.target.value }))} placeholder={t("目标名称")} /></label>
               <label><UiText text={"完成标准或背景"} /><textarea maxLength={20_000} rows={3} value={objectiveForm.description} onChange={(event) => setObjectiveForm((value) => ({ ...value, description: event.target.value }))} placeholder={t("可选")} /></label>
               <label><UiText text={"目标日期"} /><input type="date" value={objectiveForm.targetDate} onChange={(event) => setObjectiveForm((value) => ({ ...value, targetDate: event.target.value }))} /></label>
-              <button className="app-action-button" disabled={!currentPlan.canEdit || pending !== null || objectiveForm.title.trim().length === 0}>{pending === "create-objective" ? t("创建中…") : t("创建目标草稿")}</button>
-            </form>
+              <DialogActions><button type="button" className="app-action-button" disabled={pending !== null} onClick={() => setObjectiveOpen(false)}>{t("取消")}</button><DialogSubmit className={`app-action-button ${styles.formSubmit}`}  disabled={!currentPlan.canEdit || pending !== null || objectiveForm.title.trim().length === 0}>{pending === "create-objective" ? t("创建中…") : t("创建目标草稿")}</DialogSubmit></DialogActions>
+            </DialogForm>
           </OperationPanel>
           <OperationPanel title={t("添加人工工作项")} triggerLabel={t("新建工作项")} open={workItemOpen} onOpenChange={setWorkItemOpen} disabled={!currentPlan.canEdit} description={t("工作项先进入已计划状态；开始和完成仍需要成员明确操作。")}>
-            <form onSubmit={createWorkItem} className={styles.form}>
+            <DialogForm onSubmit={createWorkItem} className={styles.form}>
               {error ? <p role="alert" className={styles.formError}><UiErrorText text={error} /></p> : null}
               <label><UiText text={"工作项名称"} /><input required maxLength={160} value={workItemForm.title} onChange={(event) => setWorkItemForm((value) => ({ ...value, title: event.target.value }))} placeholder={t("工作项名称")} /></label>
               <div className={styles.formGrid}><label><UiText text={"工作说明"} /><textarea maxLength={20_000} rows={3} value={workItemForm.description} onChange={(event) => setWorkItemForm((value) => ({ ...value, description: event.target.value }))} placeholder={t("范围与背景（可选）")} /></label><label><UiText text={"验收标准"} /><textarea maxLength={20_000} rows={3} value={workItemForm.acceptanceCriteria} onChange={(event) => setWorkItemForm((value) => ({ ...value, acceptanceCriteria: event.target.value }))} placeholder={t("可验证的验收标准")} /></label></div>
@@ -242,8 +244,8 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
                 <label><UiText text={"优先级"} /><select value={workItemForm.priority} onChange={(event) => setWorkItemForm((value) => ({ ...value, priority: event.target.value as Priority }))}>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{t(label)} <UiText text={"优先级"} /></option>)}</select></label>
                 <label><UiText text={"目标日期"} /><input type="date" value={workItemForm.targetDate} onChange={(event) => setWorkItemForm((value) => ({ ...value, targetDate: event.target.value }))} /></label>
               </div>
-              <button className="app-action-button" disabled={!currentPlan.canEdit || pending !== null || workItemForm.title.trim().length === 0}>{pending === "create-work-item" ? t("添加中…") : t("加入项目计划")}</button>
-            </form>
+              <DialogActions><button type="button" className="app-action-button" disabled={pending !== null} onClick={() => setWorkItemOpen(false)}>{t("取消")}</button><DialogSubmit className={`app-action-button ${styles.formSubmit}`}  disabled={!currentPlan.canEdit || pending !== null || workItemForm.title.trim().length === 0}>{pending === "create-work-item" ? t("添加中…") : t("加入项目计划")}</DialogSubmit></DialogActions>
+            </DialogForm>
           </OperationPanel>
         </div> : null}
       </header>
@@ -336,7 +338,7 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
         {selectedWorkItem ? <OperationPanel title={selectedWorkItem.title} triggerLabel={t("打开工作项详情")} open={detailOpen} onOpenChange={setDetailOpen} className={styles.hiddenOperationTrigger} description={t("查看范围、负责人、期限、依赖和关联证据；计划变更会经过服务器状态与证据校验。")}>
           <WorkItemDetail item={selectedWorkItem} objective={objectiveById.get(selectedWorkItem.objectiveId ?? "")} dependencies={currentPlan.dependencies.filter((entry) => entry.workItemId === selectedWorkItem.id).map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} evidenceLinks={currentPlan.evidenceLinks.filter((link) => link.workItemId === selectedWorkItem.id)} />
           <WorkItemOperations key={`${selectedWorkItem.id}:${selectedWorkItem.updatedAt}`} item={selectedWorkItem} objectives={currentPlan.objectives} members={currentPlan.members} evidenceLinks={currentPlan.evidenceLinks.filter((link) => link.workItemId === selectedWorkItem.id)} evidenceCandidates={[...currentPlan.evidenceCandidates.projectItems, ...currentPlan.evidenceCandidates.projectSources]} dependencies={currentPlan.dependencies.filter((entry) => entry.workItemId === selectedWorkItem.id).map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} dependencyCandidates={activeWorkItems.filter((candidate) => candidate.id !== selectedWorkItem.id && !currentPlan.dependencies.some((dependency) => dependency.workItemId === selectedWorkItem.id && dependency.dependsOnId === candidate.id))} canEdit={currentPlan.canEdit} pending={pending} error={error} request={request} />
-          <div className={styles.detailActions}>{workItemTransitions[selectedWorkItem.status].map((status) => <button className="app-action-button" key={status} type="button" onClick={() => void request({ entity: "workItem", id: selectedWorkItem.id, expectedUpdatedAt: selectedWorkItem.updatedAt, status }, "PATCH", `work-item:${selectedWorkItem.id}:${status}`, t("工作项已更新为“{status}”。").replace("{status}", t(workItemStatusLabels[status])))} disabled={!currentPlan.canEdit || pending !== null}>{pending === `work-item:${selectedWorkItem.id}:${status}` ? t("更新中…") : t(workItemStatusLabels[status])}</button>)}</div>
+          <DialogActions className={styles.detailActions}>{workItemTransitions[selectedWorkItem.status].map((status) => <button className="app-action-button" key={status} type="button" onClick={() => void request({ entity: "workItem", id: selectedWorkItem.id, expectedUpdatedAt: selectedWorkItem.updatedAt, status }, "PATCH", `work-item:${selectedWorkItem.id}:${status}`, t("工作项已更新为“{status}”。").replace("{status}", t(workItemStatusLabels[status])))} disabled={!currentPlan.canEdit || pending !== null}>{pending === `work-item:${selectedWorkItem.id}:${status}` ? t("更新中…") : t(workItemStatusLabels[status])}</button>)}</DialogActions>
         </OperationPanel> : null}
       </> : null}
     </div>

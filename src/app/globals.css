@@ -207,8 +207,25 @@ button:not(:disabled) {
   display: none;
 }
 
+[data-dialog-footer-actions] {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+[data-dialog-footer-actions]:empty { display: none; }
+
+:is([data-operation-footer], [data-dialog-footer]) [data-dialog-actions] > button { margin-block: 0; }
+
+:is([data-operation-footer], [data-dialog-footer]):not([data-inquiry-footer]):has(> :is([data-operation-actions], [data-dialog-footer-actions]):empty) { display: none; }
+
 @media (max-width: 700px) {
-  [data-operation-footer] > [data-operation-actions] { padding: 10px 16px; }
+  [data-operation-surface] > :is([data-operation-header], [data-operation-content]) { padding-inline: 20px; }
+  [data-operation-footer] > [data-operation-actions] { padding: 10px 20px; }
 }
 
 .page-back-nav {

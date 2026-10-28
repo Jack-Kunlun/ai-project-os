@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { OperationPanel } from "@/components/operation-panel";
+import { DialogActions } from "@/components/dialog-actions";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type DocumentNode = Readonly<{ id: string; title: string; version: number }>;
@@ -153,7 +154,7 @@ export function PersonalKnowledgeGraphTools() {
             <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
               <label className="text-xs font-semibold text-slate-700"><UiText text={"知识文档"} /><select value={selectedDocumentId} onChange={(event) => setDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{documents.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}</select></label>
               <label className="text-xs font-semibold text-slate-700"><UiText text={"个人文本模型"} /><select value={selectedProviderId} onChange={(event) => setProviderId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-normal">{providers.length === 0 ? <option value=""><UiText text={"尚无已验证模型"} /></option> : providers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.defaultGenerationModelId}</option>)}</select></label>
-              <button type="button" onClick={(event) => void extract(event.currentTarget)} disabled={pending || !selectedDocumentId || !selectedProviderId} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("开始提取")}</button>
+              <DialogActions><button type="button" onClick={(event) => void extract(event.currentTarget)} disabled={pending || !selectedDocumentId || !selectedProviderId} className="min-h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("开始提取")}</button></DialogActions>
             </div>
           </OperationPanel></div>
           <h3 className="mt-7 text-sm font-semibold"><UiText text={"待审核 ·"} />{" "}{pendingSuggestions.length}</h3>

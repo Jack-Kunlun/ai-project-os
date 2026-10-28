@@ -369,10 +369,12 @@
 }
 
 .detailContent {
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  overflow-y: auto;
-  padding: 24px 26px 36px;
+  overflow: hidden;
 }
+.detailContent > p, .detailContent > .feedback { margin: 24px; }
 
 .knowledgeDialog {
   position: fixed;
@@ -623,9 +625,9 @@
     border-radius: 0;
   }
 
-  .detailContent {
-    padding: 18px 16px 28px;
-  }
+  .detailContent > article > :global([data-dialog-header]),
+  .detailContent > article > :global([data-dialog-body]),
+  .detailContent > article > :global([data-dialog-footer]) { padding-inline: 16px; }
 
   .knowledgeDialog :global(.knowledge-editor-header),
   .knowledgeDialog :global(.knowledge-editor-body),

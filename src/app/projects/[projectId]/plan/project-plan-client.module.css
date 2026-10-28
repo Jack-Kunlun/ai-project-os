@@ -527,7 +527,7 @@
 .detailSubsection ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .detailSubsection li { border-radius: 4px; padding: 4px 7px; background: var(--app-surface-soft); }
 
-.detailActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 15px; }
+.detailActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 0; }
 .detailActions button { border: 1px solid var(--app-border); border-radius: 6px; color: var(--app-muted); background: var(--app-surface); font-weight: 620; }
 .detailActions button:disabled { opacity: 0.45; }
 
@@ -543,8 +543,8 @@
 .formGrid,
 .formGridFour { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .formGridFour { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.form > button { justify-self: start; border: 1px solid var(--app-accent); border-radius: 6px; color: var(--app-on-accent); background: var(--app-accent); font-weight: 620; }
-.form > button:disabled { cursor: not-allowed; opacity: 0.45; }
+.formSubmit { justify-self: start; border: 1px solid var(--app-accent); border-radius: 6px; color: var(--app-on-accent); background: var(--app-accent); font-weight: 620; }
+.formSubmit:disabled { cursor: not-allowed; opacity: 0.45; }
 .formError { margin: 0; border-radius: 6px; padding: 8px 10px; color: var(--app-muted); background: var(--app-danger-soft); font-size: 9px; }
 
 .loading { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }

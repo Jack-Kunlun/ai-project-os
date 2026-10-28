@@ -287,3 +287,72 @@ test("materials source previews wrap long URLs at narrow widths", async ({ page 
 
   expect(blockedWrites).toEqual([]);
 });
+
+test("materials tabs remain responsive during slow requests and a refused deletion keeps the list", async ({ page }) => {
+  await signInPersonalUser(page);
+  const projectId = await createProject(page);
+  const sourceId = "33333333-3333-4333-8333-333333333333";
+  const calls = { project: 0, sources: 0, items: 0, jobs: 0, rsc: 0 };
+  let holdReview = false;
+  const releases: Array<() => void> = [];
+  await page.route(`**/api/projects/${projectId}`, route => {
+    calls.project++;
+    return fulfillJson(route, { project: { id: projectId, name: "栏目切换隔离项目", slug: "tab-switch-fixture", description: null, archivedAt: null, createdAt: "2026-10-28T00:00:00.000Z", updatedAt: "2026-10-28T00:00:00.000Z", _count: { sources: 1, assets: 0, items: 1, scans: 0, snapshots: 0 } } });
+  });
+  await page.route(`**/api/projects/${projectId}/sources?*`, route => {
+    calls.sources++;
+    return fulfillJson(route, sourcePayload("引用资料仍然保留"));
+  });
+  await page.route(`**/api/projects/${projectId}/items?*`, async route => {
+    calls.items++;
+    if (holdReview) await new Promise<void>(resolve => releases.push(resolve));
+    const status = new URL(route.request().url()).searchParams.get("reviewStatus");
+    await fulfillJson(route, itemPayload(status === "confirmed" ? "confirmed" : "all")).catch(() => {});
+  });
+  await page.route(`**/api/projects/${projectId}/governance/reviews?*`, async route => {
+    if (holdReview) await new Promise<void>(resolve => releases.push(resolve));
+    await fulfillJson(route, { items: [], nextCursor: null }).catch(() => {});
+  });
+  await page.route(`**/api/projects/${projectId}/jobs`, route => { calls.jobs++; return fulfillJson(route, { jobs: [] }); });
+  await page.route(`**/api/projects/${projectId}/sources/${sourceId}`, route => route.request().method() === "DELETE"
+    ? route.fulfill({ status: 409, json: { error: { code: "SOURCE_IN_USE", message: "private reference details" } } })
+    : route.fallback());
+
+  try {
+    await page.goto(`/projects/${projectId}/materials`);
+    await expect(page.getByText("引用资料仍然保留", { exact: true })).toBeVisible();
+    const tabs = page.getByRole("navigation", { name: "项目资料栏目" });
+    await expect(tabs.getByRole("link", { name: /^整理结果/ })).toContainText("1");
+    const initial = { ...calls };
+    // A query-only tab click must not need this server-rendered route at all.
+    await page.route(`**/projects/${projectId}/materials?*`, route => {
+      if (route.request().headers().rsc === "1") { calls.rsc++; return route.abort(); }
+      return route.fallback();
+    });
+    holdReview = true;
+    await tabs.getByRole("link", { name: /^整理结果/ }).click();
+    await expect(tabs.getByRole("link", { name: /^整理结果/ })).toHaveAttribute("aria-current", "page");
+    await tabs.getByRole("link", { name: "识别任务", exact: true }).click();
+    await expect(tabs.getByRole("link", { name: "识别任务", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect.poll(() => calls.jobs).toBe(1);
+    expect(calls.project).toBe(initial.project);
+    expect(calls.sources).toBe(initial.sources);
+    expect(calls.rsc).toBe(0);
+
+    holdReview = false;
+    releases.splice(0).forEach(release => release());
+    await page.goBack();
+    await expect(tabs.getByRole("link", { name: /^整理结果/ })).toHaveAttribute("aria-current", "page");
+    await tabs.getByRole("link", { name: "资料", exact: true }).click();
+    await expect(page.getByText("引用资料仍然保留", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "删除原始资料 引用资料仍然保留", exact: true }).click();
+    await page.getByRole("button", { name: "确认删除", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("原始资料已被项目记录引用");
+    await expect(page.getByRole("alert")).not.toContainText("private reference details");
+    await expect(page.getByText("引用资料仍然保留", { exact: true })).toBeVisible();
+    await expect(page.getByText("读取失败", { exact: true })).toHaveCount(0);
+  } finally {
+    holdReview = false;
+    releases.splice(0).forEach(release => release());
+  }
+});

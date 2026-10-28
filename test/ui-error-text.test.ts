@@ -6,6 +6,14 @@ import { englishUiMessages } from "../src/lib/ui-dictionary-source";
 
 const messages = { "项目搜索失败": "Project search failed" };
 
+test("file upload guidance retains its reviewed reason and code in both languages", async () => {
+  const error = await safeResponseError(new Response(JSON.stringify({ error: { code: "ASSET_FILE_SIGNATURE_INVALID", message: "private file internals" } }), { status: 422 }), "上传失败");
+  assert.match(translateUiErrorText(error.message, "zh-CN", englishUiMessages), /实际内容不一致.*ASSET_FILE_SIGNATURE_INVALID/u);
+  const english = translateUiErrorText(error.message, "en", englishUiMessages);
+  assert.match(english, /contents do not match.*ASSET_FILE_SIGNATURE_INVALID/u);
+  assert.doesNotMatch(english, /\p{Script=Han}|private file internals/u);
+});
+
 test("system errors preserve only reviewed dictionary messages in either language", () => {
   assert.equal(translateUiErrorText("项目搜索失败", "zh-CN", messages), "项目搜索失败");
   assert.equal(translateUiErrorText("项目搜索失败", "en", messages), "Project search failed");

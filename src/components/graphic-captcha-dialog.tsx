@@ -5,7 +5,7 @@ import { UiErrorText } from "@/components/ui-error-text";
 import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslate } from "@/components/appearance-provider";
-import { modalNativeBackdropClassName, modalSurfaceClassName } from "./modal-styles";
+import { modalFooterClassName, modalHeaderClassName, modalNativeBackdropClassName, modalSurfaceClassName } from "./modal-styles";
 import { ShellIcon } from "./shell-icon";
 
 export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test" | "recover" | "bind" | "change-old" | "change-new" | "verify" | "password";
@@ -197,22 +197,20 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
       className={`fixed inset-0 m-0 h-dvh w-dvw max-h-none max-w-none border-0 bg-transparent p-0 ${modalNativeBackdropClassName}`}
     >
       <div className="flex min-h-full items-center justify-center p-4">
-        <section className={`w-full max-w-sm rounded-2xl p-5 sm:p-6 ${modalSurfaceClassName}`}>
-          <div className="flex items-start justify-between gap-4">
-            <div>
+        <section className={`flex max-h-[calc(100dvh-2rem)] w-full max-w-sm flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
+          <header data-dialog-header className={`flex min-h-[72px] shrink-0 items-center justify-between gap-4 px-6 py-5 ${modalHeaderClassName}`}>
               <h2 id="graphic-captcha-title" className="text-lg font-semibold text-slate-950">{t("安全验证")}</h2>
-              <p id="graphic-captcha-description" className="mt-1 text-sm leading-5 text-slate-600">{t(channel === "email" ? "发送邮件前，请输入图片中的 6 位字母或数字。" : "发送短信前，请输入图片中的 6 位字母或数字。")}</p>
-            </div>
             <button
               type="button"
               onClick={() => onOpenChange(false)}
               aria-label={t("关闭图形验证码")}
-              className="app-icon-button -mr-2 -mt-2"
+              className="app-icon-button"
             >
               <ShellIcon name="close" className="app-icon--control" />
             </button>
-          </div>
-
+          </header>
+          <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
+          <p id="graphic-captcha-description" className="text-sm leading-5 text-slate-600">{t(channel === "email" ? "发送邮件前，请输入图片中的 6 位字母或数字。" : "发送短信前，请输入图片中的 6 位字母或数字。")}</p>
           <div className="mt-5 flex h-[76px] items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
             {challenge ? <Image src={challenge.image} alt={t("图形验证码")} width={216} height={72} unoptimized className="h-full max-w-full object-contain" /> : <span className="text-sm text-slate-500">{loading ? t("正在加载验证码…") : t("验证码暂不可用")}</span>}
           </div>
@@ -240,7 +238,8 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
             {error ? <UiErrorText text={error} /> : t("验证码区分字母和数字，不区分大小写。")}
           </p>
 
-          <div className="mt-3 flex gap-3">
+          </div>
+          <footer data-dialog-footer className={`flex shrink-0 flex-wrap justify-end gap-3 px-6 py-4 ${modalFooterClassName}`}>
             <button
               type="button"
               onClick={() => void loadChallenge()}
@@ -257,7 +256,7 @@ export function GraphicCaptchaDialog({ open, phone, email, channel = "sms", purp
             >
               {submitting ? t("验证并发送中…") : channel === "email" ? t("验证并发送邮件") : t("验证并发送短信")}
             </button>
-          </div>
+          </footer>
         </section>
       </div>
     </dialog>

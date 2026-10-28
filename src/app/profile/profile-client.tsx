@@ -11,6 +11,7 @@ import { AccountPhonePanel } from "@/components/account-phone-panel";
 import { AppHeader } from "@/components/app-header";
 import { EmailCodeInput } from "@/components/email-code-input";
 import { OperationPanel } from "@/components/operation-panel";
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 import styles from "../support-pages.module.css";
 import profileStyles from "./profile-page.module.css";
 
@@ -294,7 +295,7 @@ function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; o
     } catch (cause) { setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "个人资料更新失败" }); }
     finally { setPending(false); }
   }
-  return <section className="grid gap-5 sm:grid-cols-[0.72fr_1.28fr]"><div><p className="text-xs leading-5 text-slate-400"><UiText text={"显示名称用于页面展示；修改邮箱后需要验证新地址。"} /></p><p className={`mt-2 text-xs leading-5 ${verifiedEmailLocked ? "text-emerald-700" : profile?.emailVerifiedAt ? "text-emerald-700" : "text-amber-700"}`}><UiText text={verifiedEmailLocked ? "已验证邮箱目前不能修改或移除。" : profile?.emailVerifiedAt ? "邮箱已验证，可用于工作区邀请匹配。" : "邮箱未验证前不能用于工作区邀请；你可以在下方验证当前保存的邮箱。"} /></p></div><form onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input aria-label={t("显示名称")} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={t("显示名称")} maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input aria-label={t("邮箱")} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("邮箱")} maxLength={320} readOnly={verifiedEmailLocked} className={`rounded-xl border border-slate-200 px-4 py-3 text-sm ${verifiedEmailLocked ? "cursor-not-allowed bg-slate-50 text-slate-500" : ""}`} /><div className="sm:col-span-2"><button disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"><UiText text={pending ? "保存中…" : "保存个人资料"} /></button>{message ? <Message {...message} /> : null}</div></form></section>;
+  return <section className="grid gap-5 sm:grid-cols-[0.72fr_1.28fr]"><div><p className="text-xs leading-5 text-slate-400"><UiText text={"显示名称用于页面展示；修改邮箱后需要验证新地址。"} /></p><p className={`mt-2 text-xs leading-5 ${verifiedEmailLocked ? "text-emerald-700" : profile?.emailVerifiedAt ? "text-emerald-700" : "text-amber-700"}`}><UiText text={verifiedEmailLocked ? "已验证邮箱目前不能修改或移除。" : profile?.emailVerifiedAt ? "邮箱已验证，可用于工作区邀请匹配。" : "邮箱未验证前不能用于工作区邀请；你可以在下方验证当前保存的邮箱。"} /></p></div><DialogForm onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input aria-label={t("显示名称")} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={t("显示名称")} maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input aria-label={t("邮箱")} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("邮箱")} maxLength={320} readOnly={verifiedEmailLocked} className={`rounded-xl border border-slate-200 px-4 py-3 text-sm ${verifiedEmailLocked ? "cursor-not-allowed bg-slate-50 text-slate-500" : ""}`} /><div className="sm:col-span-2"><DialogActions><DialogSubmit disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"><UiText text={pending ? "保存中…" : "保存个人资料"} /></DialogSubmit></DialogActions>{message ? <Message {...message} /> : null}</div></DialogForm></section>;
 }
 
 function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null; loading: boolean; onUpdated: (username: string) => void }) {
@@ -323,15 +324,15 @@ function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null
       <div>
         <p className="text-xs leading-5 text-slate-400"><UiText text={"用于登录当前本地部署，修改后下次登录生效。"} /></p>
       </div>
-      <form onSubmit={submit}>
+      <DialogForm onSubmit={submit}>
         <label htmlFor="profile-username" className="sr-only"><UiText text={"登录名"} /></label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <input id="profile-username" value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,63}" required disabled={loading || !profile} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50" />
-          <button disabled={pending || loading || !profile || username === profile.username} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-600 disabled:opacity-40"><UiText text={pending ? "保存中…" : "保存"} /></button>
+          <DialogActions><DialogSubmit disabled={pending || loading || !profile || username === profile.username} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-600 disabled:opacity-40"><UiText text={pending ? "保存中…" : "保存"} /></DialogSubmit></DialogActions>
         </div>
         <p className="mt-2 text-xs text-slate-400"><UiText text={"3–64 位，可使用字母、数字、点、下划线和连字符。"} /></p>
         {message ? <Message {...message} /> : null}
-      </form>
+      </DialogForm>
     </section>
   );
 }
@@ -363,7 +364,7 @@ function EmailVerificationSection({ email, emailVerifiedAt, availability, onVeri
   }
 
   if (!email || emailVerifiedAt || availability === "disabled") return null;
-  return <section className="grid gap-4 sm:grid-cols-[0.72fr_1.28fr]"><div><p className="text-xs leading-5 text-slate-500"><UiText text={"验证码将发送到当前保存的邮箱"} /> {email}<UiText text={"。验证后可用于工作区邀请匹配和密码修改。"} /></p></div><form onSubmit={submit} className="grid gap-3"><EmailCodeInput key={email} id="profile-email-verification-code" email={email} purpose="verify" availability={availability === "available" ? "available" : "unavailable"} code={code} onCodeChange={setCode} onChallengeIdChange={setChallengeId} /><button disabled={pending || !challengeId || code.length !== 6} className="w-fit rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"><UiText text={pending ? "正在验证…" : "确认验证邮箱"} /></button>{message ? <Message {...message} /> : null}</form></section>;
+  return <section className="grid gap-4 sm:grid-cols-[0.72fr_1.28fr]"><div><p className="text-xs leading-5 text-slate-500"><UiText text={"验证码将发送到当前保存的邮箱"} /> {email}<UiText text={"。验证后可用于工作区邀请匹配和密码修改。"} /></p></div><DialogForm onSubmit={submit} className="grid gap-3"><EmailCodeInput key={email} id="profile-email-verification-code" email={email} purpose="verify" availability={availability === "available" ? "available" : "unavailable"} code={code} onCodeChange={setCode} onChallengeIdChange={setChallengeId} /><DialogActions><DialogSubmit disabled={pending || !challengeId || code.length !== 6} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"><UiText text={pending ? "正在验证…" : "确认验证邮箱"} /></DialogSubmit></DialogActions>{message ? <Message {...message} /> : null}</DialogForm></section>;
 }
 
 function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatus }: { hasLocalPassword: boolean; email: string | null; emailVerifiedAt: string | null; emailAuthStatus: Profile["emailAuthStatus"] }) {
@@ -406,7 +407,7 @@ function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatu
   }
 
   return (
-      <form onSubmit={submit} className="grid max-w-3xl gap-4">
+      <DialogForm onSubmit={submit} className="grid max-w-3xl gap-4">
         <p className="text-sm leading-6 text-slate-600"><UiText text={hasLocalPassword ? "输入当前密码和新密码。" : "为企业身份账号设置本地恢复密码。"} /><UiText text={"更新后会撤销全部登录会话，并要求重新登录。"} /></p>
         {hasLocalPassword ? <PasswordField id="profile-current-password" label="当前密码" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" /> : null}
         <div className="grid gap-4 sm:grid-cols-2">
@@ -416,8 +417,8 @@ function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatu
         <p className="text-xs text-slate-400"><UiText text={"新密码 8–128 位，并同时包含字母和数字。"} /></p>
         {emailAuthStatus !== "disabled" && email ? <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="mb-3 text-xs leading-5 text-slate-600">{emailVerifiedAt ? t("当前邮箱 {email} 需要通过验证码确认后才能修改密码。").replace("{email}", email) : <UiText text="请先在上方验证当前邮箱。" />}</p>{emailVerifiedAt ? <EmailCodeInput key={email} id="profile-password-email-code" email={email} purpose="password" availability={emailAuthStatus === "available" ? "available" : "unavailable"} code={emailCode} onCodeChange={setEmailCode} onChallengeIdChange={setEmailChallengeId} /> : null}</div> : null}
         {message ? <Message {...message} /> : null}
-        <div><button disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword || (emailAuthStatus !== "disabled" && email !== null && (!emailVerifiedAt || emailAuthStatus !== "available" || !emailChallengeId || emailCode.length !== 6))} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40"><UiText text={pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"} /></button></div>
-      </form>
+        <div><DialogActions><DialogSubmit disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword || (emailAuthStatus !== "disabled" && email !== null && (!emailVerifiedAt || emailAuthStatus !== "available" || !emailChallengeId || emailCode.length !== 6))} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40"><UiText text={pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"} /></DialogSubmit></DialogActions></div>
+      </DialogForm>
   );
 }
 

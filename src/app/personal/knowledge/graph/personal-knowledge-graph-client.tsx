@@ -10,6 +10,7 @@ import { AppHeader } from "@/components/app-header";
 import { ShellIcon } from "@/components/shell-icon";
 import { OperationPanel } from "@/components/operation-panel";
 import { WorkspaceDialog } from "@/components/workspace-dialog";
+import { DialogActions } from "@/components/dialog-actions";
 import { layoutKnowledgeGraph, type KnowledgeGraphNode, type KnowledgeGraphEdge } from "@/lib/knowledge-graph-view";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { KnowledgeGraphCanvas } from "./knowledge-graph-canvas";
@@ -145,8 +146,8 @@ export function PersonalKnowledgeGraphClient({username,isSystemAdmin}:{username:
         <div><span className={ui.muted}>{t(selected.kind==='fact'?'有来源的事实':'来源内容')}</span><h2 className="mt-2 break-words text-lg font-semibold">{selected.title}</h2></div>
         <dl className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 p-4 text-sm sm:grid-cols-2"><div><dt className={ui.muted}><UiText text={"内容范围"} /></dt><dd className="mt-1 break-words">{selectedScope}</dd></div><div><dt className={ui.muted}><UiText text={"版本"} /></dt><dd className="mt-1 break-words">{selected.revision||t('版本未记录')}</dd></div></dl>
         {selected.kind==='fact'?<><section><h3 className="mb-2 text-sm font-semibold"><UiText text={"事实内容"} /></h3><p className="whitespace-pre-wrap break-words text-sm leading-6">{selected.scope==='project'?selected.excerpt||selected.title:selected.title}</p></section>{selectedDetail?.sourceExcerpt?<section><h3 className="mb-2 text-sm font-semibold"><UiText text={"原文依据"} /></h3><p className="whitespace-pre-wrap break-words text-sm leading-6">{selectedDetail.sourceExcerpt}</p></section>:null}<section><h3 className="mb-2 text-sm font-semibold"><UiText text={"关联来源"} /></h3><p className="break-words text-sm">{linkedSource?.title||t('来源无法访问。')}</p>{linkedSource?.revision?<p className={ui.muted}>{linkedSource.revision}</p>:null}</section></>:<section><h3 className="mb-2 text-sm font-semibold"><UiText text={"内容"} /></h3>{detailLoading?<p role="status"><UiText text={"正在读取来源…"} /></p>:detailError?<p className={ui.error} role="alert"><UiErrorText text={detailError} /></p>:<p className="whitespace-pre-wrap break-words text-sm leading-6">{selected.scope==='personal'&&selectedDetail?.content!==undefined?selectedDetail.content:selected.excerpt||t('打开来源查看当前正文、版本与来源记录。')}</p>}</section>}
-        {linkedSource?.sourceId?<button className={ui.button} onClick={()=>void openSource(linkedSource)}><UiText text={"打开来源"} /></button>:null}
       </div>:null}
+      <DialogActions>{linkedSource?.sourceId?<button className={ui.button} onClick={()=>void openSource(linkedSource)}><UiText text={"打开来源"} /></button>:null}</DialogActions>
     </WorkspaceDialog>
     <WorkspaceDialog title={t("来源内容")} open={sourceOpen} onClose={()=>{sourceRequest.current++;sourceController.current?.abort();sourceController.current=null;setSourceLoading(false);setSourceOpen(false);}} drawer>{sourceLoading?<p role="status"><UiText text={"正在读取来源…"} /></p>:sourceError?<p className={ui.error} role="alert"><UiErrorText text={sourceError} /></p>:<div className={ui.reading}>{sourceBody}</div>}</WorkspaceDialog>
     <OperationPanel title={t("维护个人关系")} variant="drawer" open={toolsOpen} onOpenChange={open=>{setToolsOpen(open);if(!open)setRefresh(n=>n+1);}} className={styles.hiddenTrigger}><div className={styles.tools}>{toolsOpen?<PersonalKnowledgeGraphTools/>:null}</div></OperationPanel>

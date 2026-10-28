@@ -14,6 +14,7 @@ import {
 } from "@/lib/project-assets/quota";
 import { parseAssetBuffer, PROJECT_ASSET_PARSER_VERSION } from "@/lib/project-assets/parser";
 import { getUploadPolicy } from "@/lib/project-assets/policy";
+import type { ProjectAssetDownloadFile } from "@/lib/project-assets/download-response";
 import { isSerializableTransactionConflict, withSerializableRetry } from "@/lib/prisma-transaction";
 import { listPagination } from "@/lib/list-pagination";
 import { nonLegacyMcpProjectAssetSegmentWhere } from "@/lib/legacy-mcp-source-quarantine";
@@ -25,11 +26,16 @@ import {
 import {
   assetBlobStorageKey,
   assetContentHash,
+  assertAssetBlob,
   detectAssetFile,
   readAssetBlob,
   removeAssetBlob,
   sanitizeAssetFileName,
+  streamAssetBlob,
   writeAssetBlob,
+  writeAssetStream,
+  ProjectAssetStorageError,
+  type DetectedAssetFile,
 } from "@/lib/project-assets/storage";
 
 const assetIdSchema = z.string().uuid();
@@ -296,17 +302,20 @@ export async function uploadProjectAsset(input: Readonly<{
   projectId: string;
   requestedBy: Pick<AppUser, "id">;
   fileName: string;
-  buffer: Buffer;
   visibility?: ProjectAiPublicVisibility;
-}>, db: PrismaClient = getDb()) {
+} & ({ buffer: Buffer; stream?: never } | { buffer?: never; stream: ReadableStream<Uint8Array>; sizeBytes: number; signal?: AbortSignal })>, db: PrismaClient = getDb()) {
   await assertProjectActive(input.projectId, db);
   const fileName = sanitizeAssetFileName(input.fileName);
-  const detected = detectAssetFile(fileName, input.buffer);
-  const contentHash = assetContentHash(input.buffer);
+  const sizeBytes = input.buffer !== undefined ? input.buffer.length : input.sizeBytes;
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) throw new ProjectAssetStorageError("ASSET_FILE_EMPTY");
+  const byteLimit = getUploadPolicy().maxFileBytes;
+  if (byteLimit > 0 && sizeBytes > byteLimit) throw new ProjectAssetStorageError("ASSET_FILE_TOO_LARGE");
+  let detected: DetectedAssetFile | undefined = input.buffer ? detectAssetFile(fileName, input.buffer) : undefined;
+  let contentHash = input.buffer ? assetContentHash(input.buffer) : "";
   // Opportunistic cleanup is global and bounded; a failed stale cleanup keeps
   // its reservation and therefore continues to count against quotas.
   await reconcileStaleProjectAssetUploadReservations(db);
-  const duplicate = await db.projectAssetVersion.findUnique({
+  const duplicate = input.buffer ? await db.projectAssetVersion.findUnique({
     where: { projectId_contentHash: { projectId: input.projectId, contentHash } },
     select: {
       id: true,
@@ -317,9 +326,9 @@ export async function uploadProjectAsset(input: Readonly<{
       asset: { select: { status: true } },
       segments: { where: { projectSourceId: { not: null }, ...nonLegacyMcpProjectAssetSegmentWhere }, select: { projectSourceId: true } },
     },
-  });
+  }) : null;
   if (duplicate !== null) {
-    await readAssetBlob(duplicate.storageKey, duplicate.sizeBytes);
+    await assertAssetBlob(duplicate.storageKey, duplicate.sizeBytes);
     // Content identity is the upload idempotency boundary. Returning the
     // existing active asset lets a client safely retry after an uncertain HTTP
     // response without creating a second blob or receiving a misleading 409.
@@ -365,15 +374,16 @@ export async function uploadProjectAsset(input: Readonly<{
       projectId: input.projectId,
       userId: input.requestedBy.id,
       storageKey,
-      sizeBytes: input.buffer.length,
+      sizeBytes,
     }, db);
     reservationCreated = true;
-    await writeAssetBlob({
-      projectId: input.projectId,
-      assetId,
-      versionId,
-      buffer: input.buffer,
-    });
+    if (input.buffer) {
+      await writeAssetBlob({ projectId: input.projectId, assetId, versionId, buffer: input.buffer });
+    } else {
+      const written = await writeAssetStream({ projectId: input.projectId, assetId, versionId, fileName, sizeBytes, stream: input.stream, signal: input.signal });
+      detected = written.detected;
+      contentHash = written.contentHash;
+    }
   } catch (error) {
     if (reservationCreated) {
       try {
@@ -385,6 +395,9 @@ export async function uploadProjectAsset(input: Readonly<{
     }
     throw error;
   }
+  if (detected === undefined) throw new Error("ASSET_DETECTION_MISSING");
+  const assetKind = detected.kind;
+  const assetMimeType = detected.mimeType;
 
   let stored: { assetId: string; runId: string | null; reused: boolean };
   try {
@@ -443,14 +456,14 @@ export async function uploadProjectAsset(input: Readonly<{
           id: assetId,
           projectId: input.projectId,
           displayName: fileName,
-          kind: detected.kind,
+          kind: assetKind,
           uploadedById: input.requestedBy.id,
           versions: {
             create: {
               id: versionId,
               originalFileName: fileName,
-              mimeType: detected.mimeType,
-              sizeBytes: BigInt(input.buffer.length),
+              mimeType: assetMimeType,
+              sizeBytes: BigInt(sizeBytes),
               contentHash,
               storageKey,
             },
@@ -999,6 +1012,22 @@ export async function getProjectAssetBlob(projectId: string, assetIdInput: unkno
     sizeBytes: Number(version.sizeBytes),
     buffer: await readAssetBlob(version.storageKey, version.sizeBytes),
   });
+}
+
+export async function getProjectAssetDownload(projectId: string, assetIdInput: unknown, db: PrismaClient = getDb()): Promise<ProjectAssetDownloadFile> {
+  const assetId = assetIdSchema.parse(assetIdInput);
+  const asset = await db.projectAsset.findUnique({
+    where: { projectId_id: { projectId, id: assetId } },
+    include: { versions: { orderBy: { version: "desc" }, take: 1 } },
+  });
+  const version = asset?.versions[0];
+  if (asset === null || asset.status === "deleted" || version === undefined) return fail("PROJECT_ASSET_NOT_FOUND");
+  // Small text downloads retain encoding-aware inline behavior. Larger files
+  // stream unchanged as attachments instead of making another full-size copy.
+  if (version.mimeType.startsWith("text/") && version.sizeBytes <= BigInt(1024 * 1024)) {
+    return { fileName: version.originalFileName, mimeType: version.mimeType, sizeBytes: Number(version.sizeBytes), buffer: await readAssetBlob(version.storageKey, version.sizeBytes) };
+  }
+  return { fileName: version.originalFileName, mimeType: version.mimeType, sizeBytes: Number(version.sizeBytes), stream: await streamAssetBlob(version.storageKey, version.sizeBytes) };
 }
 
 export async function deleteProjectAsset(projectId: string, assetIdInput: unknown, db: PrismaClient = getDb()) {

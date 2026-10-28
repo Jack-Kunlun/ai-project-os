@@ -1178,11 +1178,8 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         className={styles.detailDialog}
       >
         <div className={styles.detailContent}>
-          {detailLoading ? <p role="status" className="py-8 text-sm text-slate-500"><UiText text="正在加载知识详情…" /></p> : document ? <>
-            <DocumentDetail language={language} document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onClose={() => void returnToList()} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} />
-            <PersonalKnowledgeNextSteps key={`${document.id}:${document.version}`} content={document.content} onOpenSemanticIndex={() => void openSearchTool("index")} />
-          </> : <>{message?.tone === "error" ? <div role="alert" className={`${styles.feedback} ${styles.feedbackError}`}><UiFeedbackText text={message.text} /></div> : null}<EmptyDetail onCreate={startCreate} /></>}
-        </div>
+{!detailLoading && document ? <DocumentDetail language={language} document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onClose={() => void returnToList()} onEdit={() => startEdit(document)} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} onOpenSemanticIndex={() => void openSearchTool("index")} /> : <EmptyDetail loading={detailLoading} onClose={() => void returnToList()} onCreate={startCreate} error={message?.tone === "error" ? message.text : undefined} />}
+</div>
       </dialog>
 
         <dialog
@@ -1274,8 +1271,13 @@ function EmptyList({ searchQuery, filter, onCreate }: { searchQuery: string; fil
 }
 
 /** Render the neutral detail state before a document has been selected. */
-function EmptyDetail({ onCreate }: { onCreate: () => void }): React.JSX.Element {
-  return <div className={styles.empty}><h2 className="font-semibold text-slate-700"><UiText text="这条知识暂不可用" /></h2><p className="mt-2"><UiText text="内容可能已删除，或当前账号已不能访问。" /></p><button type="button" onClick={onCreate} className={`${styles.buttonPrimary} app-action-button mt-4`}><UiText text="新建知识" /></button></div>;
+function EmptyDetail({ onCreate, onClose, loading = false, error }: { onCreate: () => void; onClose: () => void; loading?: boolean; error?: string }): React.JSX.Element {
+  const t = useTranslate();
+  return <article className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <header data-dialog-header className="flex min-h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-100 px-6 py-5"><h2 className="font-semibold text-slate-950"><UiText text="个人知识详情" /></h2><button type="button" onClick={onClose} data-dialog-close aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></header>
+    <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto px-6 py-6">{loading ? <p role="status"><UiText text="正在加载知识详情…" /></p> : <div className={styles.empty}><h3 className="font-semibold text-slate-700"><UiText text="这条知识暂不可用" /></h3><p className="mt-2"><UiText text="内容可能已删除，或当前账号已不能访问。" /></p>{error ? <p role="alert" className="mt-4"><UiFeedbackText text={error} /></p> : null}</div>}</div>
+    {!loading ? <footer data-dialog-footer className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-slate-100 bg-white px-6 py-4"><button type="button" onClick={onCreate} className={`${styles.buttonPrimary} app-action-button`}><UiText text="新建知识" /></button></footer> : null}
+  </article>;
 }
 
 type DocumentDetailProps = Readonly<{
@@ -1300,6 +1302,7 @@ type DocumentDetailProps = Readonly<{
   onReloadHistory: () => void;
   onLoadMoreHistory: () => void;
   onToggleRevision: (version: number) => void;
+  onOpenSemanticIndex: () => void;
 }>;
 
 /** Present the current document, its immutable history, and owner actions. */
@@ -1325,29 +1328,24 @@ function DocumentDetail({
   onReloadHistory,
   onLoadMoreHistory,
   onToggleRevision,
+  onOpenSemanticIndex,
 }: DocumentDetailProps): React.JSX.Element {
   const t = useTranslate();
   return (
-    <article>
-      <div data-dialog-header className="flex items-start justify-between gap-4 border-b border-slate-100 pb-5">
+    <article className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header data-dialog-header className="flex min-h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-100 px-6 py-5">
         <div className="min-w-0">
           <h2 id="personal-knowledge-detail-title" className="break-words text-xl font-semibold tracking-[-0.02em]">{document.title}</h2>
           {document.isDefaultMemory ? <span className="mt-2 inline-block rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700"><UiText text="个人通用记忆 · 项目 AI 可自动参考" /></span> : null}
           <p className="mt-2 text-xs text-slate-400">{t("版本")} {document.version} · {formatBytes(document.byteCount)} · {t("更新于")} {formatDate(document.updatedAt, language)}</p>
         </div>
         <button type="button" onClick={onClose} data-dialog-close data-detail-close aria-label={t("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
-      </div>
+      </header>
 
-      <div data-dialog-body>
-      <div className="mt-5 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={onEdit} className={`${styles.buttonPrimary} app-action-button`}><UiText text="编辑" /></button>
-        <button type="button" onClick={onDelete} disabled={deleting} className={`${styles.buttonDanger} app-action-button`}>{deleting ? t("删除中…") : t("删除")}</button>
-        <button type="button" onClick={() => onExport("markdown")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "markdown" ? "导出中…" : "导出 Markdown")}</button>
-        <button type="button" onClick={() => onExport("text")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "text" ? "导出中…" : "导出纯文本")}</button>
-        <button type="button" onClick={onHistory} disabled={historyLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(historyLoading ? "读取历史中…" : historyOpen ? "收起版本历史" : "查看版本历史")}</button>
-      </div>
+      <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
 
-      <div id="personal-knowledge-content" className="mt-5 scroll-mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-5">
+
+      <div id="personal-knowledge-content" className="scroll-mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-5">
         <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-slate-700">{document.content}</pre>
       </div>
 
@@ -1392,7 +1390,9 @@ function DocumentDetail({
           {historyNextCursor ? <button type="button" onClick={onLoadMoreHistory} disabled={historyLoading} className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{t(historyLoading ? "读取中…" : "加载更多版本")}</button> : null}
         </section>
       ) : null}
-      </div>
+      <PersonalKnowledgeNextSteps key={`${document.id}:${document.version}`} content={document.content} onOpenSemanticIndex={onOpenSemanticIndex} />
+</div>
+<footer data-dialog-footer className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-slate-100 bg-white px-6 py-4"><button type="button" onClick={onEdit} className={`${styles.buttonPrimary} app-action-button`}><UiText text="编辑" /></button><button type="button" onClick={onDelete} disabled={deleting} className={`${styles.buttonDanger} app-action-button`}>{deleting ? t("删除中…") : t("删除")}</button><button type="button" onClick={() => onExport("markdown")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "markdown" ? "导出中…" : "导出 Markdown")}</button><button type="button" onClick={() => onExport("text")} disabled={exporting !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(exporting === "text" ? "导出中…" : "导出纯文本")}</button><button type="button" onClick={onHistory} disabled={historyLoading} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50">{t(historyLoading ? "读取历史中…" : historyOpen ? "收起版本历史" : "查看版本历史")}</button></footer>
     </article>
   );
 }

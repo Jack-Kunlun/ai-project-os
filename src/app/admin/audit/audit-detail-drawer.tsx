@@ -14,7 +14,7 @@ import {
   valuesLabel,
   type AuditEvent,
 } from "@/app/admin/audit/audit-view-model";
-import { modalBackdropClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSecondaryButtonClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { ShellIcon } from "@/components/shell-icon";
 import { useAppearance } from "@/components/appearance-provider";
 
@@ -124,9 +124,9 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`flex h-full w-full max-w-xl flex-col overflow-y-auto ${modalSurfaceClassName}`}
+        className={`flex h-full w-full max-w-xl flex-col overflow-hidden ${modalSurfaceClassName}`}
       >
-        <div data-dialog-header className={`sticky top-0 z-10 flex items-start justify-between gap-3 px-5 py-4 sm:px-6 ${modalHeaderClassName}`}>
+        <header data-dialog-header className={`flex min-h-[72px] shrink-0 items-center justify-between gap-3 px-6 py-5 ${modalHeaderClassName}`}>
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{t("审计详情")}</p>
             <h2 id={titleId} className="mt-2 text-lg font-semibold text-slate-950">
@@ -143,9 +143,9 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
           >
             <ShellIcon name="close" className="app-icon--control"/>
           </button>
-        </div>
+        </header>
 
-        <div className="flex-1 px-5 py-5 sm:px-6">
+        <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
           <dl className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl bg-slate-50 p-3">
               <dt className="text-xs font-semibold text-slate-500">{t("发生时间")}</dt>
@@ -225,6 +225,9 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
             </div>
           </div>
         </div>
+        <footer data-dialog-footer className={`flex shrink-0 flex-wrap items-center justify-end gap-3 px-6 py-4 ${modalFooterClassName}`}>
+          <button type="button" onClick={onClose} className={modalSecondaryButtonClassName}>{t("关闭详情")}</button>
+        </footer>
       </div>
     </div>
   );

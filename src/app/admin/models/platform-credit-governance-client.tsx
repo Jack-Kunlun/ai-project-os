@@ -6,6 +6,7 @@ import { UiText, useAppearance } from "@/components/appearance-provider";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { OperationPanel } from "@/components/operation-panel";
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 
 type Grant = Readonly<{
   id: string;
@@ -304,22 +305,22 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
 
       <div className="mt-6 border-t border-slate-100 pt-6">
         <OperationPanel title={preview ? (preview.action === "grant" ? "确认补发平台额度" : "确认撤销平台额度") : selectedRevokeGrant ? "预览撤销平台额度" : "补发平台额度"} triggerLabel="额度操作" description="补发与撤销都会先展示预览，再输入目标用户名确认执行。" open={operationOpen} onOpenChange={setOperationOpen} disabled={pending || loading}>
-          {preview ? <form onSubmit={executePreview}>
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-4"><p className="text-xs leading-5 text-slate-600"><UiText text={"目标："} />{preview.target.username}；{preview.action === "grant" ? <>{t("补发")} {preview.grant.amount?.toLocaleString(language) ?? "—"}，{t("到期")} {formatDate(preview.grant.expiresAt, language)}</> : <>{t("可回收")} {preview.reclaimableTokens.toLocaleString(language)}，{t("阻塞预留")} {preview.blockerCount} {t("笔")}</>}<UiText text={"。预览有效至"} />{" "}{formatDate(preview.expiresAt, language)}。</p><button type="button" onClick={() => setPreview(null)} className="text-xs font-semibold text-slate-500"><UiText text={"返回修改"} /></button></div>
+          {preview ? <DialogForm onSubmit={executePreview}>
+            <div className="border-b border-slate-100 pb-4"><p className="text-xs leading-5 text-slate-600"><UiText text={"目标："} />{preview.target.username}；{preview.action === "grant" ? <>{t("补发")} {preview.grant.amount?.toLocaleString(language) ?? "—"}，{t("到期")} {formatDate(preview.grant.expiresAt, language)}</> : <>{t("可回收")} {preview.reclaimableTokens.toLocaleString(language)}，{t("阻塞预留")} {preview.blockerCount} {t("笔")}</>}<UiText text={"。预览有效至"} />{" "}{formatDate(preview.expiresAt, language)}。</p></div>
             {preview.blockerCount > 0 ? <p className="mt-3 text-xs text-rose-700"><UiText text={"当前存在活动预留，撤销会被拒绝；请先完成账务核对。"} /></p> : null}
             <label className="mt-4 block text-xs font-medium text-slate-600"><UiText text={"输入目标用户名确认"} /><input value={confirmationUsername} onChange={(event) => setConfirmationUsername(event.target.value)} maxLength={64} required className={adminInputClass} /></label>
-            <button disabled={pending || !preview.canExecute} className="app-action-button mt-4 rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("确认并执行")}</button>
-          </form> : selectedRevokeGrant ? <div className="space-y-4 rounded-2xl border border-rose-100 bg-rose-50/50 p-5">
+            <DialogActions><button type="button" onClick={() => setPreview(null)} disabled={pending} className="app-action-button rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text={"返回修改"} /></button><DialogSubmit disabled={pending || !preview.canExecute} className="app-action-button rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("确认并执行")}</DialogSubmit></DialogActions>
+          </DialogForm> : selectedRevokeGrant ? <div className="space-y-4 rounded-2xl border border-rose-100 bg-rose-50/50 p-5">
             <p className="text-sm font-semibold text-slate-900">{selectedRevokeGrant.username} · {selectedRevokeGrant.amount.toLocaleString()}<UiText text={"（剩余"} />{" "}{selectedRevokeGrant.remainingTokens.toLocaleString()}）</p>
             <label className="block text-xs font-medium text-slate-600"><UiText text={"撤销原因"} /><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className={adminInputClass} /></label>
-            <button type="button" onClick={() => void previewRevoke(selectedRevokeGrant)} disabled={pending || reason.trim().length === 0} className="app-action-button rounded-xl border border-rose-200 bg-white px-4 py-3 text-xs font-semibold text-rose-700 disabled:opacity-50">{pending ? t("处理中…") : t("预览撤销")}</button>
-          </div> : <form onSubmit={previewGrant} className="grid gap-4 sm:grid-cols-2">
+            <DialogActions><button type="button" onClick={() => void previewRevoke(selectedRevokeGrant)} disabled={pending || reason.trim().length === 0} className="app-action-button rounded-xl border border-rose-200 bg-white px-4 py-3 text-xs font-semibold text-rose-700 disabled:opacity-50">{pending ? t("处理中…") : t("预览撤销")}</button></DialogActions>
+          </div> : <DialogForm onSubmit={previewGrant} className="grid gap-4 sm:grid-cols-2">
             {focusUserId === undefined ? <label className="text-xs font-medium text-slate-600 sm:col-span-2"><UiText text={"补发目标"} /><select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} required className={adminInputClass}><option value=""><UiText text={"请选择搜索结果中的用户"} /></option>{users.map((user) => <option key={user.id} value={user.id} disabled={user.disabled}>{user.username}{user.displayName ? ` · ${user.displayName}` : ""}{user.disabled ? ` · ${t("已停用")}` : ""}</option>)}</select></label> : <p className="text-xs font-medium text-slate-600 sm:col-span-2"><UiText text={"当前用户："} />{selectedUser?.username ?? t("读取中…")}</p>}
             <label className="text-xs font-medium text-slate-600"><UiText text={"补发额度"} /><input type="number" min={1} max={10_000_000} value={grantAmount} onChange={(event) => setGrantAmount(event.target.value)} required className={adminInputClass} /></label>
             <label className="text-xs font-medium text-slate-600"><UiText text={"到期时间"} /><input type="datetime-local" value={grantExpiresAt} onChange={(event) => setGrantExpiresAt(event.target.value)} required className={adminInputClass} /></label>
             <label className="text-xs font-medium text-slate-600 sm:col-span-2"><UiText text={"原因（必填）"} /><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className={adminInputClass} /></label>
-            <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"搜索会覆盖尚无额度记录的本地用户；执行前仍会再次校验目标状态与用户角色。"} /></p><button disabled={pending || selectedUser === undefined || selectedUser.disabled} className="app-action-button ml-auto shrink-0 whitespace-nowrap rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("预览补发")}</button></div>
-          </form>}
+            <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"搜索会覆盖尚无额度记录的本地用户；执行前仍会再次校验目标状态与用户角色。"} /></p><DialogActions><DialogSubmit disabled={pending || selectedUser === undefined || selectedUser.disabled} className="app-action-button shrink-0 whitespace-nowrap rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? t("处理中…") : t("预览补发")}</DialogSubmit></DialogActions></div>
+          </DialogForm>}
         </OperationPanel>
       </div>
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}

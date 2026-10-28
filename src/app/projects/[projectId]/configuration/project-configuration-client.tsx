@@ -1,4 +1,5 @@
 "use client";
+import { DialogActions } from "@/components/dialog-actions";
 import { UiErrorText } from "@/components/ui-error-text";
 
 
@@ -629,13 +630,13 @@ function ProjectManagement({ project, onChanged, embedded = false }: { project: 
         </div>
         <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700"><UiText text={"仅项目 Owner 可操作"} /></span>
       </div>
-      <div className="mt-5 flex flex-wrap gap-3">
+      <DialogActions className={embedded ? undefined : "mt-5"}>
         <button type="button" onClick={() => void exportProject()} disabled={exporting} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{exporting ? <UiText text={"导出中…"} /> : <UiText text={"导出 JSON"} />}</button>
         {archived ? <>
           <button type="button" onClick={() => setLifecycle("restore")} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"><UiText text={"恢复项目"} /></button>
           <button type="button" onClick={() => setLifecycle("delete")} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50"><UiText text={"永久删除"} /></button>
         </> : <button type="button" onClick={() => setLifecycle("archive")} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50"><UiText text={"归档项目"} /></button>}
-      </div>
+      </DialogActions>
       {exportMessage ? <p role="status" className="mt-3 text-xs leading-5 text-slate-500">{exportMessage}</p> : null}
       {lifecycle ? <ProjectDialog kind="lifecycle" project={project} action={lifecycle} onClose={() => setLifecycle(null)} onChanged={(action) => { setLifecycle(null); onChanged(action); }} /> : null}
     </section>

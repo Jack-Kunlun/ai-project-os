@@ -6,6 +6,23 @@ export type SafeErrorPresentation = Readonly<{
 }>;
 
 const EXACT_PRESENTATIONS: Readonly<Record<string, Readonly<{ summary: string; nextStep: string }>>> = Object.freeze({
+  SOURCE_IN_USE: { summary: "原始资料已被项目记录引用，暂不能删除。", nextStep: "请保留该资料以便追溯；可继续查看和整理资料。" },
+  ASSET_FILE_EMPTY: { summary: "文件内容为空。", nextStep: "请打开原文件确认内容后重新选择。" },
+  ASSET_FILE_TOO_LARGE: { summary: "文件超过当前上传大小限制。", nextStep: "请按页面显示的大小限制压缩或拆分文件后上传。" },
+  ASSET_FILE_SIZE_MISMATCH: { summary: "上传内容不完整或大小不符。", nextStep: "请重新选择文件后上传。" },
+  ASSET_FILE_PROCESSING_TOO_LARGE: { summary: "原文件已保存，但超过本地解析处理能力。", nextStep: "请拆分文件后重新上传整理；原文件仍可下载。" },
+  ASSET_UPLOAD_TIMEOUT: { summary: "文件上传超时或已中断。", nextStep: "请检查网络后重新上传。" },
+  ASSET_FILE_TYPE_UNSUPPORTED: { summary: "当前不支持这个文件扩展名。", nextStep: "请将旧版 Office 或 WPS 专有文件另存为 DOCX、XLSX、PPTX 或 PDF 后上传；不要只改文件名后缀。" },
+  ASSET_FILE_SIGNATURE_INVALID: { summary: "文件扩展名与实际内容不一致，或文件已损坏。", nextStep: "请用原软件打开并重新另存文件后上传；不要只改文件名后缀。" },
+  ASSET_IMAGE_TOO_LARGE: { summary: "图片像素尺寸超过安全限制。", nextStep: "请降低图片分辨率后重新上传。" },
+  ASSET_DOCUMENT_INVALID: { summary: "文件已保存，但内容无法解析。", nextStep: "请用原软件重新导出为标准 Office 或 PDF 文件后上传。" },
+  ASSET_DOCUMENT_TOO_LARGE: { summary: "文件页数或解析内容超过安全限制。", nextStep: "请拆分为较小的文件后上传。" },
+  ASSET_DOCUMENT_EMPTY: { summary: "文件中没有可提取的文字或图片。", nextStep: "请确认文件包含正文；扫描件需要先完成图片识别和文字核对。" },
+  ASSET_DOCUMENT_TYPE_UNSUPPORTED: { summary: "当前无法解析这个文件格式。", nextStep: "请用原软件重新导出为标准 Office 或 PDF 文件后上传。" },
+  ASSET_ARCHIVE_INVALID: { summary: "Office 文件内部结构无法解析。", nextStep: "请用原软件重新导出为标准 Office 或 PDF 文件后上传。" },
+  ASSET_ARCHIVE_ENCRYPTED: { summary: "当前无法解析加密或带密码的 Office 文件。", nextStep: "请在原软件中移除文件密码后另存一份再上传。" },
+  ASSET_ARCHIVE_TOO_LARGE: { summary: "Office 文件解压后超过安全限制。", nextStep: "请拆分为较小的文件后上传。" },
+  ASSET_ARCHIVE_UNSAFE_PATH: { summary: "Office 文件的内部路径未通过安全校验。", nextStep: "请用原软件重新导出为标准 Office 或 PDF 文件后上传。" },
   UNIFIED_QUESTION_CONFLICT: { summary: "会话已被其他窗口更新。", nextStep: "读取最新状态，保留名称输入后再保存。" },
   UNIFIED_QUESTION_INVALID_INPUT: { summary: "会话名称或操作参数无效。", nextStep: "请填写不超过 120 个字符的单行名称。" },
   UNIFIED_QUESTION_HISTORY_UNAVAILABLE: { summary: "会话不存在或当前不可访问。", nextStep: "关闭弹窗并刷新会话列表。" },

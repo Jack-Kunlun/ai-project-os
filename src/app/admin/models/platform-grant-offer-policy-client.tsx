@@ -6,6 +6,7 @@ import { UiText, useAppearance } from "@/components/appearance-provider";
 
 import { useEffect, useState, type FormEvent } from "react";
 import { OperationPanel } from "@/components/operation-panel";
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
@@ -184,13 +185,13 @@ export function PlatformGrantOfferPolicyPanel() {
       </div>
 
       <div className="mt-6 border-t border-slate-100 pt-6"><OperationPanel title="创建新注册赠送策略草稿" triggerLabel="新建策略版本" description="新版本只影响之后符合条件的新注册；创建草稿不会修改历史额度。" open={operationOpen} onOpenChange={setOperationOpen} disabled={loading || pending}>
-        <form onSubmit={createDraft} className="grid gap-4 sm:grid-cols-2">
+        <DialogForm onSubmit={createDraft} className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs font-medium text-slate-600"><UiText text={"策略版本"} /><input value={offerVersion} onChange={(event) => setOfferVersion(event.target.value)} pattern="[a-z0-9][a-z0-9._-]{2,63}" maxLength={64} required className={adminInputClass} /></label>
           <label className="text-xs font-medium text-slate-600"><UiText text={"赠送额度"} /><input type="number" value={amount} onChange={(event) => setAmount(event.target.value)} min={1} max={10_000_000} required className={adminInputClass} /></label>
           <label className="text-xs font-medium text-slate-600"><UiText text={"有效天数"} /><input type="number" value={validForDays} onChange={(event) => setValidForDays(event.target.value)} min={1} max={3_650} required className={adminInputClass} /></label>
           <label className="text-xs font-medium text-slate-600"><UiText text={"创建原因"} /><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className={adminInputClass} /></label>
-          <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"启用新版本会在同一事务内停用当前 active 版本；停用后不可恢复，需要新建策略版本。"} /></p><button disabled={pending} className="app-action-button ml-auto shrink-0 whitespace-nowrap rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{t(pending ? "处理中…" : "创建策略草稿")}</button></div>
-        </form>
+          <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"启用新版本会在同一事务内停用当前 active 版本；停用后不可恢复，需要新建策略版本。"} /></p><DialogActions><DialogSubmit disabled={pending} className="app-action-button shrink-0 whitespace-nowrap rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{t(pending ? "处理中…" : "创建策略草稿")}</DialogSubmit></DialogActions></div>
+        </DialogForm>
       </OperationPanel></div>
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600"><UiFeedbackText text={message} /></p> : null}
       {policies.length > 0 ? <p className="mt-4 text-xs leading-5 text-slate-500"><UiText text={"最近审计："} />{language === "en" ? " " : null}{t(actionLabels[policies[0]?.audits[0]?.action ?? "created"])}{language === "en" ? " " : null}<UiText text={"于"} />{" "}{policies[0]?.audits[0] ? formatDate(policies[0].audits[0].createdAt, language) : t("暂无")}<UiText text={"；原因已记录但不在页面展示。"} /></p> : null}

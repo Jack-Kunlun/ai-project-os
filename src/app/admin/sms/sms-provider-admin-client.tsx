@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import type { GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
 const GraphicCaptchaDialog = dynamic(() => import("@/components/graphic-captcha-dialog").then(module => module.GraphicCaptchaDialog));
-import { modalNativeBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { modalFooterClassName, modalHeaderClassName, modalNativeBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
 
 type SmsProvider = "aliyun-pnvs" | "aliyun-sms" | "tencent-sms";
 type TemplateParams = readonly ["code"] | readonly ["code", "minutes"] | readonly ["minutes", "code"];
@@ -466,10 +466,11 @@ export function SmsProviderAdminClient() {
   </div>
   <dialog ref={editorDialogRef} aria-labelledby="sms-provider-editor-title" onCancel={(event) => { event.preventDefault(); closeEditor(); }}
     onPointerDown={(event) => { const rect = event.currentTarget.getBoundingClientRect(); editorBackdropStarted.current = event.target === event.currentTarget && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom); }}
-    onClick={(event) => { if (!editorBackdropStarted.current || event.target !== event.currentTarget) return; const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeEditor(); }} className={`m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[740px] overflow-y-auto rounded-2xl p-0 ${modalSurfaceClassName} ${modalNativeBackdropClassName}`}>
-    {editorOpen ? <div className="p-5 sm:p-6">
-      <div className="flex items-start justify-between gap-4"><div><h2 id="sms-provider-editor-title" className="text-lg font-semibold text-slate-950">{state?.config.configured ? t("编辑或更换供应商") : t("新增短信供应商")}</h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={"配置供应商 → 验证测试短信 → 保存启用"} /></p></div><button type="button" aria-label={t("关闭配置弹窗")} onClick={() => closeEditor()} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></div>
-      <form onSubmit={requestTest} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
+    onClick={(event) => { if (!editorBackdropStarted.current || event.target !== event.currentTarget) return; const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeEditor(); }} className={`m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[740px] overflow-hidden rounded-2xl p-0 ${modalSurfaceClassName} ${modalNativeBackdropClassName}`}>
+    {editorOpen ? <div className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden">
+      <header data-dialog-header className={`flex min-h-[72px] shrink-0 items-center justify-between gap-4 px-6 py-5 ${modalHeaderClassName}`}><div><h2 id="sms-provider-editor-title" className="text-lg font-semibold text-slate-950">{state?.config.configured ? t("编辑或更换供应商") : t("新增短信供应商")}</h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={"配置供应商 → 验证测试短信 → 保存启用"} /></p></div><button type="button" aria-label={t("关闭配置弹窗")} onClick={() => closeEditor()} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></header>
+<div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
+      <form id="sms-provider-test-form" onSubmit={requestTest} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
         <label className="text-xs font-semibold text-slate-600 sm:col-span-2"><UiText text={"短信供应商"} /><select value={candidate.provider} onChange={(event) => updateProvider(event.target.value as SmsProvider)} disabled={candidateFieldsDisabled} className={inputClass}>
             <option value="aliyun-pnvs">{t("阿里云号码认证服务（PNVS）")}</option>
             <option value="aliyun-sms">{t("阿里云短信服务（SendSms）")}</option>
@@ -519,14 +520,20 @@ export function SmsProviderAdminClient() {
         {candidate.provider === "aliyun-pnvs" ? <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500 sm:col-span-2"><UiText text={"用途名称和模板参数由系统生成，验证码为 6 位数字，有效期 5 分钟。"} /><br /><code className="break-all">{'{"code":"##code##","min":"5"}'}</code></p> : null}
         <div className="mt-2 flex items-center gap-3 sm:col-span-2"><span className="text-xs font-semibold text-slate-700"><UiText text={"测试短信"} /></span><span className="h-px flex-1 bg-slate-100" /></div>
         <label className="text-xs font-semibold text-slate-600"><UiText text={"测试手机号（中国大陆 +86）"} /><input autoComplete="tel" inputMode="tel" maxLength={14} placeholder="13800138000" value={phone} onChange={(event) => { if (captchaRequest) closeCaptcha(captchaRequest.sequence); setPhone(event.target.value); setProbeId(null); setVerified(false); setCode(""); }} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
-      <div className="self-end"><button ref={testButtonRef} type="submit" disabled={pending || loading || state?.smsLimitsReady !== true} className="app-action-button inline-flex min-h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("处理中…") : t("发送真实测试短信")}</button></div><p className="-mt-1 text-xs leading-5 text-slate-400 sm:col-span-2"><UiText text={"此操作会真实发送短信并消耗服务商短信额度；请使用你本人可接收的手机号。"} /></p>
+      <p className="-mt-1 text-xs leading-5 text-slate-400 sm:col-span-2"><UiText text={"此操作会真实发送短信并消耗服务商短信额度；请使用你本人可接收的手机号。"} /></p>
       </form>
 
-      {probeId ? <form onSubmit={verifyTest} className="mt-5 border-t border-slate-100 pt-4 sm:flex sm:items-end sm:gap-3"><label className="block flex-1 text-xs font-semibold text-slate-600"><UiText text={"短信验证码"} /><input id="sms-provider-test-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required disabled={pending || verified} className={inputClass} /></label><button type="submit" disabled={pending || verified} className="app-action-button mt-3 w-full rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50 sm:mt-0 sm:w-auto">{verified ? t("已验证") : pending ? t("验证中…") : t("验证验证码")}</button></form> : null}
-      {verified ? <button type="button" onClick={() => void saveConfig()} disabled={pending} className="app-action-button mt-4 inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{pending ? t("保存中…") : t("保存并启用短信服务")}</button> : null}
+      {probeId ? <form id="sms-provider-verify-form" onSubmit={verifyTest} className="mt-5 border-t border-slate-100 pt-4 sm:flex sm:items-end sm:gap-3"><label className="block flex-1 text-xs font-semibold text-slate-600"><UiText text={"短信验证码"} /><input id="sms-provider-test-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required disabled={pending || verified} className={inputClass} /></label></form> : null}
+
       {formError ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700"><UiErrorText text={formError} /></p> : null}
       {notice ? <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm leading-6 text-emerald-800"><UiFeedbackText text={notice} /></p> : null}
-    </div> : null}
+    </div>
+<footer data-dialog-footer className={`flex shrink-0 flex-wrap items-center justify-end gap-3 px-6 py-4 ${modalFooterClassName}`}>
+<button ref={testButtonRef} type="submit" form="sms-provider-test-form" disabled={pending || loading || state?.smsLimitsReady !== true} className="app-action-button inline-flex min-h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("处理中…") : t("发送真实测试短信")}</button>
+{probeId ? <button type="submit" form="sms-provider-verify-form" disabled={pending || verified} className="app-action-button rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{verified ? t("已验证") : pending ? t("验证中…") : t("验证验证码")}</button> : null}
+{verified ? <button type="button" onClick={() => void saveConfig()} disabled={pending} className="app-action-button inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{pending ? t("保存中…") : t("保存并启用短信服务")}</button> : null}
+</footer>
+</div> : null}
   </dialog>
   {captchaRequest ? (
     <GraphicCaptchaDialog

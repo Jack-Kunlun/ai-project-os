@@ -10,9 +10,9 @@ import {
 test("upload policy exposes the documented safe defaults", () => {
   const policy = getUploadPolicy();
   assert.equal(policy.maxFiles, 10);
-  assert.equal(policy.maxFileBytes, 25 * 1024 * 1024);
-  assert.equal(policy.maxImageBytes, 10 * 1024 * 1024);
-  assert.equal(policy.maxRequestBytes, 30 * 1024 * 1024);
+  assert.equal(policy.maxFileBytes, 0);
+  assert.equal(policy.maxImageBytes, 0);
+  assert.equal(policy.maxRequestBytes, 0);
   assert.equal(policy.maxProjectBytes, 1 * 1024 * 1024 * 1024);
   assert.equal(policy.maxWorkspaceBytes, 5 * 1024 * 1024 * 1024);
   assert.equal(policy.maxDeploymentBytes, 20 * 1024 * 1024 * 1024);
@@ -42,10 +42,32 @@ test("invalid upload policy overrides fail closed", () => {
   }
 });
 
+test("zero disables only byte caps while explicit positive overrides still apply", () => {
+  const names = ["AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES", "AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES", "AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES"] as const;
+  const previous = names.map((name) => process.env[name]);
+  try {
+    for (const name of names) process.env[name] = "0";
+    assert.equal(getUploadPolicy().maxFileBytes, 0);
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES = "1024";
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES = "512";
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES = "2048";
+    assert.equal(getUploadPolicy().maxFileBytes, 1024);
+    assert.equal(getUploadPolicy().maxImageBytes, 512);
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES = "1024";
+    assert.throws(() => getUploadPolicy(), UploadPolicyConfigurationError);
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES = "-1";
+    assert.throws(() => getUploadPolicy(), UploadPolicyConfigurationError);
+  } finally {
+    names.forEach((name, index) => {
+      if (previous[index] === undefined) delete process.env[name];
+      else process.env[name] = previous[index];
+    });
+  }
+});
+
 test("inconsistent upload policy relationships fail closed", () => {
   const cases = [
-    ["AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES", String(DEFAULT_UPLOAD_POLICY.maxFileBytes)],
-    ["AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES", String(DEFAULT_UPLOAD_POLICY.maxFileBytes - 1)],
+    ["AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES", "0"],
     ["AI_PROJECT_OS_UPLOAD_MAX_WORKSPACE_BYTES", String(DEFAULT_UPLOAD_POLICY.maxProjectBytes - 1)],
     ["AI_PROJECT_OS_UPLOAD_MAX_DEPLOYMENT_BYTES", String(DEFAULT_UPLOAD_POLICY.maxWorkspaceBytes - 1)],
     ["AI_PROJECT_OS_UPLOAD_ADMISSION_LEASE_MS", String(DEFAULT_UPLOAD_POLICY.bodyReadTimeoutMs - 1)],
@@ -55,8 +77,7 @@ test("inconsistent upload policy relationships fail closed", () => {
     process.env[variable] = value;
     try {
       assert.throws(() => getUploadPolicy(), (error: unknown) =>
-        error instanceof UploadPolicyConfigurationError
-        && error.variable === "AI_PROJECT_OS_UPLOAD_POLICY_RELATION",
+        error instanceof UploadPolicyConfigurationError,
       );
     } finally {
       if (previous === undefined) delete process.env[variable];
@@ -92,7 +113,29 @@ test("upload route and UI share server policy, durable admission and quota usage
   assert.match(await readFile("src/lib/project-assets/admission.ts", "utf8"), /RELEASE_RETRY_LIMIT = 3/u);
   assert.match(route, /values\.length !== 1/u);
   assert.match(route, /policy\.maxRequestBytes/u);
-  assert.match(client, /selected\.slice\(0, policy\.maxFiles\)/u);
+  const streamIndex = route.indexOf('contentType === "application/octet-stream"');
+  assert.ok(route.indexOf("assertSameOrigin(request)") < streamIndex);
+  assert.ok(route.indexOf("requireApiSession(request)") < streamIndex);
+  assert.ok(route.indexOf("loadProjectAiPublicVisibility") < streamIndex);
+  assert.ok(route.indexOf("acquireUploadAdmission({") < streamIndex);
+  assert.match(route, /stream: request\.body, signal: request\.signal/u);
+  const service = await readFile("src/lib/project-assets/service.ts", "utf8");
+  const streamWrite = service.indexOf("await writeAssetStream({");
+  assert.ok(service.indexOf("await createProjectAssetUploadReservation({") < streamWrite);
+  assert.match(service, /sizeBytes: BigInt\(sizeBytes\)/u);
+  for (const file of ["deploy/production/nginx/ai-project-os.conf", "deploy/nginx/ai-project-os.conf.example"]) {
+    const nginx = await readFile(file, "utf8");
+    const block = nginx.match(/location ~\* "\^\/api\/projects\/\[0-9a-f-\]\{36\}\/assets\$" \{([^}]+)\}/u)?.[1];
+    assert.ok(block);
+    assert.match(block, /client_max_body_size 0;/u);
+    assert.match(block, /proxy_request_buffering off;/u);
+    assert.match(block, /limit_req zone=ai_project_os_upload burst=4 nodelay;/u);
+    assert.match(block, /limit_conn ai_project_os_upload_conn 2;/u);
+    assert.match(block, /limit_req_status 429;/u);
+    assert.match(nginx, /limit_req_zone \$binary_remote_addr zone=ai_project_os_upload:10m rate=20r\/m;/u);
+    assert.match(nginx, /limit_conn_zone \$binary_remote_addr zone=ai_project_os_upload_conn:10m;/u);
+  }
+  assert.match(client, /selectSupportedProjectAssetFiles\(selected, policy\.maxFiles\)/u);
   assert.match(client, /for \(const file of files\)/u);
   assert.match(client, /projectBytes/u);
   assert.doesNotMatch(client, /usage\.workspaceBytes|usage\.deploymentBytes/u);

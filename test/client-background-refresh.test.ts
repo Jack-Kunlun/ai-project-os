@@ -27,6 +27,9 @@ test("mutation-triggered data reloads keep mounted UI after the initial page loa
     if (path.endsWith("/memory/project-memory-client.tsx")) {
       assert.match(source, /if \(current\(\)\) setLoading\(false\);/u, `${path} must only settle its latest active read`);
       assert.match(source, /activeProject\.current === projectId && !controller\.signal\.aborted && version === readVersion\.current/u);
+    } else if (path.endsWith("/assets/project-assets-client.tsx")) {
+      assert.match(source, /!controller\.signal\.aborted && reloadSequenceRef\.current === sequence/u);
+      assert.match(source, /finally \{\s*if \(isCurrentRequest\(\)\) \{[\s\S]*?setLoading\(false\);/u, `${path} must settle only its latest read, including one that supersedes a blocking load`);
     } else {
       assert.match(source, /if \((?:sequence === requestSequence\.current && )?showLoading\) setLoading\(false\);/u, `${path} must preserve the mounted page after background reloads and guard sequenced completion`);
     }

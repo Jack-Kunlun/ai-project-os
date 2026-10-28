@@ -1,4 +1,6 @@
 "use client";
+
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 import { UiFeedbackText } from "@/components/ui-error-text";
 
 
@@ -176,11 +178,11 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
       {message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700"><UiFeedbackText text={message} /></p> : null}
       {legacyBearerEnabled ? <div className="mt-5"><p className="mb-3 text-xs leading-5 text-amber-800"><UiText text={"本地兼容模式：可创建旧式可转移 Bearer 凭证；此方式在生产环境始终关闭。"} /></p><OperationPanel title={translateUi("创建 MCP 输出凭证")} triggerLabel="创建兼容凭证" open={issueOpen} onOpenChange={(open) => { setIssueOpen(open); if (open) setMessage(null); }} disabled={busy} description="凭证只显示一次。创建后请立即复制并妥善保存。">
         {message ? <p role="status" className="mb-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700"><UiFeedbackText text={message} /></p> : null}
-        <form onSubmit={(event) => void issue(event)} className="space-y-4">
+        <DialogForm onSubmit={(event) => void issue(event)} className="space-y-4">
           <label className="grid gap-2 text-sm font-medium"><UiText text={"客户端名称"} /><input required maxLength={80} value={label} onChange={(event) => setLabel(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder={translateUi("例如：桌面助手")} /></label>
           <label className="grid gap-2 text-sm font-medium"><UiText text={"有效天数"} /><input type="number" min={1} max={30} value={lifetimeDays} onChange={(event) => setLifetimeDays(Number(event.target.value))} className="min-h-11 w-28 rounded-xl border border-slate-300 px-3" /></label>
-          <div className="flex justify-end"><button type="submit" disabled={busy} className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white disabled:opacity-50"><UiText text={"创建凭证"} /></button></div>
-        </form>
+          <DialogActions><DialogSubmit type="submit" disabled={busy} className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white disabled:opacity-50"><UiText text={"创建凭证"} /></DialogSubmit></DialogActions>
+        </DialogForm>
       </OperationPanel></div> : <p className="mt-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-950"><UiText text={"由外部客户端发起 OAuth 授权后，在此查看并撤销连接。授权完成后仍需为每次工具读取单独确认。"} /></p>}
       {issuedToken && <div role="status" className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
         <p className="text-sm font-semibold text-amber-950"><UiText text={"请现在复制凭证；关闭页面后无法再次查看。"} /></p>
@@ -201,7 +203,7 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
               <label className="grid gap-2 text-sm font-medium"><UiText text={"外部模型"} /><input maxLength={80} value={model} onChange={(event) => setModel(event.target.value)} className="min-h-11 rounded-xl border border-slate-300 px-3" placeholder={translateUi("例如：客户端声明的模型")} /></label>
             </div>
             <label className="grid gap-2 text-sm font-medium"><UiText text={"本次批准的工具"} /><select value={operation} onChange={(event) => setOperation(event.target.value as McpExportOperation)} className="min-h-11 rounded-xl border border-slate-300 px-3"><option value="project_summary"><UiText text={"项目摘要"} /></option><option value="project_evidence"><UiText text={"已确认事实与来源"} /></option><option value="project_plan"><UiText text={"项目计划"} /></option></select></label>
-            <div className="flex justify-end"><button type="button" disabled={busy} onClick={() => void approveNextRead(grant)} className="app-action-button app-action-button--compact rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{busy ? <UiText text={"准备中…"} /> : <UiText text={"查看内容并确认"} />}</button></div>
+            <DialogActions><button type="button" disabled={busy} onClick={() => void approveNextRead(grant)} className="app-action-button app-action-button--compact rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{busy ? <UiText text={"准备中…"} /> : <UiText text={"查看内容并确认"} />}</button></DialogActions>
           </div>
         </OperationPanel><button type="button" disabled={busy} onClick={() => void revoke(grant)} className="min-h-10 rounded-lg border border-rose-200 px-3 text-sm font-medium text-rose-700 disabled:opacity-50"><UiText text={"撤销"} /></button></div>}
       </div>)}</div>

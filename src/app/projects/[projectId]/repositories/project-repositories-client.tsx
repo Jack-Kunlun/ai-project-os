@@ -1,4 +1,6 @@
 "use client";
+
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
@@ -340,7 +342,7 @@ function AutomationGrantPanel({ projectId, canPropose, delegations, grants, onRe
     <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><UiText text={"自动读取仅使用本次确认的仓库、分支和目录范围，不会写入或提交到 Git。"} /></p>
     {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
     {canPropose && eligibleDelegations.length > 0 ? <div className="mt-5"><OperationPanel title={translateUi("提交自动读取授权提案")} triggerLabel="创建自动读取授权" open={createOpen} onOpenChange={setCreateOpen} disabled={pending} description="选择读取间隔和资料类型。连接所有者与项目 Owner 仍需分别确认，提交提案不会立即读取 Git。">
-      <form onSubmit={(event) => void propose(event)} className="w-full min-w-0">
+      <DialogForm onSubmit={(event) => void propose(event)} className="w-full min-w-0">
         <p className="text-xs leading-5 text-slate-500"><UiText text={"仅基于有效的手动只读委托。授权有效期不超过该委托。"} /></p>
         <label className="mt-4 block text-xs font-semibold text-slate-700"><UiText text={"基础手动委托"} /><select className={fieldClass} value={selectedBase?.id ?? ""} onChange={(event) => setBaseDelegationId(event.target.value)}>{eligibleDelegations.map((delegation) => <option key={delegation.id} value={delegation.id}>{delegation.scope.repositoryPath} · {delegation.scope.trackedRef}</option>)}</select></label>
         <label className="mt-3 block text-xs font-semibold text-slate-700"><UiText text={"拟议运行间隔（分钟）"} /><input className={fieldClass} type="number" min={60} max={43_200} step={1} value={runIntervalMinutes} onChange={(event) => setRunIntervalMinutes(Number(event.target.value))} /></label>
@@ -350,11 +352,11 @@ function AutomationGrantPanel({ projectId, canPropose, delegations, grants, onRe
           <p className="mt-2 text-xs leading-4 text-slate-500"><UiText text={"未选择的资料种类不会被请求。连接所有者与项目 Owner 会分别确认这些选择。"} /></p>
         </fieldset>
         {selectedBase ? <p className="mt-3 text-xs leading-5 text-slate-600"><UiText text={"拟议授权截止："} />{formatTime(selectedBase.expiresAt, language)}<UiText text={"，不晚于基础委托。"} /></p> : null}
-        <div className="mt-4 flex flex-wrap justify-end gap-3">
+        <DialogActions>
           <button type="button" onClick={() => setCreateOpen(false)} className="app-action-button rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50"><UiText text={"取消"} /></button>
-          <button type="submit" disabled={pending || selectedBase === null || runIntervalMinutes < 60 || runIntervalMinutes > 43_200} className="app-action-button rounded-xl bg-slate-950 font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? <UiText text={"处理中…"} /> : <UiText text={"提交授权提案"} />}</button>
-        </div>
-      </form>
+          <DialogSubmit type="submit" disabled={pending || selectedBase === null || runIntervalMinutes < 60 || runIntervalMinutes > 43_200} className="app-action-button rounded-xl bg-slate-950 font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? <UiText text={"处理中…"} /> : <UiText text={"提交授权提案"} />}</DialogSubmit>
+        </DialogActions>
+      </DialogForm>
     </OperationPanel></div> : !canPropose ? <p className="mt-5 rounded-xl bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600"><UiText text={"当前账户没有项目 Editor/Owner 提案权限。"} /></p> : <p className="mt-5 rounded-xl bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">{currentTime === null ? <UiText text={"正在核对基础委托有效期…"} /> : <UiText text={"暂无可用的手动只读委托，或已有授权记录仍处于有效状态。"} />}</p>}
     <div className="mt-5 space-y-3">{grants.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-500"><UiText text={"还没有 Git 自动读取授权记录。"} /></div> : grants.map((grant) => <AutomationGrantCard key={grant.id} grant={grant} pending={pending} onConfirmConnectionOwner={() => void confirmConnectionOwner(grant)} onActivateProjectOwner={() => void activateProjectOwner(grant)} onRevoke={() => void revoke(grant)} />)}</div>
   </section>;
@@ -507,7 +509,7 @@ function ProposalPanel({ projectId, enabled, connections, onRefreshConnections, 
         </div>
         {catalogError ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={catalogError} /></p> : null}
         {!connectionsFresh ? <div role="alert" className="mt-3 rounded-xl bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-950"><p>{connectionsError ?? <UiText text={"正在从项目服务端核验可用连接…"} />}</p>{pendingCreatedTarget ? <button type="button" disabled={connectionsRefreshing} onClick={() => void refreshCreatedConnection(pendingCreatedTarget)} className="mt-2 font-semibold underline disabled:opacity-50">{connectionsRefreshing ? <UiText text={"核验中…"} /> : <UiText text={"重新核验已保存连接"} />}</button> : null}</div> : null}
-        <form onSubmit={(event) => void submit(event)} className="mt-5 space-y-3">
+        <DialogForm onSubmit={(event) => void submit(event)} className="mt-5 space-y-3">
           <Field label={translateUi("仓库路径")}><input required disabled={!connectionsFresh} className={fieldClass} value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="owner/repository" /></Field>
           <Field label={translateUi("分支")}><input required disabled={!connectionsFresh} className={fieldClass} value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" /></Field>
           <Field label={translateUi("包含目录（每行一个）")}><textarea required disabled={!connectionsFresh} className={`${fieldClass} min-h-20`} value={includeRoots} onChange={(event) => setIncludeRoots(event.target.value)} /></Field>
@@ -519,11 +521,11 @@ function ProposalPanel({ projectId, enabled, connections, onRefreshConnections, 
           </fieldset>
           <p className="text-xs leading-5 text-slate-600"><span className="font-semibold text-slate-800"><UiText text={"授权方式"} /></span><br /><UiText text={"手动只读：开启；自动读取：关闭。自动读取需要另行完成双方确认；不会写入、提交或创建 Pull Request。"} /></p>
           {error ? <p role="alert" className="text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
-          <div className="flex flex-wrap justify-end gap-3">
+          <DialogActions>
             <button type="button" onClick={() => setProposalOpen(false)} className="app-action-button rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 hover:bg-slate-50"><UiText text={"取消"} /></button>
-            <button type="submit" disabled={pending || !enabled || !connectionsFresh || selectedConnectionId === ""} className="app-action-button rounded-xl bg-slate-950 font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? <UiText text={"提交中…"} /> : <UiText text={"提交仓库范围提案"} />}</button>
-          </div>
-        </form>
+            <DialogSubmit type="submit" disabled={pending || !enabled || !connectionsFresh || selectedConnectionId === ""} className="app-action-button rounded-xl bg-slate-950 font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? <UiText text={"提交中…"} /> : <UiText text={"提交仓库范围提案"} />}</DialogSubmit>
+          </DialogActions>
+        </DialogForm>
       </>
     </div>
     </OperationPanel> : <section className="rounded-2xl border border-slate-200 bg-white p-5"><p className="text-sm font-semibold text-slate-800"><UiText text={"提交仓库范围提案"} /></p><p className="mt-2 text-xs leading-5 text-slate-600"><UiText text={"当前账户没有明确的项目 Editor/Owner 权限，不能创建委托。"} /></p></section>}

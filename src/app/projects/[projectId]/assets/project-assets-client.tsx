@@ -1,10 +1,12 @@
 "use client";
+
+import { DialogActions } from "@/components/dialog-actions";
 import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 
 
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { OperationPanel } from "@/components/operation-panel";
 import { awaitImportedAsset } from "../imported-asset-readiness";
@@ -16,9 +18,12 @@ import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { initializeReviewDrafts } from "@/lib/project-asset-review-drafts";
 import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
-import { buildProjectHref } from "@/lib/project-navigation";
+import { buildProjectHref, parseProjectPageState, PROJECT_UUID_PATTERN } from "@/lib/project-navigation";
 import supportStyles from "../project-support.module.css";
 import { formatUiDateTime } from "@/lib/ui-date-format";
+import { safeResponseError } from "@/lib/safe-error-presentation";
+import { projectAssetUploadRequest } from "@/lib/project-assets/upload-request";
+import { selectSupportedProjectAssetFiles } from "@/lib/project-assets/file-selection";
 
 type AssetStatus = "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed" | "deleted";
 type Segment = {
@@ -84,21 +89,12 @@ type Confirmation = {
 type ApiFailure = { code?: string; message?: string };
 
 async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = await response.json() as { error?: { message?: string } };
-    return payload.error?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
+  return (await safeResponseError(response, fallback)).message;
 }
 
 async function readApiFailure(response: Response, fallback: string): Promise<ApiFailure> {
-  try {
-    const payload = await response.json() as { error?: ApiFailure };
-    return { code: payload.error?.code, message: payload.error?.message ?? fallback };
-  } catch {
-    return { message: fallback };
-  }
+  const failure = await safeResponseError(response, fallback);
+  return { code: failure.code ?? undefined, message: failure.message };
 }
 
 function confirmationMessage(code: string | undefined): string | null {
@@ -134,7 +130,7 @@ function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { 
     <p className="text-sm font-semibold text-indigo-900"><UiText text={"本次外发摘要"} /></p>
     <p className="mt-2 text-xs leading-5 text-indigo-800"><UiText text={"动作："} />{confirmation.targetAction} {" "}<UiText text={"· 路由："} />{summaryText(confirmation.safeSummary.route)} {" "}<UiText text={"· 范围："} />{summaryText(confirmation.safeSummary.scope)}</p>
     <p className="mt-2 text-xs text-indigo-700"><UiText text={"确认有效期至"} />{" "}{formatDate(confirmation.expiresAt, language)}<UiText text={"。摘要不包含原文、问题或指纹。"} /></p>
-    <button type="button" onClick={onExecute} disabled={pending} className="mt-4 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? <UiText text={"执行中…"} /> : executeLabel}</button>
+    <DialogActions><button type="button" onClick={onExecute} disabled={pending} className="mt-4 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? <UiText text={"执行中…"} /> : executeLabel}</button></DialogActions>
   </div>;
 }
 
@@ -159,8 +155,12 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   const { language } = useAppearance();
   const translateUi = useTranslate();
   const { projectId } = useParams<{ projectId: string }>();
+  const searchParams = useSearchParams();
+  const navigation = useMemo(() => parseProjectPageState("assets", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
+  const focusedAssetId = navigation.focus !== null && PROJECT_UUID_PATTERN.test(navigation.focus) ? navigation.focus : null;
   const [projectName, setProjectName] = useState("项目");
   const [assets, setAssets] = useState<Asset[]>([]);
+  const displayedAssets = useMemo(() => focusedAssetId === null ? assets : assets.filter((asset) => asset.id === focusedAssetId), [assets, focusedAssetId]);
   const [pagination, setPagination] = useState<ListPaginationState>({ page: 1, pageSize: 10, total: 0, totalPages: 1 });
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -172,6 +172,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   const [factSourceIds, setFactSourceIds] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [uploadErrors, setUploadErrors] = useState<Array<{ name: string; message: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [recognizing, setRecognizing] = useState<Record<string, boolean>>({});
   const [processingJobIds, setProcessingJobIds] = useState<Record<string, string | undefined>>({});
@@ -179,6 +180,8 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   const [retrying, setRetrying] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<Record<string, Confirmation | undefined>>({});
   const [clientKeys, setClientKeys] = useState<Record<string, string | undefined>>({});
+  const reloadSequenceRef = useRef(0);
+  const reloadControllerRef = useRef<AbortController | null>(null);
   const prepareSequences = useRef<Record<string, number>>({});
   const prepareControllers = useRef<Record<string, AbortController | undefined>>({});
   const flightRef = useRef<Record<string, symbol | undefined>>({});
@@ -194,50 +197,98 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   }
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    const sequence = ++reloadSequenceRef.current;
+    reloadControllerRef.current?.abort();
+    const controller = new AbortController();
+    reloadControllerRef.current = controller;
+    const isCurrentRequest = () => !controller.signal.aborted && reloadSequenceRef.current === sequence;
     if (showLoading) setLoading(true);
     try {
-      const [projectResponse, assetsResponse] = await Promise.all([
-        fetch(`/api/projects/${projectId}`, { cache: "no-store" }),
-        fetch(`/api/projects/${projectId}/assets?${new URLSearchParams({ page: String(page), pageSize: "10", ...(deferredSearch.trim() ? { search: deferredSearch.trim() } : {}), kind: kindFilter, status: statusFilter })}`, { cache: "no-store" }),
+      const listParams = new URLSearchParams({
+        page: String(focusedAssetId === null ? page : 1),
+        pageSize: "10",
+        ...(focusedAssetId === null && deferredSearch.trim() ? { search: deferredSearch.trim() } : {}),
+        kind: focusedAssetId === null ? kindFilter : "all",
+        status: focusedAssetId === null ? statusFilter : "all",
+      });
+      const [projectResponse, assetsResponse, focusedAssetResponse] = await Promise.all([
+        fetch(`/api/projects/${projectId}`, { cache: "no-store", signal: controller.signal }),
+        fetch(`/api/projects/${projectId}/assets?${listParams}`, { cache: "no-store", signal: controller.signal }),
+        focusedAssetId === null ? Promise.resolve(null) : fetch(`/api/projects/${projectId}/assets/${focusedAssetId}`, { cache: "no-store", signal: controller.signal }),
       ]);
+      if (!isCurrentRequest()) return;
       if (!projectResponse.ok || !assetsResponse.ok) {
         const failed = !projectResponse.ok ? projectResponse : assetsResponse;
         throw new Error(await readError(failed, "文件资料加载失败"));
       }
+      if (focusedAssetResponse !== null && !focusedAssetResponse.ok) {
+        throw new Error(await readError(focusedAssetResponse, "指定文件加载失败"));
+      }
       const projectPayload = await projectResponse.json() as { project: { name: string } };
       const assetsPayload = await assetsResponse.json() as { assets: Asset[]; pagination: ListPaginationState; policy?: PublicUploadPolicy; usage?: UploadUsage };
+      const focusedPayload = focusedAssetResponse === null ? null : await focusedAssetResponse.json() as { asset: Asset };
+      if (!isCurrentRequest()) return;
+      const refreshedAssets = focusedPayload === null ? assetsPayload.assets : [focusedPayload.asset];
       setProjectName(projectPayload.project.name);
-      setAssets(assetsPayload.assets);
-      setPagination(assetsPayload.pagination);
-      if (page > assetsPayload.pagination.totalPages) setPage(assetsPayload.pagination.totalPages);
+      setAssets(refreshedAssets);
+      setPagination(focusedPayload === null ? assetsPayload.pagination : { page: 1, pageSize: 1, total: 1, totalPages: 1 });
+      if (focusedPayload === null && page > assetsPayload.pagination.totalPages) setPage(assetsPayload.pagination.totalPages);
       if (assetsPayload.policy) setPolicy(assetsPayload.policy);
       if (assetsPayload.usage) setUsage(assetsPayload.usage);
       setEdits((current) => {
-        return initializeReviewDrafts(current, assetsPayload.assets);
+        return initializeReviewDrafts(current, refreshedAssets);
       });
       setError(null);
     } catch (loadError) {
+      if (!isCurrentRequest()) return;
+      if (focusedAssetId !== null) {
+        setAssets([]);
+        setPagination({ page: 1, pageSize: 1, total: 0, totalPages: 1 });
+      }
       setError(loadError instanceof Error ? loadError.message : "文件资料加载失败");
     } finally {
-      if (showLoading) setLoading(false);
+      if (isCurrentRequest()) {
+        if (reloadControllerRef.current === controller) reloadControllerRef.current = null;
+        setLoading(false);
+      }
     }
-  }, [deferredSearch, kindFilter, page, projectId, statusFilter]);
+  }, [deferredSearch, focusedAssetId, kindFilter, page, projectId, statusFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      reloadSequenceRef.current += 1;
+      reloadControllerRef.current?.abort();
+      reloadControllerRef.current = null;
+    };
   }, [reload]);
 
-  const pendingCount = useMemo(() => assets.reduce((count, asset) =>
-    count + asset.segments.filter((segment) => segment.reviewStatus === "pending" && !segment.requiresVision).length, 0), [assets]);
+  const pendingCount = useMemo(() => displayedAssets.reduce((count, asset) =>
+    count + asset.segments.filter((segment) => segment.reviewStatus === "pending" && !segment.requiresVision).length, 0), [displayedAssets]);
+
+  function showAllAssets() {
+    setLoading(true);
+    reloadSequenceRef.current += 1;
+    reloadControllerRef.current?.abort();
+    reloadControllerRef.current = null;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("focus");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }
 
   function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
+    setUploadErrors([]);
     const selected = Array.from(event.target.files ?? []);
-    setFiles(selected.slice(0, policy.maxFiles));
-    if (selected.length > policy.maxFiles) {
-      setMessage(`已只保留前 ${policy.maxFiles} 个文件；单次最多选择 ${policy.maxFiles} 个。`);
+    const { accepted, unsupported, excess } = selectSupportedProjectAssetFiles(selected, policy.maxFiles);
+    setFiles(accepted);
+    const notices: string[] = [];
+    if (unsupported.length > 0) {
+      const names = unsupported.slice(0, 3).map((file) => file.name).join("、");
+      notices.push(`已跳过 ${unsupported.length} 个不支持的文件：${names}${unsupported.length > 3 ? "等" : ""}。`);
     }
-    else setMessage(null);
+    if (excess.length > 0) notices.push(`单次最多选择 ${policy.maxFiles} 个受支持文件，已保留前 ${policy.maxFiles} 个。`);
+    setMessage(notices.length > 0 ? notices.join(" ") : accepted.length > 0 ? `已选择 ${accepted.length} 个受支持文件。` : null);
   }
 
   async function upload() {
@@ -245,34 +296,32 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
     setFactSourceIds([]);
     setUploading(true);
     setError(null);
-    let uploaded = 0;
+    setUploadErrors([]);
     const readySourceIds: string[] = [];
     const pendingParsing: string[] = [];
-    const failures: string[] = [];
+    const failures: Array<{ name: string; message: string }> = [];
     const parseFailures: string[] = [];
     for (const file of files) {
       try {
-        const form = new FormData();
-        form.set("file", file);
-        const response = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body: form });
+        const response = await fetch(`/api/projects/${projectId}/assets`, projectAssetUploadRequest(file));
         if (!response.ok) throw new Error(await readError(response, "上传失败"));
         const payload = await response.json() as { asset?: Asset };
-        const readiness = payload.asset ? await awaitImportedAsset(projectId, payload.asset, () => setMessage(`正在等待 ${file.name} 的本地解析…`)) : null;
+        const readiness = payload.asset ? await awaitImportedAsset(projectId, payload.asset, () => setMessage("正在等待文件的本地解析…")) : null;
         if (readiness?.pending) pendingParsing.push(file.name);
         readySourceIds.push(...(readiness?.asset.segments ?? []).flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : []));
-        uploaded += 1;
         if (readiness?.asset.status === "failed") parseFailures.push(file.name);
       } catch (uploadError) {
-        failures.push(`${file.name}：${uploadError instanceof Error ? uploadError.message : "上传失败"}`);
+        failures.push({ name: file.name, message: uploadError instanceof Error ? uploadError.message : "上传失败" });
       }
     }
     setFiles([]);
+    setUploadErrors(failures);
     setFactSourceIds([...new Set(readySourceIds)]);
     setMessage(failures.length === 0
       ? parseFailures.length === 0
-        ? pendingParsing.length > 0 ? `已保存 ${uploaded} 个文件，其中 ${pendingParsing.length} 个仍在后台解析或状态暂时不可读，请稍后在文件库查看。` : `已上传并解析 ${uploaded} 个文件。`
-        : `已保存 ${uploaded} 个文件，其中 ${parseFailures.length} 个本地解析失败，可在文件卡片中重试：${parseFailures.join("、")}`
-      : `成功保存 ${uploaded} 个，上传失败 ${failures.length} 个：${failures.join("；")}`);
+        ? pendingParsing.length > 0 ? "文件已保存，部分文件仍在后台解析，请稍后刷新文件状态。" : "文件已保存，请查看每个文件的处理状态。"
+        : "文件已保存，部分文件本地解析失败，请在文件卡片中查看详情。"
+      : "部分文件上传失败，请查看每个文件的具体原因。");
     await reload();
     setUploading(false);
   }
@@ -449,10 +498,11 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
 
         <OperationPanel title={translateUi("导入文件并整理事实")} triggerLabel="导入文件或文件夹">
           {error ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
+          {uploadErrors.length > 0 ? <ul className="mb-4 space-y-3 text-sm text-rose-700">{uploadErrors.map((failure, index) => <li key={`${index}:${failure.name}`} className="break-words border-b border-slate-200 pb-3"><p className="font-semibold">{failure.name}</p><p><UiErrorText text={failure.message} /></p></li>)}</ul> : null}
           {message ? <p role="status" className="mb-4 text-sm text-indigo-700"><UiFeedbackText text={message} /></p> : null}
           <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div><p className="text-xs leading-6 text-slate-500"><UiText text={"单文件最大"} />{" "}{formatBytes(policy.maxFileBytes)}<UiText text={"，图片最大"} />{" "}{formatBytes(policy.maxImageBytes)} {" "}<UiText text={"/ 2000 万像素；单次最多选择"} />{" "}{policy.maxFiles} {" "}<UiText text={"个，multipart 请求最大"} />{" "}{formatBytes(policy.maxRequestBytes)}<UiText text={"。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP。"} /></p><div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 px-6 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><input type="file" multiple accept=".txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx,.png,.jpg,.jpeg,.webp" onChange={chooseFiles} className="sr-only" /><span>{files.length > 0 ? `已选择 ${files.length} 个文件` : <UiText text={"选择一个或多个文件"} />}</span></label><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 px-6 text-center text-sm font-semibold text-violet-700 hover:bg-violet-50"><input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} className="sr-only" /><span><UiText text={"选择整个本地文件夹"} /></span></label></div>{files.length > 0 ? <p className="mt-3 line-clamp-2 text-xs text-slate-500">{files.map((file) => file.webkitRelativePath || file.name).join("、")}</p> : null}<p className="mt-4 text-xs leading-5 text-slate-500"><UiText text={"服务端每次请求只接收一个文件，页面会按选择逐个提交；服务端还会按项目"} />{" "}{formatBytes(policy.maxProjectBytes)}<UiText text={"、工作区"} />{" "}{formatBytes(policy.maxWorkspaceBytes)}<UiText text={"、部署"} />{" "}{formatBytes(policy.maxDeploymentBytes)}<UiText text={"、活动文件"} />{" "}{policy.maxProjectAssets} {" "}<UiText text={"以及保留对象"} />{" "}{policy.maxProjectRetainedObjects} / {policy.maxWorkspaceRetainedObjects} / {policy.maxDeploymentRetainedObjects} {" "}<UiText text={"限制；每用户每分钟最多"} />{" "}{policy.maxUploadsPerMinute} {" "}<UiText text={"次请求，同时最多"} />{" "}{policy.maxConcurrentUploads} {" "}<UiText text={"个，整套部署同时最多"} />{" "}{policy.maxGlobalConcurrentUploads} {" "}<UiText text={"个上传。"} /></p></div>
-            <button type="button" onClick={() => void upload()} disabled={uploading || files.length === 0} className="app-action-button app-action-button--compact justify-self-end rounded-xl bg-indigo-600 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? <UiText text={"上传并解析中…"} /> : <UiText text={"上传并解析"} />}</button>
+            <div><p className="text-xs leading-6 text-slate-500"><UiText text={"单文件大小："} />{policy.maxFileBytes > 0 ? formatBytes(policy.maxFileBytes) : <UiText text={"不限"} />}<UiText text={"；图片大小："} />{policy.maxImageBytes > 0 ? formatBytes(policy.maxImageBytes) : <UiText text={"不限"} />}<UiText text={"。图片像素和文档解析仍有处理上限；单次最多选择"} />{" "}{policy.maxFiles}<UiText text={"个文件。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP。"} /></p><div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 px-6 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><input type="file" multiple onChange={chooseFiles} className="sr-only" /><span>{files.length > 0 ? `已选择 ${files.length} 个文件` : <UiText text={"选择一个或多个文件"} />}</span></label><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 px-6 text-center text-sm font-semibold text-violet-700 hover:bg-violet-50"><input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} className="sr-only" /><span><UiText text={"选择整个本地文件夹"} /></span></label></div>{files.length > 0 ? <p className="mt-3 line-clamp-2 text-xs text-slate-500">{files.map((file) => file.webkitRelativePath || file.name).join("、")}</p> : null}<p className="mt-4 text-xs leading-5 text-slate-500"><UiText text={"文件逐个流式上传；容量预算仍按项目"} />{" "}{formatBytes(policy.maxProjectBytes)}<UiText text={"、工作区"} />{" "}{formatBytes(policy.maxWorkspaceBytes)}<UiText text={"、部署"} />{" "}{formatBytes(policy.maxDeploymentBytes)}<UiText text={"、活动文件"} />{" "}{policy.maxProjectAssets} {" "}<UiText text={"以及保留对象"} />{" "}{policy.maxProjectRetainedObjects} / {policy.maxWorkspaceRetainedObjects} / {policy.maxDeploymentRetainedObjects} {" "}<UiText text={"限制；每用户每分钟最多"} />{" "}{policy.maxUploadsPerMinute} {" "}<UiText text={"次请求，同时最多"} />{" "}{policy.maxConcurrentUploads} {" "}<UiText text={"个，整套部署同时最多"} />{" "}{policy.maxGlobalConcurrentUploads} {" "}<UiText text={"个上传。"} /></p></div>
+            <DialogActions><button type="button" onClick={() => void upload()} disabled={uploading || files.length === 0} className="app-action-button app-action-button--compact justify-self-end rounded-xl bg-indigo-600 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? <UiText text={"上传并解析中…"} /> : <UiText text={"上传并解析"} />}</button></DialogActions>
           </div>
           <div className="mt-6 grid gap-3 border-t border-slate-100 pt-5 text-xs text-slate-500 sm:grid-cols-2 lg:grid-cols-3">
             <QuotaStat label={translateUi("项目已用")} value={`${formatBytes(Number(usage.projectBytes))} / ${formatBytes(policy.maxProjectBytes)}`} />
@@ -465,13 +515,13 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
         </OperationPanel>
 
         <section className="mt-8">
-          <div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"Asset library"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"已上传文件"} /></h2></div><button type="button" onClick={() => void reload()} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-600"><UiText text={"刷新"} /></button></div>
-          <div className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only"><UiText text={"搜索文件"} /></span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={translateUi("搜索文件名")} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:bg-white" /></label><label><span className="sr-only"><UiText text={"按文件类型筛选"} /></span><select value={kindFilter} onChange={(event) => { setKindFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部文件类型"} /></option>{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></label><label><span className="sr-only"><UiText text={"按处理状态筛选"} /></span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部处理状态"} /></option>{Object.entries(statusLabels).filter(([value]) => value !== "deleted").map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></label></div>
-          {loading ? <div className="mt-5 h-40 animate-pulse rounded-3xl bg-slate-200" /> : assets.length === 0 ? <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">{search.trim() || kindFilter !== "all" || statusFilter !== "all" ? <UiText text={"没有匹配的文件，请调整关键词或筛选条件。"} /> : <UiText text={"还没有文件。上传后，系统会显示解析、识别、审核与发布状态。"} />}</div> : <div className="mt-5 space-y-5">{assets.map((asset) => (
+          <div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"Asset library"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"已上传文件"} /></h2></div><button type="button" onClick={() => void reload({ showLoading: true })} disabled={loading} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-600 disabled:opacity-50"><UiText text={"刷新文件状态"} /></button></div>
+          {focusedAssetId !== null ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900"><p><UiText text={"当前仅显示指定文件。"} /></p><button type="button" onClick={showAllAssets} className="font-semibold underline underline-offset-4"><UiText text={"查看全部文件"} /></button></div> : <div className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only"><UiText text={"搜索文件"} /></span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={translateUi("搜索文件名")} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:bg-white" /></label><label><span className="sr-only"><UiText text={"按文件类型筛选"} /></span><select value={kindFilter} onChange={(event) => { setKindFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部文件类型"} /></option>{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></label><label><span className="sr-only"><UiText text={"按处理状态筛选"} /></span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all"><UiText text={"全部处理状态"} /></option>{Object.entries(statusLabels).filter(([value]) => value !== "deleted").map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></label></div>}
+          {loading || (focusedAssetId !== null && displayedAssets.length === 0 && error === null) ? <div className="mt-5 h-40 animate-pulse rounded-3xl bg-slate-200" /> : displayedAssets.length === 0 ? <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">{focusedAssetId !== null ? <UiText text={"未找到指定文件。"} /> : search.trim() || kindFilter !== "all" || statusFilter !== "all" ? <UiText text={"没有匹配的文件，请调整关键词或筛选条件。"} /> : <UiText text={"还没有文件。上传后，系统会显示解析、识别、审核与发布状态。"} />}</div> : <div className="mt-5 space-y-5">{displayedAssets.map((asset) => (
             <article key={asset.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{translateUi(kindLabels[asset.kind])}</span><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusTone(asset.status)}`}>{translateUi(statusLabels[asset.status])}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : <UiText text={"版本信息不可用"} />} · {formatDate(asset.createdAt, language)}</p><p className="mt-3 text-xs leading-5 text-slate-500"><UiText text={"已形成"} />{" "}{asset.segments.filter((segment) => segment.projectSourceId !== null).length} {" "}<UiText text={"个活动资料来源，共"} />{" "}{asset.segments.length} {" "}<UiText text={"个可定位片段。"} />{asset.latestRun?.modelId ? <> <UiText text={"最近视觉模型："} />{asset.latestRun.modelId}<UiText text={"。"} /></> : ""}</p>{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600"><UiText text={"失败代码："} />{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2">{asset.status === "failed" ? <button type="button" onClick={() => void retryParsing(asset)} disabled={retrying !== null} className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white disabled:opacity-40">{retrying === asset.id ? <UiText text={"重新解析中…"} /> : <UiText text={"重新解析"} />}</button> : null}<a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600"><UiText text={"查看原文件"} /></a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700"><UiText text={"移除"} /></button></div></div>
+              <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{translateUi(kindLabels[asset.kind])}</span><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusTone(asset.status)}`}>{translateUi(statusLabels[asset.status])}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : <UiText text={"版本信息不可用"} />} · {formatDate(asset.createdAt, language)}</p><p className="mt-3 text-xs leading-5 text-slate-500"><UiText text={"已形成"} />{" "}{asset.segments.filter((segment) => segment.projectSourceId !== null).length} {" "}<UiText text={"个活动资料来源，共"} />{" "}{asset.segments.length} {" "}<UiText text={"个可定位片段。"} />{asset.latestRun?.modelId ? <> <UiText text={"最近视觉模型："} />{asset.latestRun.modelId}<UiText text={"。"} /></> : ""}</p>{asset.version?.failureCode === "ASSET_FILE_PROCESSING_TOO_LARGE" ? <p className="mt-2 text-xs text-amber-700"><UiText text={"原文件已保存，但超过本地解析处理能力。请拆分文件后重新上传整理；原文件仍可下载。"} /></p> : null}{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600"><UiText text={"失败代码："} />{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2">{asset.status === "failed" ? <button type="button" onClick={() => void retryParsing(asset)} disabled={retrying !== null} className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white disabled:opacity-40">{retrying === asset.id ? <UiText text={"重新解析中…"} /> : <UiText text={"重新解析"} />}</button> : null}<a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600"><UiText text={"查看原文件"} /></a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700"><UiText text={"移除"} /></button></div></div>
 
-              {asset.status === "waitingVision" ? <OperationPanel className="px-6 pb-5" title={translateUi("识别文件中的图片")} triggerLabel="开始图片识别">{error ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700"><UiFeedbackText text={message} /></p> : null}{processingJobIds[asset.id] ? <Link href={buildProjectHref(projectId, "materials", { view: "tasks", from: "materials" })} className="mb-4 inline-block text-sm font-semibold text-indigo-700 underline"><UiText text={"查看任务进度和取消 →"} /></Link> : null}<div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950"><UiText text={"需要视觉模型识别"} /></h4><p className="mt-2 text-xs leading-5 text-amber-900"><UiText text={"本次只发送此文件中标为待识别的原图、扫描 PDF 页或 Office 内嵌图片；不会发送项目中的其他资料。共"} />{" "}{asset.segments.filter((segment) => segment.requiresVision).length} {" "}<UiText text={"个片段。请先在"} />{" "}<Link href={`/projects/${projectId}/control`} className="font-semibold underline"><UiText text={"智能控制台"} /></Link> {" "}<UiText text={"配置“图片与扫描件识别”路由。"} /></p><ul className="mt-3 list-inside list-disc space-y-1 text-xs text-amber-950">{asset.segments.filter((segment) => segment.requiresVision).map((segment) => <li key={segment.id}>{segment.locatorLabel}</li>)}</ul>{confirmations[asset.id] ? <ConfirmationCard confirmation={confirmations[asset.id]!} pending={recognizing[asset.id] === true} executeLabel="加入后台识别任务" onExecute={() => void recognize(asset)} /> : <button type="button" onClick={() => void prepareRecognition(asset)} disabled={recognizing[asset.id] === true} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing[asset.id] ? <UiText text={"读取摘要中…"} /> : <UiText text={"读取本次外发摘要"} />}</button>}</div></OperationPanel> : null}
+              {asset.status === "waitingVision" ? <OperationPanel className="px-6 pb-5" title={translateUi("识别文件中的图片")} triggerLabel="开始图片识别">{error ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700"><UiFeedbackText text={message} /></p> : null}{processingJobIds[asset.id] ? <Link href={buildProjectHref(projectId, "materials", { view: "tasks", from: "materials" })} className="mb-4 inline-block text-sm font-semibold text-indigo-700 underline"><UiText text={"查看任务进度和取消 →"} /></Link> : null}<div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950"><UiText text={"需要视觉模型识别"} /></h4><p className="mt-2 text-xs leading-5 text-amber-900"><UiText text={"本次只发送此文件中标为待识别的原图、扫描 PDF 页或 Office 内嵌图片；不会发送项目中的其他资料。共"} />{" "}{asset.segments.filter((segment) => segment.requiresVision).length} {" "}<UiText text={"个片段。请先在"} />{" "}<Link href={`/projects/${projectId}/control`} className="font-semibold underline"><UiText text={"智能控制台"} /></Link> {" "}<UiText text={"配置“图片与扫描件识别”路由。"} /></p><ul className="mt-3 list-inside list-disc space-y-1 text-xs text-amber-950">{asset.segments.filter((segment) => segment.requiresVision).map((segment) => <li key={segment.id}>{segment.locatorLabel}</li>)}</ul>{confirmations[asset.id] ? <ConfirmationCard confirmation={confirmations[asset.id]!} pending={recognizing[asset.id] === true} executeLabel="加入后台识别任务" onExecute={() => void recognize(asset)} /> : <DialogActions><button type="button" onClick={() => void prepareRecognition(asset)} disabled={recognizing[asset.id] === true} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing[asset.id] ? <UiText text={"读取摘要中…"} /> : <UiText text={"读取本次外发摘要"} />}</button></DialogActions>}</div></OperationPanel> : null}
 
               {asset.status === "awaitingReview" ? <OperationPanel className="px-6 pb-5" title={translateUi("核对识别文字")} triggerLabel="核对识别结果">{error ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}{message ? <p role="status" className="mb-4 text-sm text-slate-700"><UiFeedbackText text={message} /></p> : null}<div className="border-t border-slate-200 pt-4 text-slate-700"><div className="mb-4"><h4 className="text-sm font-semibold text-slate-900"><UiText text={"确认识别结果"} /></h4><p className="mt-2 text-xs leading-5 text-slate-600"><UiText text={"所有片段审核结束后，接受的内容才会一起发布到项目资料库；驳回的片段不会参与记忆与问答。"} /></p></div><div className="space-y-4">{asset.segments.map((segment) => <div key={segment.id} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">{segment.locatorLabel}</p><span className="text-[12px] text-slate-400">{segment.extractionMethod === "vision" ? `${segment.providerConnection?.name ?? "视觉模型"} · ${segment.modelId ?? "模型未记录"}` : <UiText text={"本地解析"} />}</span></div>{segment.reviewStatus === "pending" ? <><textarea value={edits[segment.id] ?? segment.contentText} onChange={(event) => setEdits((current) => ({ ...current, [segment.id]: event.target.value }))} rows={Math.min(12, Math.max(5, Math.ceil((edits[segment.id] ?? segment.contentText).length / 100)))} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-700 outline-none focus:border-indigo-400" /><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void review(asset.id, segment, "accept")} disabled={reviewing !== null || !(edits[segment.id] ?? segment.contentText).trim()} className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{reviewing === segment.id ? <UiText text={"保存中…"} /> : <UiText text={"确认并保留"} />}</button><button type="button" onClick={() => void review(asset.id, segment, "dismiss")} disabled={reviewing !== null} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600 disabled:opacity-40"><UiText text={"驳回片段"} /></button></div></> : <p className="mt-3 text-xs text-slate-500">{segment.reviewStatus === "accepted" ? <UiText text={"已确认，等待文件其余片段完成。"} /> : <UiText text={"已驳回，不会发布。"} />}</p>}</div>)}</div></div></OperationPanel> : null}
               {asset.status === "ready" ? <OperationPanel className="px-6 pb-5" title={translateUi("整理文件中的事实")} triggerLabel="AI 整理事实"><ProjectFactImport projectId={projectId} sourceIds={asset.segments.flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : [])} onChanged={reload} /></OperationPanel> : null}

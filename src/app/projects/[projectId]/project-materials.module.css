@@ -386,7 +386,7 @@
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 1.25rem;
+  padding: 24px;
 }
 
 .reviewSection,
@@ -481,4 +481,8 @@
   .drawer {
     width: 100%;
   }
+}
+@media (max-width: 700px) {
+  .drawer > :global([data-dialog-header]),
+  .drawer > :global([data-dialog-body]) { padding-inline: 20px; }
 }

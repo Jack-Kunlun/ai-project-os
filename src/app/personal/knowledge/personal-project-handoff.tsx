@@ -5,6 +5,7 @@ import {  UiText, useTranslate } from "@/components/appearance-provider";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { WorkspaceDialog } from "@/components/workspace-dialog";
+import { DialogActions } from "@/components/dialog-actions";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import { buildProjectMaterialsAddHref, copyPersonalKnowledgeBody, filterActiveProjects, type PersonalHandoffProjectOption as ProjectOption } from "@/lib/personal-project-handoff";
 
@@ -119,10 +120,10 @@ export function PersonalProjectHandoff({ content }: Readonly<{ content: string }
             </select>
           </label>
           <p className="text-xs leading-5 text-slate-500"><UiText text={"这里列出你可访问的进行中项目；保存资料需要编辑权限。选择目标后复制正文，再到项目的“添加资料”窗口粘贴并确认保存。"} /></p>
-          <div className="flex flex-wrap items-center gap-2">
+          <DialogActions>
             <button type="button" onClick={() => void copyBody()} disabled={!selectedProject} className="min-h-10 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"><UiText text={"复制正文"} /></button>
             {selectedProject && (copyState === "copied" || copyState === "fallback") ? <Link href={buildProjectMaterialsAddHref(selectedProject.id)} onClick={() => setOpen(false)} className="inline-flex min-h-10 items-center rounded-lg border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"前往项目并粘贴"} /></Link> : null}
-          </div>
+          </DialogActions>
           {copyState === "copied" ? <p className="text-xs text-emerald-700" role="status"><UiText text={"正文已复制。前往项目后，在“文本资料”中粘贴并保存。"} /></p> : null}
           {copyState === "fallback" ? (
             <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3" role="alert">

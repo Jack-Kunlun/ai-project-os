@@ -7,6 +7,7 @@ import { UiText, useAppearance } from "@/components/appearance-provider";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { OperationPanel } from "@/components/operation-panel";
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 import { PARENT_PAGE_LINK_CLASS_NAME } from "@/components/parent-page-link";
 import { ShellIcon } from "@/components/shell-icon";
 
@@ -282,7 +283,7 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
     }
   }
 
-  return <form onSubmit={submit} aria-label={t("记录管理员审核")}>
+  return <DialogForm onSubmit={submit} aria-label={t("记录管理员审核")}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <p className="max-w-2xl text-xs leading-5 text-slate-600"><UiText text={"服务端会再次核对候选快照、账号版本和 V2 不变量。本表单不会接收或读取个人连接材料。"} /></p>
@@ -314,11 +315,9 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
 
     {error ? <p role="alert" className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
     {message ? <p role="status" className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-xs leading-5 text-emerald-700"><UiFeedbackText text={message} /></p> : null}
-    <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-      <p className="max-w-xl text-xs leading-5 text-slate-500"><UiText text={"提交后保留追加式审核记录；正向结论才会关联当前 V2 只读证据。"} /></p>
-      <button type="submit" disabled={pending || !confirmed} className="app-action-button inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">{t(pending ? "提交中…" : "提交审核结论")}</button>
-    </div>
-  </form>;
+    <p className="mt-5 max-w-xl text-xs leading-5 text-slate-500"><UiText text={"提交后保留追加式审核记录；正向结论才会关联当前 V2 只读证据。"} /></p>
+    <DialogActions><DialogSubmit disabled={pending || !confirmed} className="app-action-button inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">{t(pending ? "提交中…" : "提交审核结论")}</DialogSubmit></DialogActions>
+  </DialogForm>;
 }
 
 export function McpReviewWorkbench() {

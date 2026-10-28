@@ -1,13 +1,14 @@
 "use client";
 
-import { createContext, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { DialogFooterTargetContext } from "./dialog-actions";
 import { useTranslate } from "./appearance-provider";
 import { useInquiryOperation } from "./inquiry-operation";
 import { createPortal } from "react-dom";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "./modal-styles";
 import { ShellIcon } from "./shell-icon";
 
-export const OperationPanelFooterTargetContext = createContext<HTMLDivElement | null>(null);
+export const OperationPanelFooterTargetContext = DialogFooterTargetContext;
 
 /** Lets long-running operation content place its primary action in the fixed footer. */
 export function useOperationPanelFooterTarget() {
@@ -105,9 +106,9 @@ export function OperationPanel({ title, translateTitle = true, triggerLabel, des
             <button data-dialog-close type="button" onClick={() => changeOpen(false)} className="app-icon-button" aria-label={t("关闭窗口")}><ShellIcon name="close" className="app-icon--control" /></button>
           </header>
           <div data-operation-content className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">{description ? <p id={descriptionId} className="mb-5 text-sm leading-6 text-slate-600">{t(description)}</p> : null}{children}</div>
-          {inquiryEnabled || footer !== undefined ? <footer data-operation-footer className={modalFooterClassName}>
+          <footer data-operation-footer className={modalFooterClassName}>
             <div data-operation-actions ref={setFooterTarget}>{footer}</div>
-          </footer> : null}
+          </footer>
         </section>
         </OperationPanelFooterTargetContext.Provider>
       </div>, document.body,

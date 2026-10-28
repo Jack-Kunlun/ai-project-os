@@ -4,11 +4,10 @@ export type ProjectAssetDownloadFile = Readonly<{
   fileName: string;
   mimeType: string;
   sizeBytes: number;
-  buffer: Buffer;
-}>;
+} & ({ buffer: Buffer; stream?: never } | { buffer?: never; stream: ReadableStream<Uint8Array> })>;
 
 export function createProjectAssetDownloadResponse(file: ProjectAssetDownloadFile): Response {
-  const textMetadata = textFileDownloadMetadata(file.buffer, file.fileName, file.mimeType);
+  const textMetadata = file.buffer ? textFileDownloadMetadata(file.buffer, file.fileName, file.mimeType) : null;
   const inline = file.mimeType.startsWith("image/")
     || file.mimeType === "application/pdf"
     || textMetadata?.inline === true;
@@ -16,7 +15,7 @@ export function createProjectAssetDownloadResponse(file: ProjectAssetDownloadFil
   const encodedFileName = encodeURIComponent(file.fileName).replace(/[!'()*]/g, (character) =>
     `%${character.codePointAt(0)!.toString(16).toUpperCase()}`,
   );
-  return new Response(new Uint8Array(file.buffer), {
+  return new Response(file.buffer ? new Uint8Array(file.buffer) : file.stream, {
     headers: {
       "content-type": textMetadata?.contentType ?? file.mimeType,
       "content-length": String(file.sizeBytes),

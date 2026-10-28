@@ -2,6 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { safeErrorPresentation, safeResponseError } from "../src/lib/safe-error-presentation";
 
+test("referenced source deletion explains the retained source without advising retries", () => {
+  const result = safeErrorPresentation({ error: { code: "SOURCE_IN_USE", message: "private references" } }, "资料删除失败");
+  assert.match(result.summary, /项目记录引用/u);
+  assert.match(result.nextStep, /保留该资料/u);
+  assert.doesNotMatch(result.message, /刷新|重试|private references/u);
+});
+
+test("upload failures distinguish unsupported format, damaged content and size limits", () => {
+  for (const [code, reason] of [
+    ["ASSET_FILE_TYPE_UNSUPPORTED", /文件扩展名/u],
+    ["ASSET_FILE_SIGNATURE_INVALID", /实际内容不一致/u],
+    ["ASSET_FILE_TOO_LARGE", /大小限制/u],
+    ["ASSET_DOCUMENT_TOO_LARGE", /页数或解析内容/u],
+    ["ASSET_ARCHIVE_ENCRYPTED", /带密码/u],
+    ["ASSET_ARCHIVE_UNSAFE_PATH", /内部路径/u],
+  ] as const) {
+    const result = safeErrorPresentation({ error: { code, message: "private file internals" } }, "上传失败");
+    assert.equal(result.code, code);
+    assert.match(result.summary, reason);
+    assert.doesNotMatch(result.message, /private file internals/u);
+  }
+});
+
 test("safe error presentation maps known codes to one actionable next step", () => {
   const result = safeErrorPresentation({ error: { code: "ACCESS_FORBIDDEN", message: "private stack and tenant details" } }, "加载失败");
   assert.equal(result.code, "ACCESS_FORBIDDEN");

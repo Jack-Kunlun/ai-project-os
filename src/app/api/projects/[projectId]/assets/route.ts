@@ -75,45 +75,66 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       // oversized and quota-rejected upload attempts all consume the rate
       // window. The lease is released in finally below.
       await assertProjectActive(id);
-      const contentType = request.headers.get("content-type") ?? "";
-      if (!contentType.toLowerCase().startsWith("multipart/form-data;")) {
-        throw new ApiError(415, "ASSET_UPLOAD_CONTENT_TYPE_INVALID", "Upload must use multipart/form-data");
+      const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+      let asset;
+      if (contentType === "application/octet-stream") {
+        const size = request.headers.get("x-asset-file-size") ?? "";
+        const encodedName = request.headers.get("x-asset-file-name") ?? "";
+        let fileName: string;
+        try { fileName = decodeURIComponent(encodedName); } catch { throw new ApiError(400, "ASSET_UPLOAD_INVALID", "Invalid file name"); }
+        if (!/^[1-9][0-9]*$/u.test(size) || !Number.isSafeInteger(Number(size))
+          || !fileName.trim() || encodedName.length > 2048 || request.body === null) {
+          throw new ApiError(400, "ASSET_UPLOAD_INVALID", "Invalid upload metadata");
+        }
+        const sizeBytes = Number(size);
+        if (policy.maxRequestBytes > 0 && sizeBytes > policy.maxRequestBytes) throw new ApiError(413, "ASSET_UPLOAD_REQUEST_TOO_LARGE", "Upload request is too large");
+        const contentLength = request.headers.get("content-length");
+        if (contentLength !== null && (!/^[0-9]+$/u.test(contentLength) || BigInt(contentLength) !== BigInt(size))) {
+          throw new ApiError(400, "ASSET_FILE_SIZE_MISMATCH", "Upload size does not match");
+        }
+        asset = await uploadProjectAsset({ projectId: id, requestedBy: user, fileName, sizeBytes, stream: request.body, signal: request.signal, visibility });
+      } else {
+        if (!contentType.startsWith("multipart/form-data;")) {
+          throw new ApiError(415, "ASSET_UPLOAD_CONTENT_TYPE_INVALID", "Upload must use multipart/form-data");
+        }
+        // Compatibility for older clients only. Current clients stream raw files
+        // and never enter this in-memory multipart path.
+        const body = await readRequestBody(request, Math.min(policy.maxRequestBytes || Infinity, 30 * 1024 * 1024), () =>
+          new ApiError(413, "ASSET_UPLOAD_REQUEST_TOO_LARGE", "Upload request is too large"),
+          {
+            milliseconds: policy.bodyReadTimeoutMs,
+            error: () => new ApiError(408, "ASSET_UPLOAD_TIMEOUT", "Upload request timed out"),
+          },
+        );
+        let form: FormData;
+        try {
+          form = await new Request(request.url, {
+            method: request.method,
+            headers: new Headers(request.headers),
+            body: new Blob([body]),
+          }).formData();
+        } catch {
+          throw new ApiError(400, "ASSET_UPLOAD_INVALID", "Upload form is invalid");
+        }
+        const values = form.getAll("file");
+        if (values.length === 0 || values.some((value) => !(value instanceof File))) {
+          throw new ApiError(400, "ASSET_FILE_REQUIRED", "A file is required");
+        }
+        if (values.length > policy.maxFiles) {
+          throw new ApiError(413, "ASSET_UPLOAD_TOO_MANY_FILES", "Too many files in one upload request");
+        }
+        if (values.length !== 1) {
+          throw new ApiError(400, "ASSET_UPLOAD_ONE_FILE_ONLY", "Each upload request must contain exactly one file");
+        }
+        const file = values[0] as File;
+        asset = await uploadProjectAsset({
+          projectId: id,
+          requestedBy: user,
+          fileName: file.name,
+          buffer: Buffer.from(await file.arrayBuffer()),
+          visibility,
+        });
       }
-      const body = await readRequestBody(request, policy.maxRequestBytes, () =>
-        new ApiError(413, "ASSET_UPLOAD_REQUEST_TOO_LARGE", "Upload request is too large"),
-        {
-          milliseconds: policy.bodyReadTimeoutMs,
-          error: () => new ApiError(408, "ASSET_UPLOAD_TIMEOUT", "Upload request timed out"),
-        },
-      );
-      let form: FormData;
-      try {
-        form = await new Request(request.url, {
-          method: request.method,
-          headers: new Headers(request.headers),
-          body: new Blob([body]),
-        }).formData();
-      } catch {
-        throw new ApiError(400, "ASSET_UPLOAD_INVALID", "Upload form is invalid");
-      }
-      const values = form.getAll("file");
-      if (values.length === 0 || values.some((value) => !(value instanceof File))) {
-        throw new ApiError(400, "ASSET_FILE_REQUIRED", "A file is required");
-      }
-      if (values.length > policy.maxFiles) {
-        throw new ApiError(413, "ASSET_UPLOAD_TOO_MANY_FILES", "Too many files in one upload request");
-      }
-      if (values.length !== 1) {
-        throw new ApiError(400, "ASSET_UPLOAD_ONE_FILE_ONLY", "Each upload request must contain exactly one file");
-      }
-      const file = values[0] as File;
-      const asset = await uploadProjectAsset({
-        projectId: id,
-        requestedBy: user,
-        fileName: file.name,
-        buffer: Buffer.from(await file.arrayBuffer()),
-        visibility,
-      });
       response = NextResponse.json({ assets: [asset], asset }, { status: 201 });
     } finally {
       try {

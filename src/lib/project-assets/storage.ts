@@ -1,15 +1,22 @@
 import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import type { ProjectAssetKind } from "@prisma/client";
 import { DEFAULT_UPLOAD_POLICY, getUploadPolicy } from "@/lib/project-assets/policy";
 import { decodeTextFile, textFileMimeType } from "@/lib/text-file-decoding";
+import { JpegHeaderReader } from "@/lib/project-assets/jpeg-header";
 
 export const MAX_ASSET_FILE_BYTES = DEFAULT_UPLOAD_POLICY.maxFileBytes;
 export const MAX_IMAGE_FILE_BYTES = DEFAULT_UPLOAD_POLICY.maxImageBytes;
 export const MAX_UPLOAD_FILES = DEFAULT_UPLOAD_POLICY.maxFiles;
 export const MAX_UPLOAD_REQUEST_BYTES = DEFAULT_UPLOAD_POLICY.maxRequestBytes;
 export const MAX_IMAGE_PIXELS = 20_000_000;
+// Processing a stored document is separate from accepting its original file.
+export const MAX_ASSET_PROCESSING_BYTES = 128 * 1024 * 1024;
+const SIGNATURE_PREFIX_BYTES = 64 * 1024;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STORAGE_KEY_PATTERN = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/original$/i;
@@ -23,6 +30,9 @@ export class ProjectAssetStorageError extends Error {
   constructor(readonly code:
     | "ASSET_FILE_EMPTY"
     | "ASSET_FILE_TOO_LARGE"
+    | "ASSET_FILE_SIZE_MISMATCH"
+    | "ASSET_FILE_PROCESSING_TOO_LARGE"
+    | "ASSET_UPLOAD_TIMEOUT"
     | "ASSET_FILE_TYPE_UNSUPPORTED"
     | "ASSET_FILE_SIGNATURE_INVALID"
     | "ASSET_IMAGE_TOO_LARGE"
@@ -103,11 +113,11 @@ function webpDimensions(buffer: Buffer): readonly [number, number] | null {
   return null;
 }
 
-function assertImageDimensions(buffer: Buffer, mimeType: string): void {
+function assertImageDimensions(buffer: Buffer, mimeType: string, jpegSize?: readonly [number, number] | null): void {
   const dimensions = mimeType === "image/png"
     ? pngDimensions(buffer)
     : mimeType === "image/jpeg"
-      ? jpegDimensions(buffer)
+      ? jpegSize === undefined ? jpegDimensions(buffer) : jpegSize
       : webpDimensions(buffer);
   if (dimensions === null) return fail("ASSET_FILE_SIGNATURE_INVALID");
   const [width, height] = dimensions;
@@ -122,15 +132,16 @@ function assertTextFile(buffer: Buffer, fileName: string): void {
   }
 }
 
-export function detectAssetFile(fileName: string, buffer: Buffer): DetectedAssetFile {
+export function detectAssetFile(fileName: string, buffer: Buffer, options?: Readonly<{ sizeBytes: number; prefixOnly: true; jpegSize?: readonly [number, number] }>): DetectedAssetFile {
   const policy = getUploadPolicy();
-  if (buffer.length === 0) return fail("ASSET_FILE_EMPTY");
-  if (buffer.length > policy.maxFileBytes) return fail("ASSET_FILE_TOO_LARGE");
+  const sizeBytes = options?.sizeBytes ?? buffer.length;
+  if (sizeBytes === 0) return fail("ASSET_FILE_EMPTY");
+  if (policy.maxFileBytes > 0 && sizeBytes > policy.maxFileBytes) return fail("ASSET_FILE_TOO_LARGE");
   const extension = path.extname(fileName).toLowerCase();
   const detectedImageMime = imageMime(buffer);
   if (detectedImageMime !== null) {
-    if (buffer.length > policy.maxImageBytes) return fail("ASSET_FILE_TOO_LARGE");
-    assertImageDimensions(buffer, detectedImageMime);
+    if (policy.maxImageBytes > 0 && sizeBytes > policy.maxImageBytes) return fail("ASSET_FILE_TOO_LARGE");
+    assertImageDimensions(buffer, detectedImageMime, options?.prefixOnly ? options.jpegSize ?? null : undefined);
     const expected = detectedImageMime === "image/png" ? ".png" : detectedImageMime === "image/jpeg" ? new Set([".jpg", ".jpeg"]) : ".webp";
     if (typeof expected === "string" ? extension !== expected : !expected.has(extension)) return fail("ASSET_FILE_SIGNATURE_INVALID");
     return Object.freeze({ kind: "image", mimeType: detectedImageMime, extension });
@@ -151,7 +162,9 @@ export function detectAssetFile(fileName: string, buffer: Buffer): DetectedAsset
   }
   const mimeType = textFileMimeType(fileName);
   if (mimeType !== null) {
-    assertTextFile(buffer, fileName);
+    // The local parser validates the complete encoding. A streamed prefix may
+    // end in the middle of a UTF-8/UTF-16/GB18030 character.
+    if (!options?.prefixOnly) assertTextFile(buffer, fileName);
     return Object.freeze({ kind: "text", mimeType, extension });
   }
   return fail("ASSET_FILE_TYPE_UNSUPPORTED");
@@ -321,15 +334,86 @@ export async function writeAssetBlob(input: Readonly<{
 export async function readAssetBlob(storageKey: string, expectedBytes?: bigint): Promise<Buffer> {
   const location = storagePath(storageKey);
   try {
-    const metadata = await stat(location);
-    if (!metadata.isFile() || metadata.size <= 0 || metadata.size > getUploadPolicy().maxFileBytes) {
-      return fail("ASSET_STORAGE_UNAVAILABLE");
-    }
-    if (expectedBytes !== undefined && BigInt(metadata.size) !== expectedBytes) return fail("ASSET_STORAGE_UNAVAILABLE");
+    const metadata = await assertAssetBlob(storageKey, expectedBytes);
+    if (metadata.size > MAX_ASSET_PROCESSING_BYTES) return fail("ASSET_FILE_PROCESSING_TOO_LARGE");
     return await readFile(location);
   } catch (error) {
     if (error instanceof ProjectAssetStorageError) throw error;
     return fail("ASSET_STORAGE_UNAVAILABLE");
+  }
+}
+
+export async function assertAssetBlob(storageKey: string, expectedBytes?: bigint) {
+  try {
+    const metadata = await stat(storagePath(storageKey));
+    if (!metadata.isFile() || metadata.size <= 0
+      || (expectedBytes !== undefined && BigInt(metadata.size) !== expectedBytes)) return fail("ASSET_STORAGE_UNAVAILABLE");
+    return metadata;
+  } catch (error) {
+    if (error instanceof ProjectAssetStorageError) throw error;
+    return fail("ASSET_STORAGE_UNAVAILABLE");
+  }
+}
+
+export async function streamAssetBlob(storageKey: string, expectedBytes: bigint): Promise<ReadableStream<Uint8Array>> {
+  await assertAssetBlob(storageKey, expectedBytes);
+  return Readable.toWeb(createReadStream(storagePath(storageKey))) as ReadableStream<Uint8Array>;
+}
+
+/** Quota reservation must already exist before this function reads any bytes. */
+export async function writeAssetStream(input: Readonly<{
+  projectId: string; assetId: string; versionId: string; fileName: string;
+  sizeBytes: number; stream: ReadableStream<Uint8Array>; signal?: AbortSignal;
+}>): Promise<Readonly<{ storageKey: string; detected: DetectedAssetFile; contentHash: string }>> {
+  const storageKey = assetBlobStorageKey(input.projectId, input.assetId, input.versionId);
+  const destination = storagePath(storageKey);
+  const temporary = `${destination}.tmp`;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  input.signal?.addEventListener("abort", abort, { once: true });
+  if (input.signal?.aborted) controller.abort();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, getUploadPolicy().bodyReadTimeoutMs);
+  const hash = createHash("sha256");
+  const jpegHeader = new JpegHeaderReader();
+  const prefix: Buffer[] = [];
+  let prefixBytes = 0;
+  let bytes = 0;
+  try {
+    await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+    const inspect = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.length;
+        if (bytes > input.sizeBytes) { callback(new ProjectAssetStorageError("ASSET_FILE_SIZE_MISMATCH")); return; }
+        hash.update(chunk);
+        jpegHeader.push(chunk);
+        if (prefixBytes < SIGNATURE_PREFIX_BYTES) {
+          const part = Buffer.from(chunk.subarray(0, SIGNATURE_PREFIX_BYTES - prefixBytes));
+          prefix.push(part);
+          prefixBytes += part.length;
+        }
+        callback(null, chunk);
+      },
+    });
+    await pipeline(
+      Readable.fromWeb(input.stream as import("node:stream/web").ReadableStream<Uint8Array>),
+      inspect,
+      createWriteStream(temporary, { flags: "wx", mode: 0o600 }),
+      { signal: controller.signal },
+    );
+    if (bytes !== input.sizeBytes) return fail("ASSET_FILE_SIZE_MISMATCH");
+    const detected = detectAssetFile(input.fileName, Buffer.concat(prefix), { sizeBytes: bytes, prefixOnly: true, jpegSize: jpegHeader.dimensions });
+    await rename(temporary, destination);
+    return { storageKey, detected, contentHash: hash.digest("hex") };
+  } catch (error) {
+    // Propagate cleanup failure so the durable reservation remains billable.
+    await removeAssetBlob(storageKey);
+    if (error instanceof ProjectAssetStorageError) throw error;
+    if (timedOut || input.signal?.aborted) return fail("ASSET_UPLOAD_TIMEOUT");
+    return fail("ASSET_STORAGE_UNAVAILABLE");
+  } finally {
+    clearTimeout(timer);
+    input.signal?.removeEventListener("abort", abort);
   }
 }
 

@@ -1,4 +1,6 @@
 "use client";
+
+import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 import { UiErrorText } from "@/components/ui-error-text";
 
 import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
@@ -19,6 +21,7 @@ import { buildMaterialsReturnTo, buildProjectQuestionHref, isAddSourceView, MATE
 import { ProjectMaterialIntake } from "./project-material-intake";
 import { ProjectMaterialReviewQueue } from "./project-material-review-queue";
 import { ProjectProcessingTasks } from "./project-processing-tasks";
+import { MaterialsTabLink } from "./materials/materials-tab-link";
 
 type ProjectItem = {
   id: string;
@@ -259,6 +262,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
   const [itemPage, setItemPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const [sourceActionError, setSourceActionError] = useState<string | null>(null);
   const [sourceSuccess, setSourceSuccess] = useState<string | null>(null);
   const [itemError, setItemError] = useState<string | null>(null);
   const [itemSuccess, setItemSuccess] = useState<string | null>(null);
@@ -276,6 +280,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
   const sourceRequestControllerRef = useRef<AbortController | null>(null);
   const itemRequestIdRef = useRef(0);
   const itemRequestControllerRef = useRef<AbortController | null>(null);
+  const itemCountsLoadedRef = useRef(false);
   const { confirm, dialog } = useAppConfirmDialog();
   const [itemForm, setItemForm] = useState<ItemFormState>({
     type: "progress",
@@ -357,7 +362,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       from: navigation.from,
       returnTo: navigation.returnTo,
     });
-    router.replace(href, { scroll: false });
+    window.history.replaceState(null, "", href);
   }
 
   const loadProject = useCallback(async () => {
@@ -411,7 +416,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       setSourceDetails((current) => ({ ...current, [source.id]: source }));
       return source;
     } catch (loadError) {
-      setSourceError(loadError instanceof Error ? loadError.message : "资料原文加载失败");
+      setSourceActionError(loadError instanceof Error ? loadError.message : "资料原文加载失败");
       return null;
     } finally {
       setIsSourceDetailLoading(false);
@@ -430,6 +435,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       if (!isCurrentRequest()) return;
       setItems(loaded.items);
       setItemCounts(loaded.counts);
+      itemCountsLoadedRef.current = true;
       setItemPagination(loaded.pagination);
       if (itemPage > loaded.pagination.totalPages) setItemPage(loaded.pagination.totalPages);
       setItemError(null);
@@ -451,15 +457,18 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
     controller?.abort();
   }, []);
 
-  useEffect(() => { const timer = window.setTimeout(() => void loadProject(), 0); return () => window.clearTimeout(timer); }, [loadProject, materialsView]);
+  useEffect(() => { const timer = window.setTimeout(() => void loadProject(), 0); return () => window.clearTimeout(timer); }, [loadProject]);
   useEffect(() => {
+    if (materialsView !== "materials" && !isAddSourceOpen && !itemEditorOpen) return;
     const timer = window.setTimeout(() => void loadSources(), 0);
     return () => {
       window.clearTimeout(timer);
       cancelSourceRequest();
     };
-  }, [cancelSourceRequest, loadSources, materialsView]);
+  }, [cancelSourceRequest, isAddSourceOpen, itemEditorOpen, loadSources, materialsView]);
   useEffect(() => {
+    // Task entry refreshes the review badge after background extraction finishes.
+    if (materialsView === "materials" && itemCountsLoadedRef.current) return;
     const timer = window.setTimeout(() => void loadItems(), 0);
     return () => {
       window.clearTimeout(timer);
@@ -467,10 +476,10 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
     };
   }, [cancelItemRequest, loadItems, materialsView]);
   useEffect(() => {
-    if (!itemForm.sourceId || sourceDetails[itemForm.sourceId]) return;
+    if (!itemEditorOpen || !itemForm.sourceId || sourceDetails[itemForm.sourceId]) return;
     const timer = window.setTimeout(() => void loadSourceDetail(itemForm.sourceId), 0);
     return () => window.clearTimeout(timer);
-  }, [itemForm.sourceId, loadSourceDetail, sourceDetails]);
+  }, [itemEditorOpen, itemForm.sourceId, loadSourceDetail, sourceDetails]);
 
   const reloadProjectAndSources = useCallback(async (): Promise<void> => {
     await Promise.all([loadProject(), loadSources(), loadItems()]);
@@ -488,7 +497,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
     if (!confirmation.confirmed) return;
 
     setDeletingSourceId(source.id);
-    setSourceError(null);
+    setSourceActionError(null);
     setSourceSuccess(null);
 
     try {
@@ -500,7 +509,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       await reloadProjectAndSources();
       setSourceSuccess("原始资料已删除。");
     } catch (deleteError) {
-      setSourceError(deleteError instanceof Error ? deleteError.message : "资料删除失败");
+      setSourceActionError(deleteError instanceof Error ? deleteError.message : "资料删除失败");
     } finally {
       setDeletingSourceId(null);
     }
@@ -751,7 +760,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
       </div>
 
       <nav aria-label={translateUi("项目资料栏目")} className={styles.tabs} data-sticky-page-tabs>
-        {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <Link key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} scroll={false} aria-current={materialsView === tab.view ? "page" : undefined} className={`${styles.tab} ${materialsView === tab.view ? styles.tabActive : ""}`}><UiText text={tab.label} />{tab.view === "review" && itemCounts.candidate > 0 ? <span className={styles.countBadge}>{itemCounts.candidate}</span> : null}</Link>)}
+        {([{ view: "materials", label: "资料" }, { view: "review", label: "整理结果" }, { view: "tasks", label: "识别任务" }] as const).map((tab) => <MaterialsTabLink key={tab.view} href={buildProjectHref(projectId, "materials", { view: tab.view === "materials" ? null : tab.view, from: "materials", kind: sourceKind, search: sourceSearch, page: sourcePage })} aria-current={materialsView === tab.view ? "page" : undefined} className={`${styles.tab} ${materialsView === tab.view ? styles.tabActive : ""}`}><UiText text={tab.label} />{tab.view === "review" && itemCounts.candidate > 0 ? <span className={styles.countBadge}>{itemCounts.candidate}</span> : null}</MaterialsTabLink>)}
       </nav>
 
       {materialsView === "tasks" ? <ProjectProcessingTasks key={projectId} projectId={projectId} onChanged={reloadProjectAndSources} /> : null}
@@ -768,6 +777,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
         <p className={styles.safetyNote} role="note"><strong><UiText text={"安全提示："} /></strong><UiText text={"资料不会自动成为已确认事实；请勿提交密码、Token 或带凭据的链接。"} /></p>
 
         {sourceError ? <div className={styles.errorNotice} role="alert"><UiErrorText text={sourceError} /></div> : null}
+        {sourceActionError ? <div className={styles.errorNotice} role="alert"><UiErrorText text={sourceActionError} /></div> : null}
         {sourceSuccess ? <div className={styles.successNotice} role="status" aria-live="polite"><UiText text={sourceSuccess} /></div> : null}
 
         <div className={styles.sourceLayout}>
@@ -825,7 +835,7 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
         <OperationPanel title={isEditingItem ? translateUi("编辑事实") : translateUi("手动补充事实")} triggerLabel={isEditingItem ? "继续编辑事实" : "手动补充"} open={itemEditorOpen} onOpenChange={setItemEditorOpen} className="mt-6" description="自动整理后的事实可在下方查看；只有需要手动补充或纠正时才使用此操作区。">
           {itemError ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={itemError} /></p> : null}
         <div className="grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
-          <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full" aria-label={translateUi(isEditingItem ? "编辑事实候选" : "补充事实候选")}>
+          <DialogForm id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full" aria-label={translateUi(isEditingItem ? "编辑事实候选" : "补充事实候选")}>
             <p className="mb-5 text-sm leading-6 text-slate-600">{isEditingItem ? <UiText text={"编辑后会回到待确认状态；原始资料归属保持不变。"} /> : <UiText text={"选择当前项目的原始资料，填写可以被原文精确支持的事实候选。"} />}</p>
 
             <label className="block text-sm font-medium text-slate-700" htmlFor="item-source"><UiText text={"Source"} />{" "}<span className="text-rose-600"><UiText text={"（必选）"} /></span></label>
@@ -905,14 +915,14 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             />
 
-            <div className="mt-5 flex flex-wrap justify-end gap-2">
-              <button
+            <DialogActions>
+              <DialogSubmit
                 type="submit"
                 disabled={isSavingItem || isItemsLoading || !itemForm.sourceId || sourceOptions.length === 0}
                 className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSavingItem ? <UiText text={"保存中…"} /> : isEditingItem ? <UiText text={"保存编辑"} /> : <UiText text={"保存候选条目"} />}
-              </button>
+              </DialogSubmit>
               {isEditingItem ? (
                 <button
                   type="button"
@@ -922,8 +932,8 @@ function ProjectDetailWorkspace({ projectId, username, isSystemAdmin }: { projec
                 >
                   <UiText text={"取消编辑"} /></button>
               ) : null}
-            </div>
-          </form>
+            </DialogActions>
+          </DialogForm>
 
           <div className="min-w-0 max-w-full">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"><UiText text={"Selected source"} /></p>

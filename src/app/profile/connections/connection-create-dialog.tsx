@@ -1,18 +1,15 @@
 "use client";
 
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { modalBackdropClassName, modalFooterClassName, modalHeaderClassName, modalSurfaceClassName } from "@/components/modal-styles";
 import { useInquiryOperation } from "@/components/inquiry-operation";
+import { DialogActions, DialogFooterTargetContext } from "@/components/dialog-actions";
 import { UiText, useAppearance } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 
-const DialogFooterContext = createContext<HTMLElement | null>(null);
-
-/** Keep form actions visible while only the form fields scroll. */
+/** Backwards-compatible action slot for the existing connection forms. */
 export function ConnectionDialogActions({ children }: { children: ReactNode }) {
-  const footer = useContext(DialogFooterContext);
-  return footer === null ? null : createPortal(children, footer);
+  return <DialogActions className="w-full">{children}</DialogActions>;
 }
 
 export function ConnectionCreateDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -53,7 +50,7 @@ export function ConnectionCreateDialog({ title, onClose, children }: { title: st
   return <div className={`fixed inset-0 z-50 flex items-center justify-center ${modalBackdropClassName} px-3 py-5 sm:px-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div data-connection-dialog ref={panelRef} data-inquiry-owned={String(owned)} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`flex max-h-[calc(100dvh-2.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
       <header data-dialog-header className={`${modalHeaderClassName} flex items-center justify-between gap-4 px-4 py-4 sm:px-6`}><h2 id={titleId} className="text-lg font-semibold text-slate-900"><UiText text={title} /></h2><button data-dialog-close ref={closeRef} type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></header>
-      <DialogFooterContext.Provider value={footer}><div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">{children}</div></DialogFooterContext.Provider>
+      <DialogFooterTargetContext.Provider value={footer}><div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">{children}</div></DialogFooterTargetContext.Provider>
       <footer data-dialog-footer ref={setFooter} className={`${modalFooterClassName} flex flex-wrap gap-2 px-4 py-4 sm:px-6`} />
     </div>
   </div>;

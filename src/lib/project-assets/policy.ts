@@ -2,9 +2,11 @@ import { z } from "zod";
 
 export const DEFAULT_UPLOAD_POLICY = Object.freeze({
   maxFiles: 10,
-  maxFileBytes: 25 * 1024 * 1024,
-  maxImageBytes: 10 * 1024 * 1024,
-  maxRequestBytes: 30 * 1024 * 1024,
+  // Zero disables a per-file/request byte cap. Storage quotas and admission
+  // remain authoritative; streamed bodies are checked against declared size.
+  maxFileBytes: 0,
+  maxImageBytes: 0,
+  maxRequestBytes: 0,
   maxProjectBytes: 1 * 1024 * 1024 * 1024,
   maxWorkspaceBytes: 5 * 1024 * 1024 * 1024,
   maxDeploymentBytes: 20 * 1024 * 1024 * 1024,
@@ -63,12 +65,17 @@ function readPositiveInteger(variable: string, fallback: number): number {
   }
 }
 
+function readByteLimit(variable: string, fallback: number): number {
+  if (process.env[variable] === "0") return 0;
+  return readPositiveInteger(variable, fallback);
+}
+
 export function getUploadPolicy(): UploadPolicy {
   const policy = {
     maxFiles: readPositiveInteger("AI_PROJECT_OS_UPLOAD_MAX_FILES", DEFAULT_UPLOAD_POLICY.maxFiles),
-    maxFileBytes: readPositiveInteger("AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES", DEFAULT_UPLOAD_POLICY.maxFileBytes),
-    maxImageBytes: readPositiveInteger("AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES", DEFAULT_UPLOAD_POLICY.maxImageBytes),
-    maxRequestBytes: readPositiveInteger("AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES", DEFAULT_UPLOAD_POLICY.maxRequestBytes),
+    maxFileBytes: readByteLimit("AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES", DEFAULT_UPLOAD_POLICY.maxFileBytes),
+    maxImageBytes: readByteLimit("AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES", DEFAULT_UPLOAD_POLICY.maxImageBytes),
+    maxRequestBytes: readByteLimit("AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES", DEFAULT_UPLOAD_POLICY.maxRequestBytes),
     maxProjectBytes: readPositiveInteger("AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES", DEFAULT_UPLOAD_POLICY.maxProjectBytes),
     maxWorkspaceBytes: readPositiveInteger("AI_PROJECT_OS_UPLOAD_MAX_WORKSPACE_BYTES", DEFAULT_UPLOAD_POLICY.maxWorkspaceBytes),
     maxDeploymentBytes: readPositiveInteger("AI_PROJECT_OS_UPLOAD_MAX_DEPLOYMENT_BYTES", DEFAULT_UPLOAD_POLICY.maxDeploymentBytes),
@@ -85,9 +92,9 @@ export function getUploadPolicy(): UploadPolicy {
   } as const;
 
   if (
-    policy.maxImageBytes > policy.maxFileBytes
-    || policy.maxRequestBytes <= policy.maxFileBytes
-    || policy.maxProjectBytes < policy.maxFileBytes
+    (policy.maxFileBytes > 0 && policy.maxImageBytes > policy.maxFileBytes)
+    || (policy.maxRequestBytes > 0 && policy.maxFileBytes > 0 && policy.maxRequestBytes <= policy.maxFileBytes)
+    || (policy.maxFileBytes > 0 && policy.maxProjectBytes < policy.maxFileBytes)
     || policy.maxWorkspaceBytes < policy.maxProjectBytes
     || policy.maxDeploymentBytes < policy.maxWorkspaceBytes
     || policy.maxProjectRetainedObjects < policy.maxProjectAssets

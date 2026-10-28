@@ -703,6 +703,9 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     const messages = {
       ASSET_FILE_EMPTY: "文件内容为空",
       ASSET_FILE_TOO_LARGE: "文件超过允许大小",
+      ASSET_FILE_SIZE_MISMATCH: "上传内容不完整或大小不符，请重新上传",
+      ASSET_FILE_PROCESSING_TOO_LARGE: "原文件已保存，但超过本地解析处理能力，请拆分后整理",
+      ASSET_UPLOAD_TIMEOUT: "文件上传超时或已中断，请重新上传",
       ASSET_FILE_TYPE_UNSUPPORTED: "暂不支持该文件类型",
       ASSET_FILE_SIGNATURE_INVALID: "文件扩展名与真实内容不一致或文件已损坏",
       ASSET_IMAGE_TOO_LARGE: "图片像素尺寸超过安全限制",

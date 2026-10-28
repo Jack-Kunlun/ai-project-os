@@ -276,11 +276,17 @@ async function assertOperationDialog(
   }
   await expect(body).toHaveCSS("overflow-y", "auto");
   await expectStandardActions(actionButtons, rootLabel);
+  const footer = dialog.locator("[data-operation-footer]");
+  await expect(footer).toBeVisible();
   for (const button of actionButtons) {
-    expect(await button.evaluate((element) => element.closest("[data-operation-content]")?.contains(element) ?? false), `${rootLabel} actions must stay inside the scrollable operation body`).toBe(true);
+    expect(await button.evaluate((element) => element.closest("[data-operation-footer]")?.contains(element) ?? false), `${rootLabel} actions must stay in the fixed footer`).toBe(true);
+    await expect(button).toBeInViewport();
   }
+  const before = await footer.boundingBox();
   await body.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   for (const button of actionButtons) await expect(button).toBeInViewport();
+  const after = await footer.boundingBox();
+  expect(after?.y, `${rootLabel} footer remains visible while content scrolls`).toBe(before?.y);
   await expectR02NoHorizontalOverflow(page, `${rootLabel} ${mode.width}px`);
 }
 

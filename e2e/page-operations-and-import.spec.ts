@@ -248,7 +248,7 @@ test("long PDF pages use a dedicated import workspace and fit each consent batch
   await expect(page.getByRole("heading", { name: "已上传文件", exact: true })).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
   await page.getByRole("button", { name: "导入文件或文件夹", exact: true }).click();
-  const intake = page.getByRole("dialog", { name: "导入文件并整理事实", exact: true });
+  const intake = page.getByRole("dialog", { name: "导入项目文件", exact: true });
   await expect(intake).toBeVisible();
   await intake.locator('input[type="file"]').first().setInputFiles({ name: "operations-long-pages.pdf", mimeType: "application/pdf", buffer: longTextPdf() });
   await intake.getByRole("button", { name: "上传并解析", exact: true }).click();

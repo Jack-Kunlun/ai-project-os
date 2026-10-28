@@ -89,6 +89,21 @@ test("dialog styling can load without the confirmation component", () => {
     assert.equal(cacheGroups.confirmDialog.test?.test(styles), false);
     assert.equal(cacheGroups.modalStyles.test?.test(styles), true);
     assert.equal(cacheGroups.confirmDialog.test?.test("/app/src/components/workspace-ui.module.css".replaceAll("/", separator)), false);
+    const actions = "/app/src/components/dialog-actions.tsx".replaceAll("/", separator);
+    assert.deepEqual(Object.entries(cacheGroups).filter(([, group]) => group.test?.test(actions)).map(([name]) => name), ["dialogActions"]);
+    assert.equal(cacheGroups.dialogActions.test?.test("/app/src/components/operation-panel.tsx".replaceAll("/", separator)), false);
+  }
+});
+
+test("repeated account forms, job outcomes and matching styles stay in dedicated shared chunks", () => {
+  const cacheGroups = groups();
+  for (const separator of ["/", "\\"]) {
+    for (const file of ["components/account-phone-panel.tsx", "components/account-closure-panel.tsx", "components/public-info-page.tsx", "components/public-info-page.module.css", "components/token-usage.module.css", "app/projects/[projectId]/project-support.module.css"]) {
+      const resource = `/app/src/${file}`.replaceAll("/", separator);
+      assert.deepEqual(Object.entries(cacheGroups).filter(([, group]) => group.test?.test(resource)).map(([name]) => name), ["sharedPresentation"]);
+    }
+    assert.equal(cacheGroups.jobOutcome.test?.test("/app/src/lib/project-job-outcome-presentation.ts".replaceAll("/", separator)), true);
+    assert.equal(cacheGroups.sharedPresentation.test?.test("/app/src/components/account-phone-panel.test.tsx".replaceAll("/", separator)), false);
   }
 });
 

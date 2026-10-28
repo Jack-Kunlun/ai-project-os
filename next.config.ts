@@ -105,6 +105,11 @@ const nextConfig: NextConfig = {
           reuseExistingChunk: true,
           priority: 40,
         },
+        dialogActions: {
+          test: /[\\/]src[\\/]components[\\/]dialog-actions\.tsx$/,
+          name: "dialog-actions",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
         workspacePresentation: {
           test: /[\\/]src[\\/]components[\\/](?:workspace-dialog\.tsx|workspace-ui\.module\.css)$/,
           name: "workspace-presentation",
@@ -163,8 +168,13 @@ const nextConfig: NextConfig = {
           name: "admin-frame",
           chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
         },
+        jobOutcome: {
+          test: /[\\/]src[\\/]lib[\\/]project-job-outcome-presentation\.ts$/,
+          name: "job-outcome",
+          chunks: "all", minChunks: 2, enforce: true, reuseExistingChunk: true, priority: 40,
+        },
         sharedPresentation: {
-          test: /[\\/]src[\\/](?:components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header)\.tsx|auth-page\.module\.css)|app[\\/]projects[\\/]\[projectId\][\\/](?:memory-quality[\\/]project-memory-quality-client|members[\\/]project-members-client)\.tsx|app[\\/]support-pages\.module\.css)$/,
+          test: /[\\/]src[\\/](?:components[\\/](?:(?:list-pagination|scope-evidence-card|token-usage|parent-page-link|project-parent-link|admin-page-header|account-phone-panel|account-closure-panel|public-info-page)\.tsx|(?:auth-page|token-usage|public-info-page)\.module\.css)|app[\\/]projects[\\/]\[projectId\][\\/](?:(?:memory-quality[\\/]project-memory-quality-client|members[\\/]project-members-client)\.tsx|project-support\.module\.css)|app[\\/]support-pages\.module\.css)$/,
           name(module: { resource?: string }) {
             return `ui-${(module.resource?.split(/[\\/]/).pop() ?? "common").replace(/\.(?:tsx|ts|module\.css)$/u, "")}`;
           },

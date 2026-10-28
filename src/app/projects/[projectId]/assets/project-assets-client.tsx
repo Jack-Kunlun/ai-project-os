@@ -140,6 +140,11 @@ function formatBytes(value: number): string {
   return `${(value / 1024 / 1024).toFixed(1)} MiB`;
 }
 
+function minimumConfiguredLimit(...limits: number[]): number {
+  const configuredLimits = limits.filter((limit) => limit > 0);
+  return configuredLimits.length > 0 ? Math.min(...configuredLimits) : 0;
+}
+
 function formatDate(value: string, language: "zh-CN" | "en"): string {
   return formatUiDateTime(new Date(value), language, { dateStyle: "medium", timeStyle: "short" });
 }
@@ -171,8 +176,9 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   const [uploading, setUploading] = useState(false);
   const [factSourceIds, setFactSourceIds] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [uploadErrors, setUploadErrors] = useState<Array<{ name: string; message: string }>>([]);
+  const [uploadErrors, setUploadErrors] = useState<Array<{ file: File; name: string; message: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [recognizing, setRecognizing] = useState<Record<string, boolean>>({});
   const [processingJobIds, setProcessingJobIds] = useState<Record<string, string | undefined>>({});
@@ -278,17 +284,18 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
   }
 
   function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
+    if (uploading) {
+      event.target.value = "";
+      return;
+    }
     setUploadErrors([]);
     const selected = Array.from(event.target.files ?? []);
+    event.target.value = "";
     const { accepted, unsupported, excess } = selectSupportedProjectAssetFiles(selected, policy.maxFiles);
     setFiles(accepted);
-    const notices: string[] = [];
-    if (unsupported.length > 0) {
-      const names = unsupported.slice(0, 3).map((file) => file.name).join("、");
-      notices.push(`已跳过 ${unsupported.length} 个不支持的文件：${names}${unsupported.length > 3 ? "等" : ""}。`);
-    }
-    if (excess.length > 0) notices.push(`单次最多选择 ${policy.maxFiles} 个受支持文件，已保留前 ${policy.maxFiles} 个。`);
-    setMessage(notices.length > 0 ? notices.join(" ") : accepted.length > 0 ? `已选择 ${accepted.length} 个受支持文件。` : null);
+    setMessage(unsupported.length > 0 || excess.length > 0
+      ? "已跳过不支持或超出数量上限的文件，请核对待上传列表。"
+      : null);
   }
 
   async function upload() {
@@ -299,7 +306,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
     setUploadErrors([]);
     const readySourceIds: string[] = [];
     const pendingParsing: string[] = [];
-    const failures: Array<{ name: string; message: string }> = [];
+    const failures: Array<{ file: File; name: string; message: string }> = [];
     const parseFailures: string[] = [];
     for (const file of files) {
       try {
@@ -311,10 +318,10 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
         readySourceIds.push(...(readiness?.asset.segments ?? []).flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : []));
         if (readiness?.asset.status === "failed") parseFailures.push(file.name);
       } catch (uploadError) {
-        failures.push({ name: file.name, message: uploadError instanceof Error ? uploadError.message : "上传失败" });
+        failures.push({ file, name: file.name, message: uploadError instanceof Error ? uploadError.message : "上传失败" });
       }
     }
-    setFiles([]);
+    setFiles(failures.map((failure) => failure.file));
     setUploadErrors(failures);
     setFactSourceIds([...new Set(readySourceIds)]);
     setMessage(failures.length === 0
@@ -480,6 +487,9 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
     }
   }
 
+  const maxSingleFileBytes = minimumConfiguredLimit(policy.maxFileBytes, policy.maxRequestBytes);
+  const maxImageFileBytes = minimumConfiguredLimit(policy.maxImageBytes, maxSingleFileBytes);
+
   return (
     <main className={supportStyles.supportPage}>
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="assets" isSystemAdmin={isSystemAdmin} />
@@ -496,20 +506,67 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
         {error ? <div role="alert" className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
         {message ? <div role="status" className="mb-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-800"><UiFeedbackText text={message} /></div> : null}
 
-        <OperationPanel title={translateUi("导入文件并整理事实")} triggerLabel="导入文件或文件夹">
+        <OperationPanel title={translateUi("导入项目文件")} triggerLabel="导入文件或文件夹" open={importOpen} onOpenChange={setImportOpen}>
+          <DialogActions className="w-full">
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
+              <p className="text-xs text-slate-500 sm:mr-auto">{files.length > 0 ? <><strong className="font-semibold text-slate-800">{files.length}</strong> <UiText text={"个文件待上传"} /></> : <UiText text={"尚未选择文件"} />}</p>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setImportOpen(false)} disabled={uploading} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"><UiText text={"取消"} /></button>
+                <button type="button" onClick={() => void upload()} disabled={uploading || files.length === 0} className="inline-flex h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? <UiText text={"上传并解析中…"} /> : <UiText text={"上传并解析"} />}</button>
+              </div>
+            </div>
+          </DialogActions>
           {error ? <p role="alert" className="mb-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
-          {uploadErrors.length > 0 ? <ul className="mb-4 space-y-3 text-sm text-rose-700">{uploadErrors.map((failure, index) => <li key={`${index}:${failure.name}`} className="break-words border-b border-slate-200 pb-3"><p className="font-semibold">{failure.name}</p><p><UiErrorText text={failure.message} /></p></li>)}</ul> : null}
+          {uploadErrors.length > 0 ? <ul className="mb-4 space-y-3 text-sm text-rose-700">{uploadErrors.map((failure, index) => <li key={`${index}:${failure.name}`} className="break-words border-b border-rose-100 pb-3"><p className="font-semibold">{failure.name}</p><p><UiErrorText text={failure.message} /></p></li>)}</ul> : null}
           {message ? <p role="status" className="mb-4 text-sm text-indigo-700"><UiFeedbackText text={message} /></p> : null}
-          <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div><p className="text-xs leading-6 text-slate-500"><UiText text={"单文件大小："} />{policy.maxFileBytes > 0 ? formatBytes(policy.maxFileBytes) : <UiText text={"不限"} />}<UiText text={"；图片大小："} />{policy.maxImageBytes > 0 ? formatBytes(policy.maxImageBytes) : <UiText text={"不限"} />}<UiText text={"。图片像素和文档解析仍有处理上限；单次最多选择"} />{" "}{policy.maxFiles}<UiText text={"个文件。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP。"} /></p><div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 px-6 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><input type="file" multiple onChange={chooseFiles} className="sr-only" /><span>{files.length > 0 ? `已选择 ${files.length} 个文件` : <UiText text={"选择一个或多个文件"} />}</span></label><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 px-6 text-center text-sm font-semibold text-violet-700 hover:bg-violet-50"><input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} className="sr-only" /><span><UiText text={"选择整个本地文件夹"} /></span></label></div>{files.length > 0 ? <p className="mt-3 line-clamp-2 text-xs text-slate-500">{files.map((file) => file.webkitRelativePath || file.name).join("、")}</p> : null}<p className="mt-4 text-xs leading-5 text-slate-500"><UiText text={"文件逐个流式上传；容量预算仍按项目"} />{" "}{formatBytes(policy.maxProjectBytes)}<UiText text={"、工作区"} />{" "}{formatBytes(policy.maxWorkspaceBytes)}<UiText text={"、部署"} />{" "}{formatBytes(policy.maxDeploymentBytes)}<UiText text={"、活动文件"} />{" "}{policy.maxProjectAssets} {" "}<UiText text={"以及保留对象"} />{" "}{policy.maxProjectRetainedObjects} / {policy.maxWorkspaceRetainedObjects} / {policy.maxDeploymentRetainedObjects} {" "}<UiText text={"限制；每用户每分钟最多"} />{" "}{policy.maxUploadsPerMinute} {" "}<UiText text={"次请求，同时最多"} />{" "}{policy.maxConcurrentUploads} {" "}<UiText text={"个，整套部署同时最多"} />{" "}{policy.maxGlobalConcurrentUploads} {" "}<UiText text={"个上传。"} /></p></div>
-            <DialogActions><button type="button" onClick={() => void upload()} disabled={uploading || files.length === 0} className="app-action-button app-action-button--compact justify-self-end rounded-xl bg-indigo-600 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? <UiText text={"上传并解析中…"} /> : <UiText text={"上传并解析"} />}</button></DialogActions>
-          </div>
-          <div className="mt-6 grid gap-3 border-t border-slate-100 pt-5 text-xs text-slate-500 sm:grid-cols-2 lg:grid-cols-3">
-            <QuotaStat label={translateUi("项目已用")} value={`${formatBytes(Number(usage.projectBytes))} / ${formatBytes(policy.maxProjectBytes)}`} />
-            <QuotaStat label={translateUi("工作区上限（实际用量仅服务端校验）")} value={formatBytes(policy.maxWorkspaceBytes)} />
-            <QuotaStat label={translateUi("部署上限（实际用量仅服务端校验）")} value={formatBytes(policy.maxDeploymentBytes)} />
-            <QuotaStat label={translateUi("活动文件 / 进行中")} value={`${usage.activeAssetCount} / ${policy.maxProjectAssets} · ${usage.activeUploads} / ${policy.maxConcurrentUploads}`} />
-            <QuotaStat label={translateUi("项目保留对象")} value={`${usage.retainedObjectCount} / ${policy.maxProjectRetainedObjects}`} />
+          <div className="space-y-5">
+            <div>
+              <p className="text-sm leading-6 text-slate-600"><UiText text={"可一次选择多个文件，也可以选择整个文件夹。单次最多选择"} />{" "}{policy.maxFiles} <UiText text={"个文件。"} /></p>
+            </div>
+
+            <section className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className={`flex min-h-12 cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:ring-offset-2 ${uploading ? "cursor-not-allowed opacity-50" : ""}`}>
+                  <input type="file" multiple onChange={chooseFiles} disabled={uploading} className="sr-only" />
+                  <UiText text={"选择文件"} />
+                </label>
+                <label className={`flex min-h-12 cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:ring-offset-2 ${uploading ? "cursor-not-allowed opacity-50" : ""}`}>
+                  <input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} disabled={uploading} className="sr-only" />
+                  <UiText text={"选择文件夹"} />
+                </label>
+              </div>
+
+              {files.length > 0 ? <section aria-label={translateUi("待上传文件")} className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+                  <h4 className="text-xs font-semibold text-slate-800"><UiText text={"待上传文件"} /> ({files.length})</h4>
+                  <button type="button" onClick={() => { setFiles([]); setUploadErrors([]); setMessage(null); }} disabled={uploading} className="text-xs font-semibold text-slate-500 underline underline-offset-4 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"><UiText text={"清空选择"} /></button>
+                </div>
+                <ul className="max-h-56 divide-y divide-slate-100 overflow-y-auto">
+                  {files.map((file, index) => <li key={`${file.name}:${file.size}:${file.lastModified}:${index}`} className="flex min-w-0 items-center gap-3 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p title={file.webkitRelativePath || file.name} className="break-all text-xs font-medium leading-5 text-slate-800">{file.webkitRelativePath || file.name}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">{formatBytes(file.size)}</p>
+                    </div>
+                    <button type="button" onClick={() => { setFiles((current) => current.filter((_, currentIndex) => currentIndex !== index)); setUploadErrors((current) => current.filter((failure) => failure.file !== file)); }} disabled={uploading} className="shrink-0 text-xs font-semibold text-slate-500 underline underline-offset-4 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"><UiText text={"移除"} /></button>
+                  </li>)}
+                </ul>
+              </section> : null}
+
+              <details className="mt-4 rounded-xl border border-slate-200 bg-white">
+                <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"格式与容量说明"} /></summary>
+                <div className="border-t border-slate-100 px-4 py-4">
+                  <dl className="grid gap-x-5 gap-y-4 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-3">
+                    <div><dt className="font-medium text-slate-500"><UiText text={"支持格式"} /></dt><dd className="mt-1 break-words text-slate-800">TXT · Markdown (.md, .markdown) · JSON · CSV · PDF · DOCX · PPTX · XLSX · PNG · JPEG (.jpg, .jpeg) · WebP</dd></div>
+                    <div><dt className="font-medium text-slate-500"><UiText text={"单次最多选择"} /></dt><dd className="mt-1 text-slate-800">{policy.maxFiles} <UiText text={"个文件"} /></dd></div>
+                    <div><dt className="font-medium text-slate-500"><UiText text={"单个文件上限"} /></dt><dd className="mt-1 text-slate-800">{maxSingleFileBytes > 0 ? formatBytes(maxSingleFileBytes) : <UiText text={"不限"} />}</dd></div>
+                    <div><dt className="font-medium text-slate-500"><UiText text={"图片文件上限"} /></dt><dd className="mt-1 text-slate-800">{maxImageFileBytes > 0 ? formatBytes(maxImageFileBytes) : <UiText text={"不限"} />}</dd></div>
+                    <div><dt className="font-medium text-slate-500"><UiText text={"项目空间已用"} /></dt><dd className="mt-1 text-slate-800">{formatBytes(Number(usage.projectBytes))} / {formatBytes(policy.maxProjectBytes)}</dd></div>
+                    <div><dt className="font-medium text-slate-500"><UiText text={"项目文件数量"} /></dt><dd className="mt-1 text-slate-800">{usage.activeAssetCount} / {policy.maxProjectAssets}</dd></div>
+                  </dl>
+                  <p className="mt-4 border-t border-slate-100 pt-3 text-xs leading-5 text-slate-500"><UiText text={"图片或扫描件需要确认后再识别；复杂文件可能受解析能力限制。上传后可在文件列表查看每个文件的处理状态。"} /></p>
+                </div>
+              </details>
+            </section>
           </div>
           <div className={factSourceIds.length > 0 ? "mt-5" : undefined}><ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={reload} /></div>
         </OperationPanel>
@@ -533,8 +590,4 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
       </div>
     </main>
   );
-}
-
-function QuotaStat({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl bg-slate-50 px-3 py-3"><p className="font-semibold text-slate-700">{value}</p><p className="mt-1 text-[12px] text-slate-400">{label}</p></div>;
 }

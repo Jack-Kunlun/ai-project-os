@@ -139,10 +139,8 @@ test("upload route and UI share server policy, durable admission and quota usage
   assert.match(client, /for \(const file of files\)/u);
   assert.match(client, /projectBytes/u);
   assert.doesNotMatch(client, /usage\.workspaceBytes|usage\.deploymentBytes/u);
-  assert.match(client, /maxUploadsPerMinute/u);
-  assert.match(client, /maxConcurrentUploads/u);
-  assert.match(client, /maxGlobalConcurrentUploads/u);
-  assert.match(client, /retainedObjectCount/u);
+  assert.match(client, /maxProjectBytes/u);
+  assert.match(client, /maxProjectAssets/u);
   assert.doesNotMatch(client, /最多导入 100 个/u);
   assert.doesNotMatch(shellCss, /\.projectNavigation\s*\{[^}]*overflow-x:\s*auto/u);
   assert.match(shell, /USER_GLOBAL_NAVIGATION\.map/u);

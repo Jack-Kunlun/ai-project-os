@@ -552,7 +552,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
                 </ul>
               </section> : null}
 
-              <details className="mt-4 rounded-xl border border-slate-200 bg-white">
+              <details open className="mt-4 rounded-xl border border-slate-200 bg-white">
                 <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"格式与容量说明"} /></summary>
                 <div className="border-t border-slate-100 px-4 py-4">
                   <dl className="grid gap-x-5 gap-y-4 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-3">

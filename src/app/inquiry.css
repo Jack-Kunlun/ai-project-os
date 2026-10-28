@@ -32,7 +32,7 @@
 /* Assistance belongs with secondary footer actions, leaving the title and close clear. */
 .inquiry-operation-footer{flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:8px;border-top:1px solid var(--app-border);padding:12px 24px;background:var(--app-surface)}
 [data-inquiry-footer]{display:flex;align-items:center;flex-wrap:wrap}
-.inquiry-launcher.in-operation-launcher{position:static;flex:0 0 auto;min-height:36px;margin-right:auto;border:1px solid transparent;border-radius:6px;padding:7px 10px;background:transparent;color:var(--app-muted);box-shadow:none;font-size:12px;line-height:20px}
+.inquiry-launcher.in-operation-launcher{position:static;flex:0 0 auto;min-height:40px;margin-right:auto;border:1px solid transparent;border-radius:6px;padding:7px 10px;background:transparent;color:var(--app-muted);box-shadow:none;font-size:12px;line-height:20px}
 .inquiry-launcher.in-operation-launcher:hover{background:var(--app-surface-soft);color:var(--app-link)}
 .inquiry-launcher.in-operation-launcher:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}
 .inquiry-launcher.in-operation-launcher.is-dragged-operation{position:fixed;z-index:56;flex:0 0 auto;min-height:40px;margin:0;border:1px solid var(--app-accent);border-radius:8px;padding:11px 15px;color:var(--app-on-accent);background:var(--app-accent);box-shadow:0 5px 20px #18386926;font-size:13px;line-height:normal;cursor:grab;touch-action:none}

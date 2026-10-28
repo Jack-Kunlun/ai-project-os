@@ -183,24 +183,23 @@ button:not(:disabled) {
   margin-inline: 0;
 }
 
-/* Operation content scrolls independently from inquiry and primary actions. */
-[data-operation-footer][data-inquiry-footer] {
+/* Operation content scrolls independently; assistance shares the action footer. */
+[data-operation-footer] {
   display: flex;
   flex: 0 0 auto;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  padding: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
 }
 
 [data-operation-footer] > [data-operation-actions] {
   display: flex;
+  flex: 1 1 0;
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 12px 24px;
 }
 
 [data-operation-footer] > [data-operation-actions]:empty {
@@ -209,7 +208,7 @@ button:not(:disabled) {
 
 [data-dialog-footer-actions] {
   display: flex;
-  width: 100%;
+  flex: 1 1 0;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
@@ -225,7 +224,8 @@ button:not(:disabled) {
 
 @media (max-width: 700px) {
   [data-operation-surface] > :is([data-operation-header], [data-operation-content]) { padding-inline: 20px; }
-  [data-operation-footer] > [data-operation-actions] { padding: 10px 20px; }
+  [data-operation-footer] { padding: 10px 20px; }
+  :is([data-operation-footer], [data-dialog-footer])[data-inquiry-footer] { align-items: flex-end; }
 }
 
 .page-back-nav {

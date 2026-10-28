@@ -75,6 +75,10 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(1);
     const body=await dialog.locator("[data-operation-content]").boundingBox(),entry=await launcher.boundingBox();
     expect(entry!.y).toBeGreaterThanOrEqual(body!.y+body!.height);
+    await expect.poll(async()=>{
+      const ask=await launcher.boundingBox(),action=await workItemAction.boundingBox();
+      return ask&&action?Math.abs(ask.y+ask.height/2-action.y-action.height/2):Infinity;
+    },{message:'assistance and primary action must share the footer row'}).toBeLessThanOrEqual(2);
     await expectIconLabelAlignment(dialog,name);
     await expectR02NoHorizontalOverflow(page,name);
     await expectR02NoAccessibilityViolations(page,name);
@@ -199,6 +203,28 @@ test("operation assistance stays in the secondary footer and icons align with re
     await expect(restoredAsk).toBeVisible();
     await restoredAsk.getByRole('textbox',{name:en?'Your question':'输入问题',exact:true}).press('Escape');
     await expect(restoredAsk).toBeHidden();
+    await page.goto(`/projects/${project.id}/assets`);
+    await page.getByRole('button',{name:en?'Import files or a folder':'导入文件或文件夹',exact:true}).click();
+    const importer=page.getByRole('dialog',{name:en?'Import project files':'导入项目文件',exact:true});
+    const importFooter=importer.locator('[data-inquiry-footer]');
+    const importAsk=importFooter.locator('.inquiry-launcher');
+    const importAction=importFooter.getByRole('button',{name:en?'Upload and parse':'上传并解析',exact:true});
+    const importDetails=importer.locator('[data-operation-content] details');
+    await expect(importDetails).toHaveAttribute('open','');
+    for(const selected of [false,true]){
+      if(selected){
+        await importer.locator('input[type=file]').first().setInputFiles({name:'footer-layout.txt',mimeType:'text/plain',buffer:Buffer.from('Footer layout fixture')});
+      }
+      await expect(importDetails).toHaveAttribute('open','');
+      await expect(importAsk).toBeVisible();
+      await expect.poll(async()=>{
+        const ask=await importAsk.boundingBox(),action=await importAction.boundingBox();
+        return ask&&action?Math.abs(ask.y+ask.height/2-action.y-action.height/2):Infinity;
+      },{message:'import assistance must not occupy a separate footer row'}).toBeLessThanOrEqual(2);
+      await expectR02NoHorizontalOverflow(page,`import footer ${name} selected=${selected}`);
+    }
+    await importFooter.getByRole('button',{name:en?'Cancel':'取消',exact:true}).click();
+    await expect(importer).toHaveCount(0);
     expect(unexpectedWrites,'opening, closing and navigating must not submit the business draft').toEqual([]);
   }
 });

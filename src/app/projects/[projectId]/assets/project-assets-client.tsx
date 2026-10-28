@@ -545,7 +545,7 @@ export function ProjectAssetsClient({ username, isSystemAdmin }: { username: str
                   {files.map((file, index) => <li key={`${file.name}:${file.size}:${file.lastModified}:${index}`} className="flex min-w-0 items-center gap-3 px-4 py-3">
                     <div className="min-w-0 flex-1">
                       <p title={file.webkitRelativePath || file.name} className="break-all text-xs font-medium leading-5 text-slate-800">{file.webkitRelativePath || file.name}</p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">{formatBytes(file.size)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{formatBytes(file.size)}</p>
                     </div>
                     <button type="button" onClick={() => { setFiles((current) => current.filter((_, currentIndex) => currentIndex !== index)); setUploadErrors((current) => current.filter((failure) => failure.file !== file)); }} disabled={uploading} className="shrink-0 text-xs font-semibold text-slate-500 underline underline-offset-4 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"><UiText text={"移除"} /></button>
                   </li>)}

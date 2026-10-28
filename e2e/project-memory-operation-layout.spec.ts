@@ -42,7 +42,7 @@ async function cleanupProject(projectId: string, owner: BrowserPersonalUser): Pr
   await deleteArchivedProject({ projectId, actor, confirmationName: archived.name, expectedUpdatedAt: archived.updatedAt }, db);
 }
 
-test("select all project sources, review the complete scope, and keep confirmation visible below inquiry", async ({ page }) => {
+test("select all project sources, review the complete scope, and keep confirmation beside inquiry", async ({ page }) => {
   await page.setViewportSize({ width: 1265, height: 720 });
   await signInR02Admin(page);
   const owner = await seedBrowserPersonalUser(`browser-memory-layout-${randomUUID().slice(0, 8)}`, "BrowserMemoryLayout2026Password!");
@@ -120,19 +120,22 @@ test("select all project sources, review the complete scope, and keep confirmati
     await expect(confirm).toBeVisible();
     await expect(confirm).toBeInViewport();
     await expect(inquiry).toBeVisible();
-    const [inquiryBox, confirmBox] = await Promise.all([inquiry.boundingBox(), confirm.boundingBox()]);
-    if (inquiryBox === null || confirmBox === null) throw new Error("OPERATION_PANEL_FOOTER_BOUNDS_MISSING");
-    expect(inquiryBox.y + inquiryBox.height).toBeLessThanOrEqual(confirmBox.y + 1);
+    const expectFooterRow = async () => {
+      await expect.poll(async () => {
+        const [inquiryBox, confirmBox] = await Promise.all([inquiry.boundingBox(), confirm.boundingBox()]);
+        return inquiryBox && confirmBox
+          ? Math.abs(inquiryBox.y + inquiryBox.height / 2 - confirmBox.y - confirmBox.height / 2)
+          : Infinity;
+      }, { message: "assistance and confirmation must share the footer row" }).toBeLessThanOrEqual(2);
+    };
+    await expectFooterRow();
     await dialog.locator("[data-operation-content]").evaluate((element) => { element.scrollTop = element.scrollHeight; });
     await expect(confirm).toBeInViewport();
     expect(executed).toHaveLength(0);
     await page.screenshot({ path: "test-results/ui-layout-polish/materials-footer-desktop.png" });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(confirm).toBeInViewport();
-    const [mobileInquiry, mobileConfirm] = await Promise.all([inquiry.boundingBox(), confirm.boundingBox()]);
-    expect(mobileInquiry).not.toBeNull();
-    expect(mobileConfirm).not.toBeNull();
-    expect(mobileInquiry!.y + mobileInquiry!.height).toBeLessThanOrEqual(mobileConfirm!.y + 1);
+    await expectFooterRow();
     await page.screenshot({ path: "test-results/ui-layout-polish/materials-footer-mobile.png" });
     await dialog.getByRole("button", { name: "返回选择", exact: true }).click();
     await expect(sources.locator("input[type=checkbox]:checked")).toHaveCount(12);

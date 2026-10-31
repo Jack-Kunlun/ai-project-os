@@ -56,3 +56,29 @@ test("membership preview recovery retains only its two stable failure codes", as
     assert.doesNotMatch(result.message, /private database/u);
   }
 });
+
+test("provider probe failures explain each reviewed cause without exposing provider prose", () => {
+  for (const [suffix, reason] of [
+    ["BUDGET_REQUIRED", /没有生效.*已过期/u],
+    ["BUDGET_EXHAUSTED", /额度不足/u],
+    ["PROVIDER_AUTH_FAILED", /凭据无效或权限不足/u],
+    ["PROVIDER_RATE_LIMITED", /限流或配额不足/u],
+    ["PROVIDER_REJECTED", /拒绝/u],
+    ["PROVIDER_TIMEOUT", /超时/u],
+    ["PROVIDER_UNAVAILABLE", /不可用/u],
+    ["PROVIDER_INVALID_RESPONSE", /无法验证/u],
+    ["PROVIDER_RESPONSE_TOO_LARGE", /超过.*限制/u],
+    ["PROVIDER_EMBEDDING_UNSUPPORTED", /不支持.*向量/u],
+    ["PROVIDER_VISION_UNSUPPORTED", /不支持.*协议/u],
+    ["RECONCILIATION_REQUIRED", /未知/u],
+    ["RECONCILIATION_HOLD", /待核对/u],
+  ] as const) {
+    const code = `PLATFORM_PROVIDER_PROBE_${suffix}`;
+    const result = safeErrorPresentation({ error: { code, message: "secret=private-provider-key" } }, "供应商连接测试未通过");
+    assert.equal(result.code, code);
+    assert.match(result.summary, reason);
+    assert.ok(result.nextStep.length > 0);
+    assert.doesNotMatch(result.message, /private-provider-key|secret=/u);
+    if (suffix.startsWith("RECONCILIATION_")) assert.match(result.nextStep, /先核对/u);
+  }
+});

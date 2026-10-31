@@ -17,7 +17,7 @@ import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-act
 import { PlatformOperationAssignments } from "./platform-operation-assignments";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { ShellIcon } from "@/components/shell-icon";
-import { safeResponseError } from "@/lib/safe-error-presentation";
+import { safeErrorPresentation, safeResponseError, type SafeErrorPresentation } from "@/lib/safe-error-presentation";
 
 type ProviderKind = "openai" | "deepseek" | "qwen" | "glm";
 type ProviderCatalogEntry = {
@@ -337,9 +337,12 @@ function ProviderCreateForm({
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [proof, setProof] = useState<{ draftProbeId: string; createRequestKey: string } | null>(null);
+  const [failure, setFailure] = useState<SafeErrorPresentation | null>(null);
 
   function clearProof() {
     setProof(null);
+    setMessage(null);
+    setFailure(null);
   }
 
   function chooseKind(nextKind: ProviderKind) {
@@ -367,6 +370,8 @@ function ProviderCreateForm({
     setPending(true);
     onPendingChange(true);
     setMessage(null);
+    setFailure(null);
+    setProof(null);
     try {
       const response = await fetch("/api/settings/providers/draft-probe", {
         method: "POST",
@@ -382,14 +387,20 @@ function ProviderCreateForm({
           embeddingDimensions: embeddingEnabled ? Number(embeddingDimensions) : null,
         }),
       });
-      if (!response.ok) throw new Error(await readError(response, "供应商连接测试失败"));
+      if (!response.ok) {
+        setFailure(await safeResponseError(response, "供应商连接测试失败"));
+        return;
+      }
       const payload = await response.json() as { draftProbeId: string | null; attempt: { safeErrorCode: string | null } };
-      if (payload.draftProbeId === null) throw new Error(payload.attempt.safeErrorCode ?? "供应商连接测试未通过");
+      if (typeof payload?.draftProbeId !== "string" || payload.draftProbeId.length === 0) {
+        setFailure(safeErrorPresentation({ error: { code: payload?.attempt?.safeErrorCode } }, "供应商连接测试未通过"));
+        return;
+      }
       setProof({ draftProbeId: payload.draftProbeId, createRequestKey });
       setMessage("真实连接测试通过；现在可以保存为已验证连接。 ");
-    } catch (testError) {
+    } catch {
       setProof(null);
-      setMessage(testError instanceof Error ? testError.message : "供应商连接测试失败");
+      setFailure(safeErrorPresentation(null, "未能取得连接测试结果，请检查网络后重试。"));
     } finally {
       setPending(false);
       onPendingChange(false);
@@ -405,6 +416,7 @@ function ProviderCreateForm({
     setPending(true);
     onPendingChange(true);
     setMessage(null);
+    setFailure(null);
     try {
       const response = await fetch("/api/settings/providers", {
         method: "POST",
@@ -421,14 +433,17 @@ function ProviderCreateForm({
           createRequestKey: proof.createRequestKey,
         }),
       });
-      if (!response.ok) throw new Error(await readError(response, "供应商创建失败"));
+      if (!response.ok) {
+        setFailure(await safeResponseError(response, "供应商创建失败"));
+        return;
+      }
       const payload = await response.json() as { provider: Provider };
       onCreated(payload.provider);
       setApiKey("");
       setProof(null);
       setMessage("连接已保存并标记为已验证。 ");
-    } catch (submitError) {
-      setMessage(submitError instanceof Error ? submitError.message : "供应商创建失败");
+    } catch {
+      setFailure(safeErrorPresentation(null, "供应商创建失败"));
     } finally {
       setPending(false);
       onPendingChange(false);
@@ -463,6 +478,12 @@ function ProviderCreateForm({
         </details>
       </div>
       <footer className={`${modalFooterClassName} grid shrink-0 gap-3 px-5 py-4 sm:grid-cols-2 sm:px-6`}>
+        {failure ? <div role="alert" className="min-w-0 space-y-1 break-words rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-800 sm:col-span-2">
+          <p className="font-semibold">{t(failure.summary)}</p>
+          <p>{t(failure.nextStep)}</p>
+          {failure.code ? <p className="[overflow-wrap:anywhere]">{t("安全错误码")}：{failure.code}</p> : null}
+          {failure.code?.startsWith("PLATFORM_PROVIDER_PROBE_BUDGET_") ? <a href="/admin/operations/probes" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center font-semibold underline underline-offset-2">{t("调整测试额度")}</a> : null}
+        </div> : null}
         {message ? <p className="text-xs leading-5 text-slate-600 sm:col-span-2" role="status"><UiFeedbackText text={message} /></p> : null}
         <button type="button" onClick={() => void testConnection()} disabled={pending || catalog.length === 0 || apiKey.trim().length < 8} className="rounded-md border border-indigo-200 px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("处理中…") : t("测试连接")}</button><button disabled={pending || catalog.length === 0 || proof === null} className="rounded-md bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("保存中…") : t("保存连接")}</button>
       </footer>

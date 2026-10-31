@@ -6,6 +6,19 @@ import { englishUiMessages } from "../src/lib/ui-dictionary-source";
 
 const messages = { "项目搜索失败": "Project search failed" };
 
+test("provider failures retain their cause, recovery guidance and code in both languages", async () => {
+  for (const suffix of ["BUDGET_REQUIRED", "BUDGET_EXHAUSTED", "PROVIDER_AUTH_FAILED", "PROVIDER_RATE_LIMITED", "PROVIDER_TIMEOUT", "PROVIDER_INVALID_RESPONSE", "PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_TOO_LARGE", "PROVIDER_EMBEDDING_UNSUPPORTED", "PROVIDER_VISION_UNSUPPORTED", "RECONCILIATION_REQUIRED", "RECONCILIATION_HOLD"]) {
+    const code = `PLATFORM_PROVIDER_PROBE_${suffix}`;
+    const failure = await safeResponseError(new Response(JSON.stringify({ error: { code, message: "private-key" } })), "供应商连接测试失败");
+    assert.ok(Object.hasOwn(englishUiMessages, failure.summary), failure.summary);
+    assert.ok(Object.hasOwn(englishUiMessages, failure.nextStep), failure.nextStep);
+    assert.equal(translateUiErrorText(failure.message, "zh-CN", englishUiMessages), failure.message);
+    const english = translateUiErrorText(failure.message, "en", englishUiMessages);
+    assert.match(english, new RegExp(code));
+    assert.doesNotMatch(english, /\p{Script=Han}|private-key|current status/u);
+  }
+});
+
 test("file upload guidance retains its reviewed reason and code in both languages", async () => {
   const error = await safeResponseError(new Response(JSON.stringify({ error: { code: "ASSET_FILE_SIGNATURE_INVALID", message: "private file internals" } }), { status: 422 }), "上传失败");
   assert.match(translateUiErrorText(error.message, "zh-CN", englishUiMessages), /实际内容不一致.*ASSET_FILE_SIGNATURE_INVALID/u);

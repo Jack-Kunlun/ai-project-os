@@ -608,7 +608,8 @@ def app_worker_pin_file(app_image_id: str, worker_image_id: str) -> Path:
 def recreate_app_worker(app_image_id: str, worker_image_id: str) -> None:
     pin_path = app_worker_pin_file(app_image_id, worker_image_id)
     try:
-        compose_command('up', '-d', '--no-deps', '--no-build', '--force-recreate', 'app', 'worker',
+        compose_command('up', '-d', '--no-deps', '--no-build', '--force-recreate',
+                        '--wait', '--wait-timeout', '300', 'app', 'worker',
                         pin_file=pin_path, timeout=900, code='APP_WORKER_RECREATE_FAILED')
     finally:
         try:
@@ -626,7 +627,7 @@ def validate_compose_files() -> None:
 
 
 def _container_ids(service: str) -> list[str]:
-    raw = command_text([DOCKER, 'ps', '-aq', '--filter', f'label=com.docker.compose.project={PROJECT}',
+    raw = command_text([DOCKER, 'ps', '-aq', '--no-trunc', '--filter', f'label=com.docker.compose.project={PROJECT}',
                         '--filter', f'label=com.docker.compose.service={service}'],
                        timeout=60, code='DOCKER_CONTAINER_LIST_FAILED')
     ids = [line for line in raw.splitlines() if line]

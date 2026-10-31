@@ -129,6 +129,24 @@ class EnvironmentRollback(unittest.TestCase):
 
 
 class ConfigurationAndRuntimeContract(unittest.TestCase):
+    def test_container_query_requests_full_id_before_identity_validation(self):
+        identity = 'a' * 64
+
+        def docker_output(command, **kwargs):
+            self.assertIn(f'label=com.docker.compose.project={m.PROJECT}', command)
+            self.assertIn('label=com.docker.compose.service=app', command)
+            return identity if '--no-trunc' in command else identity[:12]
+
+        with patch.object(m, 'command_text', side_effect=docker_output):
+            self.assertEqual(m._container_ids('app'), [identity])
+
+    def test_container_query_still_rejects_missing_ambiguous_or_short_ids(self):
+        for output in ('', 'a' * 12, 'a' * 64 + '\n' + 'b' * 64, 'z' * 64):
+            with self.subTest(output=output), \
+                    patch.object(m, 'command_text', return_value=output), \
+                    self.assertRaisesRegex(m.InstallerError, 'CONTAINER_IDENTITY_INVALID'):
+                m._container_ids('app')
+
     def test_mihomo_config_is_a_private_openai_only_listener(self):
         config = json.loads(m.build_mihomo_config(node()['node'], '172.20.0.1', 17890,
                                                   'u' * 24, 'p' * 48))
@@ -164,8 +182,10 @@ class ConfigurationAndRuntimeContract(unittest.TestCase):
             m.recreate_app_worker(app, worker)
         pin_file.assert_called_once_with(app, worker)
         self.assertEqual(compose.call_args.args,
-                         ('up', '-d', '--no-deps', '--no-build', '--force-recreate', 'app', 'worker'))
+                         ('up', '-d', '--no-deps', '--no-build', '--force-recreate',
+                          '--wait', '--wait-timeout', '300', 'app', 'worker'))
         self.assertEqual(compose.call_args.kwargs['pin_file'], Path('/private/pin.yaml'))
+        self.assertGreater(compose.call_args.kwargs['timeout'], 300)
         self.assertNotIn('build', compose.call_args.args)
 
     def test_health_and_unrelated_container_identity_checks_are_exact(self):

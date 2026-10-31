@@ -1,5 +1,6 @@
 import type { AiOperation, AiProviderConnection } from "@prisma/client";
 import { CredentialVaultError, readCredentialSecret } from "@/lib/credential-vault";
+import { prepareModelProviderFetch } from "@/lib/model-provider-http";
 
 /** Upper bound used for one provider HTTP request when no earlier deadline applies. */
 export const PROVIDER_REQUEST_TIMEOUT_MS = 45_000;
@@ -94,11 +95,28 @@ function safeRequestId(response: Response): string | null {
   return value !== null && /^[\x20-\x7e]{1,256}$/.test(value) ? value : null;
 }
 
+function isAbortError(error: unknown): boolean {
+  return (error instanceof DOMException && error.name === "AbortError") ||
+    (typeof error === "object" && error !== null && "name" in error && error.name === "AbortError");
+}
+
+function cancelResponseBody(response: Response): void {
+  if (response.body === null) return;
+  try {
+    // Start stream cancellation without waiting on an arbitrary underlying
+    // cancel hook; cleanup must not delay or replace the classified error.
+    void response.body.cancel().catch(() => {});
+  } catch {
+    // Cancellation is best effort. The safe provider classification wins.
+  }
+}
+
 async function readBoundedJson(response: Response): Promise<unknown> {
   const lengthHeader = response.headers.get("content-length");
   if (lengthHeader !== null) {
     const length = Number(lengthHeader);
     if (!Number.isFinite(length) || length < 0 || length > MAX_RESPONSE_BYTES) {
+      cancelResponseBody(response);
       return fail("AI_PROVIDER_RESPONSE_TOO_LARGE", 502, true);
     }
   }
@@ -130,6 +148,17 @@ async function providerPost(
     ? PROVIDER_REQUEST_TIMEOUT_MS
     : absoluteDeadlineAt.getTime() - Date.now();
   if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
+  const endpoint = `${connection.baseUrl}${path}`;
+  let openAiProxyFetch: ReturnType<typeof prepareModelProviderFetch> = undefined;
+  if (connection.kind === "openai") {
+    try {
+      // Validate the root-only proxy setting before credential or dispatch
+      // fences can mark this OpenAI request as sent.
+      openAiProxyFetch = prepareModelProviderFetch(endpoint);
+    } catch {
+      throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+    }
+  }
   await runProviderBoundary(connection.onBeforeCredentialRead);
   let apiKey: string;
   if (connection.apiKey !== undefined) {
@@ -162,7 +191,7 @@ async function providerPost(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_REQUEST_TIMEOUT_MS, remainingAfterCredential));
   try {
-    const response = await fetch(`${connection.baseUrl}${path}`, {
+    const response = await (openAiProxyFetch ?? fetch)(endpoint, {
       method: "POST",
       redirect: "error",
       signal: controller.signal,
@@ -174,7 +203,10 @@ async function providerPost(
       body: JSON.stringify(body),
     });
     const requestId = safeRequestId(response);
-    if (!response.ok) return mapHttpError(response.status);
+    if (!response.ok) {
+      cancelResponseBody(response);
+      return mapHttpError(response.status);
+    }
     const payload = await readBoundedJson(response);
     if (onVisionUsage !== undefined && typeof payload === "object" && payload !== null) {
       const usage = usageCounts(payload as Record<string, unknown>);
@@ -186,7 +218,7 @@ async function providerPost(
     return Object.freeze({ payload, requestId });
   } catch (error) {
     if (error instanceof ProviderTransportError) throw error;
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (controller.signal.aborted || isAbortError(error)) {
       return fail("AI_PROVIDER_TIMEOUT", 504);
     }
     return fail("AI_PROVIDER_UNAVAILABLE", 502);

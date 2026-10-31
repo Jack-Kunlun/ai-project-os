@@ -7,6 +7,7 @@ import {
 } from "./openai-embeddings-contract";
 import { getIssuedOpenAiAutoExtractPlanSources } from "./openai-responses-contract";
 import type { OpenAiResponsesTransportPlan } from "./openai-responses-contract";
+import { prepareModelProviderFetch } from "../model-provider-http";
 import {
   inspectOpenAiAutoExtractResponse,
   type VerifiedOpenAiAutoExtractResponse,
@@ -122,6 +123,23 @@ function safeProviderRequestId(value: string | null): string | undefined {
     !SECRET_LIKE_PATTERN.test(value)
     ? value
     : undefined;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (error instanceof DOMException && error.name === "AbortError") ||
+    (typeof error === "object" && error !== null && "name" in error && error.name === "AbortError");
+}
+
+function defaultOpenAiFetchImplementation(
+  endpoint: string,
+  injected: FetchImplementation | undefined,
+): FetchImplementation | null {
+  if (injected !== undefined) return injected;
+  try {
+    return prepareModelProviderFetch(endpoint) ?? globalThis.fetch;
+  } catch {
+    return null;
+  }
 }
 
 async function discardBody(response: Response): Promise<void> {
@@ -276,7 +294,7 @@ async function executeOpenAiJsonPost(
         controller.signal.aborted ||
         (error instanceof DOMException && error.name === "TimeoutError")
           ? "timeout"
-          : error instanceof DOMException && error.name === "AbortError"
+          : isAbortError(error)
             ? "abort"
             : "connection";
       return {
@@ -310,7 +328,7 @@ async function executeOpenAiJsonPost(
         providerRequestId,
       };
     } catch (error: unknown) {
-      const kind = controller.signal.aborted
+      const kind = controller.signal.aborted || isAbortError(error)
         ? "timeout"
         : error instanceof AiRuntimeServiceError
           ? "invalid_response"
@@ -341,11 +359,17 @@ export async function executeOpenAiAutoExtractTransport(
   if (getIssuedOpenAiAutoExtractPlanSources(plan) === null) {
     invalidInput();
   }
-  const apiKey = resolveCredential(credential);
-  const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
+  const fetchImplementation = defaultOpenAiFetchImplementation(
+    plan.endpoint,
+    options.fetchImplementation,
+  );
+  if (fetchImplementation === null) {
+    return autoExtractTransportResult({ kind: "connection", sentAt: false }, null);
+  }
   if (typeof fetchImplementation !== "function") {
     providerDisabled();
   }
+  const apiKey = resolveCredential(credential);
   const outcome = await executeOpenAiJsonPost(
     plan,
     apiKey,
@@ -390,11 +414,17 @@ export async function executeOpenAiEmbeddingsTransport(
   if (getIssuedOpenAiEmbeddingPlanInputs(plan) === null) {
     invalidInput();
   }
-  const apiKey = resolveCredential(credential);
-  const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
+  const fetchImplementation = defaultOpenAiFetchImplementation(
+    plan.endpoint,
+    options.fetchImplementation,
+  );
+  if (fetchImplementation === null) {
+    return embeddingsTransportResult({ kind: "connection", sentAt: false }, null);
+  }
   if (typeof fetchImplementation !== "function") {
     providerDisabled();
   }
+  const apiKey = resolveCredential(credential);
   const outcome = await executeOpenAiJsonPost(
     plan,
     apiKey,

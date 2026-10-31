@@ -1,12 +1,12 @@
 import { isIP } from "node:net";
-import type { IncomingMessage } from "node:http";
+import type { ClientRequest, IncomingMessage } from "node:http";
 import {
   Agent,
   request as httpsRequest,
   type AgentOptions as HttpsAgentOptions,
   type RequestOptions as HttpsRequestOptions,
 } from "node:https";
-import { Readable } from "node:stream";
+import { Readable, type Duplex } from "node:stream";
 
 export const OPENAI_PROXY_ENV = "AI_PROJECT_OS_OPENAI_PROXY_URL" as const;
 
@@ -17,6 +17,26 @@ type ProxyEnvironment = Readonly<{
 }>;
 
 type ProxyAgentOptions = HttpsAgentOptions & Readonly<{ proxyEnv: ProxyEnvironment }>;
+
+/** Own sockets even before Node adds a completed CONNECT tunnel to its pool. */
+class RequestScopedProxyAgent extends Agent {
+  private readonly connectingSockets = new Set<Duplex>();
+
+  override createConnection(...args: Parameters<Agent["createConnection"]>): ReturnType<Agent["createConnection"]> {
+    const socket = super.createConnection(...args);
+    if (socket !== undefined && socket !== null) {
+      this.connectingSockets.add(socket);
+      socket.once("close", () => this.connectingSockets.delete(socket));
+    }
+    return socket;
+  }
+
+  override destroy(): void {
+    for (const socket of this.connectingSockets) socket.destroy();
+    this.connectingSockets.clear();
+    super.destroy();
+  }
+}
 
 type FetchImplementation = (
   input: string | URL | Request,
@@ -171,13 +191,16 @@ function requestOpenAiThroughProxy(
   if (method !== "POST" || typeof init?.body !== "string") {
     return Promise.reject(new OpenAiProxyConfigurationError());
   }
+  if (init.signal?.aborted) {
+    return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+  }
 
   const agentOptions: ProxyAgentOptions = {
     proxyEnv,
     keepAlive: false,
     maxSockets: 1,
   };
-  const agent = new Agent(agentOptions);
+  const agent = new RequestScopedProxyAgent(agentOptions);
   const configuredProxyEnv = (
     agent.options as HttpsAgentOptions & { proxyEnv?: Partial<ProxyEnvironment> }
   ).proxyEnv;
@@ -193,9 +216,12 @@ function requestOpenAiThroughProxy(
   return new Promise<Response>((resolve, reject) => {
     let settled = false;
     let agentDestroyed = false;
+    let request: ClientRequest | undefined;
+    let responseStream: IncomingMessage | undefined;
     const destroyAgent = (): void => {
       if (agentDestroyed) return;
       agentDestroyed = true;
+      init.signal?.removeEventListener("abort", onAbort);
       agent.destroy();
     };
     const rejectOnce = (error: Error): void => {
@@ -204,53 +230,75 @@ function requestOpenAiThroughProxy(
       destroyAgent();
       reject(error);
     };
-
-    const options: HttpsRequestOptions = {
-      protocol: "https:",
-      hostname: "api.openai.com",
-      servername: "api.openai.com",
-      port: 443,
-      path: endpointPath,
-      method,
-      headers: outgoingHeaders(init.headers),
-      agent,
-      rejectUnauthorized: true,
-      ...(init.signal === null || init.signal === undefined ? {} : { signal: init.signal }),
+    const onAbort = (): void => {
+      const error = new DOMException("The operation was aborted.", "AbortError");
+      responseStream?.destroy(error);
+      request?.destroy(error);
+      rejectOnce(error);
+      destroyAgent();
     };
+    init.signal?.addEventListener("abort", onAbort, { once: true });
+    if (init.signal?.aborted) {
+      onAbort();
+      return;
+    }
 
-    const request = httpsRequest(options, (incoming) => {
-      const status = incoming.statusCode;
-      if (status === undefined || status < 200 || status > 599) {
-        incoming.destroy();
-        rejectOnce(new Error("OPENAI_PROXY_TRANSPORT_FAILED"));
-        return;
-      }
+    try {
+      const options: HttpsRequestOptions = {
+        protocol: "https:",
+        hostname: "api.openai.com",
+        servername: "api.openai.com",
+        port: 443,
+        path: endpointPath,
+        method,
+        headers: outgoingHeaders(init.headers),
+        agent,
+        rejectUnauthorized: true,
+        ...(init.signal === null || init.signal === undefined ? {} : { signal: init.signal }),
+      };
+      request = httpsRequest(options, (incoming) => {
+        responseStream = incoming;
+        if (settled) {
+          incoming.destroy();
+          destroyAgent();
+          return;
+        }
+        const status = incoming.statusCode;
+        if (status === undefined || status < 200 || status > 599) {
+          incoming.destroy();
+          rejectOnce(new Error("OPENAI_PROXY_TRANSPORT_FAILED"));
+          return;
+        }
 
-      incoming.once("end", destroyAgent);
-      incoming.once("close", destroyAgent);
-      incoming.once("aborted", destroyAgent);
-      incoming.once("error", destroyAgent);
+        incoming.once("end", destroyAgent);
+        incoming.once("close", destroyAgent);
+        incoming.once("aborted", destroyAgent);
+        incoming.once("error", destroyAgent);
 
-      try {
-        const hasNoBody = status === 204 || status === 205 || status === 304;
-        const body = hasNoBody
-          ? null
-          : Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
-        const response = new Response(body, {
-          status,
-          ...(incoming.statusMessage === undefined ? {} : { statusText: incoming.statusMessage }),
-          headers: incomingHeaders(incoming),
-        });
-        settled = true;
-        resolve(response);
-      } catch {
-        incoming.destroy();
-        rejectOnce(new Error("OPENAI_PROXY_TRANSPORT_FAILED"));
-      }
-    });
+        try {
+          const hasNoBody = status === 204 || status === 205 || status === 304;
+          const body = hasNoBody
+            ? null
+            : Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
+          const response = new Response(body, {
+            status,
+            ...(incoming.statusMessage === undefined ? {} : { statusText: incoming.statusMessage }),
+            headers: incomingHeaders(incoming),
+          });
+          settled = true;
+          resolve(response);
+        } catch {
+          incoming.destroy();
+          rejectOnce(new Error("OPENAI_PROXY_TRANSPORT_FAILED"));
+        }
+      });
 
-    request.once("error", rejectOnce);
-    request.end(init.body);
+      request.once("error", rejectOnce);
+      request.end(init.body);
+    } catch {
+      request?.destroy();
+      rejectOnce(new Error("OPENAI_PROXY_TRANSPORT_FAILED"));
+    }
   });
 }
 

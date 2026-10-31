@@ -830,3 +830,79 @@ test("both default OpenAI transports use authenticated CONNECT, preserve TLS, an
     rmSync(tempDirectory, { recursive: true, force: true });
   }
 });
+
+test("OpenAI proxy aborts while CONNECT is unanswered and does not dispatch pre-aborted requests", {
+  skip: !supportsNativeProxyEnv(),
+}, () => {
+  const script = String.raw`
+import assert from "node:assert/strict";
+import net from "node:net";
+import { getEventListeners } from "node:events";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { prepareModelProviderFetch } = require("./src/lib/model-provider-http.ts");
+const sockets = new Set();
+let connectCount = 0;
+let connected;
+let socketClosed;
+const connectReceived = new Promise((resolve) => { connected = resolve; });
+const firstSocketClosed = new Promise((resolve) => { socketClosed = resolve; });
+const server = net.createServer((socket) => {
+  sockets.add(socket);
+  socket.once("close", () => { sockets.delete(socket); socketClosed(); });
+  let header = "";
+  socket.on("data", (chunk) => {
+    header += chunk.toString("latin1");
+    if (header.includes("\r\n\r\n")) {
+      assert.ok(header.startsWith("CONNECT api.openai.com:443 "));
+      assert.equal(header.includes("Bearer "), false);
+      connectCount += 1;
+      connected();
+    }
+  });
+});
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+const endpoint = "https://api.openai.com/v1/chat/completions";
+process.env.AI_PROJECT_OS_OPENAI_PROXY_URL = "http://fixture-user:fixture-password@127.0.0.1:" + server.address().port;
+const execute = prepareModelProviderFetch(endpoint);
+const request = {method: "POST", body: "{}", headers: {authorization: "Bearer fake-diagnostic-only"}};
+try {
+  const controller = new AbortController();
+  const pending = execute(endpoint, {...request, signal: controller.signal});
+  await connectReceived;
+  controller.abort();
+  let timer;
+  const outcome = await Promise.race([
+    pending.then(() => "UNEXPECTED_SUCCESS", (error) => error.name),
+    new Promise((resolve) => { timer = setTimeout(() => resolve("HUNG"), 500); }),
+  ]);
+  clearTimeout(timer);
+  assert.equal(outcome, "AbortError");
+  const closed = await Promise.race([
+    firstSocketClosed.then(() => true),
+    new Promise((resolve) => { timer = setTimeout(() => resolve(false), 500); }),
+  ]);
+  clearTimeout(timer);
+  assert.equal(closed, true);
+  const count = connectCount;
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await assert.rejects(execute(endpoint, {...request, signal: preAborted.signal}), {name: "AbortError"});
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(connectCount, count);
+  const invalidHeaders = new AbortController();
+  await assert.rejects(execute(endpoint, {...request, headers: {authorization: "invalid\nprivate-fixture"}, signal: invalidHeaders.signal}), {message: "OPENAI_PROXY_TRANSPORT_FAILED"});
+  assert.equal(getEventListeners(invalidHeaders.signal, "abort").length, 0);
+  assert.equal(connectCount, count);
+} finally {
+  for (const socket of sockets) socket.destroy();
+  await new Promise((resolve) => server.close(resolve));
+}
+`;
+  const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  assert.equal(child.status, 0, `CONNECT abort fixture failed\n${child.stdout}\n${child.stderr}`);
+});

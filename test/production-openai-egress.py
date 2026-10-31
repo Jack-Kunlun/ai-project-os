@@ -295,11 +295,12 @@ class ConfigurationAndRuntimeContract(unittest.TestCase):
                                    proxy_loc='TW', proxy_colo='TPE', openai_401=True,
                                    non_openai_rejected=True, app_healthy=True,
                                    worker_healthy=True, public_health=True,
-                                   database_unchanged=True, git_worker_unchanged=True)
+                                   database_unchanged=True, git_worker_unchanged=True,
+                                   firewall_rule_added=True, bridge_reachable=True)
         rendered = json.dumps(receipt)
         for safe in ('1.2.22', 'a' * 40, 'TW', 'TPE', 'openai_401'):
             self.assertIn(safe, rendered)
-        for forbidden in ('password', 'proxy_url', '1.1.1.1', 'fixture-node'):
+        for forbidden in ('password', 'proxy_url', '1.1.1.1', 'fixture-node', '172.20.0.1'):
             self.assertNotIn(forbidden, rendered)
 
 
@@ -419,6 +420,384 @@ class ProxyNonOpenAiDenySmoke(unittest.TestCase):
             m.verify_proxy_smoke('172.20.0.1', 'fixture-user', 'fixture-password')
         self.assertEqual(calls[1][3], 'Bearer diagnostic-not-a-real-api-key')
         denied.assert_called_once_with('172.20.0.1', 'fixture-user', 'fixture-password')
+
+
+class UfwBridgeIntegration(unittest.TestCase):
+    binding = {'network_id': 'a' * 64, 'interface': 'br-aaaaaaaaaaaa',
+               'subnet': '172.20.0.0/16', 'gateway': '172.20.0.1'}
+    comment = m.UFW_OWNER_PREFIX + 'b' * 24
+
+    @classmethod
+    def raw(cls, owner=False, *, policy='DROP', extra=()):
+        lines = [
+            'IPV4 (filter)',
+            f'Chain INPUT (policy {policy} 0 packets, 0 bytes)',
+            'Chain FORWARD (policy DROP 0 packets, 0 bytes)',
+            'Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)',
+            'Chain ufw-user-input (1 references)',
+            'pkts bytes target prot opt in out source destination',
+            '0 0 ACCEPT tcp -- * * 0.0.0.0/0 0.0.0.0/0 tcp dpt:443',
+        ]
+        if owner:
+            lines.append('0 0 ACCEPT tcp -- br-aaaaaaaaaaaa * 172.20.0.0/16 '
+                         '172.20.0.1 tcp dpt:17890')
+        lines.extend(extra)
+        lines.extend([
+            'IPV6 (filter)',
+            'Chain INPUT (policy DROP 0 packets, 0 bytes)',
+            'Chain FORWARD (policy DROP 0 packets, 0 bytes)',
+            'Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)',
+            'Chain ufw6-user-input (1 references)',
+            'pkts bytes target prot opt in out source destination',
+        ])
+        return '\n'.join(lines)
+
+    @classmethod
+    def status(cls, *, active=True, incoming='deny'):
+        return ('Status: active\n' if active else 'Status: inactive\n') + (
+            f'Default: {incoming} (incoming), allow (outgoing), deny (routed)\n')
+
+    @classmethod
+    def snapshot(cls, *, owner=False, extra_added=(), extra_raw=()):
+        added = ['ufw allow 22/tcp comment SSH', 'ufw allow 80/tcp comment HTTP',
+                 'ufw allow 443/tcp comment HTTPS', *extra_added]
+        raw = m._normalize_ufw_raw(cls.raw(owner, extra=extra_raw))
+        return {'added': added, 'raw': raw}
+
+    def test_bridge_identity_requires_compose_bridge_and_matching_host_gateway(self):
+        network = {
+            'Name': m.NETWORK_NAME, 'Driver': 'bridge', 'Id': 'a' * 64,
+            'Internal': False, 'Labels': {'com.docker.compose.project': m.PROJECT,
+                                         'com.docker.compose.network': 'default'},
+            'Options': {}, 'IPAM': {'Config': [{'Subnet': '172.20.0.0/16',
+                                               'Gateway': '172.20.0.1'}]},
+            'Containers': {'c' * 64: {}, 'd' * 64: {}},
+        }
+        runtime = {'app_container_id': 'c' * 64, 'worker_container_id': 'd' * 64}
+        with patch.object(m, 'docker_json', return_value=[network]), \
+                patch.object(m, 'validate_host_bridge') as validate:
+            result = m.docker_network_binding(runtime)
+        self.assertEqual(result, {'network_id': 'a' * 64, 'interface': 'br-aaaaaaaaaaaa',
+                                  'subnet': '172.20.0.0/16', 'gateway': '172.20.0.1'})
+        validate.assert_called_once_with(result)
+
+        invalid_networks = [
+            ({'Driver': 'overlay'}, 'DOCKER_NETWORK_PROJECT_INVALID'),
+            ({'IPAM': {'Config': [{'Subnet': '203.0.113.0/24',
+                                   'Gateway': '203.0.113.1'}]}}, 'DOCKER_GATEWAY_NOT_RFC1918'),
+            ({'Options': {'com.docker.network.bridge.name': 'bad/name'}},
+             'DOCKER_BRIDGE_NAME_INVALID'),
+            ({'Containers': {'c' * 64: {}}}, 'APPLICATION_NETWORK_BINDING_INVALID'),
+        ]
+        for changes, expected in invalid_networks:
+            invalid = {**network, **changes}
+            with patch.object(m, 'docker_json', return_value=[invalid]), \
+                    self.assertRaisesRegex(m.InstallerError, expected):
+                m.docker_network_binding(runtime)
+
+    def test_host_bridge_requires_kernel_bridge_kind_and_exact_ipv4_gateway(self):
+        link = [{'ifname': self.binding['interface'],
+                 'linkinfo': {'info_kind': 'bridge'}}]
+        address = [{'ifname': self.binding['interface'], 'addr_info': [
+            {'family': 'inet', 'local': self.binding['gateway'], 'prefixlen': 16}]}]
+        with patch.object(m, 'command_text', side_effect=[json.dumps(link), json.dumps(address)]) as query:
+            m.validate_host_bridge(self.binding)
+        self.assertEqual(query.call_count, 2)
+        for bad_link, bad_address, expected in (
+                ([{'ifname': self.binding['interface'], 'linkinfo': {'info_kind': 'dummy'}}],
+                 address, 'DOCKER_BRIDGE_LINK_INVALID'),
+                (link, [{'ifname': self.binding['interface'], 'addr_info': [
+                    {'family': 'inet', 'local': '172.20.0.2', 'prefixlen': 16}]}],
+                 'DOCKER_BRIDGE_ADDRESS_MISMATCH')):
+            with patch.object(m, 'command_text', side_effect=[json.dumps(bad_link),
+                                                                json.dumps(bad_address)]), \
+                    self.assertRaisesRegex(m.InstallerError, expected):
+                m.validate_host_bridge(self.binding)
+
+    def test_ufw_executable_and_config_must_be_trusted_root_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o755)
+            executable = root / 'ufw'
+            config = root / 'ufw.conf'
+            executable.write_text('fixture')
+            config.write_text('fixture')
+            executable.chmod(0o755)
+            config.chmod(0o644)
+            original_lstat = Path.lstat
+
+            def root_owned(path, *args, **kwargs):
+                info = original_lstat(path, *args, **kwargs)
+                return SimpleNamespace(st_mode=info.st_mode, st_uid=0, st_gid=0, st_nlink=1)
+
+            with patch.object(m, 'UFW', executable), patch.object(m, 'UFW_CONFIG_FILES', (config,)), \
+                    patch.object(m, 'UFW_DIRECTORIES', (root,)), \
+                    patch.object(Path, 'lstat', root_owned):
+                m._check_ufw_files()
+                config.chmod(0o664)
+                with self.assertRaisesRegex(m.InstallerError, 'UFW_FILES_UNTRUSTED'):
+                    m._check_ufw_files()
+                config.chmod(0o644)
+                config.unlink()
+                config.symlink_to(executable)
+                with self.assertRaisesRegex(m.InstallerError, 'UFW_FILES_UNTRUSTED'):
+                    m._check_ufw_files()
+
+    def test_effective_ufw_must_be_active_deny_and_have_supported_raw_policy(self):
+        baseline = self.snapshot()
+        added = '\n'.join(baseline['added'])
+        raw = self.raw()
+        for status, raw_value, expected in (
+                (self.status(active=False), raw, 'UFW_POLICY_UNSUPPORTED'),
+                (self.status(incoming='allow'), raw, 'UFW_POLICY_UNSUPPORTED'),
+                (self.status(), self.raw(policy='ACCEPT'), 'UFW_EFFECTIVE_INPUT_POLICY_UNSUPPORTED')):
+            with patch.object(m, '_check_ufw_files'), \
+                    patch.object(m, 'command_text', side_effect=[status, added, raw_value]), \
+                    self.assertRaisesRegex(m.InstallerError, expected):
+                m._ufw_snapshot(self.binding)
+
+    def test_existing_exact_and_ambiguous_port_rules_refuse_without_adoption(self):
+        exact = 'ufw allow in on br-aaaaaaaaaaaa proto tcp from 172.20.0.0/16 '
+        exact += 'to 172.20.0.1 port 17890 comment old-owner'
+        ranged = 'ufw allow 17880:17900/tcp comment broad-range'
+        for rule in (exact, ranged, 'ufw allow from any comment all-ports'):
+            snapshot = self.snapshot(extra_added=(rule,))
+            with self.subTest(rule=rule), self.assertRaisesRegex(
+                    m.InstallerError, 'UFW_EXISTING_PORT_RULE_CONFLICT'):
+                m._validate_no_ufw_conflict(snapshot, self.binding)
+
+    def test_exact_add_delta_changes_only_one_ipv4_rule_and_does_not_open_ipv6(self):
+        before = self.snapshot()
+        firewall = m._firewall_binding_state(self.binding, self.comment, before)
+        after = self.snapshot(owner=True, extra_added=(m._firewall_rule_line(firewall),))
+        self.assertTrue(m._exact_firewall_add_delta(before, after, firewall))
+        changed_ipv6 = copy.deepcopy(after)
+        changed_ipv6['raw']['ipv6'].append('ACCEPT tcp -- * * ::/0 ::/0 tcp dpt:17890')
+        self.assertFalse(m._exact_firewall_add_delta(before, changed_ipv6, firewall))
+
+    def test_worker_access_adds_exact_rule_and_requires_post_add_tcp_success(self):
+        before = self.snapshot()
+        firewall = m._firewall_binding_state(self.binding, self.comment, before)
+        after = self.snapshot(owner=True, extra_added=(m._firewall_rule_line(firewall),))
+        state = {'phase': 'proxy_verified',
+                 'firewall': {'status': 'pending', 'rule_added': None, 'bridge_reachable': None}}
+        runtime = {'worker_container_id': 'd' * 64}
+        persisted = []
+        with patch.object(m, '_ufw_snapshot', side_effect=[before, after]), \
+                patch.object(m, '_bridge_tcp_probe', side_effect=[False, True]), \
+                patch.object(m.secrets, 'token_hex', return_value='b' * 24), \
+                patch.object(m, 'run_command') as run, \
+                patch.object(m, 'write_private_state',
+                             side_effect=lambda value: persisted.append(copy.deepcopy(value))) as write:
+            m._ensure_worker_bridge_access(state, runtime, self.binding, before)
+        args = run.call_args.args[0]
+        self.assertEqual(args, [str(m.UFW), 'allow', 'in', 'on', self.binding['interface'],
+                                'from', self.binding['subnet'], 'to', self.binding['gateway'],
+                                'port', '17890', 'proto', 'tcp', 'comment', self.comment])
+        self.assertEqual(state['phase'], 'bridge_verified')
+        self.assertEqual(state['firewall']['status'], 'added')
+        self.assertTrue(state['firewall']['bridge_reachable'])
+        self.assertEqual(write.call_count, 3)
+        self.assertEqual([item['phase'] for item in persisted],
+                         ['firewall_intent', 'firewall_added', 'bridge_verified'])
+        self.assertEqual(persisted[0]['firewall']['status'], 'intent')
+
+    def test_post_add_tcp_failure_leaves_recoverable_owned_intent_for_rollback(self):
+        before = self.snapshot()
+        firewall = m._firewall_binding_state(self.binding, self.comment, before)
+        after = self.snapshot(owner=True, extra_added=(m._firewall_rule_line(firewall),))
+        state = {'phase': 'proxy_verified',
+                 'firewall': {'status': 'pending', 'rule_added': None, 'bridge_reachable': None}}
+        with patch.object(m, '_ufw_snapshot', side_effect=[before, after]), \
+                patch.object(m, '_bridge_tcp_probe', side_effect=[False, False]), \
+                patch.object(m.secrets, 'token_hex', return_value='b' * 24), \
+                patch.object(m, 'run_command'), patch.object(m, 'write_private_state'), \
+                self.assertRaisesRegex(m.InstallerError, 'WORKER_BRIDGE_UNREACHABLE'):
+            m._ensure_worker_bridge_access(state, {'worker_container_id': 'd' * 64},
+                                           self.binding, before)
+        self.assertEqual(state['firewall']['status'], 'added')
+        self.assertTrue(state['firewall']['rule_added'])
+
+    def test_rollback_deletes_only_owned_rule_and_preserves_unrelated_rule_edits(self):
+        before = self.snapshot()
+        firewall = m._firewall_binding_state(self.binding, self.comment, before)
+        installed = self.snapshot(owner=True, extra_added=(m._firewall_rule_line(firewall),))
+        concurrent = copy.deepcopy(installed)
+        concurrent['added'].append('ufw allow 8080/tcp comment operator-change')
+        concurrent['raw']['ipv4'].append(
+            'ACCEPT tcp -- * * 0.0.0.0/0 0.0.0.0/0 tcp dpt:8080')
+        after_delete = copy.deepcopy(concurrent)
+        after_delete['added'].remove(m._firewall_rule_line(firewall))
+        after_delete['raw']['ipv4'].remove(next(
+            line for line in after_delete['raw']['ipv4'] if m._raw_line_is_owned_rule(line, firewall)))
+        state = {'phase': 'firewall_added', 'status': 'rollback_incomplete', 'firewall': {
+            **firewall, 'status': 'added', 'rule_added': True, 'bridge_reachable': True}}
+        with patch.object(m, '_ufw_snapshot', side_effect=[concurrent, after_delete]), \
+                patch.object(m, 'run_command') as run, patch.object(m, 'write_private_state'):
+            self.assertTrue(m.cleanup_owned_firewall_rule(state))
+        self.assertEqual(run.call_args.args[0], [str(m.UFW), '--force', 'delete', 'allow', 'in',
+                                                'on', self.binding['interface'],
+                                                'from', self.binding['subnet'], 'to', self.binding['gateway'],
+                                                'port', '17890', 'proto', 'tcp', 'comment', self.comment])
+        self.assertIn('ufw allow 8080/tcp comment operator-change', after_delete['added'])
+        self.assertEqual(state['firewall']['status'], 'removed')
+
+    def test_tampered_owned_raw_rule_fails_incomplete_without_delete(self):
+        before = self.snapshot()
+        firewall = m._firewall_binding_state(self.binding, self.comment, before)
+        drift = self.snapshot(extra_added=(m._firewall_rule_line(firewall),))
+        state = {'phase': 'firewall_added', 'firewall': {
+            **firewall, 'status': 'added', 'rule_added': True, 'bridge_reachable': True}}
+        with patch.object(m, '_ufw_snapshot', return_value=drift), \
+                patch.object(m, 'run_command') as run:
+            self.assertFalse(m.cleanup_owned_firewall_rule(state))
+        run.assert_not_called()
+
+    def test_ufw_0362_raw_and_added_normalization_matches_cli_contract(self):
+        self.assertEqual(m._normalize_ufw_added(
+            "Added user rules (see 'ufw status' for running firewall):\n(None)\n"), [])
+        actual_added = ("Added user rules (see 'ufw status' for running firewall):\n"
+                        "ufw allow in on br-aios-probe from 172.30.0.0/24 to 172.30.0.1 "
+                        "port 17890 proto tcp comment 'ai-project-os-fixture-A'\n")
+        self.assertEqual(m._normalize_ufw_added(actual_added), [
+            'ufw allow in on br-aios-probe from 172.30.0.0/24 to 172.30.0.1 '
+            'port 17890 proto tcp comment ai-project-os-fixture-A'])
+        raw_before = ('IPV4 (raw):\nChain INPUT (policy DROP 0 packets, 0 bytes)\n'
+                      'Chain FORWARD (policy DROP 0 packets, 0 bytes)\n'
+                      'Chain INPUT (policy ACCEPT 0 packets, 0 bytes)\n'
+                      'Chain ufw-user-input (1 references)\n'
+                      '       pkts bytes target prot opt in out source destination\n'
+                      '       0 0 DROP 6 -- * * 0.0.0.0/0 0.0.0.0/0 tcp dpt:22\n'
+                      'IPV6:\nChain INPUT (policy DROP 0 packets, 0 bytes)\n'
+                      'Chain FORWARD (policy DROP 0 packets, 0 bytes)\n')
+        raw_owned = raw_before.replace(
+            '       0 0 DROP 6 -- * * 0.0.0.0/0 0.0.0.0/0 tcp dpt:22',
+            '       0 0 DROP 6 -- * * 0.0.0.0/0 0.0.0.0/0 tcp dpt:22\n'
+            '       0 0 ACCEPT 6 -- br-aios-probe * 172.30.0.0/24 172.30.0.1 tcp dpt:17890')
+        before = m._normalize_ufw_raw(raw_before)
+        after = m._normalize_ufw_raw(raw_owned)
+        self.assertEqual(before['input_policy'], 'DROP')
+        self.assertEqual(before['forward_policy'], 'DROP')
+        firewall = {'interface': 'br-aios-probe', 'subnet': '172.30.0.0/24',
+                    'gateway': '172.30.0.1', 'comment': 'ai-project-os-fixture-A'}
+        self.assertTrue(any(m._raw_line_is_owned_rule(line, firewall) for line in after['ipv4']))
+
+    def test_recorded_ufw_0362_fixture_roundtrips_add_delete_and_comment_conflicts(self):
+        fixture_path = Path(__file__).parent / 'fixtures/openai-egress-ufw36.json'
+        fixture = json.loads(fixture_path.read_text())['cases']
+        binding = {'interface': 'br-aios-probe', 'subnet': '172.30.0.0/24',
+                   'gateway': '172.30.0.1'}
+        owner = {'interface': binding['interface'], 'subnet': binding['subnet'],
+                 'gateway': binding['gateway'], 'comment': 'ai-project-os-fixture-A'}
+        before = {'added': m._normalize_ufw_added(fixture['added_before']['stdout']),
+                  'raw': m._normalize_ufw_raw(fixture['raw_before']['stdout'])}
+        installed = {'added': m._normalize_ufw_added(fixture['added_owned']['stdout']),
+                     'raw': m._normalize_ufw_raw(fixture['raw_owned']['stdout'])}
+        deleted = {'added': m._normalize_ufw_added(fixture['added_after_delete']['stdout']),
+                   'raw': m._normalize_ufw_raw(fixture['raw_after_delete']['stdout'])}
+        self.assertEqual(before['raw']['input_policy'], 'DROP')
+        self.assertEqual(before['raw']['forward_policy'], 'DROP')
+        self.assertTrue(m._exact_firewall_add_delta(before, installed, owner))
+        self.assertEqual(m._snapshot_owned_rule(installed, owner), (1, 1))
+        delete_before = copy.deepcopy(deleted)
+        delete_before['added'].append(m._firewall_rule_line(owner))
+        delete_before['raw']['ipv4'].append(next(
+            line for line in installed['raw']['ipv4'] if m._raw_line_is_owned_rule(line, owner)))
+        self.assertTrue(m._validate_exact_firewall_deletion(delete_before, deleted, owner))
+        self.assertNotIn(m._firewall_rule_line(owner), deleted['added'])
+
+        changed_comment = m._normalize_ufw_added(fixture['added_changed_comment']['stdout'])
+        with self.assertRaisesRegex(m.InstallerError, 'UFW_EXISTING_PORT_RULE_CONFLICT'):
+            m._validate_no_ufw_conflict({'added': changed_comment, 'raw': before['raw']}, binding)
+        ranged = m._normalize_ufw_added(fixture['added_with_range']['stdout'])
+        with self.assertRaisesRegex(m.InstallerError, 'UFW_EXISTING_PORT_RULE_CONFLICT'):
+            m._validate_no_ufw_conflict({'added': ranged, 'raw': installed['raw']}, binding)
+        after_old_comment_delete = m._normalize_ufw_added(
+            fixture['added_after_old_comment_delete']['stdout'])
+        self.assertTrue(any('ai-project-os-fixture-B' in line for line in after_old_comment_delete))
+
+    def test_rollback_requires_postdelete_absence_not_success_exit_code_alone(self):
+        before = self.snapshot()
+        firewall = m._firewall_binding_state(self.binding, self.comment, before)
+        installed = self.snapshot(owner=True, extra_added=(m._firewall_rule_line(firewall),))
+        state = {'phase': 'firewall_added', 'firewall': {
+            **firewall, 'status': 'added', 'rule_added': True, 'bridge_reachable': True}}
+        with patch.object(m, '_ufw_snapshot', side_effect=[installed, installed]), \
+                patch.object(m, 'run_command', return_value=subprocess.CompletedProcess([], 0)), \
+                patch.object(m, 'write_private_state'):
+            self.assertFalse(m.cleanup_owned_firewall_rule(state))
+
+    def test_legacy_private_state_without_firewall_journal_remains_valid(self):
+        proxy = 'http://fixture_user_123456:fixture_password_12345678901234567890@172.20.0.1:17890'
+        image_a = 'sha256:' + '1' * 64
+        image_b = 'sha256:' + '2' * 64
+        baseline = {'version': '1.2.22', 'revision': 'a' * 40,
+                    'app_image_id': image_a, 'worker_image_id': image_b,
+                    'postgres_image_id': 'sha256:' + '3' * 64,
+                    'git_worker_image_id': 'sha256:' + '4' * 64,
+                    'app_container_id': '5' * 64, 'worker_container_id': '6' * 64,
+                    'postgres_container_id': '7' * 64, 'git_worker_container_id': '8' * 64}
+        state = {'schema': 1, 'status': 'prepared', 'phase': 'preparing',
+                 'version': '1.2.22', 'revision': 'a' * 40,
+                 'installed_value': proxy,
+                 'installed_value_sha256': m.sha256_bytes(proxy.encode()),
+                 'app_image_id': image_a, 'worker_image_id': image_b,
+                 'gateway_ip': '172.20.0.1', 'mihomo_sha256': '9' * 64,
+                 'config_sha256': 'a' * 64, 'unit_sha256': 'b' * 64,
+                 'baseline_runtime': baseline, 'previous_line_b64': None,
+                 'append_separator_added': False, 'append_previous_last_line_b64': None,
+                 'created_directories': [], 'egress_uid': None, 'egress_gid': None,
+                 'smoke': {}}
+        self.assertNotIn('firewall', m.validate_private_state(state))
+        state_with_pending = {**state, 'firewall': {
+            'status': 'pending', 'rule_added': None, 'bridge_reachable': None}}
+        self.assertEqual(m.validate_private_state(state_with_pending)['firewall']['status'], 'pending')
+
+    def test_worker_bridge_probe_uses_only_validated_worker_id_and_bounded_timeout(self):
+        worker_id = 'd' * 64
+        success = subprocess.CompletedProcess([], 0, b'OPENAI_EGRESS_BRIDGE_TCP_OK\n', b'')
+        with patch.object(m, 'run_command', return_value=success) as run:
+            self.assertTrue(m._bridge_tcp_probe(worker_id, self.binding['gateway']))
+        args = run.call_args.args[0]
+        self.assertEqual(args[:5], [m.DOCKER, 'exec', worker_id, m.TIMEOUT, '8'])
+        self.assertEqual(args[-2:], [self.binding['gateway'], '17890'])
+        self.assertEqual(run.call_args.kwargs['timeout'], 12)
+        self.assertNotIn('password', repr(args))
+        blocked = subprocess.CompletedProcess([], 10, b'OPENAI_EGRESS_BRIDGE_TCP_BLOCKED\n', b'')
+        with patch.object(m, 'run_command', return_value=blocked):
+            self.assertFalse(m._bridge_tcp_probe(worker_id, self.binding['gateway']))
+
+    def test_worker_bridge_failure_prevents_environment_mutation(self):
+        runtime = {'app_container_id': 'c' * 64, 'worker_container_id': 'd' * 64,
+                   'app_image_id': 'sha256:' + '1' * 64,
+                   'worker_image_id': 'sha256:' + '2' * 64,
+                   'postgres_container_id': 'e' * 64, 'postgres_image_id': 'sha256:' + '3' * 64,
+                   'git_worker_container_id': 'f' * 64, 'git_worker_image_id': 'sha256:' + '4' * 64}
+        payload = {'node': {'cipher': 'chacha20-ietf-poly1305', 'name': 'fixture',
+                            'password': 'not-a-real-node-password', 'port': 443,
+                            'server': '1.1.1.1', 'type': 'ss', 'udp': True}}
+        group = SimpleNamespace(gr_gid=901)
+        user = SimpleNamespace(pw_uid=901)
+        env_info = SimpleNamespace(st_dev=1, st_ino=2, st_size=3, st_mtime_ns=4, st_ctime_ns=5)
+        with patch.object(m, 'preflight', return_value=(payload, runtime, self.binding,
+                                                        self.snapshot(), b'OTHER=value\n', env_info, None)), \
+                patch.object(m, 'write_status'), patch.object(m, 'download_mihomo', return_value=(b'binary', '9' * 64)), \
+                patch.object(m, '_existing_account', return_value=(None, None)), \
+                patch.object(m, 'create_account_if_missing', return_value=(user, group, True)), \
+                patch.object(m, 'install_directories'), patch.object(m, 'install_binary'), \
+                patch.object(m, '_write_managed_file'), patch.object(m, 'config_test'), \
+                patch.object(m, 'start_proxy_service'), patch.object(m, '_wait_listener'), \
+                patch.object(m, 'verify_proxy_smoke', return_value={'proxy_loc': 'TW',
+                                                                    'proxy_colo': 'TPE',
+                                                                    'openai_401': True,
+                                                                    'non_openai_rejected': True}), \
+                patch.object(m, '_ensure_worker_bridge_access',
+                             side_effect=m.InstallerError('WORKER_BRIDGE_UNREACHABLE')), \
+                patch.object(m, 'write_private_state'), patch.object(m, 'rollback_state', return_value=True), \
+                patch.object(m, 'safe_env_write') as env_write, \
+                self.assertRaisesRegex(m.InstallerError, 'WORKER_BRIDGE_UNREACHABLE'):
+            m.apply_installation('1.2.22', 'a' * 40, '/private/payload', 'b' * 64)
+        env_write.assert_not_called()
 
 
 class RedirectAndCleanupSecurity(unittest.TestCase):

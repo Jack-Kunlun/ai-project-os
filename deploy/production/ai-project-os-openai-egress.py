@@ -17,6 +17,7 @@ from pathlib import Path
 import pwd
 import re
 import secrets
+import shlex
 import socket
 import stat
 import subprocess
@@ -48,7 +49,8 @@ MIHOMO = BIN_DIR / 'mihomo'
 UNIT = Path('/etc/systemd/system/ai-project-os-openai-egress.service')
 UNIT_LINK = Path('/etc/systemd/system/multi-user.target.wants/ai-project-os-openai-egress.service')
 UNIT_INSTALLED_PHASES = frozenset((
-    'unit_installed', 'proxy_started', 'proxy_verified', 'env_written',
+    'unit_installed', 'proxy_started', 'proxy_verified', 'firewall_intent',
+    'firewall_added', 'firewall_not_needed', 'bridge_verified', 'env_written',
     'compose_attempted', 'app_worker_recreated', 'verified',
 ))
 PROXY_ENV_KEY = 'AI_PROJECT_OS_OPENAI_PROXY_URL'
@@ -94,8 +96,19 @@ GIT = '/usr/bin/git'
 SYSTEMCTL = '/usr/bin/systemctl'
 USERADD = '/usr/sbin/useradd'
 RUNUSER = '/usr/sbin/runuser'
+UFW = Path('/usr/sbin/ufw')
+IP = '/usr/bin/ip'
+TIMEOUT = '/usr/bin/timeout'
 EXIT_TRACE_LOC = 'TW'
 EXIT_TRACE_COLO = 'TPE'
+UFW_CONFIG_FILES = tuple(Path(path) for path in (
+    '/etc/ufw/ufw.conf', '/etc/ufw/user.rules', '/etc/ufw/user6.rules',
+    '/etc/ufw/before.rules', '/etc/ufw/after.rules',
+    '/etc/ufw/before6.rules', '/etc/ufw/after6.rules', '/etc/default/ufw',
+))
+UFW_DIRECTORIES = tuple(Path(path) for path in ('/usr/sbin', '/etc/ufw', '/etc/default'))
+UFW_OWNER_PREFIX = 'ai-project-os-openai-egress-'
+MAX_UFW_SNAPSHOT_BYTES = 48 * 1024
 
 
 class InstallerError(RuntimeError):
@@ -715,7 +728,7 @@ def validate_repository_revision(expected_revision: str) -> None:
     require(actual == expected_revision, 'PRODUCTION_REVISION_MISMATCH')
 
 
-def docker_network_gateway(runtime: dict) -> str:
+def docker_network_binding(runtime: dict) -> dict:
     rows = docker_json('network', 'inspect', NETWORK_NAME, code='DOCKER_NETWORK_INSPECT_FAILED')
     require(isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict),
             'DOCKER_NETWORK_INSPECT_INVALID')
@@ -724,33 +737,321 @@ def docker_network_gateway(runtime: dict) -> str:
     require(network.get('Name') == NETWORK_NAME
             and labels.get('com.docker.compose.project') == PROJECT
             and labels.get('com.docker.compose.network') == 'default'
-            and network.get('Internal') is not True,
+            and network.get('Internal') is not True
+            and network.get('Driver') == 'bridge',
             'DOCKER_NETWORK_PROJECT_INVALID')
     config = network.get('IPAM', {}).get('Config', [])
-    gateways = []
-    for entry in config if isinstance(config, list) else []:
-        if not isinstance(entry, dict) or not isinstance(entry.get('Gateway'), str):
-            continue
-        try:
-            gateway = ipaddress.IPv4Address(entry['Gateway'])
-            subnet = ipaddress.IPv4Network(entry.get('Subnet', ''), strict=False)
-        except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
-            continue
-        if gateway in subnet:
-            gateways.append(gateway)
-    require(len(gateways) == 1, 'DOCKER_GATEWAY_INVALID')
-    gateway = gateways[0]
-    private_networks = (ipaddress.IPv4Network('10.0.0.0/8'),
-                        ipaddress.IPv4Network('172.16.0.0/12'),
-                        ipaddress.IPv4Network('192.168.0.0/16'))
-    require(any(gateway in network_range for network_range in private_networks)
-            and str(gateway) != '0.0.0.0', 'DOCKER_GATEWAY_NOT_RFC1918')
+    require(isinstance(config, list) and len(config) == 1 and isinstance(config[0], dict),
+            'DOCKER_GATEWAY_INVALID')
+    try:
+        gateway = ipaddress.IPv4Address(config[0].get('Gateway', ''))
+        subnet = ipaddress.IPv4Network(config[0].get('Subnet', ''), strict=False)
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
+        raise InstallerError('DOCKER_GATEWAY_INVALID')
+    require(gateway in subnet and is_rfc1918_ipv4(str(gateway)) and subnet.is_private,
+            'DOCKER_GATEWAY_NOT_RFC1918')
     container_map = network.get('Containers', {})
     require(isinstance(container_map, dict)
             and runtime['app_container_id'] in container_map
             and runtime['worker_container_id'] in container_map,
             'APPLICATION_NETWORK_BINDING_INVALID')
-    return str(gateway)
+    network_id = network.get('Id')
+    require(isinstance(network_id, str) and HEX64.fullmatch(network_id) is not None,
+            'DOCKER_NETWORK_ID_INVALID')
+    options = network.get('Options', {})
+    require(isinstance(options, dict), 'DOCKER_NETWORK_OPTIONS_INVALID')
+    bridge_name = options.get('com.docker.network.bridge.name', f'br-{network_id[:12]}')
+    require(isinstance(bridge_name, str)
+            and re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', bridge_name) is not None,
+            'DOCKER_BRIDGE_NAME_INVALID')
+    binding = {'network_id': network_id, 'interface': bridge_name,
+               'gateway': str(gateway), 'subnet': str(subnet)}
+    validate_host_bridge(binding)
+    return binding
+
+
+def docker_network_gateway(runtime: dict) -> str:
+    return docker_network_binding(runtime)['gateway']
+
+
+def validate_host_bridge(binding: dict) -> None:
+    require(isinstance(binding, dict) and isinstance(binding.get('network_id'), str)
+            and HEX64.fullmatch(binding['network_id']) is not None
+            and isinstance(binding.get('interface'), str)
+            and re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', binding['interface']) is not None,
+            'DOCKER_BRIDGE_BINDING_INVALID')
+    try:
+        gateway = ipaddress.IPv4Address(binding['gateway'])
+        subnet = ipaddress.IPv4Network(binding['subnet'], strict=False)
+    except (KeyError, ipaddress.AddressValueError, ipaddress.NetmaskValueError):
+        raise InstallerError('DOCKER_BRIDGE_BINDING_INVALID')
+    require(gateway in subnet and is_rfc1918_ipv4(str(gateway)), 'DOCKER_BRIDGE_BINDING_INVALID')
+    try:
+        links = json.loads(command_text([IP, '-j', '-d', 'link', 'show', 'dev', binding['interface']],
+                                        code='DOCKER_BRIDGE_LINK_QUERY_FAILED'))
+        addresses = json.loads(command_text([IP, '-j', 'address', 'show', 'dev', binding['interface']],
+                                            code='DOCKER_BRIDGE_ADDRESS_QUERY_FAILED'))
+    except (json.JSONDecodeError, ValueError, TypeError, RecursionError) as error:
+        raise InstallerError('DOCKER_BRIDGE_INSPECT_INVALID') from error
+    require(isinstance(links, list) and len(links) == 1 and isinstance(links[0], dict)
+            and links[0].get('ifname') == binding['interface']
+            and links[0].get('linkinfo', {}).get('info_kind') == 'bridge',
+            'DOCKER_BRIDGE_LINK_INVALID')
+    require(isinstance(addresses, list) and len(addresses) == 1 and isinstance(addresses[0], dict)
+            and addresses[0].get('ifname') == binding['interface'],
+            'DOCKER_BRIDGE_ADDRESS_INVALID')
+    ipv4 = []
+    for address in addresses[0].get('addr_info', []):
+        if isinstance(address, dict) and address.get('family') == 'inet':
+            try:
+                ipv4.append((str(ipaddress.IPv4Address(address.get('local', ''))),
+                             int(address.get('prefixlen'))))
+            except (ipaddress.AddressValueError, TypeError, ValueError):
+                raise InstallerError('DOCKER_BRIDGE_ADDRESS_INVALID')
+    require(ipv4 == [(str(gateway), subnet.prefixlen)], 'DOCKER_BRIDGE_ADDRESS_MISMATCH')
+
+
+def _check_ufw_files() -> None:
+    for directory in UFW_DIRECTORIES:
+        _trusted_directory(directory, 0o755, group=0)
+    paths = (UFW, *UFW_CONFIG_FILES)
+    for path in paths:
+        try:
+            info = path.lstat()
+        except OSError as error:
+            raise InstallerError('UFW_FILES_UNAVAILABLE') from error
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                and not (stat.S_IMODE(info.st_mode) & 0o022), 'UFW_FILES_UNTRUSTED')
+        if path == UFW:
+            require(stat.S_IMODE(info.st_mode) & 0o111, 'UFW_BINARY_NOT_EXECUTABLE')
+
+
+def _normalize_ufw_added(raw: str) -> list[str]:
+    result = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line == '(None)' or line.startswith("Added user rules"):
+            continue
+        require(line.startswith('ufw '), 'UFW_ADDED_RULES_UNSUPPORTED')
+        try:
+            tokens = shlex.split(line, posix=True)
+        except ValueError as error:
+            raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED') from error
+        require(len(tokens) >= 2 and tokens[0] == 'ufw', 'UFW_ADDED_RULES_UNSUPPORTED')
+        result.append(' '.join(tokens))
+    require(len(result) <= 1024, 'UFW_ADDED_RULES_UNSUPPORTED')
+    return result
+
+
+def _normalize_ufw_raw(raw: str) -> dict:
+    sections = {'ipv4': [], 'ipv6': [], 'other': []}
+    family = 'other'
+    current_chain = ''
+    input_policy = None
+    forward_policy = None
+    for source_line in raw.splitlines():
+        line = source_line.strip()
+        if not line:
+            continue
+        if line.startswith('IPV4'):
+            family = 'ipv4'
+            continue
+        if line.startswith('IPV6'):
+            family = 'ipv6'
+            continue
+        chain = re.match(r'^Chain ([A-Za-z0-9_-]+) \(policy ([A-Z]+)(?: [0-9]+ packets, [0-9]+ bytes)?\)$', line)
+        if chain:
+            current_chain = chain.group(1)
+            if family == 'ipv4' and chain.group(1) == 'INPUT' and input_policy is None:
+                input_policy = chain.group(2)
+            if family == 'ipv4' and chain.group(1) == 'FORWARD' and forward_policy is None:
+                forward_policy = chain.group(2)
+            sections[family].append(f'Chain {chain.group(1)} (policy {chain.group(2)})')
+            continue
+        references = re.match(r'^Chain ([A-Za-z0-9_-]+) \([0-9]+ references\)$', line)
+        if references:
+            current_chain = references.group(1)
+            sections[family].append(current_chain)
+            continue
+        if re.match(r'^(?:pkts|num)\s+bytes\s+', line, re.IGNORECASE):
+            continue
+        line = re.sub(r'^\d+\s+\d+\s+', '', line)
+        line = re.sub(r'\s+\d+ packets, \d+ bytes$', '', line)
+        sections[family].append(f'{current_chain} {line}'.strip())
+    require(input_policy == 'DROP', 'UFW_EFFECTIVE_INPUT_POLICY_UNSUPPORTED')
+    require(forward_policy == 'DROP', 'UFW_EFFECTIVE_ROUTE_POLICY_UNSUPPORTED')
+    total = sum(len(line.encode('utf-8')) + 1 for lines in sections.values() for line in lines)
+    require(total <= MAX_UFW_SNAPSHOT_BYTES, 'UFW_SNAPSHOT_TOO_LARGE')
+    return {'ipv4': sections['ipv4'], 'ipv6': sections['ipv6'],
+            'other': sections['other'], 'input_policy': input_policy,
+            'forward_policy': forward_policy}
+
+
+def _ufw_snapshot(binding: dict, owned: dict | None = None) -> dict:
+    _check_ufw_files()
+    try:
+        status = command_text([str(UFW), 'status', 'verbose'], timeout=30,
+                              code='UFW_STATUS_QUERY_FAILED')
+        require(re.search(r'^Status: active$', status, re.MULTILINE) is not None
+                and re.search(r'^Default: deny \(incoming\), [^\n]*, deny \(routed\)$', status,
+                              re.MULTILINE) is not None,
+                'UFW_POLICY_UNSUPPORTED')
+        added = _normalize_ufw_added(command_text([str(UFW), 'show', 'added'], timeout=30,
+                                                   code='UFW_ADDED_QUERY_FAILED'))
+        raw = _normalize_ufw_raw(command_text([str(UFW), 'show', 'raw'], timeout=30,
+                                               code='UFW_EFFECTIVE_QUERY_FAILED'))
+    except InstallerError:
+        raise
+    except Exception as error:
+        raise InstallerError('UFW_QUERY_FAILED') from error
+    serialized_size = len(json.dumps({'added': added, 'raw': raw}, separators=(',', ':')).encode())
+    require(serialized_size <= MAX_UFW_SNAPSHOT_BYTES, 'UFW_SNAPSHOT_TOO_LARGE')
+    snapshot = {'added': added, 'raw': raw}
+    _validate_no_ufw_conflict(snapshot, binding, owned)
+    return snapshot
+
+
+def _network_token_overlaps(value: str, network: ipaddress.IPv4Network) -> bool:
+    if value.lower() in ('any', 'anywhere', '0.0.0.0/0'):
+        return True
+    try:
+        candidate = ipaddress.IPv4Network(value, strict=False)
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
+        return True
+    return candidate.overlaps(network)
+
+
+def _port_spec_covers(spec: str, expected: int) -> bool:
+    for part in spec.split(','):
+        try:
+            bounds = part.split(':', 1)
+            low = int(bounds[0])
+            high = int(bounds[1]) if len(bounds) == 2 else low
+        except ValueError:
+            return True
+        if not (1 <= low <= high <= 65535):
+            return True
+        if low <= expected <= high:
+            return True
+    return False
+
+
+def _added_rule_may_cover(line: str, binding: dict | None) -> bool:
+    try:
+        tokens = shlex.split(line)
+    except ValueError as error:
+        raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED') from error
+    if len(tokens) < 2 or tokens[0] != 'ufw':
+        raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+    rule_tokens = tokens[1:]
+    if not rule_tokens:
+        raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+    action_offset = 0
+    if rule_tokens[0] == 'route':
+        return False
+    if rule_tokens[0] == 'insert':
+        if len(rule_tokens) < 3 or not rule_tokens[1].isdigit():
+            raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+        action_offset = 2
+    action = rule_tokens[action_offset]
+    if action not in ('allow', 'deny', 'reject', 'limit'):
+        raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+    args = rule_tokens[action_offset + 1:]
+    if 'comment' in args:
+        args = args[:args.index('comment')]
+    if 'out' in args:
+        return False
+    interface = None
+    if 'on' in args:
+        index = args.index('on')
+        if index + 1 >= len(args):
+            raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+        interface = args[index + 1]
+    if binding is not None and interface is not None and interface != binding['interface']:
+        return False
+    protocol = None
+    if 'proto' in args:
+        index = args.index('proto')
+        if index + 1 >= len(args):
+            raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+        protocol = args[index + 1].lower()
+        if protocol == 'udp':
+            return False
+        if protocol not in ('tcp', 'any'):
+            raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+    if binding is not None:
+        for marker, compare in (('from', ipaddress.IPv4Network(binding['subnet'])),
+                                ('to', ipaddress.IPv4Network(binding['gateway'] + '/32'))):
+            if marker in args:
+                index = args.index(marker)
+                if index + 1 >= len(args):
+                    raise InstallerError('UFW_ADDED_RULES_UNSUPPORTED')
+                if not _network_token_overlaps(args[index + 1], compare):
+                    return False
+    specs = []
+    saw_explicit_port = False
+    to_index = args.index('to') if 'to' in args else -1
+    for index, token in enumerate(args):
+        match = re.fullmatch(r'([0-9:,]+)/(tcp|udp)', token, re.IGNORECASE)
+        if match:
+            saw_explicit_port = True
+            if match.group(2).lower() == 'udp':
+                continue
+            specs.append(match.group(1))
+    for index, token in enumerate(args[:-1]):
+        if token == 'port':
+            saw_explicit_port = True
+            if to_index >= 0 and index > to_index:
+                specs.append(args[index + 1])
+    # A source-port constraint without a destination-port constraint still
+    # affects every destination port, so it is treated as broad and unsafe.
+    has_source_port = ('from' in args and 'port' in args
+                       and ('to' not in args or args.index('port') < to_index))
+    return has_source_port or (not specs and not saw_explicit_port) \
+        or any(_port_spec_covers(spec, PORT) for spec in specs)
+
+
+def _validate_no_ufw_conflict(snapshot: dict, binding: dict | None,
+                              owned: dict | None = None) -> None:
+    for line in snapshot['added']:
+        if owned is not None and line == _firewall_rule_line(owned):
+            continue
+        if _added_rule_may_cover(line, binding):
+            raise InstallerError('UFW_EXISTING_PORT_RULE_CONFLICT')
+    for family in ('ipv4', 'ipv6'):
+        for line in snapshot['raw'][family]:
+            if owned is not None and _raw_line_is_owned_rule(line, owned):
+                continue
+            raw_specs = [match.group(1) or match.group(2) for match in
+                         re.finditer(r'\b(?:dpt|dpts):([0-9:,]+)|\b(?:dport|dports)\s+([0-9:,]+)', line)]
+            if (any(_port_spec_covers(spec, PORT) for spec in raw_specs)
+                    or _raw_rule_may_cover(line, family, binding)):
+                raise InstallerError('UFW_EFFECTIVE_PORT_RULE_CONFLICT')
+
+
+def _same_ufw_snapshot(left: dict, right: dict) -> bool:
+    return left == right
+
+
+def _bridge_tcp_probe(worker_id: str, gateway: str) -> bool:
+    require(HEX64.fullmatch(worker_id) is not None and is_rfc1918_ipv4(gateway),
+            'WORKER_BRIDGE_PROBE_TARGET_INVALID')
+    script = ("const net=require('node:net');let done=false;const finish=(ok)=>{if(done)return;"
+              "done=true;process.stdout.write(ok?'OPENAI_EGRESS_BRIDGE_TCP_OK\\n':"
+              "'OPENAI_EGRESS_BRIDGE_TCP_BLOCKED\\n');process.exitCode=ok?0:10;};"
+              "const s=net.createConnection({host:process.argv[1],port:Number(process.argv[2])});"
+              "s.setTimeout(4000);s.once('connect',()=>{finish(true);s.destroy();});"
+              "s.once('timeout',()=>{finish(false);s.destroy();});"
+              "s.once('error',e=>{if(['ECONNREFUSED','ETIMEDOUT','EHOSTUNREACH',"
+              "'ENETUNREACH','EACCES'].includes(e.code))finish(false);else process.exitCode=11;});")
+    result = run_command([DOCKER, 'exec', worker_id, TIMEOUT, '8', 'node', '-e', script,
+                          gateway, str(PORT)], timeout=12, code='WORKER_BRIDGE_PROBE_FAILED',
+                         allowed_statuses=frozenset((0, 10)))
+    if result.returncode == 0 and result.stdout == b'OPENAI_EGRESS_BRIDGE_TCP_OK\n':
+        return True
+    if result.returncode == 10 and result.stdout == b'OPENAI_EGRESS_BRIDGE_TCP_BLOCKED\n':
+        return False
+    raise InstallerError('WORKER_BRIDGE_PROBE_INVALID')
 
 
 def read_production_env() -> tuple[bytes, os.stat_result]:
@@ -793,7 +1094,8 @@ def validate_private_state(value) -> dict:
             'PRIVATE_STATE_INVALID')
     require(value['phase'] in ('preparing', 'account_ready', 'binary_installed',
                                'config_validated', 'unit_installed', 'proxy_started',
-                               'proxy_verified', 'env_written', 'compose_attempted',
+                               'proxy_verified', 'firewall_intent', 'firewall_added',
+                               'firewall_not_needed', 'bridge_verified', 'env_written', 'compose_attempted',
                                'app_worker_recreated', 'verified'), 'PRIVATE_STATE_INVALID')
     require(is_valid_proxy_url(value['installed_value'])
             and HEX64.fullmatch(value['installed_value_sha256']) is not None
@@ -858,7 +1160,254 @@ def validate_private_state(value) -> dict:
             and all(smoke.get(key) is None or type(smoke.get(key)) is bool
                     for key in ('openai_401', 'non_openai_rejected')),
             'PRIVATE_STATE_INVALID')
+    if 'firewall' in value:
+        _validate_firewall_state(value['firewall'])
     return value
+
+
+def _validate_firewall_snapshot(snapshot: dict) -> None:
+    require(isinstance(snapshot, dict) and set(snapshot) == {'added', 'raw'}
+            and isinstance(snapshot.get('added'), list)
+            and len(snapshot['added']) <= 1024
+            and all(isinstance(line, str) and len(line) <= 4096 for line in snapshot['added']),
+            'PRIVATE_STATE_INVALID')
+    raw = snapshot.get('raw')
+    require(isinstance(raw, dict)
+            and set(raw) == {'ipv4', 'ipv6', 'other', 'input_policy', 'forward_policy'}
+            and raw.get('input_policy') == 'DROP' and raw.get('forward_policy') == 'DROP',
+            'PRIVATE_STATE_INVALID')
+    for family in ('ipv4', 'ipv6', 'other'):
+        require(isinstance(raw.get(family), list)
+                and all(isinstance(line, str) and len(line) <= 4096 for line in raw[family]),
+                'PRIVATE_STATE_INVALID')
+    require(len(json.dumps(snapshot, separators=(',', ':')).encode()) <= MAX_UFW_SNAPSHOT_BYTES,
+            'PRIVATE_STATE_INVALID')
+
+
+def _validate_firewall_state(firewall: dict) -> None:
+    require(isinstance(firewall, dict)
+            and firewall.get('status') in ('pending', 'not_needed', 'intent', 'added', 'removed')
+            and (firewall.get('rule_added') is None or type(firewall.get('rule_added')) is bool)
+            and (firewall.get('bridge_reachable') is None
+                 or type(firewall.get('bridge_reachable')) is bool), 'PRIVATE_STATE_INVALID')
+    status = firewall['status']
+    if status == 'pending':
+        require(firewall.get('rule_added') is None and firewall.get('bridge_reachable') is None,
+                'PRIVATE_STATE_INVALID')
+        return
+    if status == 'not_needed':
+        require(firewall.get('rule_added') is False and firewall.get('bridge_reachable') is True,
+                'PRIVATE_STATE_INVALID')
+        return
+    require(isinstance(firewall.get('interface'), str)
+            and re.fullmatch(r'[A-Za-z0-9_.:-]{1,15}', firewall['interface']) is not None
+            and isinstance(firewall.get('subnet'), str)
+            and isinstance(firewall.get('gateway'), str)
+            and isinstance(firewall.get('comment'), str)
+            and re.fullmatch(re.escape(UFW_OWNER_PREFIX) + r'[a-f0-9]{24}', firewall['comment']) is not None,
+            'PRIVATE_STATE_INVALID')
+    try:
+        subnet = ipaddress.IPv4Network(firewall['subnet'], strict=False)
+        gateway = ipaddress.IPv4Address(firewall['gateway'])
+    except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
+        raise InstallerError('PRIVATE_STATE_INVALID')
+    require(gateway in subnet and is_rfc1918_ipv4(str(gateway)), 'PRIVATE_STATE_INVALID')
+    before = firewall.get('before')
+    _validate_firewall_snapshot(before)
+    if status == 'intent':
+        require(firewall.get('rule_added') is None and firewall.get('bridge_reachable') is None,
+                'PRIVATE_STATE_INVALID')
+    elif status == 'added':
+        require(firewall.get('rule_added') is True
+                and firewall.get('bridge_reachable') in (None, False, True),
+                'PRIVATE_STATE_INVALID')
+    else:
+        require(firewall.get('rule_added') in (False, True)
+                and firewall.get('bridge_reachable') in (None, False, True),
+                'PRIVATE_STATE_INVALID')
+
+
+def _firewall_rule_tokens(firewall: dict) -> list[str]:
+    return ['ufw', 'allow', 'in', 'on', firewall['interface'],
+            'from', firewall['subnet'], 'to', firewall['gateway'], 'port', str(PORT),
+            'proto', 'tcp', 'comment', firewall['comment']]
+
+
+def _firewall_rule_line(firewall: dict) -> str:
+    return ' '.join(_firewall_rule_tokens(firewall))
+
+
+def _raw_line_is_owned_rule(line: str, firewall: dict) -> bool:
+    fields = line.split()
+    if not fields or fields[0] != 'ufw-user-input':
+        return False
+    fields = fields[1:]
+    if (len(fields) < 8 or fields[0] != 'ACCEPT' or fields[1] not in ('tcp', '6')
+            or fields[2] != '--' or fields[3] != firewall['interface'] or fields[4] != '*'
+            or fields[5] != firewall['subnet'] or fields[6] != firewall['gateway']):
+        return False
+    return re.search(rf'\bdpt:{PORT}(?:\s|$)', line) is not None
+
+
+def _raw_rule_may_cover(line: str, family: str, binding: dict) -> bool:
+    fields = line.split()
+    if len(fields) < 8:
+        return False
+    chain, target, protocol = fields[0], fields[1], fields[2]
+    if chain not in ('INPUT', 'ufw-before-input', 'ufw-user-input', 'ufw-after-input',
+                     'ufw-reject-input', 'ufw-track-input', 'ufw6-user-input'):
+        return False
+    if any(_port_spec_covers(match.group(1) or match.group(2), PORT) for match in
+           re.finditer(r'\b(?:dpt|dpts):([0-9:,]+)|\b(?:dport|dports)\s+([0-9:,]+)', line)):
+        return True
+    if target != 'ACCEPT' or protocol not in ('tcp', '6', '0', 'all'):
+        return False
+    if 'ctstate RELATED,ESTABLISHED' in line or re.search(r'\bdpt[s]?:|\bdports?\s', line):
+        return False
+    if family == 'ipv6':
+        return False
+    interface, source, destination = fields[4], fields[6], fields[7]
+    if interface not in ('*', binding['interface']):
+        return False
+    if not _network_token_overlaps(source, ipaddress.IPv4Network(binding['subnet'])):
+        return False
+    if not _network_token_overlaps(destination,
+                                   ipaddress.IPv4Network(binding['gateway'] + '/32')):
+        return False
+    return True
+
+
+def _snapshot_owned_rule(snapshot: dict, firewall: dict) -> tuple[int, int]:
+    expected = _firewall_rule_line(firewall)
+    added = sum(line == expected for line in snapshot['added'])
+    raw = sum(_raw_line_is_owned_rule(line, firewall) for line in snapshot['raw']['ipv4'])
+    return added, raw
+
+
+def _exact_firewall_add_delta(before: dict, after: dict, firewall: dict) -> bool:
+    if before['raw']['ipv6'] != after['raw']['ipv6'] or before['raw']['other'] != after['raw']['other']:
+        return False
+    if before['raw']['input_policy'] != after['raw']['input_policy']:
+        return False
+    if before['raw']['forward_policy'] != after['raw']['forward_policy']:
+        return False
+    old_added = list(before['added'])
+    new_added = list(after['added'])
+    expected = _firewall_rule_line(firewall)
+    if new_added.count(expected) != old_added.count(expected) + 1:
+        return False
+    new_added.remove(expected)
+    if new_added != old_added:
+        return False
+    old_raw = list(before['raw']['ipv4'])
+    new_raw = list(after['raw']['ipv4'])
+    matching = [line for line in new_raw if _raw_line_is_owned_rule(line, firewall)]
+    if len(matching) != 1:
+        return False
+    new_raw.remove(matching[0])
+    return new_raw == old_raw
+
+
+def _validate_exact_firewall_deletion(before: dict, after: dict, firewall: dict) -> bool:
+    if before['raw']['ipv6'] != after['raw']['ipv6'] or before['raw']['other'] != after['raw']['other']:
+        return False
+    if before['raw']['input_policy'] != after['raw']['input_policy']:
+        return False
+    if before['raw']['forward_policy'] != after['raw']['forward_policy']:
+        return False
+    expected = _firewall_rule_line(firewall)
+    old_added = list(before['added'])
+    new_added = list(after['added'])
+    if old_added.count(expected) != new_added.count(expected) + 1:
+        return False
+    old_added.remove(expected)
+    if old_added != new_added:
+        return False
+    old_raw = list(before['raw']['ipv4'])
+    new_raw = list(after['raw']['ipv4'])
+    matching = [line for line in old_raw if _raw_line_is_owned_rule(line, firewall)]
+    if len(matching) != 1:
+        return False
+    old_raw.remove(matching[0])
+    return old_raw == new_raw
+
+
+def _firewall_binding_state(binding: dict, comment: str, snapshot: dict) -> dict:
+    return {'status': 'intent', 'interface': binding['interface'],
+            'subnet': binding['subnet'], 'gateway': binding['gateway'],
+            'comment': comment, 'before': snapshot,
+            'rule_added': None, 'bridge_reachable': None}
+
+
+def _ensure_worker_bridge_access(state: dict, runtime: dict, binding: dict,
+                                 initial_snapshot: dict) -> None:
+    current = _ufw_snapshot(binding)
+    require(_same_ufw_snapshot(initial_snapshot, current), 'UFW_STATE_CHANGED')
+    firewall = state['firewall']
+    if _bridge_tcp_probe(runtime['worker_container_id'], binding['gateway']):
+        firewall.update({'status': 'not_needed', 'rule_added': False, 'bridge_reachable': True,
+                         'interface': binding['interface'], 'subnet': binding['subnet'],
+                         'gateway': binding['gateway']})
+        state['phase'] = 'firewall_not_needed'
+        write_private_state(state)
+    else:
+        firewall = _firewall_binding_state(binding, UFW_OWNER_PREFIX + secrets.token_hex(12), current)
+        state['firewall'] = firewall
+        state['phase'] = 'firewall_intent'
+        write_private_state(state)
+        run_command([str(UFW), 'allow', 'in', 'on', firewall['interface'],
+                     'from', firewall['subnet'], 'to', firewall['gateway'], 'port', str(PORT),
+                     'proto', 'tcp', 'comment', firewall['comment']],
+                    timeout=30, code='UFW_RULE_ADD_FAILED')
+        after = _ufw_snapshot(binding, owned=firewall)
+        require(_exact_firewall_add_delta(current, after, firewall)
+                and _snapshot_owned_rule(after, firewall) == (1, 1),
+                'UFW_RULE_ADD_VERIFY_FAILED')
+        firewall.update({'status': 'added', 'rule_added': True, 'bridge_reachable': None})
+        state['phase'] = 'firewall_added'
+        write_private_state(state)
+    require(_bridge_tcp_probe(runtime['worker_container_id'], binding['gateway']),
+            'WORKER_BRIDGE_UNREACHABLE')
+    firewall['bridge_reachable'] = True
+    state['phase'] = 'bridge_verified'
+    write_private_state(state)
+
+
+def cleanup_owned_firewall_rule(state: dict) -> bool:
+    firewall = state.get('firewall')
+    if not isinstance(firewall, dict) or firewall.get('status') in ('pending', 'not_needed', 'removed'):
+        return True
+    try:
+        binding = {'interface': firewall['interface'], 'subnet': firewall['subnet'],
+                   'gateway': firewall['gateway']}
+        current = _ufw_snapshot(binding, owned=firewall)
+        owned_count = _snapshot_owned_rule(current, firewall)
+        if owned_count == (0, 0):
+            firewall['status'] = 'removed'
+            firewall['rule_added'] = firewall.get('rule_added') is True
+            state['phase'] = 'bridge_verified'
+            write_private_state(state)
+            return True
+        require(owned_count == (1, 1), 'UFW_OWNED_RULE_DRIFT')
+        firewall['rule_added'] = True
+        if firewall['status'] == 'intent':
+            require(_exact_firewall_add_delta(firewall['before'], current, firewall),
+                    'UFW_INTENT_STATE_DRIFT')
+        delete_before = current
+        run_command([str(UFW), '--force', 'delete', 'allow', 'in', 'on', firewall['interface'],
+                     'from', firewall['subnet'], 'to', firewall['gateway'], 'port', str(PORT),
+                     'proto', 'tcp', 'comment', firewall['comment']],
+                    timeout=30, code='UFW_RULE_DELETE_FAILED')
+        after = _ufw_snapshot(binding)
+        require(_validate_exact_firewall_deletion(delete_before, after, firewall)
+                and _snapshot_owned_rule(after, firewall) == (0, 0),
+                'UFW_RULE_DELETE_VERIFY_FAILED')
+        firewall['status'] = 'removed'
+        state['phase'] = 'bridge_verified'
+        write_private_state(state)
+        return True
+    except (InstallerError, OSError, KeyError, TypeError):
+        return False
 
 
 def _ensure_private_dir(*, create: bool) -> None:
@@ -905,7 +1454,8 @@ def read_status() -> dict | None:
     allowed = {'schema', 'version', 'revision', 'status', 'rollback_status', 'updated_at',
                'proxy_loc', 'proxy_colo', 'openai_401', 'non_openai_rejected',
                'direct_fetch_direct', 'app_healthy', 'worker_healthy', 'public_health',
-               'database_unchanged', 'git_worker_unchanged'}
+               'database_unchanged', 'git_worker_unchanged',
+               'firewall_rule_added', 'bridge_reachable'}
     require(isinstance(value, dict) and value.get('schema') == 1
             and set(value) <= allowed
             and isinstance(value.get('version'), str)
@@ -917,7 +1467,8 @@ def read_status() -> dict | None:
     require(value.get('proxy_loc') in (None, EXIT_TRACE_LOC)
             and value.get('proxy_colo') in (None, EXIT_TRACE_COLO), 'STATUS_RECEIPT_INVALID')
     for key in ('openai_401', 'non_openai_rejected', 'direct_fetch_direct', 'app_healthy',
-                'worker_healthy', 'public_health', 'database_unchanged', 'git_worker_unchanged'):
+                'worker_healthy', 'public_health', 'database_unchanged', 'git_worker_unchanged',
+                'firewall_rule_added', 'bridge_reachable'):
         require(value.get(key) is None or type(value.get(key)) is bool, 'STATUS_RECEIPT_INVALID')
     return value
 
@@ -951,7 +1502,7 @@ def status_receipt(version: str, revision: str, status: str,
     allowed = {
         'proxy_loc', 'proxy_colo', 'openai_401', 'non_openai_rejected',
         'direct_fetch_direct', 'app_healthy', 'worker_healthy', 'public_health',
-        'database_unchanged', 'git_worker_unchanged',
+        'database_unchanged', 'git_worker_unchanged', 'firewall_rule_added', 'bridge_reachable',
     }
     value = {'schema': 1, 'version': version, 'revision': revision,
              'status': status, 'rollback_status': rollback_status,
@@ -1592,6 +2143,8 @@ def rollback_state(state: dict, *, automatic: bool) -> bool:
         'public_health': None,
         'database_unchanged': None,
         'git_worker_unchanged': None,
+        'firewall_rule_added': state.get('firewall', {}).get('rule_added'),
+        'bridge_reachable': state.get('firewall', {}).get('bridge_reachable'),
     }
     success = True
     compose_was_attempted = state.get('phase') in ('compose_attempted', 'app_worker_recreated', 'verified', 'installed')
@@ -1622,8 +2175,22 @@ def rollback_state(state: dict, *, automatic: bool) -> bool:
             success = False
     elif compose_was_attempted:
         success = False
-    cleanup_ok = cleanup_managed_installation(state) if env_restored and runtime_ok else False
-    success = cleanup_ok and success
+    firewall_ok = cleanup_owned_firewall_rule(state) if env_restored and runtime_ok else False
+    cleanup_ok = False
+    if env_restored and runtime_ok:
+        if firewall_ok:
+            cleanup_ok = cleanup_managed_installation(state)
+        else:
+            # Keep the owned unit files available for a later exact retry, but
+            # stop its listener so a failed UFW CAS cannot leave it exposed.
+            try:
+                stop_proxy_service(strict=False)
+                cleanup_ok = False
+            except InstallerError:
+                cleanup_ok = False
+    checks['firewall_rule_added'] = state.get('firewall', {}).get('rule_added')
+    checks['bridge_reachable'] = state.get('firewall', {}).get('bridge_reachable')
+    success = firewall_ok and cleanup_ok and success
     if success:
         sanitized = _sanitize_state(state, 'rolled_back', 'succeeded')
         write_private_state(sanitized)
@@ -1637,12 +2204,13 @@ def rollback_state(state: dict, *, automatic: bool) -> bool:
 
 
 def preflight(version: str, revision: str, payload_path: str,
-              payload_sha256: str) -> tuple[dict, dict, str, bytes, os.stat_result, dict | None]:
+              payload_sha256: str) -> tuple[dict, dict, dict, dict, bytes, os.stat_result, dict | None]:
     validate_expected(version, revision)
     validate_compose_files()
     validate_repository_revision(revision)
     runtime = capture_runtime(version, revision)
-    gateway = docker_network_gateway(runtime)
+    binding = docker_network_binding(runtime)
+    firewall_snapshot = _ufw_snapshot(binding)
     env_bytes, env_info = read_production_env()
     payload = read_private_payload(payload_path, payload_sha256)
     previous_state = current_state_file()
@@ -1655,7 +2223,7 @@ def preflight(version: str, revision: str, payload_path: str,
     else:
         _trusted_directory(STATUS_DIR.parent, 0o755, group=0)
     read_status()
-    return payload, runtime, gateway, env_bytes, env_info, previous_state
+    return payload, runtime, binding, firewall_snapshot, env_bytes, env_info, previous_state
 
 
 def print_plan(version: str, revision: str) -> None:
@@ -1664,13 +2232,15 @@ def print_plan(version: str, revision: str) -> None:
 
 def apply_installation(version: str, revision: str, payload_path: str,
                        payload_sha256: str) -> dict:
-    payload, runtime, gateway, env_bytes, env_info, _old_state = preflight(
+    payload, runtime, binding, firewall_snapshot, env_bytes, env_info, _old_state = preflight(
         version, revision, payload_path, payload_sha256)
+    gateway = binding['gateway']
     write_status(status_receipt(version, revision, 'applying', 'pending',
                                 openai_401=None, proxy_loc=None, proxy_colo=None,
                                 non_openai_rejected=None, app_healthy=None,
                                 worker_healthy=None, public_health=None,
-                                database_unchanged=None, git_worker_unchanged=None))
+                                database_unchanged=None, git_worker_unchanged=None,
+                                firewall_rule_added=None, bridge_reachable=None))
     try:
         binary, binary_digest = download_mihomo()
         username = secrets.token_urlsafe(18)
@@ -1685,7 +2255,8 @@ def apply_installation(version: str, revision: str, payload_path: str,
                                     openai_401=None, proxy_loc=None, proxy_colo=None,
                                     non_openai_rejected=None, app_healthy=None,
                                     worker_healthy=None, public_health=None,
-                                    database_unchanged=None, git_worker_unchanged=None))
+                                    database_unchanged=None, git_worker_unchanged=None,
+                                    firewall_rule_added=None, bridge_reachable=None))
         raise
     user_before, _group_before = _existing_account()
     state = {
@@ -1704,6 +2275,7 @@ def apply_installation(version: str, revision: str, payload_path: str,
         'worker_image_id': runtime['worker_image_id'],
         'baseline_runtime': runtime,
         'gateway_ip': gateway,
+        'firewall': {'status': 'pending', 'rule_added': None, 'bridge_reachable': None},
         'egress_uid': None,
         'egress_gid': None,
         'created_directories': [],
@@ -1749,6 +2321,8 @@ def apply_installation(version: str, revision: str, payload_path: str,
         state['phase'] = 'proxy_verified'
         write_private_state(state)
 
+        _ensure_worker_bridge_access(state, runtime, binding, firewall_snapshot)
+
         safe_env_write(new_env, env_info)
         state['phase'] = 'env_written'
         write_private_state(state)
@@ -1779,6 +2353,8 @@ def apply_installation(version: str, revision: str, payload_path: str,
             'git_worker_unchanged': git_worker_same,
             'public_health': True,
             'direct_fetch_direct': True,
+            'firewall_rule_added': state['firewall']['rule_added'],
+            'bridge_reachable': state['firewall']['bridge_reachable'],
         }
         write_private_state(state)
         receipt_checks = {**state['smoke'], **state['checks']}

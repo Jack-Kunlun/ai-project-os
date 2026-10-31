@@ -65,9 +65,11 @@ test("new provider tests display safe failure reasons and clear stale results", 
   await page.route("**/api/admin/platform-provider-probe/budget", (route) => route.fulfill({ json: { budget: null } }));
   await page.route("**/api/settings/platform-ai-operations", (route) => route.fulfill({ json: platformOperations }));
   let probeReply: { status: number; body: unknown } | null = null;
-  await page.route("**/api/settings/providers/draft-probe", (route) => probeReply === null
-    ? route.abort("failed")
-    : route.fulfill({ status: probeReply.status, json: probeReply.body }));
+  let probeGate = Promise.resolve();
+  await page.route("**/api/settings/providers/draft-probe", async (route) => {
+    await probeGate;
+    return probeReply === null ? route.abort("failed") : route.fulfill({ status: probeReply.status, json: probeReply.body });
+  });
   const origin = new URL(page.url()).origin;
   await page.context().addCookies([{ name: "aipos-language", value: "zh-CN", url: origin }]);
   await page.setViewportSize({ width: 390, height: 740 });
@@ -77,7 +79,7 @@ test("new provider tests display safe failure reasons and clear stale results", 
   await dialog.getByRole("combobox", { name: "供应商", exact: true }).selectOption("openai");
   await dialog.getByRole("textbox", { name: "OpenAI API key", exact: true }).fill("isolated-browser-fixture-key");
   const run = dialog.getByRole("button", { name: "测试连接", exact: true });
-  const save = dialog.getByRole("button", { name: "保存连接", exact: true });
+  const save = dialog.getByRole("button", { name: /^(?:保存连接|保存中…)$/u });
   for (const [suffix, reason] of [
     ["BUDGET_REQUIRED", "当前没有生效的模型测试额度"],
     ["BUDGET_EXHAUSTED", "平台连接测试额度不足"],
@@ -85,11 +87,13 @@ test("new provider tests display safe failure reasons and clear stale results", 
     ["PROVIDER_RATE_LIMITED", "供应商触发限流或配额不足"],
     ["PROVIDER_TIMEOUT", "供应商响应超时"],
     ["RECONCILIATION_REQUIRED", "连接测试结果未知，需要核对"],
+    ["RECONCILED_NO_DISPATCH", "有模型测试未发出，连接验证未完成"],
   ]) {
     const code = `PLATFORM_PROVIDER_PROBE_${suffix}`;
     probeReply = { status: 200, body: { draftProbeId: null, attempt: { safeErrorCode: code } } };
     await run.click();
     const alert = dialog.getByRole("alert");
+    await expect(alert).toBeVisible();
     await expect(alert).toContainText(reason);
     await expect(alert).toContainText(code);
     await expect(save).toBeDisabled();
@@ -99,6 +103,11 @@ test("new provider tests display safe failure reasons and clear stale results", 
   await run.click();
   await expect(dialog.getByRole("alert")).toContainText("供应商凭据无效或权限不足");
   await expect(dialog).not.toContainText("private-provider-detail");
+  probeReply = { status: 400, body: { error: { code: "PLATFORM_PROVIDER_PROBE_INVALID_INPUT", message: "secret=private-validation-detail" } } };
+  await run.click();
+  await expect(dialog.getByRole("alert")).toContainText("提交的供应商配置未通过校验");
+  await expect(dialog.getByRole("alert")).toContainText("PLATFORM_PROVIDER_PROBE_INVALID_INPUT");
+  await expect(dialog).not.toContainText("private-validation-detail");
   probeReply = { status: 200, body: { draftProbeId: null, attempt: { safeErrorCode: "SECRET_INTERNAL_CODE" } } };
   await run.click();
   await expect(dialog.getByRole("alert")).toContainText("供应商连接测试未通过");
@@ -111,12 +120,28 @@ test("new provider tests display safe failure reasons and clear stale results", 
   await run.click();
   await expect(dialog.getByRole("alert")).toContainText("未能取得连接测试结果，请检查网络后重试");
   probeReply = { status: 200, body: { draftProbeId: fixtureId, attempt: { safeErrorCode: null } } };
+  let finishProbe!: () => void;
+  probeGate = new Promise<void>((resolve) => { finishProbe = resolve; });
   await run.click();
+  await expect(dialog.getByRole("textbox", { name: "连接名称", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("combobox", { name: "供应商", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("textbox", { name: "OpenAI API key", exact: true })).toBeDisabled();
+  await expect(save).toBeDisabled();
+  finishProbe();
+  await expect(dialog.getByRole("status")).toBeVisible();
   await expect(dialog.getByRole("status")).toContainText("真实连接测试通过");
   await expect(dialog.getByRole("alert")).toHaveCount(0);
   await expect(save).toBeEnabled();
+  await page.route("**/api/settings/providers", (route) => route.fulfill({ status: 409, json: { error: { code: "PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT", message: "secret=private-proof-detail" } } }));
+  await save.click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByRole("alert")).toContainText("连接配置或测试证明已变化或过期");
+  await expect(dialog.getByRole("alert")).toContainText("PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT");
+  await expect(dialog).not.toContainText("private-proof-detail");
+  await expect(save).toBeDisabled();
   await dialog.getByLabel("连接名称", { exact: true }).fill("Changed after test");
   await expect(dialog.getByRole("status")).toHaveCount(0);
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
   await expect(save).toBeDisabled();
   await expectR02NoHorizontalOverflow(page, "provider test feedback 390px");
 });

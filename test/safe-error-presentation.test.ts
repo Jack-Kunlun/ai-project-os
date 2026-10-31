@@ -59,6 +59,8 @@ test("membership preview recovery retains only its two stable failure codes", as
 
 test("provider probe failures explain each reviewed cause without exposing provider prose", () => {
   for (const [suffix, reason] of [
+    ["INVALID_INPUT", /配置未通过校验/u],
+    ["CONFIGURATION_CONFLICT", /证明已变化或过期.*不能保存/u],
     ["BUDGET_REQUIRED", /没有生效.*已过期/u],
     ["BUDGET_EXHAUSTED", /额度不足/u],
     ["PROVIDER_AUTH_FAILED", /凭据无效或权限不足/u],
@@ -72,6 +74,7 @@ test("provider probe failures explain each reviewed cause without exposing provi
     ["PROVIDER_VISION_UNSUPPORTED", /不支持.*协议/u],
     ["RECONCILIATION_REQUIRED", /未知/u],
     ["RECONCILIATION_HOLD", /待核对/u],
+    ["RECONCILED_NO_DISPATCH", /测试未发出.*未完成/u],
   ] as const) {
     const code = `PLATFORM_PROVIDER_PROBE_${suffix}`;
     const result = safeErrorPresentation({ error: { code, message: "secret=private-provider-key" } }, "供应商连接测试未通过");

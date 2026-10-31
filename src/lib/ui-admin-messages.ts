@@ -1,5 +1,11 @@
 /** Static interface copy only. User content, protocol IDs and confirmation values stay unchanged. */
 export const englishAdminMessages: Readonly<Record<string, string>> = {
+  "连接配置或测试证明已变化或过期，不能保存。": "The connection settings or test proof changed or expired, so the connection cannot be saved.",
+  "按当前填写的配置重新测试，测试通过后再保存。": "Test the current settings again and save after the test passes.",
+  "提交的供应商配置未通过校验。": "The provider configuration did not pass validation.",
+  "检查连接名称、API Key、模型 ID，以及向量模型与维度是否完整匹配，修正后重新测试。": "Check the connection name, API key, model IDs, and whether the embedding model and dimensions are complete and compatible, then test again.",
+  "有模型测试未发出，连接验证未完成。": "At least one model test was not sent, so connection verification is incomplete.",
+  "先核对已完成的测试和测试额度，再手动重新测试。": "Review completed tests and the test allowance before retrying manually.",
   "当前没有生效的模型测试额度，可能尚未设置、尚未生效或已过期。": "No model test allowance is currently active. It may be missing, not yet active, or expired.",
   "到“模型测试额度”设置当前有效的测试周期后重试。": "Set a currently valid period in Model test allowance, then retry.",
   "平台连接测试额度不足。": "There is not enough connection test allowance.",

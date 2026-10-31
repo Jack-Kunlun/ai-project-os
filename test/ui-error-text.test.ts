@@ -7,7 +7,7 @@ import { englishUiMessages } from "../src/lib/ui-dictionary-source";
 const messages = { "项目搜索失败": "Project search failed" };
 
 test("provider failures retain their cause, recovery guidance and code in both languages", async () => {
-  for (const suffix of ["BUDGET_REQUIRED", "BUDGET_EXHAUSTED", "PROVIDER_AUTH_FAILED", "PROVIDER_RATE_LIMITED", "PROVIDER_TIMEOUT", "PROVIDER_INVALID_RESPONSE", "PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_TOO_LARGE", "PROVIDER_EMBEDDING_UNSUPPORTED", "PROVIDER_VISION_UNSUPPORTED", "RECONCILIATION_REQUIRED", "RECONCILIATION_HOLD"]) {
+  for (const suffix of ["INVALID_INPUT", "CONFIGURATION_CONFLICT", "BUDGET_REQUIRED", "BUDGET_EXHAUSTED", "PROVIDER_AUTH_FAILED", "PROVIDER_RATE_LIMITED", "PROVIDER_TIMEOUT", "PROVIDER_INVALID_RESPONSE", "PROVIDER_UNAVAILABLE", "PROVIDER_RESPONSE_TOO_LARGE", "PROVIDER_EMBEDDING_UNSUPPORTED", "PROVIDER_VISION_UNSUPPORTED", "RECONCILIATION_REQUIRED", "RECONCILIATION_HOLD", "RECONCILED_NO_DISPATCH"]) {
     const code = `PLATFORM_PROVIDER_PROBE_${suffix}`;
     const failure = await safeResponseError(new Response(JSON.stringify({ error: { code, message: "private-key" } })), "供应商连接测试失败");
     assert.ok(Object.hasOwn(englishUiMessages, failure.summary), failure.summary);

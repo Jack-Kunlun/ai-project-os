@@ -434,7 +434,9 @@ function ProviderCreateForm({
         }),
       });
       if (!response.ok) {
-        setFailure(await safeResponseError(response, "供应商创建失败"));
+        const failure = await safeResponseError(response, "供应商创建失败");
+        setFailure(failure);
+        if (failure.code === "PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT") setProof(null);
         return;
       }
       const payload = await response.json() as { provider: Provider };
@@ -454,6 +456,7 @@ function ProviderCreateForm({
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col text-slate-900">
       {/* The body owns overflow so the header and action footer stay available while fields scroll. */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6">
+        <fieldset disabled={pending} className="min-w-0">
         <Field compact label="供应商">
           <select value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className={`${formFields.lightField} light-field`}>
             {catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{t(entry.displayName)}</option>)}
@@ -476,6 +479,7 @@ function ProviderCreateForm({
           <p className="mt-1"><UiText text={"生成模型用于文本、摘要和计划；图片识别模型可选，留空即关闭；向量模型可选，维度必须匹配，切换模型或维度后需重建相关索引。API Key 只在服务端加密保存；连接测试按实际模型类型使用 1–3 次模型测试额度。"} /></p>
           {definition ? <div className="mt-3 space-y-1 text-slate-500"><p><UiText text={"生成推荐："} />{definition.generationModelSuggestions.join("、") || "暂无"}</p><p><UiText text={"图片推荐："} />{definition.visionModelSuggestions.join("、") || "暂无"}</p><p><UiText text={"向量推荐："} />{definition.embeddingModelSuggestions.map((item) => `${item.id}（${item.dimensions} 维）`).join("、") || "暂无"}</p></div> : null}
         </details>
+        </fieldset>
       </div>
       <footer className={`${modalFooterClassName} grid shrink-0 gap-3 px-5 py-4 sm:grid-cols-2 sm:px-6`}>
         {failure ? <div role="alert" className="min-w-0 space-y-1 break-words rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-800 sm:col-span-2">

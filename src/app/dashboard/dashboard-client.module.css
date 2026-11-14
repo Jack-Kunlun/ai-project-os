@@ -66,7 +66,7 @@
 }
 
 .primaryButton:hover {
-  background: var(--app-accent);
+  background: var(--app-accent-hover);
 }
 
 .featureGrid {
@@ -208,7 +208,7 @@
 .emptyCard {
   margin-top: 16px;
   border: 1px dashed var(--app-border);
-  border-radius: 9px;
+  border-radius: 6px;
   padding: 35px 20px;
   text-align: center;
   background: var(--app-surface);
@@ -286,7 +286,7 @@
 
 .cardAction {
   display: inline-flex;
-  min-height: 36px;
+  min-height: var(--app-action-min-height);
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
@@ -366,12 +366,11 @@
   padding: 18px;
   color: inherit;
   text-decoration: none;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color 140ms ease;
 }
 
 .projectCard:hover {
-  border-color: var(--app-border);
-  box-shadow: 0 7px 20px rgb(38 48 38 / 6%);
+  border-color: var(--app-accent-border);
 }
 
 .projectCardHeading,
@@ -457,7 +456,7 @@
 .projectSkeleton,
 .loadingRows span {
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 6px;
   background: linear-gradient(100deg, var(--app-surface-soft) 20%, var(--app-border) 40%, var(--app-surface-soft) 60%);
   background-size: 200% 100%;
   animation: shimmer 1.25s linear infinite;
@@ -483,17 +482,17 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 17px;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border: 1px solid var(--app-danger-border);
+  border-radius: 4px;
   padding: 11px 14px;
-  color: var(--app-muted);
-  background: var(--app-warning-soft);
+  color: var(--app-danger-ink);
+  background: var(--app-danger-soft);
   font-size: 12px;
 }
 
 .error button {
   border: 0;
-  color: var(--app-muted);
+  color: var(--app-danger-ink);
   background: transparent;
   font-size: 11px;
   font-weight: 650;

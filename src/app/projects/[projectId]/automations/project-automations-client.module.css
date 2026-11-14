@@ -26,7 +26,7 @@
   justify-content: center;
   gap: var(--app-action-gap);
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--app-surface);
   padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   color: var(--app-muted);
@@ -51,7 +51,7 @@
 .errorNotice {
   margin-top: 1rem;
   border: 1px solid var(--app-danger-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   background: var(--app-danger-soft);
   padding: 0.75rem 1rem;
   color: var(--app-danger-ink);
@@ -66,7 +66,7 @@
 
 .permissionNote {
   border: 1px solid var(--app-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
   padding: 0.75rem 1rem;
   color: var(--app-muted);
@@ -96,7 +96,7 @@
 }
 
 .ruleRowHighlighted {
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   outline: 2px solid var(--app-border);
   outline-offset: -2px;
   background: var(--app-surface);
@@ -149,7 +149,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--app-border);
-  border-radius: 0.4rem;
+  border-radius: var(--radius-control);
   background: var(--app-surface);
   padding: 5px 12px;
   color: var(--app-muted);
@@ -216,7 +216,7 @@
   margin: 0.75rem 0;
   scroll-margin-top: 5.5rem;
   border: 1px solid var(--app-border);
-  border-radius: 0.625rem;
+  border-radius: var(--radius-panel);
   background: var(--app-accent-soft);
   padding: 1rem;
 }
@@ -229,7 +229,7 @@
 
 .failureNotice {
   border: 1px solid var(--app-danger-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   background: var(--app-danger-soft);
   padding: 0.75rem;
   color: var(--app-danger-ink);
@@ -319,7 +319,7 @@
 .editField {
   min-height: 2.375rem;
   border: 1px solid var(--app-border);
-  border-radius: 0.4rem;
+  border-radius: var(--radius-field);
   background: var(--app-surface);
   padding: 0.5rem 0.625rem;
   color: var(--app-link);
@@ -328,8 +328,8 @@
 }
 
 .editField:focus {
-  border-color: var(--app-border);
-  box-shadow: 0 0 0 3px rgb(219 234 254 / 70%);
+  border-color: var(--app-accent-border);
+  box-shadow: none;
 }
 
 .actionMessage,
@@ -345,7 +345,7 @@
 
 .emptyState {
   border: 1px dashed var(--app-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   margin-top: 0.75rem;
   background: var(--app-surface);
   padding: 2rem 1rem;
@@ -357,7 +357,7 @@
 .loadingRow {
   height: 4.5rem;
   margin-top: 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface-soft);
   animation: pulse 1.7s ease-in-out infinite;
 }
@@ -382,4 +382,4 @@
   }
 }
 
-.pageHeader h1 { font-size: 25px; font-weight: 600; letter-spacing: 0; }
+.pageHeader h1 { font-size: var(--app-page-title-size); font-weight: 600; letter-spacing: 0; }

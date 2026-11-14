@@ -77,10 +77,10 @@ const statusLabels: Readonly<Record<StatusKey, string>> = {
   revocationRequired: "需要先撤销旧证据",
 };
 const statusClasses: Readonly<Record<StatusKey, string>> = {
-  eligible: "bg-amber-50 text-amber-700",
-  active: "bg-emerald-50 text-emerald-700",
-  stale: "bg-rose-50 text-rose-700",
-  revocationRequired: "bg-violet-50 text-violet-700",
+  eligible: "bg-app-warning-soft text-app-warning-ink",
+  active: "bg-app-success-soft text-app-success-ink",
+  stale: "bg-app-danger-soft text-app-danger-ink",
+  revocationRequired: "bg-app-accent-soft text-app-link",
 };
 const conclusionLabels: Readonly<Record<ReviewConclusion, string>> = {
   read_only_verified: "确认只读",
@@ -180,19 +180,19 @@ function StatusBadges({ candidate }: { candidate: McpCandidate }) {
 
 function SnapshotRow({ label, value }: { label: string; value: string | number | null | undefined }) {
   const { t } = useAppearance();
-  return <div className="rounded-2xl bg-slate-50 px-4 py-3">
-    <dt className="text-xs font-semibold text-slate-500">{t(label)}</dt>
-    <dd className="mt-2 break-all font-mono text-xs leading-5 text-slate-800">{safeValue(value)}</dd>
+  return <div className="rounded-panel bg-app-surface-soft px-4 py-3">
+    <dt className="text-xs font-semibold text-app-muted">{t(label)}</dt>
+    <dd className="mt-2 break-all font-mono text-xs leading-5 text-app-text">{safeValue(value)}</dd>
   </div>;
 }
 
 function SchemaBlock({ label, value }: { label: string; value: JsonValue }) {
   const { t } = useAppearance();
-  return <details className="group rounded-2xl border border-slate-200 bg-slate-50">
-    <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
-      <span className="flex items-center justify-between gap-3"><span>{t(label)}</span><span className="text-xs font-normal text-slate-500 group-open:text-indigo-600"><UiText text={"展开净化结构"} /></span></span>
+  return <details className="group rounded-panel border border-app-border bg-app-surface-soft">
+    <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-app-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent">
+      <span className="flex items-center justify-between gap-3"><span>{t(label)}</span><span className="text-xs font-normal text-app-muted group-open:text-app-link"><UiText text={"展开净化结构"} /></span></span>
     </summary>
-    <pre className="max-h-[360px] overflow-auto border-t border-slate-200 px-4 py-4 font-mono text-xs leading-5 text-slate-700">{schemaText(value, t("[无法展示的净化结构]"))}</pre>
+    <pre className="max-h-[360px] overflow-auto border-t border-app-border px-4 py-4 font-mono text-xs leading-5 text-app-text">{schemaText(value, t("[无法展示的净化结构]"))}</pre>
   </details>;
 }
 
@@ -201,17 +201,17 @@ function CandidateTable({ candidates, onSelect }: { candidates: McpCandidate[]; 
   return <div className="mt-5 overflow-x-auto">
     <table className="w-full text-left text-sm">
       <caption className="sr-only"><UiText text={"MCP 工具审核列表"} /></caption>
-      <thead className="border-y border-slate-100 bg-slate-50 text-xs text-slate-500">
+      <thead className="border-y border-app-border bg-app-surface-soft text-xs text-app-muted">
         <tr>{["工具", "所属连接", "审核状态", "风险", "更新时间", "操作"].map((label) => <th key={label} scope="col" className="whitespace-nowrap px-4 py-3 font-semibold">{t(label)}</th>)}</tr>
       </thead>
-      <tbody className="divide-y divide-slate-100">
-        {candidates.map((candidate) => <tr key={candidate.tool.id} className="align-top hover:bg-slate-50/60">
-          <td className="min-w-56 px-4 py-4"><p className="font-semibold text-slate-950">{candidate.tool.title || candidate.tool.name}</p><p className="mt-1 break-all text-xs text-slate-500">{candidate.tool.name}</p></td>
-          <td className="min-w-48 max-w-80 break-words px-4 py-4 text-slate-600">{safeValue(candidate.connection.name)}</td>
+      <tbody className="divide-y divide-app-border">
+        {candidates.map((candidate) => <tr key={candidate.tool.id} className="align-top hover:bg-app-surface-soft">
+          <td className="min-w-56 px-4 py-4"><p className="font-semibold text-app-text">{candidate.tool.title || candidate.tool.name}</p><p className="mt-1 break-all text-xs text-app-muted">{candidate.tool.name}</p></td>
+          <td className="min-w-48 max-w-80 break-words px-4 py-4 text-app-muted">{safeValue(candidate.connection.name)}</td>
           <td className="min-w-40 px-4 py-4"><StatusBadges candidate={candidate} /></td>
-          <td className="whitespace-nowrap px-4 py-4 text-slate-600">{candidate.riskLevel ? t(riskLabels[candidate.riskLevel]) : t("待评估")}</td>
-          <td className="whitespace-nowrap px-4 py-4 text-xs leading-5 text-slate-500">{formatDate(candidate.snapshots.connectionUpdatedAt, language, t("时间不可用"))}<p className="mt-1"><UiText text={"配置版本"} />{" "}{safeValue(candidate.snapshots.connectionConfigurationRevision)}</p></td>
-          <td className="whitespace-nowrap px-4 py-4"><button type="button" onClick={() => onSelect(candidate.tool.id)} aria-label={`${t("查看")} ${candidate.tool.title || candidate.tool.name} ${t("的详情")}`} className="app-action-button app-action-button--compact inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"查看详情"} /></button></td>
+          <td className="whitespace-nowrap px-4 py-4 text-app-muted">{candidate.riskLevel ? t(riskLabels[candidate.riskLevel]) : t("待评估")}</td>
+          <td className="whitespace-nowrap px-4 py-4 text-xs leading-5 text-app-muted">{formatDate(candidate.snapshots.connectionUpdatedAt, language, t("时间不可用"))}<p className="mt-1"><UiText text={"配置版本"} />{" "}{safeValue(candidate.snapshots.connectionConfigurationRevision)}</p></td>
+          <td className="whitespace-nowrap px-4 py-4"><button type="button" onClick={() => onSelect(candidate.tool.id)} aria-label={`${t("查看")} ${candidate.tool.title || candidate.tool.name} ${t("的详情")}`} className="app-button-secondary app-button-compact inline-flex min-h-10 items-center justify-center rounded-control border px-3 py-2 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"><UiText text={"查看详情"} /></button></td>
         </tr>)}
       </tbody>
     </table>
@@ -286,37 +286,37 @@ function ReviewForm({ candidate, onCompleted }: { candidate: McpCandidate; onCom
   return <DialogForm onSubmit={submit} aria-label={t("记录管理员审核")}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p className="max-w-2xl text-xs leading-5 text-slate-600"><UiText text={"服务端会再次核对候选快照、账号版本和 V2 不变量。本表单不会接收或读取个人连接材料。"} /></p>
+        <p className="max-w-2xl text-xs leading-5 text-app-muted"><UiText text={"服务端会再次核对候选快照、账号版本和 V2 不变量。本表单不会接收或读取个人连接材料。"} /></p>
       </div>
-      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600"><UiText text={"当前工具："} />{candidate.tool.name}</span>
+      <span className="rounded-full bg-app-surface px-3 py-1 text-xs font-semibold text-app-muted"><UiText text={"当前工具："} />{candidate.tool.name}</span>
     </div>
 
-    <div className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
-      <label className="text-xs font-semibold text-slate-700"><UiText text={"审核结论"} /><select value={conclusion} onChange={(event) => changeConclusion(event.target.value as ReviewConclusion)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-normal text-slate-900 focus:border-indigo-400 focus:outline-2 focus:outline-indigo-100" disabled={pending}>
+    <div className="mt-5 grid gap-4 border-t border-app-border pt-5 sm:grid-cols-2">
+      <label className="text-xs font-semibold text-app-text"><UiText text={"审核结论"} /><select value={conclusion} onChange={(event) => changeConclusion(event.target.value as ReviewConclusion)} className="mt-2 w-full rounded-field border border-app-border bg-app-surface px-3 py-3 text-sm font-normal text-app-text focus:border-app-accent-border focus:outline-2 focus:outline-app-accent app-field" disabled={pending}>
           {(Object.keys(conclusionLabels) as ReviewConclusion[]).map((value) => <option key={value} value={value}>{t(conclusionLabels[value])}</option>)}
         </select>
       </label>
-      <label className="text-xs font-semibold text-slate-700"><UiText text={"风险等级"} /><select value={riskLevel} onChange={(event) => setRiskLevel(event.target.value as ReviewRiskLevel)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-normal text-slate-900 focus:border-indigo-400 focus:outline-2 focus:outline-indigo-100" disabled={pending}>
+      <label className="text-xs font-semibold text-app-text"><UiText text={"风险等级"} /><select value={riskLevel} onChange={(event) => setRiskLevel(event.target.value as ReviewRiskLevel)} className="mt-2 w-full rounded-field border border-app-border bg-app-surface px-3 py-3 text-sm font-normal text-app-text focus:border-app-accent-border focus:outline-2 focus:outline-app-accent app-field" disabled={pending}>
           {(Object.keys(riskLabels) as ReviewRiskLevel[]).map((value) => <option key={value} value={value}>{t(riskLabels[value])}</option>)}
         </select>
       </label>
-      <label className="text-xs font-semibold text-slate-700 sm:col-span-2"><UiText text={"风险原因"} /><select value={riskReasonCode} onChange={(event) => setRiskReasonCode(event.target.value as ReviewRiskReasonCode)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-normal text-slate-900 focus:border-indigo-400 focus:outline-2 focus:outline-indigo-100" disabled={pending}>
+      <label className="text-xs font-semibold text-app-text sm:col-span-2"><UiText text={"风险原因"} /><select value={riskReasonCode} onChange={(event) => setRiskReasonCode(event.target.value as ReviewRiskReasonCode)} className="mt-2 w-full rounded-field border border-app-border bg-app-surface px-3 py-3 text-sm font-normal text-app-text focus:border-app-accent-border focus:outline-2 focus:outline-app-accent app-field" disabled={pending}>
           {(Object.keys(riskReasonLabels) as ReviewRiskReasonCode[]).map((value) => <option key={value} value={value}>{t(riskReasonLabels[value])}</option>)}
         </select>
       </label>
-      <label className="text-xs font-semibold text-slate-700 sm:col-span-2"><UiText text={"审核说明（必填，最多 240 个字符）"} /><textarea value={evidenceNote} onChange={(event) => setEvidenceNote(event.target.value)} maxLength={240} required rows={4} placeholder={t("例如：已核对工具输入输出结构，未发现破坏性动作。")} className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-normal leading-6 text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-2 focus:outline-indigo-100" disabled={pending} />
+      <label className="text-xs font-semibold text-app-text sm:col-span-2"><UiText text={"审核说明（必填，最多 240 个字符）"} /><textarea value={evidenceNote} onChange={(event) => setEvidenceNote(event.target.value)} maxLength={240} required rows={4} placeholder={t("例如：已核对工具输入输出结构，未发现破坏性动作。")} className="mt-2 w-full resize-y rounded-field border border-app-border bg-app-surface px-3 py-3 text-sm font-normal leading-6 text-app-text placeholder:text-app-muted focus:border-app-accent-border focus:outline-2 focus:outline-app-accent app-field" disabled={pending} />
       </label>
     </div>
 
-    <label className="mt-5 flex items-start gap-3 border-t border-slate-100 pt-4 text-xs leading-5 text-slate-700">
-      <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 accent-indigo-600" disabled={pending} />
+    <label className="mt-5 flex items-start gap-3 border-t border-app-border pt-4 text-xs leading-5 text-app-text">
+      <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 accent-app-accent" disabled={pending} />
       <span><UiText text={"我确认审核内容只针对当前净化快照；提交只记录安全证据，不会触发远端操作。"} /></span>
     </label>
 
-    {error ? <p role="alert" className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
-    {message ? <p role="status" className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-xs leading-5 text-emerald-700"><UiFeedbackText text={message} /></p> : null}
-    <p className="mt-5 max-w-xl text-xs leading-5 text-slate-500"><UiText text={"提交后保留追加式审核记录；正向结论才会关联当前 V2 只读证据。"} /></p>
-    <DialogActions><DialogSubmit disabled={pending || !confirmed} className="app-action-button inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700">{t(pending ? "提交中…" : "提交审核结论")}</DialogSubmit></DialogActions>
+    {error ? <p role="alert" className="mt-4 rounded-field bg-app-danger-soft px-4 py-3 text-xs leading-5 text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
+    {message ? <p role="status" className="mt-4 rounded-field bg-app-success-soft px-4 py-3 text-xs leading-5 text-app-success-ink app-feedback-success"><UiFeedbackText text={message} /></p> : null}
+    <p className="mt-5 max-w-xl text-xs leading-5 text-app-muted"><UiText text={"提交后保留追加式审核记录；正向结论才会关联当前 V2 只读证据。"} /></p>
+    <DialogActions><DialogSubmit disabled={pending || !confirmed} className="app-button-primary app-button-readable-disabled inline-flex min-h-11 items-center justify-center rounded-control px-5 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:border-app-border disabled:bg-app-surface-soft disabled:text-app-text">{t(pending ? "提交中…" : "提交审核结论")}</DialogSubmit></DialogActions>
   </DialogForm>;
 }
 
@@ -381,60 +381,60 @@ export function McpReviewWorkbench() {
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader title="MCP 工具安全审核" description="审核已经净化的工具快照；审核记录只表达受控结论，不开放远端工具操作。" meta="安全审核工作台" />
     {selectedId === "" ? <><div className="mt-4 grid gap-3 sm:grid-cols-2">
-      <div className="text-xs leading-5 text-amber-800"><UiText text={"远端 Schema 与 annotations 属于不可信远端声明，仅供人工审核，不能替代平台安全判断。"} /></div>
-      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></div>
+      <div className="text-xs leading-5 text-app-warning-ink"><UiText text={"远端 Schema 与 annotations 属于不可信远端声明，仅供人工审核，不能替代平台安全判断。"} /></div>
+      <div className="rounded-panel border border-app-border bg-app-surface px-4 py-3 text-xs leading-5 text-app-muted app-panel"><UiText text={"费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。"} /></div>
     </div>
 
-    <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+    <div className="mt-6 rounded-panel border border-app-border bg-app-surface p-4 sm:p-5 app-panel">
       <div role="tablist" aria-label={t("MCP 审核候选状态")} className="flex flex-wrap gap-2">
-        {([["eligible", "待审核候选"], ["active", "已审核快照"]] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={view === value} onClick={() => changeView(value)} className={`min-h-11 rounded-xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${view === value ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{t(label)}</button>)}
+        {([["eligible", "待审核候选"], ["active", "已审核快照"]] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={view === value} onClick={() => changeView(value)} className={`min-h-11 rounded-control px-4 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent ${view === value ? "bg-app-surface text-app-text" : "text-app-muted hover:bg-app-surface-soft"}`}>{t(label)}</button>)}
       </div>
-      <p className="mt-3 text-xs leading-5 text-slate-500"><UiText text={"选择工具查看净化快照并记录审核结论；服务端会对每次读取再次执行管理员校验。"} /></p>
+      <p className="mt-3 text-xs leading-5 text-app-muted"><UiText text={"选择工具查看净化快照并记录审核结论；服务端会对每次读取再次执行管理员校验。"} /></p>
     </div>
 
     </> : null}
-    {notice ? <p role="status" className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><UiFeedbackText text={notice} /></p> : null}
-    {selectedId !== "" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { setSelectedId(""); window.scrollTo(0, 0); }} className={PARENT_PAGE_LINK_CLASS_NAME}><ShellIcon name="back" className="app-icon--compact" /><UiText text={"返回审核列表"} /></button><button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="app-action-button rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"刷新详情"} /></button></div> : null}
+    {notice ? <p role="status" className="mt-5 rounded-field border border-app-success-border bg-app-success-soft px-4 py-3 text-sm text-app-success-ink app-feedback-success"><UiFeedbackText text={notice} /></p> : null}
+    {selectedId !== "" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => { setSelectedId(""); window.scrollTo(0, 0); }} className={PARENT_PAGE_LINK_CLASS_NAME}><ShellIcon name="back" className="app-icon--compact" /><UiText text={"返回审核列表"} /></button><button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="app-button-secondary app-button-readable-disabled rounded-control border px-3 py-2 text-xs font-semibold disabled:border-app-border disabled:bg-app-surface-soft disabled:text-app-text"><UiText text={"刷新详情"} /></button></div> : null}
     <div className="mt-6 min-w-0">
-      {selectedId === "" ? <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-list-title">
+      {selectedId === "" ? <section className="min-w-0 rounded-panel border border-app-border bg-app-surface p-5 sm:p-6 app-panel" aria-labelledby="mcp-candidate-list-title">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Candidate queue</p>
-            <h2 id="mcp-candidate-list-title" className="mt-2 text-xl font-semibold text-slate-950">{t(view === "eligible" ? "待审核工具" : "当前 V2 审核记录")}</h2>
-            <p className="mt-1 text-xs leading-5 text-slate-500">{loading ? t("正在读取安全快照…") : <>{(data?.total ?? 0).toLocaleString(language)} {t("条记录")}</>}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link">Candidate queue</p>
+            <h2 id="mcp-candidate-list-title" className="mt-2 text-xl font-semibold text-app-text">{t(view === "eligible" ? "待审核工具" : "当前 V2 审核记录")}</h2>
+            <p className="mt-1 text-xs leading-5 text-app-muted">{loading ? t("正在读取安全快照…") : <>{(data?.total ?? 0).toLocaleString(language)} {t("条记录")}</>}</p>
           </div>
-          <button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="app-action-button app-action-button--compact rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"刷新"} /></button>
+          <button type="button" onClick={() => setRefreshToken((value) => value + 1)} disabled={loading} className="app-button-secondary app-button-readable-disabled app-button-compact rounded-control border px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:border-app-border disabled:bg-app-surface-soft disabled:text-app-text"><UiText text={"刷新"} /></button>
         </div>
-        {loading ? <div className="mt-5 space-y-3" role="status" aria-label={t("正在加载 MCP 审核候选")}><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /><div className="h-28 animate-pulse rounded-2xl bg-slate-100" /></div> : error ? <div role="alert" className="mt-5 rounded-2xl bg-rose-50 px-4 py-4 text-sm leading-6 text-rose-700"><UiErrorText text={error} /></div> : data?.candidates.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700"><UiText text={"当前没有候选记录"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"可切换另一状态或稍后刷新安全快照。"} /></p></div> : <CandidateTable candidates={data?.candidates ?? []} onSelect={(id) => { setSelectedId(id); setNotice(null); window.scrollTo(0, 0); }} />}
-        <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
-          <button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || loading} className="app-action-button app-action-button--compact rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"上一页"} /></button>
-          <span className="text-xs text-slate-500"><UiText text={"第"} />{" "}{page} <UiText text={"页"} /></span>
-          <button type="button" onClick={() => setPage((value) => value + 1)} disabled={!hasNextPage || loading} className="app-action-button app-action-button--compact rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-200 disabled:text-slate-700"><UiText text={"下一页"} /></button>
+        {loading ? <div className="mt-5 space-y-3" role="status" aria-label={t("正在加载 MCP 审核候选")}><div className="h-28 animate-pulse rounded-control bg-app-surface-soft" /><div className="h-28 animate-pulse rounded-control bg-app-surface-soft" /><div className="h-28 animate-pulse rounded-control bg-app-surface-soft" /></div> : error ? <div role="alert" className="mt-5 rounded-field bg-app-danger-soft px-4 py-4 text-sm leading-6 text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></div> : data?.candidates.length === 0 ? <div className="mt-5 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-5 py-10 text-center"><p className="text-sm font-semibold text-app-text"><UiText text={"当前没有候选记录"} /></p><p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"可切换另一状态或稍后刷新安全快照。"} /></p></div> : <CandidateTable candidates={data?.candidates ?? []} onSelect={(id) => { setSelectedId(id); setNotice(null); window.scrollTo(0, 0); }} />}
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-app-border pt-4">
+          <button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || loading} className="app-button-secondary app-button-readable-disabled app-button-compact rounded-control border px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:border-app-border disabled:bg-app-surface-soft disabled:text-app-text"><UiText text={"上一页"} /></button>
+          <span className="text-xs text-app-muted"><UiText text={"第"} />{" "}{page} <UiText text={"页"} /></span>
+          <button type="button" onClick={() => setPage((value) => value + 1)} disabled={!hasNextPage || loading} className="app-button-secondary app-button-readable-disabled app-button-compact rounded-control border px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:border-app-border disabled:bg-app-surface-soft disabled:text-app-text"><UiText text={"下一页"} /></button>
         </div>
-      </section> : <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="mcp-candidate-detail-title">
-        {loading ? <p role="status" className="py-12 text-center text-sm text-slate-500"><UiText text={"正在更新工具详情…"} /></p> : error ? <p role="alert" className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : selectedCandidate ? <>
+      </section> : <section className="min-w-0 rounded-panel border border-app-border bg-app-surface p-5 sm:p-6 app-panel" aria-labelledby="mcp-candidate-detail-title">
+        {loading ? <p role="status" className="py-12 text-center text-sm text-app-muted app-feedback-info"><UiText text={"正在更新工具详情…"} /></p> : error ? <p role="alert" className="rounded-field bg-app-danger-soft px-4 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : selectedCandidate ? <>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Sanitized candidate detail</p>
-              <h2 id="mcp-candidate-detail-title" className="mt-2 break-words text-xl font-semibold text-slate-950">{safeValue(selectedCandidate.tool.title) === "—" ? selectedCandidate.tool.name : selectedCandidate.tool.title}</h2>
-              <p className="mt-1 break-words text-xs text-slate-500">{selectedCandidate.tool.name} · {safeValue(selectedCandidate.connection.name)}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link">Sanitized candidate detail</p>
+              <h2 id="mcp-candidate-detail-title" className="mt-2 break-words text-xl font-semibold text-app-text">{safeValue(selectedCandidate.tool.title) === "—" ? selectedCandidate.tool.name : selectedCandidate.tool.title}</h2>
+              <p className="mt-1 break-words text-xs text-app-muted">{selectedCandidate.tool.name} · {safeValue(selectedCandidate.connection.name)}</p>
             </div>
             <StatusBadges candidate={selectedCandidate} />
           </div>
-          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><UiText text={"Schema、annotations 和远端描述均为不可信远端声明，仅供审核。这里展示的是服务端已净化结构，不代表平台已经信任其内容。"} /></div>
+          <div className="mt-5 rounded-panel border border-app-warning-border bg-app-warning-soft px-4 py-3 text-xs leading-5 text-app-warning-ink"><UiText text={"Schema、annotations 和远端描述均为不可信远端声明，仅供审核。这里展示的是服务端已净化结构，不代表平台已经信任其内容。"} /></div>
           <div className="mt-5">
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500"><UiText text={"只读能力"} /></p><p className="mt-2 text-sm font-semibold text-slate-900">{t(selectedCandidate.state === "active" ? "已进入 V2 只读审核流" : "工具声明为只读候选")}</p><p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"仍需以当前审核结论和快照有效性为准。"} /></p></div>
-            <div className="rounded-2xl border border-slate-200 px-4 py-3"><p className="text-xs font-semibold text-slate-500"><UiText text={"风险"} /></p><p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.riskLevel ? t(riskLabels[selectedCandidate.riskLevel]) : t("尚无审核结论")}</p><p className="mt-1 text-xs leading-5 text-slate-500">{selectedCandidate.conclusion && selectedCandidate.conclusion in conclusionLabels ? t(conclusionLabels[selectedCandidate.conclusion as ReviewConclusion]) : t("等待管理员记录受控结论")}</p></div>
+            <div className="rounded-panel border border-app-border px-4 py-3"><p className="text-xs font-semibold text-app-muted"><UiText text={"只读能力"} /></p><p className="mt-2 text-sm font-semibold text-app-text">{t(selectedCandidate.state === "active" ? "已进入 V2 只读审核流" : "工具声明为只读候选")}</p><p className="mt-1 text-xs leading-5 text-app-muted"><UiText text={"仍需以当前审核结论和快照有效性为准。"} /></p></div>
+            <div className="rounded-panel border border-app-border px-4 py-3"><p className="text-xs font-semibold text-app-muted"><UiText text={"风险"} /></p><p className="mt-2 text-sm font-semibold text-app-text">{selectedCandidate.riskLevel ? t(riskLabels[selectedCandidate.riskLevel]) : t("尚无审核结论")}</p><p className="mt-1 text-xs leading-5 text-app-muted">{selectedCandidate.conclusion && selectedCandidate.conclusion in conclusionLabels ? t(conclusionLabels[selectedCandidate.conclusion as ReviewConclusion]) : t("等待管理员记录受控结论")}</p></div>
           </div>
-          {selectedCandidate.tool.description ? <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"远端描述（不可信）"} /></p><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{selectedCandidate.tool.description}</p></div> : null}
+          {selectedCandidate.tool.description ? <div className="mt-5 rounded-panel bg-app-surface-soft px-4 py-4"><p className="text-xs font-semibold text-app-muted"><UiText text={"远端描述（不可信）"} /></p><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-app-text">{selectedCandidate.tool.description}</p></div> : null}
           <div className="mt-5 space-y-3">
             <SchemaBlock label="输入 Schema（已净化）" value={selectedCandidate.tool.inputSchema} />
             <SchemaBlock label="输出 Schema（已净化）" value={selectedCandidate.tool.outputSchema} />
             <SchemaBlock label="annotations（已净化）" value={selectedCandidate.tool.annotations} />
           </div>
-          <details className="mt-5 rounded-2xl border border-slate-200">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><UiText text={"安全快照与技术指纹"} /></summary>
+          <details className="mt-5 rounded-panel border border-app-border">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-app-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent"><UiText text={"安全快照与技术指纹"} /></summary>
             <div className="px-4 pb-4">
           <dl className="mt-5 grid gap-3 sm:grid-cols-2">
             <SnapshotRow label="连接 ID" value={selectedCandidate.connection.id} />
@@ -448,14 +448,14 @@ export function McpReviewWorkbench() {
           </dl>
             </div>
           </details>
-          {effectiveReason(selectedCandidate) ? <p className="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700"><UiText text={"当前安全状态："} />{t(effectiveReason(selectedCandidate) ?? "")}<UiText text={"。如需更新证据，请先确认旧证据的处理状态。"} /></p> : null}
+          {effectiveReason(selectedCandidate) ? <p className="mt-5 rounded-panel bg-app-danger-soft px-4 py-3 text-xs leading-5 text-app-danger-ink"><UiText text={"当前安全状态："} />{t(effectiveReason(selectedCandidate) ?? "")}<UiText text={"。如需更新证据，请先确认旧证据的处理状态。"} /></p> : null}
           </div>
           <div className="mt-6 flex justify-end">
             {selectedCandidate.reviewStatus === "approved"
-              ? <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-xs leading-5 text-emerald-800" role="status"><UiText text={"当前 tuple 已有不可变 APPROVED 审核；为避免打断现有项目授权，不能重复提交正向审核。若快照失效，请先按治理流程处理旧证据。"} /></div>
+              ? <div className="w-full rounded-field border border-app-success-border bg-app-success-soft px-4 py-4 text-xs leading-5 text-app-success-ink app-feedback-success" role="status"><UiText text={"当前 tuple 已有不可变 APPROVED 审核；为避免打断现有项目授权，不能重复提交正向审核。若快照失效，请先按治理流程处理旧证据。"} /></div>
               : <OperationPanel title={`审核 ${selectedCandidate.tool.title || selectedCandidate.tool.name}`} translateTitle={false} triggerLabel="记录管理员审核" open={reviewOpen} onOpenChange={setReviewOpen} description="审核只针对当前净化快照记录受控结论，不会触发远端工具操作。"><ReviewForm key={selectedCandidate.tool.id} candidate={selectedCandidate} onCompleted={(conclusion) => { setReviewOpen(false); reviewCompleted(conclusion); }} /></OperationPanel>}
           </div>
-        </> : <div className="flex min-h-80 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center"><div><p className="text-sm font-semibold text-slate-700"><UiText text={"当前工具已不在此列表中"} /></p><p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"请返回审核列表，重新选择当前可用的工具快照。"} /></p></div></div>}
+        </> : <div className="flex min-h-80 items-center justify-center rounded-panel border border-dashed border-app-border bg-app-surface-soft px-6 text-center"><div><p className="text-sm font-semibold text-app-text"><UiText text={"当前工具已不在此列表中"} /></p><p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"请返回审核列表，重新选择当前可用的工具快照。"} /></p></div></div>}
       </section>}
     </div>
   </div>;

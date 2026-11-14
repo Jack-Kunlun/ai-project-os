@@ -7,7 +7,7 @@ export default async function AdminGuidePage() {
   await requireSystemAdminPage();
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader title="管理员操作指南" description="按当前控制面流程完成预算、供应商连接、能力模型和用户治理；未通过真实测试的配置不会被宣称可用。" />
-    <div className={`${styles.guideContent} ${styles.adminLayout}`}>
+    <div className={`${styles.guideContent} ${styles.layout} ${styles.adminLayout}`}>
       <nav aria-labelledby="admin-guide-nav-label" className={styles.chapterNav}>
         <span id="admin-guide-nav-label" className="sr-only"><UiText text="管理员指南目录" /></span>
         <ul>

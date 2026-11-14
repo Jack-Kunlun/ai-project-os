@@ -26,7 +26,7 @@ export function LogoutButton({ className }: { className?: string }) {
       type="button"
       onClick={() => void logout()}
       disabled={pending}
-      className={className ?? "text-xs font-medium text-slate-500 transition hover:text-slate-950 disabled:opacity-50"}
+      className={className ?? "text-xs font-medium text-app-muted transition hover:text-app-text disabled:opacity-50"}
     >
       {pending ? t("退出中…") : t("退出")}
     </button>

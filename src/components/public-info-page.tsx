@@ -36,10 +36,10 @@ export function PublicInfoPage({
 
         <nav aria-labelledby="public-info-nav-label" className={styles.footerNav}>
           <span id="public-info-nav-label" className="sr-only"><UiText text="公开信息" /></span>
-          <Link href="/privacy" className="hover:text-indigo-600"><UiText text="隐私政策" /></Link>
-          <Link href="/terms" className="hover:text-indigo-600"><UiText text="服务条款" /></Link>
-          <Link href="/help" className="hover:text-indigo-600"><UiText text="帮助文档" /></Link>
-          <Link href="/contact" className="hover:text-indigo-600"><UiText text="联系作者" /></Link>
+          <Link href="/privacy" className="hover:text-app-link"><UiText text="隐私政策" /></Link>
+          <Link href="/terms" className="hover:text-app-link"><UiText text="服务条款" /></Link>
+          <Link href="/help" className="hover:text-app-link"><UiText text="帮助文档" /></Link>
+          <Link href="/contact" className="hover:text-app-link"><UiText text="联系作者" /></Link>
         </nav>
       </div>
     </main>

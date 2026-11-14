@@ -23,9 +23,9 @@ const purposes: Record<PlatformOperation, string> = {
 const resultLabels = {
   queued: "等待执行", testing: "测试中…", passed: "测试通过，5 分钟内可启用", applying: "启用中…", enabled: "已测试并启用", failed: "测试未通过", applyFailed: "启用未成功，可重试启用", unknown: "测试结果待核对，未自动重试", applyUnknown: "启用结果待核对，请用“启用已通过项”确认", stopped: "未执行", expired: "测试结果已过期，请重新测试",
 };
-const buttonClass = "app-action-button rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40";
-const primaryClass = "app-action-button rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
-const selectClass = "min-h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 disabled:opacity-50";
+const buttonClass = "app-button-secondary rounded-control border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40";
+const primaryClass = "app-button-primary rounded-panel px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40";
+const selectClass = "min-h-10 w-full min-w-0 rounded-panel border border-app-border bg-app-surface px-3 py-2 text-xs text-app-text disabled:opacity-50";
 const isUncertain = (result?: OperationResult) => result?.status === "unknown" || result?.status === "applyUnknown";
 
 export function PlatformOperationAssignments({ providers, onBusyChange }: { providers: readonly { id: string; name: string; configurationVersion: number; status: string }[]; onBusyChange: (busy: boolean) => void }) {
@@ -234,60 +234,60 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
 
   return <section className="mt-6 space-y-4" aria-labelledby="platform-operation-cards-title">
     <PlatformProbeBudgetClient compact disabled={busy} open={budgetOpen} onOpenChange={setBudgetOpen} onBudgetChanged={setBudget} refreshKey={refreshKey} />
-    {budget && budget.heldUnits > 0 ? <p className="text-xs leading-5 text-amber-800"><UiText text="当前额度周期有待核对请求，再次测试前请先核对供应商记录。逐项测试结果仅保留在当前页面，刷新后不会恢复。" /></p> : null}
+    {budget && budget.heldUnits > 0 ? <p className="text-xs leading-5 text-app-warning-ink"><UiText text="当前额度周期有待核对请求，再次测试前请先核对供应商记录。逐项测试结果仅保留在当前页面，刷新后不会恢复。" /></p> : null}
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 id="platform-operation-cards-title" className="text-xl font-semibold text-slate-950"><UiText text="能力分配" /></h2><p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500"><UiText text="选择模型后可批量测试并启用。候选来自已验证连接；测试只检查连通性，不代表业务输出质量。" /></p></div>
-      <button type="button" onClick={() => { if (!lock.current) void load().catch((error: Error) => setMessage(error.message)); }} disabled={busy} className={buttonClass}><UiText text="刷新能力" /></button>
+      <div><h2 id="platform-operation-cards-title" className="text-xl font-semibold text-app-text"><UiText text="能力分配" /></h2><p className="mt-2 max-w-3xl text-xs leading-5 text-app-muted"><UiText text="选择模型后可批量测试并启用。候选来自已验证连接；测试只检查连通性，不代表业务输出质量。" /></p></div>
+      <button type="button" onClick={() => { if (!lock.current) void load().catch((error: Error) => setMessage(error.message)); }} disabled={busy} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="刷新能力" /></button>
     </div>
     <div className="flex flex-wrap items-center gap-3 text-xs">
-      <button type="button" disabled={busy || !view} onClick={() => setSelected(PLATFORM_OPERATIONS.filter((operation) => candidate(operation) && !isUncertain(results[operation])))} className={buttonClass}><UiText text="全选" /></button>
-      <button type="button" disabled={busy || !selected.length} onClick={() => setSelected([])} className={buttonClass}><UiText text="清空" /></button>
+      <button type="button" disabled={busy || !view} onClick={() => setSelected(PLATFORM_OPERATIONS.filter((operation) => candidate(operation) && !isUncertain(results[operation])))} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="全选" /></button>
+      <button type="button" disabled={busy || !selected.length} onClick={() => setSelected([])} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="清空" /></button>
       <span aria-live="polite">{t("已选")} {selected.length} {t("项能力，本批最多使用")} {selected.length} {t("次测试额度")}</span>
     </div>
-    {textOperations.length > 0 ? <div className="flex flex-wrap items-end gap-2 border-y border-slate-200 py-3">
-      <label className="w-full max-w-sm text-xs text-slate-600"><UiText text="统一设置所选文字能力模型" /><select value={bulkModel} disabled={busy} onChange={(event) => setBulkModel(event.target.value)} className={`mt-2 ${selectClass}`}><option value="">{t("选择文字模型")}</option>{sharedModels.map((item) => <option key={candidateKey(item)} value={candidateKey(item)}>{item.providerName} · {item.modelId}</option>)}</select></label>
-      <button type="button" disabled={busy || !sharedModels.some((item) => candidateKey(item) === bulkModel) || textOperations.some((operation) => isUncertain(results[operation]))} onClick={() => textOperations.forEach((operation) => choose(operation, bulkModel))} className={buttonClass}><UiText text="应用到所选文字能力" /></button>
+    {textOperations.length > 0 ? <div className="flex flex-wrap items-end gap-2 border-y border-app-border py-3">
+      <label className="w-full max-w-sm text-xs text-app-muted"><UiText text="统一设置所选文字能力模型" /><select value={bulkModel} disabled={busy} onChange={(event) => setBulkModel(event.target.value)} className={["app-field", (`mt-2 ${selectClass}`)].filter(Boolean).join(' ')}><option value="">{t("选择文字模型")}</option>{sharedModels.map((item) => <option key={candidateKey(item)} value={candidateKey(item)}>{item.providerName} · {item.modelId}</option>)}</select></label>
+      <button type="button" disabled={busy || !sharedModels.some((item) => candidateKey(item) === bulkModel) || textOperations.some((operation) => isUncertain(results[operation]))} onClick={() => textOperations.forEach((operation) => choose(operation, bulkModel))} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="应用到所选文字能力" /></button>
     </div> : null}
-    <div role="table" aria-label={t("能力分配")} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div role="rowgroup" className="hidden border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500 lg:block"><div role="row" className="grid grid-cols-4 gap-4">{["选择能力", "本次使用模型", "当前生效", "本次测试"].map((label) => <span role="columnheader" key={label}>{t(label)}</span>)}</div></div>
-      <div role="rowgroup" className="divide-y divide-slate-200">{PLATFORM_OPERATIONS.map((operation) => {
+    <div role="table" aria-label={t("能力分配")} className="overflow-hidden rounded-panel border border-app-border bg-app-surface app-panel">
+      <div role="rowgroup" className="hidden border-b border-app-border bg-app-surface-soft px-4 py-3 text-xs text-app-muted lg:block"><div role="row" className="grid grid-cols-4 gap-4">{["选择能力", "本次使用模型", "当前生效", "本次测试"].map((label) => <span role="columnheader" key={label}>{t(label)}</span>)}</div></div>
+      <div role="rowgroup" className="divide-y divide-app-border">{PLATFORM_OPERATIONS.map((operation) => {
         const group = view?.candidates[operation];
         const chosen = candidate(operation);
         const activeProvider = providers.find((provider) => provider.id === group?.active?.providerConnectionId)?.name;
         const result = results[operation];
         return <div role="row" key={operation} data-operation={operation} className="grid min-w-0 gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-center lg:gap-4">
-          <div role="cell"><label className="flex items-start gap-3 text-sm font-semibold text-slate-900"><input type="checkbox" checked={selected.includes(operation)} disabled={busy || !chosen || result?.status === "unknown"} onChange={(event) => setSelected((current) => event.target.checked ? [...current, operation] : current.filter((item) => item !== operation))} className="mt-1 h-4 w-4 shrink-0 accent-indigo-600" />{t(labels[operation])}</label><p className="mt-1 pl-7 text-xs leading-5 text-slate-500">{t(purposes[operation])}</p></div>
-          <div role="cell" className="min-w-0"><label className="block text-xs text-slate-500"><span className="lg:sr-only">{t(labels[operation])} · {t("本次使用模型")}</span><select value={choices[operation] ?? ""} onChange={(event) => choose(operation, event.target.value)} disabled={busy || isUncertain(result) || !group?.candidates.length} className={selectClass}>
+          <div role="cell"><label className="flex items-start gap-3 text-sm font-semibold text-app-text"><input type="checkbox" checked={selected.includes(operation)} disabled={busy || !chosen || result?.status === "unknown"} onChange={(event) => setSelected((current) => event.target.checked ? [...current, operation] : current.filter((item) => item !== operation))} className="mt-1 h-4 w-4 shrink-0 accent-app-accent" />{t(labels[operation])}</label><p className="mt-1 pl-7 text-xs leading-5 text-app-muted">{t(purposes[operation])}</p></div>
+          <div role="cell" className="min-w-0"><label className="block text-xs text-app-muted"><span className="lg:sr-only">{t(labels[operation])} · {t("本次使用模型")}</span><select value={choices[operation] ?? ""} onChange={(event) => choose(operation, event.target.value)} disabled={busy || isUncertain(result) || !group?.candidates.length} className={["app-field", (selectClass)].filter(Boolean).join(' ')}>
             {!chosen ? <option value={choices[operation] ?? ""}>{t(group?.candidates.length ? "原选择已失效，请重新选择" : "暂无合格候选")}</option> : null}
             {group?.candidates.map((item) => <option key={candidateKey(item)} value={candidateKey(item)}>{item.providerName} · {item.modelId}{item.embeddingDimensions ? ` · ${item.embeddingDimensions} ${t("维")}` : ""}</option>)}
           </select></label></div>
-          <div role="cell" className="min-w-0 break-words text-xs leading-5 text-slate-600"><span className="block text-slate-400 lg:sr-only">{t("当前生效")}</span>{group?.active ? <>{activeProvider ? `${activeProvider} · ` : ""}{group.active.modelId}{group.active.embeddingDimensions ? ` · ${group.active.embeddingDimensions} ${t("维")}` : ""}</> : t(view ? "未启用" : "读取中…")}</div>
-          <div role="cell" aria-live="polite" className={`min-w-0 break-words text-xs leading-5 ${result?.status === "enabled" || result?.status === "passed" ? "text-emerald-700" : isUncertain(result) || result?.status === "failed" || result?.status === "applyFailed" ? "text-amber-800" : "text-slate-500"}`}>{resultText(operation)}{result?.message ? <p className="mt-1"><UiFeedbackText text={result.message} /></p> : null}</div>
+          <div role="cell" className="min-w-0 break-words text-xs leading-5 text-app-muted"><span className="block text-app-muted lg:sr-only">{t("当前生效")}</span>{group?.active ? <>{activeProvider ? `${activeProvider} · ` : ""}{group.active.modelId}{group.active.embeddingDimensions ? ` · ${group.active.embeddingDimensions} ${t("维")}` : ""}</> : t(view ? "未启用" : "读取中…")}</div>
+          <div role="cell" aria-live="polite" className={`min-w-0 break-words text-xs leading-5 ${result?.status === "enabled" || result?.status === "passed" ? "text-app-success-ink" : isUncertain(result) || result?.status === "failed" || result?.status === "applyFailed" ? "text-app-warning-ink" : "text-app-muted"}`}>{resultText(operation)}{result?.message ? <p className="mt-1"><UiFeedbackText text={result.message} /></p> : null}</div>
         </div>;
       })}</div>
     </div>
-    {message ? <p role="status" className="text-xs leading-5 text-amber-800"><UiFeedbackText text={message} /></p> : null}
-    <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white py-4">
-      <p className="max-w-xl text-xs leading-5 text-slate-500"><UiText text="本批每项最多 1 次测试额度，再次手动测试另计；通过后立即启用，失败保留原配置。结果未知时暂停后续项，不自动重试。" /></p>
+    {message ? <p role="status" className="text-xs leading-5 text-app-warning-ink app-feedback-warning"><UiFeedbackText text={message} /></p> : null}
+    <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-app-border bg-app-surface py-4">
+      <p className="max-w-xl text-xs leading-5 text-app-muted"><UiText text="本批每项最多 1 次测试额度，再次手动测试另计；通过后立即启用，失败保留原配置。结果未知时暂停后续项，不自动重试。" /></p>
       <div className="flex flex-wrap gap-2">
-        {passed.length > 0 ? <button type="button" disabled={busy} onClick={() => void prepare("apply")} className={buttonClass}><UiText text="启用已通过项" /> ({passed.length})</button> : null}
-        <button type="button" disabled={busy || !selected.length || selected.some((operation) => isUncertain(results[operation]))} onClick={() => void prepare("test")} className={buttonClass}><UiText text="仅测试" /></button>
-        <button type="button" disabled={busy || !selected.length || selected.some((operation) => isUncertain(results[operation]))} onClick={() => void prepare("testAndApply")} className={primaryClass}><UiText text="测试并启用所选" /></button>
+        {passed.length > 0 ? <button type="button" disabled={busy} onClick={() => void prepare("apply")} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="启用已通过项" /> ({passed.length})</button> : null}
+        <button type="button" disabled={busy || !selected.length || selected.some((operation) => isUncertain(results[operation]))} onClick={() => void prepare("test")} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="仅测试" /></button>
+        <button type="button" disabled={busy || !selected.length || selected.some((operation) => isUncertain(results[operation]))} onClick={() => void prepare("testAndApply")} className={["app-button-primary", (primaryClass)].filter(Boolean).join(' ')}><UiText text="测试并启用所选" /></button>
       </div>
     </div>
     <OperationPanel title={panelTitle} triggerLabel="查看本批结果" className={plan ? "" : "hidden"} open={panelOpen} onOpenChange={closePanel} footer={<div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-xs text-slate-500"><UiText text={phase === "running" ? "停止只跳过后续项，当前项会完成。" : "测试通过凭据 5 分钟有效且只能使用一次。"} /></p>
-      <div className="flex flex-wrap gap-2">{phase === "confirm" ? <><button type="button" onClick={() => closePanel(false)} className={buttonClass}><UiText text="取消" /></button><button type="button" disabled={plan?.embeddingImpact && !embeddingAck} onClick={() => void execute()} className={primaryClass}><UiText text={plan?.mode === "apply" ? "确认启用通过项" : plan?.mode === "test" ? "确认仅测试" : "确认测试并启用"} /></button></> : phase === "running" ? <button type="button" disabled={stopRequested} onClick={() => { stop.current = true; setStopRequested(true); }} className={buttonClass}><UiText text={stopRequested ? "已请求停止后续项" : "停止后续项"} /></button> : <button type="button" onClick={() => closePanel(false)} className={buttonClass}><UiText text="完成" /></button>}</div>
+      <p className="text-xs text-app-muted"><UiText text={phase === "running" ? "停止只跳过后续项，当前项会完成。" : "测试通过凭据 5 分钟有效且只能使用一次。"} /></p>
+      <div className="flex flex-wrap gap-2">{phase === "confirm" ? <><button type="button" onClick={() => closePanel(false)} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="取消" /></button><button type="button" disabled={plan?.embeddingImpact && !embeddingAck} onClick={() => void execute()} className={["app-button-primary", (primaryClass)].filter(Boolean).join(' ')}><UiText text={plan?.mode === "apply" ? "确认启用通过项" : plan?.mode === "test" ? "确认仅测试" : "确认测试并启用"} /></button></> : phase === "running" ? <button type="button" disabled={stopRequested} onClick={() => { stop.current = true; setStopRequested(true); }} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text={stopRequested ? "已请求停止后续项" : "停止后续项"} /></button> : <button type="button" onClick={() => closePanel(false)} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="完成" /></button>}</div>
     </div>}>
       {plan ? <div className="space-y-4">
-        <p className="text-sm leading-6 text-slate-600"><UiText text={plan.mode === "apply" ? "仅启用已有通过结果，不会再次测试或新增测试次数。启用结果未知时使用原凭据核对，不重复测试。" : "逐项向所选供应商发送固定测试样例，不包含项目资料。仅检查连通性；供应商可能另收 Token 费用。"} /></p>
-        {plan.mode !== "apply" && budget && budget.heldUnits > 0 ? <p className="text-xs leading-5 text-amber-800"><UiText text="当前额度周期有待核对请求，再次测试前请先核对供应商记录。逐项测试结果仅保留在当前页面，刷新后不会恢复。" /></p> : null}
-        {phase === "confirm" ? <p className="text-xs text-slate-600">{t("本批能力")} {plan.targets.length} · {t("最多使用测试次数")} {plan.mode === "apply" ? 0 : plan.targets.length} · {t("当前可用")} {plan.available}</p> : <p role="status" className="text-xs text-slate-600">{t("成功")} {batchCounts?.success} · {t("失败")} {batchCounts?.failed} · {t("待核对")} {batchCounts?.unknown}</p>}
-        <ul className="divide-y divide-slate-200">{plan.targets.map((target) => <li key={target.operation} className="flex flex-wrap justify-between gap-3 py-3 text-xs leading-5"><div><strong>{t(labels[target.operation])}</strong><p className="break-all text-slate-500">{target.candidate.providerName} · {target.candidate.modelId}</p></div>{phase !== "confirm" ? <span>{resultText(target.operation)}</span> : null}</li>)}</ul>
-        {phase === "confirm" && plan.embeddingImpact ? <label className="flex items-start gap-3 text-xs leading-5 text-amber-800"><input type="checkbox" checked={embeddingAck} onChange={(event) => setEmbeddingAck(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><UiText text="我已确认更换向量模型或维度可能需要重建现有资料索引。" /></label> : null}
-        {phase === "confirm" && plan.mode === "testAndApply" ? <p className="text-xs leading-5 text-slate-500"><UiText text="每项测试通过后立即启用；部分失败时保留已成功项，失败项的原配置不变。" /></p> : null}
-        {message ? <p role="status" className="text-xs text-amber-800"><UiFeedbackText text={message} /></p> : null}
-        {phase === "done" && plan.targets.some((target) => results[target.operation]?.status === "failed") ? <button type="button" className={buttonClass} onClick={() => { setSelected(plan.targets.filter((target) => results[target.operation]?.status === "failed").map((target) => target.operation)); closePanel(false); }}><UiText text="选中明确失败项以重试" /></button> : null}
+        <p className="text-sm leading-6 text-app-muted"><UiText text={plan.mode === "apply" ? "仅启用已有通过结果，不会再次测试或新增测试次数。启用结果未知时使用原凭据核对，不重复测试。" : "逐项向所选供应商发送固定测试样例，不包含项目资料。仅检查连通性；供应商可能另收 Token 费用。"} /></p>
+        {plan.mode !== "apply" && budget && budget.heldUnits > 0 ? <p className="text-xs leading-5 text-app-warning-ink"><UiText text="当前额度周期有待核对请求，再次测试前请先核对供应商记录。逐项测试结果仅保留在当前页面，刷新后不会恢复。" /></p> : null}
+        {phase === "confirm" ? <p className="text-xs text-app-muted">{t("本批能力")} {plan.targets.length} · {t("最多使用测试次数")} {plan.mode === "apply" ? 0 : plan.targets.length} · {t("当前可用")} {plan.available}</p> : <p role="status" className="text-xs text-app-muted">{t("成功")} {batchCounts?.success} · {t("失败")} {batchCounts?.failed} · {t("待核对")} {batchCounts?.unknown}</p>}
+        <ul className="divide-y divide-app-border">{plan.targets.map((target) => <li key={target.operation} className="flex flex-wrap justify-between gap-3 py-3 text-xs leading-5"><div><strong>{t(labels[target.operation])}</strong><p className="break-all text-app-muted">{target.candidate.providerName} · {target.candidate.modelId}</p></div>{phase !== "confirm" ? <span>{resultText(target.operation)}</span> : null}</li>)}</ul>
+        {phase === "confirm" && plan.embeddingImpact ? <label className="flex items-start gap-3 text-xs leading-5 text-app-warning-ink"><input type="checkbox" checked={embeddingAck} onChange={(event) => setEmbeddingAck(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><UiText text="我已确认更换向量模型或维度可能需要重建现有资料索引。" /></label> : null}
+        {phase === "confirm" && plan.mode === "testAndApply" ? <p className="text-xs leading-5 text-app-muted"><UiText text="每项测试通过后立即启用；部分失败时保留已成功项，失败项的原配置不变。" /></p> : null}
+        {message ? <p role="status" className="text-xs text-app-warning-ink app-feedback-warning"><UiFeedbackText text={message} /></p> : null}
+        {phase === "done" && plan.targets.some((target) => results[target.operation]?.status === "failed") ? <button type="button" className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')} onClick={() => { setSelected(plan.targets.filter((target) => results[target.operation]?.status === "failed").map((target) => target.operation)); closePanel(false); }}><UiText text="选中明确失败项以重试" /></button> : null}
       </div> : null}
     </OperationPanel>
   </section>;

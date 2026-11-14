@@ -458,15 +458,16 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
 
       {searchOpen ? (
         <div className={styles.searchOverlay} onMouseDown={(event) => { if (event.target === event.currentTarget) closeSearch(); }}>
-          <div data-inquiry-disabled className={styles.searchDialog} role="dialog" aria-modal="true" aria-labelledby="user-shell-search-title" onKeyDown={handleSearchKeyDown}>
-            <div className={styles.searchDialogHeader}>
+          <div data-inquiry-disabled className={`app-dialog-surface app-dialog-surface--modal ${styles.searchDialog}`} role="dialog" aria-modal="true" aria-labelledby="user-shell-search-title" onKeyDown={handleSearchKeyDown}>
+            <div data-dialog-header className={`app-dialog-header ${styles.searchDialogHeader}`}>
               <div>
                 <h2 id="user-shell-search-title"><UiText text="搜索与跳转"/></h2>
                 <p><UiText text="按页面名称或你有权访问的项目查找路由。"/></p>
               </div>
               <button type="button" className={styles.iconButton} onClick={closeSearch} aria-label={t("关闭搜索")}><ShellIcon className={styles.icon} name="close" /></button>
             </div>
-            <label className={styles.searchInputWrap}>
+            <div data-dialog-body className={`app-dialog-content ${styles.searchDialogBody}`}>
+            <label className={`app-field app-field-group ${styles.searchInputWrap}`}>
               <ShellIcon className={styles.icon} name="search" />
               <input
                 ref={searchInputRef}
@@ -494,6 +495,7 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
               ) : (
                 <p className={styles.searchEmpty} role="status"><UiText text="没有匹配的可访问页面或项目。"/></p>
               )}
+            </div>
             </div>
           </div>
         </div>

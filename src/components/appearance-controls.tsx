@@ -39,7 +39,7 @@ export function AppearanceControls(): React.JSX.Element {
       <button
         ref={triggerRef}
         type="button"
-        className="appearance-controls-trigger"
+        className="app-button-secondary appearance-controls-trigger"
         aria-label={t("语言与外观")}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -52,10 +52,10 @@ export function AppearanceControls(): React.JSX.Element {
       </button>
 
       {open ? (
-        <div id={popoverId} role="dialog" aria-label={t("语言与外观")} className="appearance-controls-popover">
+        <div id={popoverId} role="dialog" aria-label={t("语言与外观")} className="app-dialog-surface app-dialog-surface--modal appearance-controls-popover">
           <label className="appearance-controls-row">
             <span>{t("语言")}</span>
-            <select value={language} disabled={languageLoading} aria-busy={languageLoading} onChange={(event) => setLanguage(event.currentTarget.value as "zh-CN" | "en")}>
+            <select className="app-field" value={language} disabled={languageLoading} aria-busy={languageLoading} onChange={(event) => setLanguage(event.currentTarget.value as "zh-CN" | "en")}>
               <option value="zh-CN">{t("中文")}</option>
               <option value="en">English</option>
             </select>
@@ -64,7 +64,7 @@ export function AppearanceControls(): React.JSX.Element {
           {languageError ? <p role="alert" className="appearance-feedback"><UiErrorText text={languageError} /></p> : null}
           <label className="appearance-controls-row">
             <span>{t("主题")}</span>
-            <select value={theme} onChange={(event) => setTheme(event.currentTarget.value as "light" | "dark" | "system")}>
+            <select className="app-field" value={theme} onChange={(event) => setTheme(event.currentTarget.value as "light" | "dark" | "system")}>
               <option value="light">{t("浅色")}</option>
               <option value="dark">{t("深色")}</option>
               <option value="system">{t("跟随系统")}</option>

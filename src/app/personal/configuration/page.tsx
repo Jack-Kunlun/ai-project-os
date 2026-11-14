@@ -42,9 +42,9 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
       <div data-page-content className={styles.content}>
         <section className={styles.pageHeader}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text="个人资源配置" /></p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-app-link"><UiText text="个人资源配置" /></p>
             <h1 className={styles.pageTitle}><UiText text={"个人资源配置"} /></h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600"><UiText text={"先查看已有资源，再为具体项目分配授权。"} /></p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted"><UiText text={"先查看已有资源，再为具体项目分配授权。"} /></p>
           </div>
         </section>
 

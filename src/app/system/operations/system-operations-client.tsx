@@ -21,10 +21,10 @@ import type {
 import { RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS, RECOVERY_DRILL_RUNBOOK_HREF } from "@/lib/system-operations-types";
 
 const stateMetadata: Record<BackupRunState, Readonly<{ label: string; tone: string; dot: string }>> = {
-  running: { label: "执行中", tone: "bg-indigo-50 text-indigo-700", dot: "animate-pulse bg-indigo-500" },
-  succeeded: { label: "成功", tone: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
-  failed: { label: "失败", tone: "bg-rose-50 text-rose-700", dot: "bg-rose-500" },
-  skipped: { label: "已跳过", tone: "bg-slate-100 text-slate-600", dot: "bg-slate-400" },
+  running: { label: "执行中", tone: "bg-app-accent-soft text-app-link", dot: "animate-pulse bg-app-accent" },
+  succeeded: { label: "成功", tone: "bg-app-success-soft text-app-success-ink", dot: "bg-app-success" },
+  failed: { label: "失败", tone: "bg-app-danger-soft text-app-danger-ink", dot: "bg-app-danger" },
+  skipped: { label: "已跳过", tone: "bg-app-surface-soft text-app-muted", dot: "bg-app-surface-soft" },
 };
 
 const triggerLabels: Record<BackupRunTrigger, string> = {
@@ -34,8 +34,8 @@ const triggerLabels: Record<BackupRunTrigger, string> = {
 };
 
 const recoveryDrillStatusMetadata: Record<PublicRecoveryDrill["status"], Readonly<{ label: string; tone: string }>> = {
-  verified: { label: "已验证", tone: "bg-emerald-50 text-emerald-700" },
-  failed: { label: "失败", tone: "bg-rose-50 text-rose-700" },
+  verified: { label: "已验证", tone: "bg-app-success-soft text-app-success-ink" },
+  failed: { label: "失败", tone: "bg-app-danger-soft text-app-danger-ink" },
 };
 
 const recoveryDrillCheckLabels: Record<keyof PublicRecoveryDrill["checks"], string> = {
@@ -148,11 +148,11 @@ export function SystemOperationsClient({
       <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
         {!adminMode ? <div className="mb-4"><ParentPageLink href="/profile" label="返回个人中心" /></div> : null}
         <ServerResourcesPanel />
-        <AdminPageHeader title="生产备份与 COS 同步" description="查看每日、手动和部署前备份的脱敏执行状态；页面不能启动、删除或恢复备份，也不能访问 COS 密钥、age 私钥、Docker 或 systemd。" actions={<button type="button" onClick={() => void refresh()} disabled={refreshing} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60">{refreshing ? t("刷新中…") : t("刷新状态")}</button>} />
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700"><UiText text={"仅初始超级管理员"} /></span><span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-600"><UiText text={"只读"} /></span></div>
+        <AdminPageHeader title="生产备份与 COS 同步" description="查看每日、手动和部署前备份的脱敏执行状态；页面不能启动、删除或恢复备份，也不能访问 COS 密钥、age 私钥、Docker 或 systemd。" actions={<button type="button" onClick={() => void refresh()} disabled={refreshing} className="inline-flex min-h-10 items-center justify-center rounded-control px-4 py-2.5 text-xs font-semibold transition disabled:opacity-60 app-button-primary">{refreshing ? t("刷新中…") : t("刷新状态")}</button>} />
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full bg-app-warning-soft px-3 py-1.5 font-semibold text-app-warning-ink"><UiText text={"仅初始超级管理员"} /></span><span className="rounded-full bg-app-surface-soft px-3 py-1.5 font-semibold text-app-muted"><UiText text={"只读"} /></span></div>
 
-        {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></div> : null}
-        {sourceNotice ? <div role="status" className={`mt-6 rounded-2xl border px-5 py-4 text-sm ${snapshot.sourceStatus === "invalid" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>{t(sourceNotice)}</div> : null}
+        {error ? <div role="alert" className="mt-6 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></div> : null}
+        {sourceNotice ? <div role="status" className={`mt-6 rounded-field border px-5 py-4 text-sm ${snapshot.sourceStatus === "invalid" ? "border-app-danger-border bg-app-danger-soft text-app-danger-ink app-feedback-error" : "border-app-warning-border bg-app-warning-soft text-app-warning-ink app-feedback-warning"}`}>{t(sourceNotice)}</div> : null}
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label={t("备份任务概览")}>
           <Metric label="当前状态" value={currentMeta ? t(currentMeta.label) : t("暂无记录")} detail={current ? t(triggerLabels[current.trigger]) : t("等待首次状态发布")} />
@@ -161,35 +161,35 @@ export function SystemOperationsClient({
           <Metric label="下次计划" value={current?.nextRunAt ? formatDate(current.nextRunAt, language, t, timeZone) : `${snapshot.schedule.localTime}–03:40`} detail={`${t("每日随机延迟不超过")} ${snapshot.schedule.randomizedDelayMinutes} ${t("分钟")}`} />
         </section>
 
-        <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-6 sm:px-7">
+        <section className="mt-6 overflow-hidden rounded-panel border border-app-border bg-app-surface app-panel">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-app-border px-6 py-6 sm:px-7">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Current run</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted">Current run</p>
               <h2 className="mt-2 text-xl font-semibold"><UiText text={"最近一次任务"} /></h2>
             </div>
             {currentMeta ? <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${currentMeta.tone}`}><span className={`h-2.5 w-2.5 rounded-full ${currentMeta.dot}`} />{t(currentMeta.label)}</span> : null}
           </div>
-          {current ? <CurrentRun run={current} language={language} t={t} timeZone={timeZone} /> : <div className="px-6 py-14 text-center text-sm text-slate-500"><UiText text={"服务器尚未发布备份任务状态。"} /></div>}
+          {current ? <CurrentRun run={current} language={language} t={t} timeZone={timeZone} /> : <div className="px-6 py-14 text-center text-sm text-app-muted"><UiText text={"服务器尚未发布备份任务状态。"} /></div>}
         </section>
 
-        <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+        <section className="mt-6 rounded-panel border border-app-border bg-app-surface p-6 sm:p-7 app-panel">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Execution history</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted">Execution history</p>
               <h2 className="mt-2 text-xl font-semibold"><UiText text={"最近执行记录"} /></h2>
-              <p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"最多读取 30 条经过格式校验的脱敏状态，不读取原始 journal。"} /></p>
+              <p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"最多读取 30 条经过格式校验的脱敏状态，不读取原始 journal。"} /></p>
             </div>
-            <span className="text-xs text-slate-400"><UiText text={"读取于"} />{" "}{formatDate(snapshot.readAt, language, t, timeZone)}</span>
+            <span className="text-xs text-app-muted"><UiText text={"读取于"} />{" "}{formatDate(snapshot.readAt, language, t, timeZone)}</span>
           </div>
           <div className="mt-5 space-y-3">
-            {snapshot.history.length === 0 ? <div className="rounded-2xl bg-slate-50 px-5 py-10 text-center text-sm text-slate-500"><UiText text={"还没有已完成的历史任务。"} /></div> : snapshot.history.map((run) => <HistoryRun key={run.runId} run={run} language={language} t={t} timeZone={timeZone} />)}
+            {snapshot.history.length === 0 ? <div className="rounded-panel bg-app-surface-soft px-5 py-10 text-center text-sm text-app-muted"><UiText text={"还没有已完成的历史任务。"} /></div> : snapshot.history.map((run) => <HistoryRun key={run.runId} run={run} language={language} t={t} timeZone={timeZone} />)}
           </div>
         </section>
 
         <RecoveryDrillPanel drill={snapshot.recoveryDrill} sourceStatus={snapshot.recoveryDrillSourceStatus} language={language} t={t} timeZone={timeZone} />
 
-        <section className="mt-6 border-t border-slate-200 pt-5 text-sm leading-6 text-slate-600">
-          <h2 className="font-semibold text-slate-800"><UiText text={"只读安全边界"} /></h2>
+        <section className="mt-6 border-t border-app-border pt-5 text-sm leading-6 text-app-muted">
+          <h2 className="font-semibold text-app-text"><UiText text={"只读安全边界"} /></h2>
           <p className="mt-1"><UiText text={"备份服务只向专用目录原子写入状态、时间、对象路径、大小、校验摘要和安全错误码；应用仅以只读挂载读取该目录。任何控制操作仍必须在服务器受限流程中执行。"} /></p>
         </section>
       </div>
@@ -199,7 +199,7 @@ export function SystemOperationsClient({
 
 function OperationsFrame({ adminMode, username, children }: { adminMode: boolean; username: string; children: React.ReactNode }) {
   if (adminMode) return <>{children}</>;
-  return <main className="min-h-screen bg-[#f4f6fb] text-slate-950"><AppHeader username={username} active="profile" /><AdminPageFrame active="operations" showSidebar={false}>{children}</AdminPageFrame></main>;
+  return <main className="min-h-screen bg-app-surface text-app-text"><AppHeader username={username} active="profile" /><AdminPageFrame active="operations" showSidebar={false}>{children}</AdminPageFrame></main>;
 }
 
 function recoveryDrillFreshness(completedAt: string, now = Date.now()): "fresh" | "stale" | "unknown" {
@@ -212,17 +212,17 @@ function RecoveryDrillPanel({ drill, sourceStatus, language, t, timeZone }: { dr
   const metadata = drill ? recoveryDrillStatusMetadata[drill.status] : null;
   const freshness = drill ? recoveryDrillFreshness(drill.completedAt) : "unknown";
   const checks = drill ? Object.entries(drill.checks) as Array<[keyof PublicRecoveryDrill["checks"], PublicRecoveryDrill["checks"][keyof PublicRecoveryDrill["checks"]]]> : [];
-  return <section id="recovery-drill" className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm" aria-labelledby="recovery-drill-title">
-    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-6 sm:px-7">
+  return <section id="recovery-drill" className="mt-6 overflow-hidden rounded-panel border border-app-border bg-app-surface app-panel" aria-labelledby="recovery-drill-title">
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-app-border px-6 py-6 sm:px-7">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Recovery drill</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted">Recovery drill</p>
         <h2 id="recovery-drill-title" className="mt-2 text-xl font-semibold"><UiText text={"恢复演练证据"} /></h2>
-        <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500"><UiText text={"恢复演练与备份任务完全独立；备份成功不会推断可恢复。本机隔离演练不等同生产异地主机恢复。"} /></p>
+        <p className="mt-2 max-w-3xl text-xs leading-5 text-app-muted"><UiText text={"恢复演练与备份任务完全独立；备份成功不会推断可恢复。本机隔离演练不等同生产异地主机恢复。"} /></p>
       </div>
-      {metadata ? <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${metadata.tone}`}>{t(metadata.label)}</span> : <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${sourceStatus === "invalid" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>{t(sourceStatus === "invalid" ? "读取失败" : "未取得")}</span>}
+      {metadata ? <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${metadata.tone}`}>{t(metadata.label)}</span> : <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${sourceStatus === "invalid" ? "bg-app-danger-soft text-app-danger-ink" : "bg-app-surface-soft text-app-muted"}`}>{t(sourceStatus === "invalid" ? "读取失败" : "未取得")}</span>}
     </div>
-    {drill === null ? <div className="px-6 py-10 text-sm text-slate-500 sm:px-7">{t(sourceStatus === "invalid" ? "恢复演练状态文件未通过安全校验，原始内容不会展示。" : "尚未取得独立恢复演练证据；不能以备份任务成功替代恢复验证。")}</div> : <>
-      <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-4">
+    {drill === null ? <div className="px-6 py-10 text-sm text-app-muted sm:px-7">{t(sourceStatus === "invalid" ? "恢复演练状态文件未通过安全校验，原始内容不会展示。" : "尚未取得独立恢复演练证据；不能以备份任务成功替代恢复验证。")}</div> : <>
+      <div className="grid gap-px bg-app-surface-soft sm:grid-cols-2 lg:grid-cols-4">
         <RunDetail label="环境" value={t(drill.environment === "local" ? "本机隔离" : "生产异地主机")} />
         <RunDetail label="作用域" value={drill.scope} mono />
         <RunDetail label="完成时间" value={formatDate(drill.completedAt, language, t, timeZone)} />
@@ -234,31 +234,31 @@ function RecoveryDrillPanel({ drill, sourceStatus, language, t, timeZone }: { dr
         <RunDetail label="源快照" value={drill.sourceArtifact?.name ?? t("尚未绑定")} mono />
         <RunDetail label="源快照类型" value={drill.sourceArtifact?.kind ?? t("尚未绑定")} mono />
         <RunDetail label="源快照 SHA-256" value={drill.sourceArtifact?.sha256 ?? t("尚未绑定")} mono />
-        <dl className="min-w-0 bg-white px-5 py-4 sm:col-span-2"><dt className="text-xs font-semibold text-slate-400"><UiText text={"固定检查"} /></dt><dd className="mt-2 grid gap-2 sm:grid-cols-2">{checks.map(([key, state]) => <span key={key} className={`rounded-lg px-3 py-2 text-xs font-semibold ${state === "passed" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{t(recoveryDrillCheckLabels[key])}：{t(state === "passed" ? "通过" : "失败")}</span>)}</dd></dl>
-        {drill.errorCode ? <div className="bg-rose-50 px-5 py-4 sm:col-span-2 lg:col-span-4"><p className="text-xs font-semibold text-rose-800">{drill.errorCode}</p><p className="mt-1 text-xs text-rose-700"><UiText text={"恢复演练未通过，安全错误码是唯一公开失败原因。"} /></p></div> : null}
+        <dl className="min-w-0 bg-app-surface px-5 py-4 sm:col-span-2"><dt className="text-xs font-semibold text-app-muted"><UiText text={"固定检查"} /></dt><dd className="mt-2 grid gap-2 sm:grid-cols-2">{checks.map(([key, state]) => <span key={key} className={`rounded-panel px-3 py-2 text-xs font-semibold ${state === "passed" ? "bg-app-success-soft text-app-success-ink" : "bg-app-danger-soft text-app-danger-ink"}`}>{t(recoveryDrillCheckLabels[key])}：{t(state === "passed" ? "通过" : "失败")}</span>)}</dd></dl>
+        {drill.errorCode ? <div className="bg-app-danger-soft px-5 py-4 sm:col-span-2 lg:col-span-4"><p className="text-xs font-semibold text-app-danger-ink">{drill.errorCode}</p><p className="mt-1 text-xs text-app-danger-ink"><UiText text={"恢复演练未通过，安全错误码是唯一公开失败原因。"} /></p></div> : null}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-6 py-5 sm:px-7"><p className="text-xs leading-5 text-slate-500"><UiText text={"验证结果仅证明当前记录的固定检查；生产恢复仍需独立空主机、窗口和证据。"} /></p><a href={RECOVERY_DRILL_RUNBOOK_HREF} className="inline-flex rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700"><UiText text={"打开恢复演练 Runbook"} /></a></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-app-border px-6 py-5 sm:px-7"><p className="text-xs leading-5 text-app-muted"><UiText text={"验证结果仅证明当前记录的固定检查；生产恢复仍需独立空主机、窗口和证据。"} /></p><a href={RECOVERY_DRILL_RUNBOOK_HREF} className="inline-flex rounded-control px-3 py-2 text-xs font-semibold transition app-button-primary"><UiText text={"打开恢复演练 Runbook"} /></a></div>
     </>}
   </section>;
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   const t = useAppearance().t;
-  return <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><p className="text-xs font-semibold text-slate-500">{t(label)}</p><p className="mt-2 break-words text-xl font-semibold tracking-tight">{t(value)}</p><p className="mt-3 text-xs leading-5 text-slate-400">{t(detail)}</p></article>;
+  return <article className="rounded-panel border border-app-border bg-app-surface p-5 app-panel"><p className="text-xs font-semibold text-app-muted">{t(label)}</p><p className="mt-2 break-words text-xl font-semibold tracking-tight">{t(value)}</p><p className="mt-3 text-xs leading-5 text-app-muted">{t(detail)}</p></article>;
 }
 
 function CurrentRun({ run, language, t, timeZone }: { run: PublicBackupRun; language: "zh-CN" | "en"; t: (text: string) => string; timeZone: string }) {
   const message = failureMessage(run, t);
-  return <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-4"><RunDetail label="触发方式" value={`${t(triggerLabels[run.trigger])}${run.targetTag ? ` · ${run.targetTag}` : ""}`} /><RunDetail label="开始时间" value={formatDate(run.startedAt, language, t, timeZone)} /><RunDetail label="完成时间" value={formatDate(run.completedAt, language, t, timeZone)} /><RunDetail label="远端校验尝试" value={`${run.verificationAttempts} ${t("次")}`} /><RunDetail label="备份集合" value={run.backupName ?? t("尚未生成")} mono /><RunDetail label="清理本地旧备份" value={`${run.retentionRemoved} ${t("份")}`} /><RunDetail label="SHA-256" value={run.archiveSha256 ?? t("尚未生成")} mono /><RunDetail label="运行 ID" value={run.runId} mono />{run.archiveObject ? <dl className="bg-white px-5 py-4 sm:col-span-2 lg:col-span-4"><dt className="text-xs font-semibold text-slate-400"><UiText text={"COS 对象"} /></dt><dd className="mt-2 break-all font-mono text-xs leading-5 text-slate-600">{run.archiveObject}</dd></dl> : null}{message ? <div className="bg-rose-50 px-5 py-4 sm:col-span-2 lg:col-span-4"><p className="text-xs font-semibold text-rose-800">{run.errorCode}</p><p className="mt-1 text-sm text-rose-700"><UiFeedbackText text={message} /></p></div> : null}</div>;
+  return <div className="grid gap-px bg-app-surface-soft sm:grid-cols-2 lg:grid-cols-4"><RunDetail label="触发方式" value={`${t(triggerLabels[run.trigger])}${run.targetTag ? ` · ${run.targetTag}` : ""}`} /><RunDetail label="开始时间" value={formatDate(run.startedAt, language, t, timeZone)} /><RunDetail label="完成时间" value={formatDate(run.completedAt, language, t, timeZone)} /><RunDetail label="远端校验尝试" value={`${run.verificationAttempts} ${t("次")}`} /><RunDetail label="备份集合" value={run.backupName ?? t("尚未生成")} mono /><RunDetail label="清理本地旧备份" value={`${run.retentionRemoved} ${t("份")}`} /><RunDetail label="SHA-256" value={run.archiveSha256 ?? t("尚未生成")} mono /><RunDetail label="运行 ID" value={run.runId} mono />{run.archiveObject ? <dl className="bg-app-surface px-5 py-4 sm:col-span-2 lg:col-span-4"><dt className="text-xs font-semibold text-app-muted"><UiText text={"COS 对象"} /></dt><dd className="mt-2 break-all font-mono text-xs leading-5 text-app-muted">{run.archiveObject}</dd></dl> : null}{message ? <div className="bg-app-danger-soft px-5 py-4 sm:col-span-2 lg:col-span-4"><p className="text-xs font-semibold text-app-danger-ink">{run.errorCode}</p><p className="mt-1 text-sm text-app-danger-ink"><UiFeedbackText text={message} /></p></div> : null}</div>;
 }
 
 function RunDetail({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   const t = useAppearance().t;
-  return <dl className="min-w-0 bg-white px-5 py-4"><dt className="text-xs font-semibold text-slate-400">{t(label)}</dt><dd className={`mt-2 break-words text-sm text-slate-700 ${mono ? "font-mono text-xs" : "font-medium"}`}>{value}</dd></dl>;
+  return <dl className="min-w-0 bg-app-surface px-5 py-4"><dt className="text-xs font-semibold text-app-muted">{t(label)}</dt><dd className={`mt-2 break-words text-sm text-app-text ${mono ? "font-mono text-xs" : "font-medium"}`}>{value}</dd></dl>;
 }
 
 function HistoryRun({ run, language, t, timeZone }: { run: PublicBackupRun; language: "zh-CN" | "en"; t: (text: string) => string; timeZone: string }) {
   const metadata = stateMetadata[run.state];
   const message = failureMessage(run, t);
-  return <article className="rounded-2xl border border-slate-200 px-5 py-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-slate-800">{t(triggerLabels[run.trigger])}{run.targetTag ? ` · ${run.targetTag}` : ""}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${metadata.tone}`}>{t(metadata.label)}</span></div><p className="mt-2 text-xs text-slate-500">{formatDate(run.startedAt, language, t, timeZone)} · {formatDuration(run.durationSeconds, t)} · {formatBytes(run.archiveBytes, t)}</p></div><p className="font-mono text-[12px] text-slate-400">{run.runId}</p></div>{message ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700"><strong>{run.errorCode}</strong> · <UiFeedbackText text={message} /></p> : null}</article>;
+  return <article className="rounded-panel border border-app-border px-5 py-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-app-text">{t(triggerLabels[run.trigger])}{run.targetTag ? ` · ${run.targetTag}` : ""}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${metadata.tone}`}>{t(metadata.label)}</span></div><p className="mt-2 text-xs text-app-muted">{formatDate(run.startedAt, language, t, timeZone)} · {formatDuration(run.durationSeconds, t)} · {formatBytes(run.archiveBytes, t)}</p></div><p className="font-mono text-[12px] text-app-muted">{run.runId}</p></div>{message ? <p className="mt-3 rounded-panel bg-app-danger-soft px-3 py-2 text-xs text-app-danger-ink"><strong>{run.errorCode}</strong> · <UiFeedbackText text={message} /></p> : null}</article>;
 }

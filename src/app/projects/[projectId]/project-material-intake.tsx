@@ -258,76 +258,76 @@ export function ProjectMaterialIntake({
 
   return (
     <OperationPanelFooterTargetContext.Provider value={footerTarget}>
-    <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`${styles.drawerBackdrop} ${modalBackdropClassName}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={`${styles.drawer} overflow-hidden ${modalSurfaceClassName}`}>
-        <div data-dialog-header className={`${styles.drawerHeader} flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-6`}>
+    <div hidden={!open} inert={!open} aria-hidden={!open || undefined} style={open ? undefined : { display: "none" }} className={`${styles.drawerBackdrop}  ${modalBackdropClassName}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className={["app-dialog-surface app-dialog-surface--drawer", (`${styles.drawer} overflow-hidden ${modalSurfaceClassName}`)].filter(Boolean).join(' ')}>
+        <div data-dialog-header className={`app-dialog-header ${styles.drawerHeader} flex items-start justify-between gap-4`}>
         <div className="min-w-0 flex-1">
-          <h2 id="add-source-dialog-title" className="text-lg font-semibold tracking-tight text-slate-950"><UiText text={"添加资料"} /></h2>
-          <p id="add-source-dialog-description" className="mt-1 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"资料会保留原文和来源。需要模型处理时，会先显示本次范围并等待确认。"} /></p>
+          <h2 id="add-source-dialog-title" className="text-base font-semibold tracking-tight text-app-text"><UiText text={"添加资料"} /></h2>
+          <p id="add-source-dialog-description" className="mt-1 max-w-3xl text-xs leading-5 text-app-muted"><UiText text={"资料会保留原文和来源。需要模型处理时，会先显示本次范围并等待确认。"} /></p>
         </div>
         <button ref={closeButtonRef} data-dialog-close type="button" onClick={closeDrawer} aria-label={translateUi("关闭窗口")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
       </div>
 
-      <div data-dialog-body className={`${styles.drawerBody} px-5 py-5 sm:px-6`}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 text-xs text-slate-500">
+      <div data-dialog-body className={`app-dialog-content ${styles.drawerBody}`}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-app-border pb-3 text-xs text-app-muted">
         <p><UiText text={"当前入口："} /><strong className="font-semibold">{translateUi(kindLabels[kind])}</strong></p>
-        <Link href={buildProjectHref(projectId, "assets", { from: "materials" })} onClick={() => closeDrawer()} className="font-semibold text-indigo-700 underline underline-offset-4"><UiText text={"管理已上传文件"} /></Link>
+        <Link href={buildProjectHref(projectId, "assets", { from: "materials" })} onClick={() => closeDrawer()} className="font-semibold text-app-link underline underline-offset-4"><UiText text={"管理已上传文件"} /></Link>
       </div>
 
-      {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700"><UiErrorText text={error} /></p> : null}
-      {uploadErrors.length > 0 ? <ul className="mt-3 space-y-3 text-sm text-rose-700">{uploadErrors.map((failure, index) => <li key={`${index}:${failure.name}`} className="break-words border-b border-slate-200 pb-3"><p className="font-semibold">{failure.name}</p><p><UiErrorText text={failure.message} /></p></li>)}</ul> : null}
-      {message ? <p role="status" aria-live="polite" className="mt-5 border-t border-slate-200 pt-4 text-sm leading-6 text-slate-700"><UiFeedbackText text={message} /></p> : null}
+      {error ? <p role="alert" className="mt-5 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm leading-6 text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
+      {uploadErrors.length > 0 ? <ul className="mt-3 space-y-3 text-sm text-app-danger-ink">{uploadErrors.map((failure, index) => <li key={`${index}:${failure.name}`} className="break-words border-b border-app-border pb-3"><p className="font-semibold">{failure.name}</p><p><UiErrorText text={failure.message} /></p></li>)}</ul> : null}
+      {message ? <p role="status" aria-live="polite" className="mt-5 border-t border-app-border pt-4 text-sm leading-6 text-app-text app-feedback-info"><UiFeedbackText text={message} /></p> : null}
 
       <DialogForm id="manual-text" onSubmit={saveText} className="min-w-0">
       <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-2">
-        <div className="min-w-0 text-slate-900">
-          <h3 className="text-sm font-semibold text-slate-950"><UiText text={"手工文本"} /></h3>
-          <p className="mt-1 text-xs leading-5 text-slate-600"><UiText text={"粘贴会议记录、进展或其他项目原文。"} /></p>
-          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder={translateUi("直接输入或粘贴项目资料…")} className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" />
-          <details className="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <summary className="cursor-pointer text-xs font-semibold text-slate-700"><UiText text={"补充来源链接和资料时间（可选）"} /></summary>
-            <label className="mt-4 block text-xs text-slate-600"><UiText text={"来源链接"} /><input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400" /></label>
-            <label className="mt-4 block text-xs text-slate-600"><UiText text={"资料时间"} /><input type="datetime-local" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none [color-scheme:light]" /></label>
+        <div className="min-w-0 text-app-text">
+          <h3 className="text-sm font-semibold text-app-text"><UiText text={"手工文本"} /></h3>
+          <p className="mt-1 text-xs leading-5 text-app-muted"><UiText text={"粘贴会议记录、进展或其他项目原文。"} /></p>
+          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder={translateUi("直接输入或粘贴项目资料…")} className="mt-4 w-full resize-y rounded-field border border-app-border bg-app-surface px-4 py-3 text-sm leading-6 text-app-text outline-none placeholder:text-app-muted focus:border-app-accent-border focus:ring-2 focus:ring-app-accent-border app-field" />
+          <details className="mt-3 rounded-panel border border-app-border bg-app-surface px-4 py-3">
+            <summary className="cursor-pointer text-xs font-semibold text-app-text"><UiText text={"补充来源链接和资料时间（可选）"} /></summary>
+            <label className="mt-4 block text-xs text-app-muted"><UiText text={"来源链接"} /><input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-field border border-app-border bg-app-surface px-4 py-3 text-sm text-app-text outline-none placeholder:text-app-muted app-field" /></label>
+            <label className="mt-4 block text-xs text-app-muted"><UiText text={"资料时间"} /><input type="datetime-local" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} className="mt-2 w-full rounded-field border border-app-border bg-app-surface px-4 py-3 text-sm text-app-text outline-none [color-scheme:light] app-field" /></label>
           </details>
         </div>
 
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-slate-950"><UiText text={"图片、文档或文件夹"} /></h3>
-          <p className="mt-1 text-xs leading-5 text-slate-500"><UiText text={"支持 DOCX、XLSX、PPTX、PDF、TXT、Markdown、CSV、JSON 和 PNG、JPEG、WebP；旧版 Office 和 WPS 专有格式请先另存。图片识别仍需当次确认。"} /></p>
+          <h3 className="text-sm font-semibold text-app-text"><UiText text={"图片、文档或文件夹"} /></h3>
+          <p className="mt-1 text-xs leading-5 text-app-muted"><UiText text={"支持 DOCX、XLSX、PPTX、PDF、TXT、Markdown、CSV、JSON 和 PNG、JPEG、WebP；旧版 Office 和 WPS 专有格式请先另存。图片识别仍需当次确认。"} /></p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-white px-5 text-center hover:border-indigo-400 hover:bg-indigo-50">
+            <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-panel border border-dashed border-app-accent-border bg-app-surface px-5 text-center hover:border-app-accent-border hover:bg-app-accent-soft">
               <input type="file" multiple onChange={chooseFiles} className="sr-only" />
-              <span className="text-sm font-semibold text-indigo-700"><UiText text={"选择图片或文档"} /></span>
-              <span className="mt-1 text-[12px] text-slate-400"><UiText text={"可一次多选"} /></span>
+              <span className="text-sm font-semibold text-app-link"><UiText text={"选择图片或文档"} /></span>
+              <span className="mt-1 text-[12px] text-app-muted"><UiText text={"可一次多选"} /></span>
             </label>
-            <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white px-5 text-center hover:border-violet-400 hover:bg-violet-50">
+            <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-panel border border-dashed border-app-accent-border bg-app-surface px-5 text-center hover:border-app-accent-border hover:bg-app-accent-soft">
               <input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} className="sr-only" />
-              <span className="text-sm font-semibold text-violet-700"><UiText text={"选择整个文件夹"} /></span>
-              <span className="mt-1 text-[12px] text-slate-400"><UiText text={"读取子目录中的受支持文件"} /></span>
+              <span className="text-sm font-semibold text-app-link"><UiText text={"选择整个文件夹"} /></span>
+              <span className="mt-1 text-[12px] text-app-muted"><UiText text={"读取子目录中的受支持文件"} /></span>
             </label>
           </div>
-          <p className="mt-3 text-[12px] leading-5 text-slate-400"><UiText text={"单次最多"} />{" "}{maxFiles} {" "}<UiText text={"个文件；文件夹中的不支持格式会自动跳过。"} /></p>
-          {files.length > 0 ? <div className="mt-4 min-w-0 rounded-xl bg-white p-4 text-xs text-slate-600"><p className="font-semibold text-slate-800"><UiText text={"已选择"} />{" "}{files.length} {" "}<UiText text={"个文件"} /></p><p className="mt-2 line-clamp-3 [overflow-wrap:anywhere]">{files.map(selectedFileName).join("、")}</p></div> : null}
+          <p className="mt-3 text-[12px] leading-5 text-app-muted"><UiText text={"单次最多"} />{" "}{maxFiles} {" "}<UiText text={"个文件；文件夹中的不支持格式会自动跳过。"} /></p>
+          {files.length > 0 ? <div className="mt-4 min-w-0 rounded-panel bg-app-surface p-4 text-xs text-app-muted"><p className="font-semibold text-app-text"><UiText text={"已选择"} />{" "}{files.length} {" "}<UiText text={"个文件"} /></p><p className="mt-2 line-clamp-3 [overflow-wrap:anywhere]">{files.map(selectedFileName).join("、")}</p></div> : null}
         </div>
       </div>
 
-      {uploadedAssets.length > 0 ? <div role="status" className="mt-5 space-y-3"><h3 className="text-sm font-semibold text-slate-900"><UiText text={"已上传文件状态"} /></h3>{uploadedAssets.map((asset) => <div key={asset.id} className="border-b border-slate-200 pb-3 last:border-b-0"><p className="break-all text-xs font-semibold text-slate-800">{asset.name}</p><p className="mt-1 text-xs leading-5 text-slate-600"><UiText text={importedAssetGuidance(asset).message} /></p></div>)}</div> : null}
+      {uploadedAssets.length > 0 ? <div role="status" className="mt-5 space-y-3"><h3 className="text-sm font-semibold text-app-text"><UiText text={"已上传文件状态"} /></h3>{uploadedAssets.map((asset) => <div key={asset.id} className="border-b border-app-border pb-3 last:border-b-0"><p className="break-all text-xs font-semibold text-app-text">{asset.name}</p><p className="mt-1 text-xs leading-5 text-app-muted"><UiText text={importedAssetGuidance(asset).message} /></p></div>)}</div> : null}
       <DialogActions className="w-full">
         <div className="mr-auto flex min-w-0 flex-wrap gap-2">{uploadedAssets.map((asset) => {
           const guidance = importedAssetGuidance(asset);
-          return <Link key={asset.id} href={buildProjectHref(projectId, "assets", { focus: asset.id, from: "materials" })} onClick={() => closeDrawer()} aria-label={`${translateUi(guidance.action)}：${asset.name}`} title={asset.name} className="inline-flex min-h-10 max-w-full items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:border-indigo-300"><UiText text={guidance.action} /><span className="ml-1 max-w-44 truncate text-slate-500">· {asset.name}</span></Link>;
+          return <Link key={asset.id} href={buildProjectHref(projectId, "assets", { focus: asset.id, from: "materials" })} onClick={() => closeDrawer()} aria-label={`${translateUi(guidance.action)}：${asset.name}`} title={asset.name} className="inline-flex min-h-10 max-w-full items-center rounded-control border border-app-border bg-app-surface px-3 py-2 text-xs font-semibold text-app-link hover:border-app-accent-border"><UiText text={guidance.action} /><span className="ml-1 max-w-44 truncate text-app-muted">· {asset.name}</span></Link>;
         })}</div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <DialogSubmit disabled={savingText || !contentText.trim()} className="inline-flex min-h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? <UiText text={"保存中…"} /> : <UiText text={"加入原始资料"} />}</DialogSubmit>
-          <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? <UiText text={"上传并解析中…"} /> : files.length > 0 ? translateUi("上传并解析 {count} 个文件").replace("{count}", String(files.length)) : <UiText text={"请先选择文件或文件夹"} />}</button>
+          <DialogSubmit disabled={savingText || !contentText.trim()} className="inline-flex min-h-10 items-center justify-center rounded-control px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 app-button-primary">{savingText ? <UiText text={"保存中…"} /> : <UiText text={"加入原始资料"} />}</DialogSubmit>
+          <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="inline-flex min-h-10 items-center justify-center rounded-control border px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 app-button-secondary">{uploading ? <UiText text={"上传并解析中…"} /> : files.length > 0 ? translateUi("上传并解析 {count} 个文件").replace("{count}", String(files.length)) : <UiText text={"请先选择文件或文件夹"} />}</button>
         </div>
       </DialogActions>
       </DialogForm>
       <div className={factSourceIds.length > 0 ? "mt-5" : undefined}><ProjectFactImport key={factSourceIds.join(",")} projectId={projectId} sourceIds={factSourceIds} onChanged={onChanged} /></div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Link href={`/projects/${projectId}/external-sources`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-800"><UiText text={"添加网页资料"} /></Link>
-        <Link href={`/projects/${projectId}/repositories`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-800"><UiText text={"连接代码仓库"} /></Link>
+        <Link href={`/projects/${projectId}/external-sources`} className="rounded-control border px-3 py-2 text-xs font-semibold transition app-button-secondary"><UiText text={"添加网页资料"} /></Link>
+        <Link href={`/projects/${projectId}/repositories`} className="rounded-control border px-3 py-2 text-xs font-semibold transition app-button-secondary"><UiText text={"连接代码仓库"} /></Link>
       </div>
       </div>
       <footer data-operation-footer className={modalFooterClassName}>

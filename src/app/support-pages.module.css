@@ -172,7 +172,7 @@
   flex-direction: column;
   align-items: flex-start;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--app-surface);
   padding: 24px;
   color: var(--app-text);
@@ -196,7 +196,7 @@
   height: 40px;
   place-items: center;
   margin-bottom: 18px;
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--app-accent-soft);
   color: var(--app-link);
 }
@@ -306,19 +306,6 @@
   line-height: 1.4;
 }
 
-.content :global([class*="rounded-3xl"]),
-.content :global([class*="rounded-2xl"]) {
-  border-radius: 6px;
-}
-
-.content :global([class*="rounded-xl"]) {
-  border-radius: 4px;
-}
-
-.content :global([class*="shadow-"]) {
-  box-shadow: none;
-}
-
 @media (max-width: 700px) {
   .pageHeader {
     flex-wrap: wrap;
@@ -395,24 +382,21 @@
   line-height: var(--app-action-line-height);
 }
 .primaryAction {
+  border: 1px solid var(--app-accent);
+  border-radius: 6px;
   background: var(--app-accent);
   color: var(--app-on-accent);
 }
 .primaryAction:hover {
-  background: color-mix(in srgb, var(--app-accent) 88%, #000);
+  background: var(--app-accent-hover);
+}
+.secondaryAction {
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
+  color: var(--app-text);
 }
 .secondaryAction:hover {
   background: var(--app-accent-soft);
 }
-.content :global(button.bg-indigo-600),
-.content :global(button.bg-indigo-700) {
-  background: var(--app-accent);
-  color: var(--app-on-accent);
-}
-.content :global(button.bg-indigo-600:hover),
-.content :global(button.bg-indigo-700:hover) {
-  background: color-mix(in srgb, var(--app-accent) 88%, #000);
-}
-.content :global(.text-indigo-600),
-.content :global(.text-indigo-700) { color: var(--app-link); }
 .content :global(p.uppercase) { display: none; }

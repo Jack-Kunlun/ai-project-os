@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function PersonalWorkspacePage(): Promise<React.JSX.Element> {
   const user = await requirePageSession();
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
+    <main className="min-h-screen bg-app-surface text-app-text">
       <AppHeader username={user.username} active="personalKnowledge" isSystemAdmin={user.role === "admin"} />
       <PersonalWorkspaceNav active="overview" />
       <PersonalOverviewClient />

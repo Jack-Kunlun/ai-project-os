@@ -93,7 +93,7 @@
 .document {
   margin-top: 28px;
   border: 1px solid var(--app-border);
-  border-radius: 5px;
+  border-radius: var(--radius-panel);
   padding: 28px 30px;
   background: var(--app-surface);
   color: var(--app-text);
@@ -199,7 +199,7 @@
   outline-offset: 3px;
 }
 
-.infoBody a {
+.infoBody a:not(.primaryAction):not([class~="app-button-primary"]):not([class~="app-button-secondary"]):not([class~="app-button-ghost"]):not([class~="app-button-danger"]):not([class~="app-button-warning"]) {
   color: var(--app-link);
 }
 

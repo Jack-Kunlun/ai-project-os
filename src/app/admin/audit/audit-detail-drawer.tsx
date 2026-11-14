@@ -43,20 +43,20 @@ function CopyableValue({ label, value }: { label: string; value: string }) {
   }
 
   return (
-    <li className="rounded-2xl border border-slate-200 bg-white p-3">
+    <li className="rounded-panel border border-app-border bg-app-surface p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-slate-500">{label}</p>
+        <p className="text-xs font-semibold text-app-muted">{label}</p>
         <button
           type="button"
           aria-label={`${t("复制")}${language === "en" ? " " : ""}${label}`}
           onClick={() => void copy()}
-          className="whitespace-nowrap rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+          className="whitespace-nowrap rounded-control border border-app-border px-2.5 py-1.5 text-xs font-semibold text-app-muted transition hover:bg-app-surface-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent"
         >
           {t(copied === "done" ? "已复制" : copied === "failed" ? "复制失败" : "复制")}
         </button>
       </div>
-      <p className="mt-2 break-all font-mono text-xs leading-5 text-slate-800">{value}</p>
-      {copied === "failed" ? <p className="mt-1 text-xs text-rose-700">{t("当前浏览器不允许写入剪贴板，请手动选择复制。")}</p> : null}
+      <p className="mt-2 break-all font-mono text-xs leading-5 text-app-text">{value}</p>
+      {copied === "failed" ? <p className="mt-1 text-xs text-app-danger-ink">{t("当前浏览器不允许写入剪贴板，请手动选择复制。")}</p> : null}
     </li>
   );
 }
@@ -124,12 +124,12 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`flex h-full w-full max-w-xl flex-col overflow-hidden ${modalSurfaceClassName}`}
+        className={["app-dialog-surface app-dialog-surface--drawer", (`flex h-full w-full max-w-xl flex-col overflow-hidden ${modalSurfaceClassName}`)].filter(Boolean).join(' ')}
       >
         <header data-dialog-header className={`flex min-h-[72px] shrink-0 items-center justify-between gap-3 px-6 py-5 ${modalHeaderClassName}`}>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{t("审计详情")}</p>
-            <h2 id={titleId} className="mt-2 text-lg font-semibold text-slate-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link">{t("审计详情")}</p>
+            <h2 id={titleId} className="mt-2 text-base font-semibold text-app-text">
               {t(auditSourceLabel(shown.source))} · {t(auditActionLabel(shown.action))}
             </h2>
           </div>
@@ -145,40 +145,40 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
           </button>
         </header>
 
-        <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
+        <div data-dialog-body className="app-dialog-content min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
           <dl className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl bg-slate-50 p-3">
-              <dt className="text-xs font-semibold text-slate-500">{t("发生时间")}</dt>
-              <dd className="mt-1 text-sm text-slate-800">{dateParts(shown.occurredAt, language).full}</dd>
+            <div className="rounded-panel bg-app-surface-soft p-3">
+              <dt className="text-xs font-semibold text-app-muted">{t("发生时间")}</dt>
+              <dd className="mt-1 text-sm text-app-text">{dateParts(shown.occurredAt, language).full}</dd>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-3">
-              <dt className="text-xs font-semibold text-slate-500">{t("结果")}</dt>
+            <div className="rounded-panel bg-app-surface-soft p-3">
+              <dt className="text-xs font-semibold text-app-muted">{t("结果")}</dt>
               <dd className="mt-1">
                 <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${resultClass(shown.result)}`}>
                   {t(auditResultLabel(shown.result))}
                 </span>
               </dd>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-3">
-              <dt className="text-xs font-semibold text-slate-500">{t("操作者")}</dt>
-              <dd className="mt-1 break-words text-sm text-slate-800">{displayPrincipal(shown.actor, t)}</dd>
+            <div className="rounded-panel bg-app-surface-soft p-3">
+              <dt className="text-xs font-semibold text-app-muted">{t("操作者")}</dt>
+              <dd className="mt-1 break-words text-sm text-app-text">{displayPrincipal(shown.actor, t)}</dd>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-3">
-              <dt className="text-xs font-semibold text-slate-500">{t("主体")}</dt>
-              <dd className="mt-1 break-words text-sm text-slate-800">{displayPrincipal(shown.subject, t)}</dd>
+            <div className="rounded-panel bg-app-surface-soft p-3">
+              <dt className="text-xs font-semibold text-app-muted">{t("主体")}</dt>
+              <dd className="mt-1 break-words text-sm text-app-text">{displayPrincipal(shown.subject, t)}</dd>
             </div>
           </dl>
 
-          {loading ? <p className="mt-5 text-sm text-slate-500">{t("正在读取详情…")}</p> : null}
+          {loading ? <p className="mt-5 text-sm text-app-muted">{t("正在读取详情…")}</p> : null}
 
           {error !== null ? (
-            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4">
-              <p className="text-sm font-semibold text-rose-700"><UiErrorText text={error} /></p>
-              <p className="mt-1 text-xs text-rose-700/80">{t("详情读取失败，仍可关闭后继续使用列表。")}</p>
+            <div className="mt-5 rounded-panel border border-app-danger-border bg-app-danger-soft p-4">
+              <p className="text-sm font-semibold text-app-danger-ink"><UiErrorText text={error} /></p>
+              <p className="mt-1 text-xs text-app-danger-ink">{t("详情读取失败，仍可关闭后继续使用列表。")}</p>
               <button
                 type="button"
                 onClick={onRetry}
-                className="app-action-button app-action-button--compact mt-3 whitespace-nowrap rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"
+                className="app-button-danger app-button-compact mt-3 whitespace-nowrap rounded-control border px-3 py-2 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 {t("重新读取")}
               </button>
@@ -186,21 +186,21 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
           ) : null}
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs font-semibold text-slate-500">{t("前状态")}</p>
-              <p className="mt-2 break-words text-sm text-slate-800">{displayValues(shown.evidence.before, t)}</p>
+            <div className="rounded-panel bg-app-surface-soft p-4">
+              <p className="text-xs font-semibold text-app-muted">{t("前状态")}</p>
+              <p className="mt-2 break-words text-sm text-app-text">{displayValues(shown.evidence.before, t)}</p>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs font-semibold text-slate-500">{t("后状态")}</p>
-              <p className="mt-2 break-words text-sm text-slate-800">{displayValues(shown.evidence.after, t)}</p>
+            <div className="rounded-panel bg-app-surface-soft p-4">
+              <p className="text-xs font-semibold text-app-muted">{t("后状态")}</p>
+              <p className="mt-2 break-words text-sm text-app-text">{displayValues(shown.evidence.after, t)}</p>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs font-semibold text-slate-500">{t("版本证据")}</p>
-              <p className="mt-2 break-words text-sm text-slate-800">{valuesLabel(shown.evidence.versions)}</p>
+            <div className="rounded-panel bg-app-surface-soft p-4">
+              <p className="text-xs font-semibold text-app-muted">{t("版本证据")}</p>
+              <p className="mt-2 break-words text-sm text-app-text">{valuesLabel(shown.evidence.versions)}</p>
             </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs font-semibold text-slate-500">{t("安全说明")}</p>
-              <p className="mt-2 text-sm text-slate-800">
+            <div className="rounded-panel bg-app-surface-soft p-4">
+              <p className="text-xs font-semibold text-app-muted">{t("安全说明")}</p>
+              <p className="mt-2 text-sm text-app-text">
                 {t("安全错误码：")}{language === "en" ? " " : ""}{shown.evidence.safeErrorCode ?? t("未记录")} · {t("原因正文：")}{language === "en" ? " " : ""}
                 {shown.evidence.reasonRecorded ? t("已记录但不展示") : t("未记录")}
               </p>
@@ -208,10 +208,10 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
           </div>
 
           <div className="mt-5">
-            <h3 className="text-sm font-semibold text-slate-950">{t("完整技术引用")}</h3>
-            <p className="mt-1 text-xs text-slate-500">{t("技术标识仅在详情中展示，列表只保留摘要。")}</p>
+            <h3 className="text-sm font-semibold text-app-text">{t("完整技术引用")}</h3>
+            <p className="mt-1 text-xs text-app-muted">{t("技术标识仅在详情中展示，列表只保留摘要。")}</p>
             {references.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-500">{t("无安全引用")}</p>
+              <p className="mt-3 text-sm text-app-muted">{t("无安全引用")}</p>
             ) : (
               <ul className="mt-3 grid gap-2">
                 {references.map((reference) => (
@@ -219,9 +219,9 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
                 ))}
               </ul>
             )}
-            <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3">
-              <p className="text-xs font-semibold text-slate-500">{t("记录 ID")}</p>
-              <p className="mt-1 break-all font-mono text-xs text-slate-800">{shown.id}</p>
+            <div className="mt-3 rounded-panel border border-app-border bg-app-surface p-3 app-panel">
+              <p className="text-xs font-semibold text-app-muted">{t("记录 ID")}</p>
+              <p className="mt-1 break-all font-mono text-xs text-app-text">{shown.id}</p>
             </div>
           </div>
         </div>

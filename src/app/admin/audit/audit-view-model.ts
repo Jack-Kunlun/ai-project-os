@@ -180,10 +180,10 @@ export function valuesLabel(values: Record<string, string | number | boolean | n
 }
 
 export function resultClass(value: string): string {
-  if (value === "applied" || value === "restored") return "bg-emerald-50 text-emerald-700";
-  if (value === "pending") return "bg-amber-50 text-amber-700";
-  if (value === "rejected" || value === "revoked" || value === "disabled" || value === "failed") return "bg-rose-50 text-rose-700";
-  return "bg-slate-100 text-slate-600";
+  if (value === "applied" || value === "restored") return "bg-app-success-soft text-app-success-ink";
+  if (value === "pending") return "bg-app-warning-soft text-app-warning-ink";
+  if (value === "rejected" || value === "revoked" || value === "disabled" || value === "failed") return "bg-app-danger-soft text-app-danger-ink";
+  return "bg-app-surface-soft text-app-muted";
 }
 
 /**

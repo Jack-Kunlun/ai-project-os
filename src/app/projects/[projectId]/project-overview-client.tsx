@@ -321,7 +321,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="overview" isSystemAdmin={isSystemAdmin} />
       <div data-page-content className={styles.content}>
         {loading && currentData === null ? <OverviewSkeleton /> : currentData === null || summary === null || nextStep === null ? (
-          <div className={styles.error} role="alert"><span><UiErrorText text={error ?? "项目概览加载失败"} /></span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text={"重试"} /></button></div>
+          <div className={["app-feedback-error", (styles.error)].filter(Boolean).join(' ')} role="alert"><span><UiErrorText text={error ?? "项目概览加载失败"} /></span><button type="button" onClick={() => void load({ showLoading: true })} className="app-feedback-action"><UiText text={"重试"} /></button></div>
         ) : (
           <>
             <section className={styles.heading}>
@@ -330,12 +330,12 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                 <h1>{currentData.project.name}</h1>
                 <p className={styles.subtitle}>{currentData.project.description || t("尚未填写项目说明。")}</p>
               </div>
-              <span className={`${styles.statusPill} ${worldStatusMeta[currentData.world.status].tone}`}>{t(currentData.project.archivedAt ? "已归档" : worldStatusMeta[currentData.world.status].label)}</span>
+              <span className={`${styles.statusPill}  ${worldStatusMeta[currentData.world.status].tone}`}>{t(currentData.project.archivedAt ? "已归档" : worldStatusMeta[currentData.world.status].label)}</span>
             </section>
 
-            {currentData.project.archivedAt ? <p className={styles.archiveNotice}><UiText text={"项目已归档，当前概览为只读状态。"} /></p> : null}
-            {error ? <p role="alert" className={styles.inlineError}><UiErrorText text={error} /></p> : null}
-            {message ? <p role="status" className={styles.inlineSuccess}><UiFeedbackText text={message} /></p> : null}
+            {currentData.project.archivedAt ? <p className={`app-feedback-warning ${styles.archiveNotice}`}><UiText text={"项目已归档，当前概览为只读状态。"} /></p> : null}
+            {error ? <p role="alert" className={["app-feedback-error", (styles.inlineError)].filter(Boolean).join(' ')}><UiErrorText text={error} /></p> : null}
+            {message ? <p role="status" className={`app-feedback-success ${styles.inlineSuccess}`}><UiFeedbackText text={message} /></p> : null}
 
             <section className={styles.metrics} aria-label={t("项目关键指标")}>
               <MetricCard label={t("进行中工作")} value={currentData.planError ? "—" : activeWorkCount ?? 0} detail={currentData.planError ? t("项目计划暂不可用") : currentData.plan ? `${blockedWorkCount ?? 0} ${t("项受阻")}` : t("项目计划尚未设置")} href={`/projects/${projectId}/plan`} />
@@ -363,7 +363,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                     </div> : <p className={styles.panelEmpty}><UiText text={"还没有关联到此目标的工作项。"} /></p>}
                   </> : <div className={styles.emptyGoal}><h3><UiText text={"尚未设置当前目标"} /></h3><p><UiText text={"项目目标可在计划中创建并启动。"} /></p><Link href={`/projects/${projectId}/plan`}><UiText text={"前往项目计划 →"} /></Link></div>}
                   <div className={styles.worldSummary}>
-                    <span className={`${styles.statusPill} ${worldStatusMeta[currentData.world.status].tone}`}>{t(worldStatusMeta[currentData.world.status].label)}</span>
+                    <span className={`${styles.statusPill}  ${worldStatusMeta[currentData.world.status].tone}`}>{t(worldStatusMeta[currentData.world.status].label)}</span>
                     <p>{t(worldStatusMeta[currentData.world.status].detail)}</p>
                     <Link href={`/projects/${projectId}/world`}><UiText text={"高级状态治理 →"} /></Link>
                   </div>
@@ -372,7 +372,7 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                 <section className={styles.nextTasks} aria-labelledby="next-work-heading" data-overview-card="next">
                   <div className={styles.panelHeading}><div><p className={styles.eyebrow}><UiText text={"NEXT WORK"} /></p><h2 id="next-work-heading"><UiText text={"接下来推进"} /></h2></div><Link href={`/projects/${projectId}/plan`} className={styles.textLink}><UiText text={"全部工作 →"} /></Link></div>
                   {currentData.planError ? <p className={styles.panelEmpty}><UiText text={"计划工作暂不可用，稍后重试。"} /></p> : nextWorkItems.length === 0 ? <p className={styles.panelEmpty}><UiText text={"暂无待推进工作。"} /></p> : <div className={styles.workList}>{nextWorkItems.map((item) => <Link key={item.id} href={`/projects/${projectId}/plan?focus=${encodeURIComponent(item.id)}&status=${encodeURIComponent(item.status)}`} className={styles.workItem}>
-                    <span className={`${styles.workDot} ${item.status === "blocked" ? styles.workBlocked : item.status === "inProgress" ? styles.workActive : ""}`} aria-hidden="true" />
+                    <span className={`${styles.workDot}  ${item.status === "blocked" ? styles.workBlocked : item.status === "inProgress" ? styles.workActive : ""}`} aria-hidden="true" />
                     <span className={styles.workCopy}><strong>{item.title}</strong><small>{t(workStatusLabels[item.status])} · {item.assignee?.displayName?.trim() || item.assignee?.username || t("未分配")}{item.targetDate ? ` · ${formatDate(item.targetDate, language)}` : ` · ${t("未设置期限")}`}</small></span>
                     <span className={styles.arrow} aria-hidden="true">→</span>
                   </Link>)}</div>}

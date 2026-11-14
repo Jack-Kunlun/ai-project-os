@@ -34,7 +34,7 @@ const statusLabels: Record<ProbeBudgetSummary["status"], string> = {
 };
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MAX_BUDGET_DURATION_MS = 90 * DAY_MS;
-const adminInputClass = "mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
+const adminInputClass = "mt-2 block min-h-11 w-full rounded-panel border border-app-border bg-app-surface px-4 py-2.5 text-sm outline-none transition focus:border-app-accent-border focus:ring-2 focus:ring-app-accent-border disabled:cursor-not-allowed disabled:bg-app-surface-soft disabled:text-app-muted";
 
 async function readError(response: Response, fallback: string): Promise<string> {
   return (await safeResponseError(response, fallback)).message;
@@ -79,10 +79,10 @@ function defaultExpiresAt(): string {
 }
 
 function metric(label: string, value: string | number, hint?: string, compact = false) {
-  return <div className={`min-w-0 ${compact ? "border-l border-slate-200 pl-3 first:border-l-0 first:pl-0" : "rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"}`}>
-    <dt className="text-xs text-slate-500"><UiText text={label} /></dt>
-    <dd className="mt-1 break-words text-sm font-semibold tabular-nums text-slate-900">{value}</dd>
-    {hint ? <dd className="mt-1 text-xs leading-5 text-slate-500"><UiText text={hint} /></dd> : null}
+  return <div className={["app-panel", (`min-w-0 ${compact ? "border-l border-app-border pl-3 first:border-l-0 first:pl-0" : "rounded-panel border border-app-border bg-app-surface-soft px-3 py-3"}`)].filter(Boolean).join(' ')}>
+    <dt className="text-xs text-app-muted"><UiText text={label} /></dt>
+    <dd className="mt-1 break-words text-sm font-semibold tabular-nums text-app-text">{value}</dd>
+    {hint ? <dd className="mt-1 text-xs leading-5 text-app-muted"><UiText text={hint} /></dd> : null}
   </div>;
 }
 
@@ -227,12 +227,12 @@ export function PlatformProbeBudgetClient({
 
   const visibleAvailable = budget?.status === "active" ? budget.availableUnits : 0;
   const editDisabled = disabled || pending || loading || loadFailed;
-  const feedback = message ? <p role={messageType === "error" ? "alert" : "status"} className={`mt-3 rounded-lg border px-3 py-2 text-xs leading-5 ${messageType === "error" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>{messageType === "error" ? <UiFeedbackText text={message} /> : <UiText text={message} />}</p> : null;
-  const summary = <section aria-label={t("模型测试额度摘要")} className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${compact ? "p-4" : "mt-6 p-5 sm:p-6"}`}>
+  const feedback = message ? <p role={messageType === "error" ? "alert" : "status"} className={`mt-3 rounded-field border px-3 py-2 text-xs leading-5 ${messageType === "error" ? "border-app-danger-border bg-app-danger-soft text-app-danger-ink app-feedback-error" : "border-app-success-border bg-app-success-soft text-app-success-ink app-feedback-success"}`}>{messageType === "error" ? <UiFeedbackText text={message} /> : <UiText text={message} />}</p> : null;
+  const summary = <section aria-label={t("模型测试额度摘要")} className={["app-panel", (`rounded-panel border border-app-border bg-app-surface ${compact ? "p-4" : "mt-6 p-5 sm:p-6"}`)].filter(Boolean).join(' ')}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="text-sm font-semibold text-slate-900"><UiText text={"测试额度"} /></span>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{loading ? t("读取中…") : loadFailed ? t("读取失败") : budget ? t(statusLabels[budget.status]) : t("未设置")}</span>
+        <span className="text-sm font-semibold text-app-text"><UiText text={"测试额度"} /></span>
+          <span className="rounded-full bg-app-surface-soft px-2.5 py-1 text-xs font-medium text-app-muted">{loading ? t("读取中…") : loadFailed ? t("读取失败") : budget ? t(statusLabels[budget.status]) : t("未设置")}</span>
       </div>
       <OperationPanel
         title="设置模型测试额度"
@@ -243,34 +243,34 @@ export function PlatformProbeBudgetClient({
         disabled={editDisabled}
         inquiryEnabled={false}
         footer={<div className="flex w-full flex-wrap items-center justify-between gap-3">
-          <span className="text-xs leading-5 text-slate-500"><UiText text={"最大 10,000 次；周期最长 90 天。保存后旧周期立即停用，剩余次数不结转。"} /></span>
+          <span className="text-xs leading-5 text-app-muted"><UiText text={"最大 10,000 次；周期最长 90 天。保存后旧周期立即停用，剩余次数不结转。"} /></span>
           <div className="flex items-center gap-2">
-            <button type="button" disabled={pending} onClick={() => requestOpenChange(false)} className="app-action-button rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"><UiText text={"取消"} /></button>
-          <button type="submit" form={formId} disabled={editDisabled} className="app-action-button rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("保存中…") : t("保存新周期")}</button>
+            <button type="button" disabled={pending} onClick={() => requestOpenChange(false)} className="app-button-secondary rounded-control border px-4 py-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"><UiText text={"取消"} /></button>
+          <button type="submit" form={formId} disabled={editDisabled} className="app-button-primary rounded-control px-4 py-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50">{pending ? t("保存中…") : t("保存新周期")}</button>
           </div>
         </div>}
       >
         <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-600">
+          <div className="rounded-panel border border-app-border bg-app-surface-soft p-4 text-xs leading-5 text-app-muted app-panel">
             <p><UiText text={"此处统计测试请求次数，不是平台 Token、人民币费用或供应商余额。供应商可能另收 Token 费用。"} /></p>
             <p className="mt-2"><UiText text={"每次单项能力连通性测试最多计 1 次，六项全部测试最多计 6 次；再次手动测试另计。供应商连接测试按生成、向量、图片模型计 1–3 次。"} /></p>
             <p className="mt-2"><UiText text={"结果未知的请求会占用次数并显示为待核对，不会自动重试。达到告警阈值会通知管理员，不会自动补充额度。"} /></p>
           </div>
           {operationOpen ? feedback : null}
           <form id={formId} noValidate onSubmit={activate} className="grid gap-4 sm:grid-cols-2">
-            <label className="text-xs font-medium text-slate-700"><UiText text={"最大测试次数"} /><input type="number" min={1} max={10_000} step={1} value={unitLimit} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setUnitLimit(event.target.value); }} className={adminInputClass} aria-label={t("最大测试次数")} /></label>
-            <label className="text-xs font-medium text-slate-700"><UiText text={"有效至"} /><input type="datetime-local" value={expiresAt} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setExpiresAt(event.target.value); }} className={adminInputClass} aria-label={t("有效至")} /></label>
-            <details className="rounded-xl border border-slate-200 px-4 py-3 sm:col-span-2">
-              <summary className="cursor-pointer text-xs font-semibold text-indigo-700"><UiText text={"高级设置"} /></summary>
+            <label className="text-xs font-medium text-app-text"><UiText text={"最大测试次数"} /><input type="number" min={1} max={10_000} step={1} value={unitLimit} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setUnitLimit(event.target.value); }} className={["app-field", (adminInputClass)].filter(Boolean).join(' ')} aria-label={t("最大测试次数")} /></label>
+            <label className="text-xs font-medium text-app-text"><UiText text={"有效至"} /><input type="datetime-local" value={expiresAt} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setExpiresAt(event.target.value); }} className={["app-field", (adminInputClass)].filter(Boolean).join(' ')} aria-label={t("有效至")} /></label>
+            <details className="rounded-panel border border-app-border px-4 py-3 sm:col-span-2">
+              <summary className="cursor-pointer text-xs font-semibold text-app-link"><UiText text={"高级设置"} /></summary>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <label className="text-xs font-medium text-slate-700"><UiText text={"生效时间"} /><input type="datetime-local" value={startsAt} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setStartsAt(event.target.value); }} className={adminInputClass} aria-label={t("生效时间")} /></label>
-                <label className="text-xs font-medium text-slate-700"><UiText text={"告警阈值"} /><input type="number" min={0} max={10_000} step={1} value={threshold} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setThreshold(event.target.value); }} className={adminInputClass} aria-label={t("告警阈值")} /></label>
+                <label className="text-xs font-medium text-app-text"><UiText text={"生效时间"} /><input type="datetime-local" value={startsAt} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setStartsAt(event.target.value); }} className={["app-field", (adminInputClass)].filter(Boolean).join(' ')} aria-label={t("生效时间")} /></label>
+                <label className="text-xs font-medium text-app-text"><UiText text={"告警阈值"} /><input type="number" min={0} max={10_000} step={1} value={threshold} disabled={editDisabled} onChange={(event) => { draftTouchedRef.current = true; setThreshold(event.target.value); }} className={["app-field", (adminInputClass)].filter(Boolean).join(' ')} aria-label={t("告警阈值")} /></label>
               </div>
             </details>
           </form>
         </div>
       </OperationPanel>
-      {loadFailed ? <button type="button" onClick={() => void load()} className="app-action-button rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">{t("重新读取")}</button> : null}
+      {loadFailed ? <button type="button" onClick={() => void load()} className="app-button-secondary rounded-control border px-3 py-2 text-xs font-semibold">{t("重新读取")}</button> : null}
     </div>
     <dl className={`mt-4 grid grid-cols-2 gap-2 ${compact ? "sm:grid-cols-5" : "sm:grid-cols-5"}`}>
       {metric("可用测试次数", budget ? `${visibleAvailable} / ${budget.unitLimit}` : "—", undefined, compact)}
@@ -279,7 +279,7 @@ export function PlatformProbeBudgetClient({
       {metric("结果待核对", budget?.heldUnits ?? "—", "未知结果占用的次数", compact)}
       {metric("有效至", budget ? dateLabel(budget.expiresAt, language) : "—", budget?.status === "scheduled" ? "当前周期尚未生效" : undefined, compact)}
     </dl>
-    <p className="mt-3 text-xs leading-5 text-slate-600"><UiText text={"额度按测试请求次数统计，不是平台 Token 或人民币余额；供应商可能另收 Token 费用。未知请求会保留待核对状态，不自动重试。"} /></p>
+    <p className="mt-3 text-xs leading-5 text-app-muted"><UiText text={"额度按测试请求次数统计，不是平台 Token 或人民币余额；供应商可能另收 Token 费用。未知请求会保留待核对状态，不自动重试。"} /></p>
     {!operationOpen ? feedback : null}
   </section>;
 

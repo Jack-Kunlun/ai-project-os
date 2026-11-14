@@ -323,15 +323,15 @@ export function PersonalOverviewClient(): React.JSX.Element {
     <div data-page-content className={styles.content}>
       <section className={styles.pageHeader}>
         <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Personal workspace"} /></p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-app-link"><UiText text={"Personal workspace"} /></p>
             <h1 className={styles.pageTitle}><UiText text={"我的空间"} /></h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600"><UiText text={"这里展示当前账号可访问的项目和个人资源。个人知识留在个人空间，项目资料与记忆留在各自项目。"} /></p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted"><UiText text={"这里展示当前账号可访问的项目和个人资源。个人知识留在个人空间，项目资料与记忆留在各自项目。"} /></p>
         </div>
-        <Link href="/personal/configuration" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50"><UiText text={"管理个人资源"} /></Link>
+        <Link href="/personal/configuration" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-control border px-4 py-2 text-sm font-semibold transition app-button-secondary"><UiText text={"管理个人资源"} /></Link>
       </section>
 
-      {state.error ? <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span><UiErrorText text={state.error} /></span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text={"重新加载"} /></button></div> : null}
-      {state.partialFailures.length > 0 ? <p role="status" className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800"><UiText text={"部分统计暂不可用："} />{state.partialFailures.map((label) => translateUi(label)).join(", ")}<UiText text={"。项目和其他已加载内容仍可继续使用。"} /></p> : null}
+      {state.error ? <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><span><UiErrorText text={state.error} /></span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text={"重新加载"} /></button></div> : null}
+      {state.partialFailures.length > 0 ? <p role="status" className="mt-6 rounded-field border border-app-warning-border bg-app-warning-soft px-5 py-4 text-sm text-app-warning-ink app-feedback-warning"><UiText text={"部分统计暂不可用："} />{state.partialFailures.map((label) => translateUi(label)).join(", ")}<UiText text={"。项目和其他已加载内容仍可继续使用。"} /></p> : null}
 
       <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label={translateUi("我的空间统计")}>
         <MetricCard label={translateUi("进行中项目")} value={state.loading ? "…" : String(state.activeProjects)} href="/personal/projects" />
@@ -348,18 +348,18 @@ export function PersonalOverviewClient(): React.JSX.Element {
         onReload={() => void load()}
       />
 
-      <section className="mt-7 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+      <section className="mt-7 rounded-panel border border-app-border bg-app-surface p-6 sm:p-7 app-panel">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Accessible projects"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"最近访问范围内的项目"} /></h2><p className="mt-2 text-sm text-slate-500"><UiText text={"这里只展示当前账号有权读取的最近 8 个进行中项目。"} /></p></div>
-          <Link href="/personal/projects" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4"><UiText text={"查看全部项目 →"} /></Link>
+          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link"><UiText text={"Accessible projects"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"最近访问范围内的项目"} /></h2><p className="mt-2 text-sm text-app-muted"><UiText text={"这里只展示当前账号有权读取的最近 8 个进行中项目。"} /></p></div>
+          <Link href="/personal/projects" className="text-sm font-semibold text-app-link underline decoration-app-accent-border underline-offset-4"><UiText text={"查看全部项目 →"} /></Link>
         </div>
-        {state.loading ? <div className="mt-6 grid gap-4 md:grid-cols-2"><div className="h-36 animate-pulse rounded-2xl bg-slate-100" /><div className="h-36 animate-pulse rounded-2xl bg-slate-100" /></div> : state.projects.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700"><UiText text={"当前没有可访问的进行中项目"} /></p><p className="mt-2 text-xs text-slate-500"><UiText text={"个人知识库和个人连接仍可独立使用；获得项目权限后会显示在这里。"} /></p></div> : <div className="mt-6 grid gap-4 md:grid-cols-2">{state.projects.map((project) => <ProjectCard key={project.id} project={project} />)}</div>}
+        {state.loading ? <div className="mt-6 grid gap-4 md:grid-cols-2"><div className="h-36 animate-pulse rounded-control bg-app-surface-soft" /><div className="h-36 animate-pulse rounded-control bg-app-surface-soft" /></div> : state.projects.length === 0 ? <div className="mt-6 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-5 py-10 text-center"><p className="text-sm font-semibold text-app-text"><UiText text={"当前没有可访问的进行中项目"} /></p><p className="mt-2 text-xs text-app-muted"><UiText text={"个人知识库和个人连接仍可独立使用；获得项目权限后会显示在这里。"} /></p></div> : <div className="mt-6 grid gap-4 md:grid-cols-2">{state.projects.map((project) => <ProjectCard key={project.id} project={project} />)}</div>}
       </section>
 
-      <section className="mt-7 border-t border-slate-200 pt-5 text-sm leading-7 text-slate-600">
-        <h2 className="text-lg font-semibold text-slate-900"><UiText text={"生效顺序"} /></h2>
+      <section className="mt-7 border-t border-app-border pt-5 text-sm leading-7 text-app-muted">
+        <h2 className="text-lg font-semibold text-app-text"><UiText text={"生效顺序"} /></h2>
         <p className="mt-2"><UiText text={"我的空间保存个人资源所有权；项目配置保存该项目的委托、选择和限制。进入项目执行任务时，以项目当前有效配置为准，不会因为个人连接存在就自动启用。"} /></p>
-        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs font-medium text-slate-500"><span><UiText text={"Git 已关联项目"} />{" "}{countLabel(state.gitProjectCount)}</span><span><UiText text={"MCP 已关联项目"} />{" "}{countLabel(state.mcpProjectCount)}</span></div>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs font-medium text-app-muted"><span><UiText text={"Git 已关联项目"} />{" "}{countLabel(state.gitProjectCount)}</span><span><UiText text={"MCP 已关联项目"} />{" "}{countLabel(state.mcpProjectCount)}</span></div>
       </section>
     </div>
   );
@@ -442,28 +442,28 @@ function KnowledgeOverviewSection({
   }
 
   return (
-    <section className="mt-7 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="personal-knowledge-overview-title">
+    <section className="mt-7 rounded-panel border border-app-border bg-app-surface p-6 sm:p-7 app-panel" aria-labelledby="personal-knowledge-overview-title">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"><UiText text={"Personal knowledge"} /></p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link"><UiText text={"Personal knowledge"} /></p>
           <h2 id="personal-knowledge-overview-title" className="mt-2 text-2xl font-semibold"><UiText text={"个人知识网状连接"} /></h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500"><UiText text={"图中只展示你明确建立的文档关联。文档编辑后，关联会保留创建时的版本并标记为需要复核。"} /></p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted"><UiText text={"图中只展示你明确建立的文档关联。文档编辑后，关联会保留创建时的版本并标记为需要复核。"} /></p>
         </div>
-        <div className="flex flex-wrap gap-4"><Link href="/personal/knowledge" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4"><UiText text={"打开知识库 →"} /></Link><Link href="/personal/knowledge/graph" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4"><UiText text={"完整知识图谱 →"} /></Link></div>
+        <div className="flex flex-wrap gap-4"><Link href="/personal/knowledge" className="text-sm font-semibold text-app-link underline decoration-app-accent-border underline-offset-4"><UiText text={"打开知识库 →"} /></Link><Link href="/personal/knowledge/graph" className="text-sm font-semibold text-app-link underline decoration-app-accent-border underline-offset-4"><UiText text={"完整知识图谱 →"} /></Link></div>
       </div>
 
-      {loading ? <div className="mt-6 h-64 animate-pulse rounded-2xl bg-slate-100" /> : overview === null ? <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-8 text-sm text-amber-800"><UiText text={"个人知识图与容量暂不可用，请稍后重新加载。"} /></div> : (
+      {loading ? <div className="mt-6 h-64 animate-pulse rounded-control bg-app-surface-soft" /> : overview === null ? <div className="mt-6 rounded-panel border border-app-warning-border bg-app-warning-soft px-5 py-8 text-sm text-app-warning-ink"><UiText text={"个人知识图与容量暂不可用，请稍后重新加载。"} /></div> : (
         <>
           <div className="mt-6 grid gap-4 sm:grid-cols-3" aria-label={translateUi("知识库容量与索引状态")}>
-            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"知识文档"} /></p><p className="mt-2 text-2xl font-semibold text-slate-950">{overview.capacity.documentCount}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"当前有效文档"} /></p></div>
-            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"已用容量"} /></p><p className="mt-2 text-2xl font-semibold text-slate-950">{formatBytes(overview.capacity.usedBytes)}</p><p className="mt-1 text-xs text-slate-500"><UiText text={"按当前版本正文 UTF-8 字节统计 ·"} />{" "}{translateUi(overview.capacity.limitLabel)}</p></div>
-            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"索引状态"} /></p><p className="mt-2 text-base font-semibold text-amber-700"><UiText text={overview.index.label} /></p><p className="mt-1 text-xs text-slate-500"><UiText text={"统计时间"} />{" "}{formatDate(overview.capacity.measuredAt, language, translateUi)}</p></div>
+            <div className="rounded-panel bg-app-surface-soft p-4"><p className="text-xs font-semibold text-app-muted"><UiText text={"知识文档"} /></p><p className="mt-2 text-2xl font-semibold text-app-text">{overview.capacity.documentCount}</p><p className="mt-1 text-xs text-app-muted"><UiText text={"当前有效文档"} /></p></div>
+            <div className="rounded-panel bg-app-surface-soft p-4"><p className="text-xs font-semibold text-app-muted"><UiText text={"已用容量"} /></p><p className="mt-2 text-2xl font-semibold text-app-text">{formatBytes(overview.capacity.usedBytes)}</p><p className="mt-1 text-xs text-app-muted"><UiText text={"按当前版本正文 UTF-8 字节统计 ·"} />{" "}{translateUi(overview.capacity.limitLabel)}</p></div>
+            <div className="rounded-panel bg-app-surface-soft p-4"><p className="text-xs font-semibold text-app-muted"><UiText text={"索引状态"} /></p><p className="mt-2 text-base font-semibold text-app-warning-ink"><UiText text={overview.index.label} /></p><p className="mt-1 text-xs text-app-muted"><UiText text={"统计时间"} />{" "}{formatDate(overview.capacity.measuredAt, language, translateUi)}</p></div>
           </div>
 
           <div className="mt-6 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
-              <div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold text-slate-800"><UiText text={"连接图"} /></p>{overview.graph.truncated ? <span className="text-xs font-semibold text-amber-700"><UiText text={"已达到展示上限"} /></span> : null}</div>
-              {nodes.length === 0 ? <div className="flex min-h-56 items-center justify-center text-center"><div><p className="text-sm font-semibold text-slate-700"><UiText text={"还没有可展示的知识节点"} /></p><p className="mt-2 text-xs text-slate-500"><UiText text={"先在知识库创建一条个人知识，再建立关联。"} /></p></div></div> : <>
+            <div className="rounded-panel border border-app-border bg-app-surface-soft p-4 app-panel">
+              <div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold text-app-text"><UiText text={"连接图"} /></p>{overview.graph.truncated ? <span className="text-xs font-semibold text-app-warning-ink"><UiText text={"已达到展示上限"} /></span> : null}</div>
+              {nodes.length === 0 ? <div className="flex min-h-56 items-center justify-center text-center"><div><p className="text-sm font-semibold text-app-text"><UiText text={"还没有可展示的知识节点"} /></p><p className="mt-2 text-xs text-app-muted"><UiText text={"先在知识库创建一条个人知识，再建立关联。"} /></p></div></div> : <>
                 <svg className="mt-2 h-64 w-full" viewBox="0 0 100 100" role="img" aria-label={translateUi("个人知识文档关联图")}>
                   <title><UiText text="个人知识文档关联图" /></title>
                   {overview.graph.edges.map((edge) => {
@@ -474,15 +474,15 @@ function KnowledgeOverviewSection({
                   })}
                   {positions.map(({ node, x, y }) => <g key={node.id}><circle cx={x} cy={y} r="6" fill="#312e81" /><text x={x} y={y + 1.2} textAnchor="middle" fontSize="3.2" fill="white">{node.title.slice(0, 2)}</text></g>)}
                 </svg>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">{nodes.map((node, index) => <Link key={node.id} href={`/personal/knowledge?document=${encodeURIComponent(node.id)}`} className="rounded-xl bg-white px-3 py-2 text-xs text-slate-700 hover:text-indigo-700"><span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 font-semibold text-indigo-800">{index + 1}</span>{graphTitle(node.title)}<span className="ml-2 text-slate-400">{formatBytes(node.byteCount)}</span></Link>)}</div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">{nodes.map((node, index) => <Link key={node.id} href={`/personal/knowledge?document=${encodeURIComponent(node.id)}`} className="rounded-control bg-app-surface px-3 py-2 text-xs text-app-text hover:text-app-link"><span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-app-accent-soft font-semibold text-app-link">{index + 1}</span>{graphTitle(node.title)}<span className="ml-2 text-app-muted">{formatBytes(node.byteCount)}</span></Link>)}</div>
               </>}
             </div>
 
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <p className="text-sm font-semibold text-slate-800"><UiText text={"明确建立的关联"} /></p>
-              {overview.graph.edges.length === 0 ? <p className="mt-5 text-sm text-slate-500"><UiText text={"暂无关联。选择两个知识节点即可建立第一条边。"} /></p> : <ul className="mt-4 space-y-3">{overview.graph.edges.map((edge) => <li key={edge.id} className="rounded-xl bg-slate-50 px-3 py-3"><div className="flex items-start justify-between gap-3"><p className="text-xs leading-5 text-slate-700">{graphTitle(nodeById.get(edge.fromDocumentId)?.title ?? "未知文档")} <span className="text-slate-400">↔</span> {graphTitle(nodeById.get(edge.toDocumentId)?.title ?? "未知文档")}</p><button type="button" disabled={submitting} onClick={() => void revokeRelation(edge.id)} className="shrink-0 text-xs font-semibold text-slate-500 underline underline-offset-2 hover:text-rose-700"><UiText text={"解除"} /></button></div>{edge.stale ? <p className="mt-2 text-xs font-semibold text-amber-700"><UiText text={"文档版本已变化，需要重新确认"} /></p> : null}</li>)}</ul>}
-              {nodes.length >= 2 ? <div className="mt-5 border-t border-slate-200 pt-4"><p className="text-xs font-semibold text-slate-600"><UiText text={"建立新关联"} /></p><div className="mt-3 grid gap-2"><select aria-label={translateUi("关联起点")} value={resolvedFromDocumentId} onChange={(event) => setFromDocumentId(event.target.value)} className="min-h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700">{nodes.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select><select aria-label={translateUi("关联终点")} value={resolvedToDocumentId} onChange={(event) => setToDocumentId(event.target.value)} className="min-h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700">{nodes.filter((node) => node.id !== resolvedFromDocumentId).map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select><button type="button" disabled={submitting || resolvedFromDocumentId === "" || resolvedToDocumentId === ""} onClick={() => void createRelation()} className="min-h-10 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{submitting ? <UiText text={"保存中…"} /> : <UiText text={"建立关联"} />}</button></div></div> : null}
-              {actionError ? <p role="alert" className="mt-3 text-xs text-rose-700"><UiErrorText text={actionError} /></p> : null}
+            <div className="rounded-panel border border-app-border p-4">
+              <p className="text-sm font-semibold text-app-text"><UiText text={"明确建立的关联"} /></p>
+              {overview.graph.edges.length === 0 ? <p className="mt-5 text-sm text-app-muted"><UiText text={"暂无关联。选择两个知识节点即可建立第一条边。"} /></p> : <ul className="mt-4 space-y-3">{overview.graph.edges.map((edge) => <li key={edge.id} className="rounded-panel bg-app-surface-soft px-3 py-3"><div className="flex items-start justify-between gap-3"><p className="text-xs leading-5 text-app-text">{graphTitle(nodeById.get(edge.fromDocumentId)?.title ?? "未知文档")} <span className="text-app-muted">↔</span> {graphTitle(nodeById.get(edge.toDocumentId)?.title ?? "未知文档")}</p><button type="button" disabled={submitting} onClick={() => void revokeRelation(edge.id)} className="shrink-0 text-xs font-semibold underline underline-offset-2 app-button-danger"><UiText text={"解除"} /></button></div>{edge.stale ? <p className="mt-2 text-xs font-semibold text-app-warning-ink"><UiText text={"文档版本已变化，需要重新确认"} /></p> : null}</li>)}</ul>}
+              {nodes.length >= 2 ? <div className="mt-5 border-t border-app-border pt-4"><p className="text-xs font-semibold text-app-muted"><UiText text={"建立新关联"} /></p><div className="mt-3 grid gap-2"><select aria-label={translateUi("关联起点")} value={resolvedFromDocumentId} onChange={(event) => setFromDocumentId(event.target.value)} className="min-h-10 rounded-field border border-app-border bg-app-surface px-3 text-sm text-app-text app-field">{nodes.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select><select aria-label={translateUi("关联终点")} value={resolvedToDocumentId} onChange={(event) => setToDocumentId(event.target.value)} className="min-h-10 rounded-field border border-app-border bg-app-surface px-3 text-sm text-app-text app-field">{nodes.filter((node) => node.id !== resolvedFromDocumentId).map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select><button type="button" disabled={submitting || resolvedFromDocumentId === "" || resolvedToDocumentId === ""} onClick={() => void createRelation()} className="min-h-10 rounded-control px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 app-button-primary">{submitting ? <UiText text={"保存中…"} /> : <UiText text={"建立关联"} />}</button></div></div> : null}
+              {actionError ? <p role="alert" className="mt-3 text-xs text-app-danger-ink app-feedback-error"><UiErrorText text={actionError} /></p> : null}
             </div>
           </div>
         </>
@@ -493,7 +493,7 @@ function KnowledgeOverviewSection({
 
 /** Render one account or project count as a navigable summary card. */
 function MetricCard({ label, value, href }: Readonly<{ label: string; value: string; href: string }>): React.JSX.Element {
-  return <Link href={href} className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200"><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p></Link>;
+  return <Link href={href} className="app-card-action p-5"><p className="text-xs font-semibold text-app-muted">{label}</p><p className="mt-2 text-2xl font-semibold text-app-text">{value}</p></Link>;
 }
 
 /** Show project state without duplicating lifecycle controls from `/projects`. */
@@ -501,10 +501,10 @@ function ProjectCard({ project }: Readonly<{ project: PersonalProjectSummary }>)
   const { language } = useAppearance();
   const translateUi = useTranslate();
   return (
-    <article className="flex h-full min-w-0 flex-col rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
-      <div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="truncate text-lg font-semibold text-slate-900">{project.name}</h3><p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{project.description ?? <UiText text={"暂无项目描述。"} />}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${project.memoryReady ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{project.memoryReady ? <UiText text={"记忆就绪"} /> : <UiText text={"待建立记忆"} />}</span></div>
-      <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600"><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"事实"} />{" "}{project.itemCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"仓库"} />{" "}{project.repositoryCount}</span><span className="rounded-lg bg-white px-2.5 py-1.5"><UiText text={"更新于"} />{" "}{formatDate(project.updatedAt, language, translateUi)}</span></div>
-      <div className="mt-auto flex border-t border-slate-200/70 pt-4"><Link href={`/projects/${project.id}`} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-600"><UiText text={"进入项目 →"} /></Link></div>
+    <article className="flex h-full min-w-0 flex-col rounded-panel border border-app-border bg-app-surface-soft p-5 app-panel">
+      <div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="truncate text-lg font-semibold text-app-text">{project.name}</h3><p className="mt-2 line-clamp-2 text-sm leading-6 text-app-muted">{project.description ?? <UiText text={"暂无项目描述。"} />}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${project.memoryReady ? "bg-app-success-soft text-app-success-ink" : "bg-app-warning-soft text-app-warning-ink"}`}>{project.memoryReady ? <UiText text={"记忆就绪"} /> : <UiText text={"待建立记忆"} />}</span></div>
+      <div className="mt-4 flex flex-wrap gap-2 text-xs text-app-muted"><span className="rounded-panel bg-app-surface px-2.5 py-1.5"><UiText text={"事实"} />{" "}{project.itemCount}</span><span className="rounded-panel bg-app-surface px-2.5 py-1.5"><UiText text={"仓库"} />{" "}{project.repositoryCount}</span><span className="rounded-panel bg-app-surface px-2.5 py-1.5"><UiText text={"更新于"} />{" "}{formatDate(project.updatedAt, language, translateUi)}</span></div>
+      <div className="mt-auto flex border-t border-app-border pt-4"><Link href={`/projects/${project.id}`} className="inline-flex min-h-10 items-center justify-center rounded-control px-4 py-2 text-xs font-semibold transition app-button-primary"><UiText text={"进入项目 →"} /></Link></div>
     </article>
   );
 }

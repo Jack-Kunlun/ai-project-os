@@ -48,10 +48,10 @@ export function ConnectionCreateDialog({ title, onClose, children }: { title: st
   }, [onClose]);
 
   return <div className={`fixed inset-0 z-50 flex items-center justify-center ${modalBackdropClassName} px-3 py-5 sm:px-6`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div data-connection-dialog ref={panelRef} data-inquiry-owned={String(owned)} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`flex max-h-[calc(100dvh-2.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
-      <header data-dialog-header className={`${modalHeaderClassName} flex items-center justify-between gap-4 px-4 py-4 sm:px-6`}><h2 id={titleId} className="text-lg font-semibold text-slate-900"><UiText text={title} /></h2><button data-dialog-close ref={closeRef} type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></header>
-      <DialogFooterTargetContext.Provider value={footer}><div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">{children}</div></DialogFooterTargetContext.Provider>
-      <footer data-dialog-footer ref={setFooter} className={`${modalFooterClassName} flex flex-wrap gap-2 px-4 py-4 sm:px-6`} />
+    <div data-connection-dialog ref={panelRef} data-inquiry-owned={String(owned)} role="dialog" aria-modal="true" aria-labelledby={titleId} className={["app-dialog-surface app-dialog-surface--modal", (`flex max-h-[calc(100dvh-2.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-panel ${modalSurfaceClassName}`)].filter(Boolean).join(' ')}>
+      <header data-dialog-header className={`${modalHeaderClassName} flex items-center justify-between gap-4`}><h2 id={titleId} className="text-lg font-semibold text-app-text"><UiText text={title} /></h2><button data-dialog-close ref={closeRef} type="button" onClick={onClose} aria-label={t("关闭弹窗")} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></header>
+      <DialogFooterTargetContext.Provider value={footer}><div data-dialog-body className="app-dialog-content flex-1 overscroll-contain">{children}</div></DialogFooterTargetContext.Provider>
+      <footer data-dialog-footer ref={setFooter} className={`${modalFooterClassName} flex-wrap gap-2`} />
     </div>
   </div>;
 }

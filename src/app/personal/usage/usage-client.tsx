@@ -262,7 +262,7 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
       </header>
 
       {error ? (
-        <div className={styles.card} role="alert">
+        <div className="app-feedback-error" role="alert">
           <p className={styles.loadError}><UiErrorText text={error} /><br />{t("读取失败时不会用旧数据替代。")}</p>
           <div className={styles.loadMore}>
             <span>{t("用量记录暂不可用")}</span>
@@ -271,7 +271,7 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
         </div>
       ) : null}
 
-      <section className={`${styles.card} ${styles.summaryCard}`} aria-labelledby="usage-summary-heading">
+      <section className={`${styles.card}  ${styles.summaryCard}`} aria-labelledby="usage-summary-heading">
         <div>
           <h2 id="usage-summary-heading" className={styles.sectionHeading}>{t("Token 消耗汇总")}</h2>
           <p className={styles.summaryHint}>{t("当前账号用量")}</p>
@@ -279,29 +279,29 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
         {loading && !usage ? <p className={styles.emptyState}>{t("正在读取用量…")}</p> : usage ? <TokenUsageView usage={usage.summary} /> : null}
       </section>
 
-      <section className={`${styles.card} ${styles.filterCard}`} aria-labelledby="usage-filter-heading">
+      <section className={`${styles.card}  ${styles.filterCard}`} aria-labelledby="usage-filter-heading">
         <h2 id="usage-filter-heading" className={styles.sectionHeading}>{t("统计周期")}</h2>
         <div className={styles.filters}>
-          <label className={styles.filterLabel}>{t("开始日期")}<input type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} /></label>
-          <label className={styles.filterLabel}>{t("结束日期")}<input type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)} /></label>
-          <label className={styles.filterLabel}>{t("调用类型")}<select value={kind} onChange={(event) => setKind(event.target.value as UsageKind)}>{kindOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
-          <label className={styles.filterLabel}>{t("调用状态")}<select value={status} onChange={(event) => setStatus(event.target.value as UsageStatus)}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
+          <label className={styles.filterLabel}>{t("开始日期")}<input type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)}  className="app-field"/></label>
+          <label className={styles.filterLabel}>{t("结束日期")}<input type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)}  className="app-field"/></label>
+          <label className={styles.filterLabel}>{t("调用类型")}<select value={kind} onChange={(event) => setKind(event.target.value as UsageKind)} className="app-field">{kindOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
+          <label className={styles.filterLabel}>{t("调用状态")}<select value={status} onChange={(event) => setStatus(event.target.value as UsageStatus)} className="app-field">{statusOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
           <label className={styles.filterLabel}>{t("项目筛选")}
-            <select value={projectId} onChange={(event) => selectProject(event.target.value)} disabled={projectsLoading || projectsError}>
+            <select value={projectId} onChange={(event) => selectProject(event.target.value)} disabled={projectsLoading || projectsError} className="app-field">
               <option value="">{t("全部项目")}</option>
               {projectId && !projects.some((project) => project.id === projectId) ? <option value={projectId}>{t("指定项目")} · {projectId.slice(0, 8)}…</option> : null}
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.archivedAt ? ` · ${t("已归档")}` : ""}</option>)}
             </select>
           </label>
         </div>
-        <label className={`${styles.filterLabel} ${styles.projectSearch}`}>
+        <label className={`${styles.filterLabel}  ${styles.projectSearch}`}>
           {t("搜索项目名称")}
-          <input type="search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder={t("搜索项目名称")} aria-label={t("搜索项目名称")} />
+          <input type="search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder={t("搜索项目名称")} aria-label={t("搜索项目名称")}  className="app-field"/>
         </label>
         {projectsLoading ? <p className={styles.summaryHint}>{t("正在加载项目…")}</p> : projectsError ? <p className={styles.summaryHint} role="status">{t("项目列表暂不可用")}</p> : projects.length === 0 && projectSearch.trim() ? <p className={styles.summaryHint}>{t("没有匹配的项目")}</p> : null}
       </section>
 
-      <section className={`${styles.card} ${styles.recordsCard}`} aria-labelledby="usage-records-heading">
+      <section className={`${styles.card}  ${styles.recordsCard}`} aria-labelledby="usage-records-heading">
         <div className={styles.recordsHeader}>
           <div>
             <h2 id="usage-records-heading" className={styles.sectionHeading}>{t("模型调用历史")}</h2>

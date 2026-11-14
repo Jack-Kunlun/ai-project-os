@@ -132,14 +132,14 @@ export function LoginForm({
             {phoneAuthStatus !== "disabled" ? (
               <div className={styles.methodSection}>
                 <div role="tablist" aria-label={t("选择登录方式")} className={styles.methodTabs}>
-                  <button type="button" role="tab" aria-selected={method === "password"} onClick={() => changeLoginMethod("password")} className={`${styles.methodTab} ${method === "password" ? styles.methodTabSelected : ""}`}>{t("用户名密码")}</button>
-                  <button type="button" role="tab" aria-selected={method === "sms"} disabled={!smsLoginAvailable} onClick={() => changeLoginMethod("sms")} className={`${styles.methodTab} ${method === "sms" ? styles.methodTabSelected : ""}`}>{t("手机号验证码")}</button>
+                  <button type="button" role="tab" aria-selected={method === "password"} onClick={() => changeLoginMethod("password")} className={`${styles.methodTab}  ${method === "password" ? styles.methodTabSelected : ""}`}>{t("用户名密码")}</button>
+                  <button type="button" role="tab" aria-selected={method === "sms"} disabled={!smsLoginAvailable} onClick={() => changeLoginMethod("sms")} className={`${styles.methodTab}  ${method === "sms" ? styles.methodTabSelected : ""}`}>{t("手机号验证码")}</button>
                 </div>
                 {smsLoginAvailable ? (
                   <p className={styles.methodHint}>
                     {t(phoneAutoRegistrationEnabled ? "验证码验证后登录；手机号首次使用时会自动创建账号和个人工作区。" : "验证码用于登录已有账号；如需新账号，请先完成注册。")}
                   </p>
-                ) : <p role="status" className={`${styles.methodHint} ${styles.statusWarning}`}>{t("短信服务暂不可用，请稍后重试或联系管理员。")}</p>}
+                ) : <p role="status" className={`${styles.methodHint}  ${styles.statusWarning}`}>{t("短信服务暂不可用，请稍后重试或联系管理员。")}</p>}
               </div>
             ) : null}
 
@@ -148,14 +148,14 @@ export function LoginForm({
                 <label className={styles.fieldLabel} htmlFor="login-username">{t(emailAuthEnabled ? "用户名、手机号或已验证邮箱" : "用户名或手机号")}</label>
                 <div className={styles.inputShell}>
                   <span className={styles.inputIcon}><UserIcon /></span>
-                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={emailAuthEnabled ? 320 : 64} required placeholder={t(emailAuthEnabled ? "输入用户名、手机号或已验证邮箱" : "输入用户名或手机号")} className={styles.textInput} />
+                  <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={emailAuthEnabled ? 320 : 64} required placeholder={t(emailAuthEnabled ? "输入用户名、手机号或已验证邮箱" : "输入用户名或手机号")} className={["app-field", (styles.textInput)].filter(Boolean).join(' ')} />
                 </div>
 
-                <label className={`${styles.fieldLabel} ${styles.nextFieldLabel}`} htmlFor="login-password">{t("密码")}</label>
+                <label className={`${styles.fieldLabel}  ${styles.nextFieldLabel}`} htmlFor="login-password">{t("密码")}</label>
                 <div className={styles.inputShell}>
                   <span className={styles.inputIcon}><LockIcon /></span>
                   <div className={styles.passwordShell}>
-                    <input id="login-password" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder={t("输入密码")} className={styles.passwordInput} />
+                    <input id="login-password" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder={t("输入密码")} className={["app-field", (styles.passwordInput)].filter(Boolean).join(' ')} />
                     <button type="button" className={styles.passwordToggle} aria-label={t(passwordVisible ? "隐藏密码" : "显示密码")} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((current) => !current)}><ShellIcon name={passwordVisible ? "eye-off" : "eye"} className="app-icon--control" /></button>
                   </div>
                 </div>
@@ -164,7 +164,7 @@ export function LoginForm({
                 </div>
               </fieldset>
 
-            {smsLoginAvailable ? <fieldset disabled={method !== "sms"} inert={method !== "sms"} aria-hidden={method !== "sms"} data-hidden={method !== "sms"} className={`${styles.loginFields} ${styles.smsFields}`}>
+            {smsLoginAvailable ? <fieldset disabled={method !== "sms"} inert={method !== "sms"} aria-hidden={method !== "sms"} data-hidden={method !== "sms"} className={`${styles.loginFields}  ${styles.smsFields}`}>
                 <div className={styles.smsPhoneField}>
                   <label className={styles.fieldLabel} htmlFor="login-phone">{t("手机号")}</label>
                   <div className={styles.phoneShell}>
@@ -185,7 +185,7 @@ export function LoginForm({
                       required
                       pattern="1[3-9][0-9]{9}"
                       placeholder={t("输入 11 位手机号")}
-                      className={styles.phoneInput}
+                      className={["app-field", (styles.phoneInput)].filter(Boolean).join(' ')}
                     />
                   </div>
                 </div>
@@ -205,9 +205,9 @@ export function LoginForm({
             </div>
 
             <div className={styles.loginActions}>
-            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice} ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}><UiFeedbackText text={notice} /></p> : null}
-            {smsSuccessNotice ? <p role="status" className={`${styles.notice} ${styles.noticeSuccess}`}>{t(smsSuccessNotice)}</p> : null}
-            {error ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
+            {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`${styles.notice}  ${noticeTone === "error" ? styles.noticeError : styles.noticeSuccess}`}><UiFeedbackText text={notice} /></p> : null}
+            {smsSuccessNotice ? <p role="status" className={`${styles.notice}  ${styles.noticeSuccess}`}>{t(smsSuccessNotice)}</p> : null}
+            {error ? <p role="alert" className={["app-feedback-error", (`${styles.notice}  ${styles.noticeError}`)].filter(Boolean).join(' ')}><UiErrorText text={error} /></p> : null}
 
             <button type="submit" disabled={pending} className={styles.submitButton}>{pending ? t("登录中…") : t("登 录")}</button>
             </div>
@@ -223,7 +223,7 @@ export function LoginForm({
               </div>
             ) : (
               <div className={styles.providerBlock}>
-                <button type="button" disabled className={`${styles.providerLink} ${styles.providerUnavailable}`}><GitHubIcon />{t("使用 GitHub 登录")}</button>
+                <button type="button" disabled className={`${styles.providerLink}  ${styles.providerUnavailable}`}><GitHubIcon />{t("使用 GitHub 登录")}</button>
                 <p className={styles.providerHint}>{t(githubUnavailableMessage)}</p>
               </div>
             )}

@@ -55,15 +55,15 @@ export function SetupForm() {
       <InfoSection title="创建管理员并进入">
         <form onSubmit={submit} className={styles.form}>
           <label className={styles.formLabel} htmlFor="setup-username"><UiText text="用户名" /></label>
-          <input id="setup-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required className={styles.formInput} />
+          <input id="setup-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required className={["app-field", (styles.formInput)].filter(Boolean).join(' ')} />
           <label className={styles.formLabel} htmlFor="setup-password"><UiText text="密码" /></label>
-          <input id="setup-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={styles.formInput} />
-          <p className="mt-2 text-xs leading-5 text-slate-500"><UiText text="8–128 位，并同时包含字母和数字。" /></p>
+          <input id="setup-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={["app-field", (styles.formInput)].filter(Boolean).join(' ')} />
+          <p className="mt-2 text-xs leading-5 text-app-muted"><UiText text="8–128 位，并同时包含字母和数字。" /></p>
           <label className={styles.formLabel} htmlFor="setup-password-confirm"><UiText text="再次输入密码" /></label>
-          <input id="setup-password-confirm" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={styles.formInput} />
-          {error ? <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
-          <button type="submit" disabled={pending} className={`app-action-button ${styles.formSubmit}`}><UiText text={pending ? "正在初始化…" : "创建管理员并进入"} /></button>
-          <p className="mt-5 text-center text-xs text-slate-500"><UiText text="第一次使用？" /><Link href="/guide#first-run" className="ml-1 font-semibold text-indigo-600 hover:text-indigo-700"><UiText text="查看完整使用指南" /></Link></p>
+          <input id="setup-password-confirm" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={["app-field", (styles.formInput)].filter(Boolean).join(' ')} />
+          {error ? <p role="alert" className="mt-5 rounded-field border border-app-danger-border bg-app-danger-soft px-4 py-3 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
+          <button type="submit" disabled={pending} className={`app-button-primary ${styles.formSubmit}`}><UiText text={pending ? "正在初始化…" : "创建管理员并进入"} /></button>
+          <p className="mt-5 text-center text-xs text-app-muted"><UiText text="第一次使用？" /><Link href="/guide#first-run" className="ml-1 font-semibold text-app-link hover:text-app-link"><UiText text="查看完整使用指南" /></Link></p>
         </form>
       </InfoSection>
     </PublicInfoPage>

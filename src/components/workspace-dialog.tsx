@@ -43,15 +43,15 @@ export function WorkspaceDialog({ title, open, onClose, children, footer, drawer
     if (event.shiftKey && (current === first || current === event.currentTarget)) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && (current === last || current === event.currentTarget)) { event.preventDefault(); first.focus(); }
   }
-  return <dialog ref={dialog} className={`${styles.dialog} ${drawer ? styles.drawer : ""} ${compact ? styles.compactDialog : ""}`} aria-labelledby={titleId} data-inquiry-owned={String(owned)}
+  return <dialog ref={dialog} className={`app-dialog-surface ${drawer ? "app-dialog-surface--drawer" : "app-dialog-surface--modal"} ${styles.dialog} ${drawer ? styles.drawer : ""} ${compact ? styles.compactDialog : ""}`} aria-labelledby={titleId} data-inquiry-owned={String(owned)}
     onKeyDown={containTab}
     onCancel={(event) => { event.preventDefault(); event.stopPropagation(); if (!busy) onClose(); }}
     onPointerDown={(event) => { const r=event.currentTarget.getBoundingClientRect(); backdropStarted.current=event.target===event.currentTarget&&(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom); }}
     onClick={(event) => { if (event.target === event.currentTarget && backdropStarted.current && !busy) { const rect=event.currentTarget.getBoundingClientRect(); if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)onClose(); } }}>
-    <div data-dialog-header className={styles.dialogHeader}><h2 id={titleId}>{t(title)}</h2><button data-dialog-close type="button" disabled={busy} onClick={onClose} aria-label={t(closeLabel)} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></div>
+    <div data-dialog-header className={`app-dialog-header ${styles.dialogHeader}`}><h2 id={titleId}>{t(title)}</h2><button data-dialog-close type="button" disabled={busy} onClick={onClose} aria-label={t(closeLabel)} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></div>
     <DialogFooterTargetContext.Provider value={footerTarget}>
-      <div data-dialog-body className={styles.dialogBody}>{open ? children : null}</div>
+      <div data-dialog-body className={`app-dialog-content ${styles.dialogBody}`}>{open ? children : null}</div>
     </DialogFooterTargetContext.Provider>
-    <footer data-dialog-footer className={styles.dialogFooter}><div data-dialog-footer-actions ref={setFooterTarget}>{footer}</div></footer>
+    <footer data-dialog-footer className={`app-dialog-footer ${styles.dialogFooter}`}><div data-dialog-footer-actions ref={setFooterTarget}>{footer}</div></footer>
   </dialog>;
 }

@@ -159,11 +159,11 @@ export function RegisterForm({
         <form onSubmit={submit} className={styles.registerForm}>
           {verificationRequired ? (
             <div className={styles.flowSteps} aria-label={t("第 {step} 步，共 2 步").replace("{step}", String(step))}>
-              <span className={`${styles.flowStep} ${step === 1 ? styles.flowStepActive : styles.flowStepDone}`} aria-current={step === 1 ? "step" : undefined}>
+              <span className={`${styles.flowStep}  ${step === 1 ? styles.flowStepActive : styles.flowStepDone}`} aria-current={step === 1 ? "step" : undefined}>
                 <i>{step === 1 ? "1" : <ShellIcon name="check" className="app-icon--meta" />}</i>{t("联系方式")}
               </span>
               <span className={styles.flowConnector} />
-              <span className={`${styles.flowStep} ${step === 2 ? styles.flowStepActive : ""}`} aria-current={step === 2 ? "step" : undefined}>
+              <span className={`${styles.flowStep}  ${step === 2 ? styles.flowStepActive : ""}`} aria-current={step === 2 ? "step" : undefined}>
                 <i>2</i>{t("账号设置")}
               </span>
             </div>
@@ -184,7 +184,7 @@ export function RegisterForm({
           ) : null}
 
           {verificationRequired ? (
-            <fieldset disabled={pending || step !== 1} data-hidden={step !== 1} className={`${styles.registerFieldset} ${styles.stepPanel}`}>
+            <fieldset disabled={pending || step !== 1} data-hidden={step !== 1} className={`${styles.registerFieldset}  ${styles.stepPanel}`}>
               {emailAvailable ? (
                 <fieldset disabled={method !== "email"} data-hidden={method !== "email"} className={styles.stepPanel}>
                   <div className={styles.verificationFields}>
@@ -199,7 +199,7 @@ export function RegisterForm({
                         maxLength={320}
                         required
                         placeholder={t("输入常用邮箱")}
-                        className={styles.fieldInput}
+                        className={["app-field", (styles.fieldInput)].filter(Boolean).join(' ')}
                       />
                       <p className={styles.fieldHint}>{t("验证码用于验证邮箱；系统不会提供邮件找回密码。")}</p>
                     </div>
@@ -229,7 +229,7 @@ export function RegisterForm({
                           required
                           pattern="1[3-9][0-9]{9}"
                           placeholder={t("输入 11 位手机号")}
-                          className={styles.phoneInput}
+                          className={["app-field", (styles.phoneInput)].filter(Boolean).join(' ')}
                         />
                       </div>
                       <p className={styles.fieldHint}>{t("仅支持中国大陆手机号。")}</p>
@@ -241,7 +241,7 @@ export function RegisterForm({
                 </fieldset>
               ) : null}
 
-              {error && step === 1 ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
+              {error && step === 1 ? <p role="alert" className={["app-feedback-error", (`${styles.notice}  ${styles.noticeError}`)].filter(Boolean).join(' ')}><UiErrorText text={error} /></p> : null}
               <button type="button" onClick={continueToCredentials} className={styles.submitButton}>{t("继续设置账号")}</button>
               <p className={styles.fieldHint}>{t("验证码将在创建账号时一并核验。")}</p>
             </fieldset>
@@ -256,7 +256,7 @@ export function RegisterForm({
                 </div>
               ) : null}
               <fieldset disabled={pending || (verificationRequired && step !== 2)} className={styles.registerFieldset}>
-                <div className={`${styles.passwordFields} ${styles.registerCredentialFields}`}>
+                <div className={`${styles.passwordFields}  ${styles.registerCredentialFields}`}>
                   <div>
                     <label htmlFor="register-username" className={styles.fieldLabel}>{t("用户名")}</label>
                     <input
@@ -270,14 +270,14 @@ export function RegisterForm({
                       pattern={"[A-Za-z0-9][A-Za-z0-9._\\-]{2,63}"}
                       title={t("3 至 64 个字符，以字母或数字开头，只能使用字母、数字、点、下划线和连字符。")}
                       placeholder={t("例如 project.owner")}
-                      className={styles.fieldInput}
+                      className={["app-field", (styles.fieldInput)].filter(Boolean).join(' ')}
                     />
                     <p className={styles.fieldHint}>{t("3–64 位，支持字母、数字和 . _ -；统一为小写。")}</p>
                   </div>
                   <div>
                     <label htmlFor="register-password" className={styles.fieldLabel}>{t("密码")}</label>
                     <div className={styles.passwordShell}>
-                      <input id="register-password" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={styles.passwordInput} />
+                      <input id="register-password" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={["app-field", (styles.passwordInput)].filter(Boolean).join(' ')} />
                       <button type="button" className={styles.passwordToggle} aria-label={t(passwordVisible ? "隐藏密码" : "显示密码")} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((current) => !current)}><ShellIcon name={passwordVisible ? "eye-off" : "eye"} className="app-icon--control" /></button>
                     </div>
                     <p className={styles.fieldHint}>{t("8–128 位，并同时包含英文字母和数字。")}</p>
@@ -285,7 +285,7 @@ export function RegisterForm({
                   <div>
                     <label htmlFor="register-confirm-password" className={styles.fieldLabel}>{t("确认密码")}</label>
                     <div className={styles.passwordShell}>
-                      <input id="register-confirm-password" type={confirmationVisible ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={styles.passwordInput} />
+                      <input id="register-confirm-password" type={confirmationVisible ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required className={["app-field", (styles.passwordInput)].filter(Boolean).join(' ')} />
                       <button type="button" className={styles.passwordToggle} aria-label={t(confirmationVisible ? "隐藏密码" : "显示密码")} aria-pressed={confirmationVisible} onClick={() => setConfirmationVisible((current) => !current)}><ShellIcon name={confirmationVisible ? "eye-off" : "eye"} className="app-icon--control" /></button>
                     </div>
                   </div>
@@ -296,17 +296,17 @@ export function RegisterForm({
                   <span>{t("保持登录")}</span>
                 </label>
 
-                {method === "legacy" ? <p className={`${styles.notice} ${styles.noticeWarning}`}>
+                {method === "legacy" ? <p className={`${styles.notice}  ${styles.noticeWarning}`}>
                   {t("请妥善保管用户名和密码；当前没有可用的邮箱或手机号验证通道。")}
                 </p> : null}
-                {error && (step === 2 || method === "legacy") ? <p role="alert" className={`${styles.notice} ${styles.noticeError}`}><UiErrorText text={error} /></p> : null}
+                {error && (step === 2 || method === "legacy") ? <p role="alert" className={["app-feedback-error", (`${styles.notice}  ${styles.noticeError}`)].filter(Boolean).join(' ')}><UiErrorText text={error} /></p> : null}
                 <button type="submit" disabled={pending || (emailVerificationRequired && emailAuthStatus !== "available") || (phoneVerificationRequired && phoneAuthStatus !== "available")} className={styles.submitButton}>{pending ? t("正在创建账号…") : t("创建账号")}</button>
               </fieldset>
             </>
           ) : null}
         </form>
       ) : (
-        <p className={`${styles.notice} ${styles.noticeWarning}`}>{t("本地用户名和密码注册暂未开放。请返回登录页使用其他可用方式，或联系管理员。")}</p>
+        <p className={`${styles.notice}  ${styles.noticeWarning}`}>{t("本地用户名和密码注册暂未开放。请返回登录页使用其他可用方式，或联系管理员。")}</p>
       )}
     </div>
   );

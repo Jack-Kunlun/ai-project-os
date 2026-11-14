@@ -18,10 +18,10 @@ export function ProjectFlowGuide({ projectId, stage, sourceCount, pendingCount, 
   const questionHref = `/ask?scope=project&projectId=${encodeURIComponent(projectId)}`;
   const next = projectFlowNextStep({ stage, sourceCount, pendingCount, confirmedCount, indexReady, archived });
   const nextLabel = next.label.startsWith("核对待处理项（") ? <><UiText text="核对待处理项" /> ({pendingCount})</> : <UiText text={next.label} />;
-  return <section aria-labelledby="project-flow-title" className="my-5 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+  return <section aria-labelledby="project-flow-title" className="app-panel-soft my-5 p-4 sm:p-5">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="max-w-3xl"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500"><UiText text="下一步" /></p><h2 id="project-flow-title" className="mt-1 text-sm font-semibold text-slate-900"><UiText text="项目使用流程" /></h2><p className="mt-1 text-sm leading-6 text-slate-600"><UiText text={next.detail} /></p></div>
-      <Link href={next.state.view === "ask" ? questionHref : buildProjectHref(projectId, next.route, { ...next.state, from })} className="inline-flex min-h-10 shrink-0 items-center rounded-lg px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-4">{nextLabel} →</Link>
+      <div className="max-w-3xl"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-app-muted"><UiText text="下一步" /></p><h2 id="project-flow-title" className="mt-1 text-sm font-semibold text-app-text"><UiText text="项目使用流程" /></h2><p className="mt-1 text-sm leading-6 text-app-muted"><UiText text={next.detail} /></p></div>
+      <Link href={next.state.view === "ask" ? questionHref : buildProjectHref(projectId, next.route, { ...next.state, from })} className="inline-flex min-h-10 shrink-0 items-center rounded-control px-3 py-2 text-sm font-semibold text-app-link underline underline-offset-4">{nextLabel} →</Link>
     </div>
   </section>;
 }

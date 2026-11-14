@@ -15,7 +15,7 @@
 
 .eyebrow {
   margin: 0 0 7px;
-  color: var(--app-accent);
+  color: var(--app-link);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .09em;
@@ -108,9 +108,9 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 38px;
+  min-height: 40px;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 8px 10px;
   background: var(--app-input);
   color: var(--app-text);
@@ -226,7 +226,7 @@
 
 .retryButton,
 .loadButton {
-  min-height: var(--app-action-small-height);
+  min-height: var(--app-action-min-height);
   border: 1px solid var(--app-border);
   border-radius: 6px;
   padding: 5px 12px;
@@ -293,3 +293,5 @@
   .detailGrid { grid-template-columns: 1fr; }
   .loadMore { align-items: flex-start; flex-direction: column; }
 }
+
+@media(max-width:700px){.filterLabel :is(select,input){min-height:44px}}

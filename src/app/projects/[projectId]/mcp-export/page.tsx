@@ -19,7 +19,7 @@ export default async function ProjectMcpExportPage({ params }: { params: Promise
     if (error instanceof AccessControlError) notFound();
     throw error;
   }
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+  return <main className="min-h-screen bg-app-surface text-app-text">
     <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={user.role === "admin"} />
     <div data-page-content className="mx-auto max-w-4xl px-5 py-7 sm:px-8 lg:px-10">
       <ProjectOverviewParentLink projectId={projectId} />

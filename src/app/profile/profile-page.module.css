@@ -1,7 +1,7 @@
 .profileCover {
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
 }
 
@@ -73,7 +73,7 @@
 .settingsList {
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
 }
 
@@ -191,7 +191,7 @@
 .accountDetails {
   margin-top: 22px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
 }
 
@@ -274,7 +274,7 @@
 
 .identityItem {
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface-soft);
   padding: 10px 12px;
   color: var(--app-text);

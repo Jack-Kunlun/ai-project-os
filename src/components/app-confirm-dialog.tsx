@@ -122,33 +122,33 @@ export function useAppConfirmDialog() {
       ? value.trim().length > 0
       : true;
   const tone = options?.tone ?? "primary";
-  const confirmClass = tone === "danger" ? "bg-rose-600 hover:bg-rose-500" : tone === "warning" ? "bg-amber-600 hover:bg-amber-500" : "bg-indigo-600 hover:bg-indigo-500";
-  const descriptionClass = tone === "danger" ? "text-rose-700" : "text-slate-600";
+  const confirmClass = tone === "danger" ? "app-button-danger" : tone === "warning" ? "app-button-warning" : "app-button-primary";
+  const descriptionClass = tone === "danger" ? "text-app-danger-ink" : "text-app-muted";
 
   const dialog = request === null || options === undefined ? null : createPortal(
     <div className={`fixed inset-0 z-[80] flex items-end justify-center ${modalBackdropClassName} p-0 sm:items-center sm:p-6`} role="presentation" onPointerDown={event=>{backdropStarted.current=event.target===event.currentTarget;}} onClick={(event) => { if (backdropStarted.current&&event.target === event.currentTarget) close(false); }}>
-      <section data-inquiry-owned={String(owned)} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className={`flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl ${modalSurfaceClassName}`}>
-        <header data-dialog-header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-7 py-5 sm:px-8`}>
+      <section data-inquiry-owned={String(owned)} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className={`app-dialog-surface--modal flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden ${modalSurfaceClassName}`}>
+        <header data-dialog-header className={`${modalHeaderClassName} flex shrink-0 items-start justify-between gap-4`}>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{t(options.eyebrow ?? "确认操作")}</p>
-            <h2 id={titleId} className="mt-2 text-lg font-semibold tracking-tight text-slate-950">{t(options.title)}</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link">{t(options.eyebrow ?? "确认操作")}</p>
+            <h2 id={titleId} className="mt-2 text-lg font-semibold tracking-tight text-app-text">{t(options.title)}</h2>
           </div>
           <button type="button" className="app-icon-button" onClick={() => close(false)} aria-label={t("关闭窗口")}>
             <ShellIcon name="close" className="app-icon--control" />
           </button>
         </header>
-        <div data-dialog-body className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
+        <div data-dialog-body className="app-dialog-content min-h-0 flex-1">
           <p id={descriptionId} className={`whitespace-pre-wrap break-words text-sm leading-6 ${descriptionClass}`}>{t(options.description)}</p>
           {hasInput ? (
-            <label className="mt-5 block text-sm font-semibold text-slate-700">
+            <label className="mt-5 block text-sm font-semibold text-app-text">
               {t(options.inputLabel ?? "")}
-              <input autoFocus value={value} onChange={(event) => { valueRef.current = event.target.value; setValue(event.target.value); }} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder?t(options.inputPlaceholder):undefined} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${tone === "danger" ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-indigo-300 focus:ring-indigo-100"}`} />
+              <input autoFocus value={value} onChange={(event) => { valueRef.current = event.target.value; setValue(event.target.value); }} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder?t(options.inputPlaceholder):undefined} className={`app-field mt-2 w-full text-sm ${tone === "danger" ? "app-field-danger" : tone === "warning" ? "app-field-warning" : ""}`} />
             </label>
           ) : null}
         </div>
-        <footer data-dialog-footer className={`${modalFooterClassName} flex justify-end gap-3 px-7 py-5 sm:px-8`}>
-          <button type="button" onClick={() => close(false)} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600">{t(options.cancelLabel ?? "取消")}</button>
-          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`app-action-button rounded-lg font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{t(options.confirmLabel ?? "确认")}</button>
+        <footer data-dialog-footer className={`${modalFooterClassName} justify-end`}>
+          <button type="button" onClick={() => close(false)} className="app-button-secondary">{t(options.cancelLabel ?? "取消")}</button>
+          <button type="button" onClick={() => close(true)} disabled={!inputValid} className={confirmClass}>{t(options.confirmLabel ?? "确认")}</button>
         </footer>
       </section>
     </div>, request.portalHost,

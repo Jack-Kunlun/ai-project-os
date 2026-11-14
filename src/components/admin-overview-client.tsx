@@ -56,15 +56,15 @@ function valueLabel(value: number | null, language: "zh-CN" | "en"): string {
 
 function statusTone(status: "ready" | "attention" | "unknown" | "restricted"): string {
   return {
-    ready: "bg-emerald-50 text-emerald-700",
-    attention: "bg-amber-50 text-amber-800",
-    unknown: "bg-slate-100 text-slate-600",
-    restricted: "bg-slate-100 text-slate-600",
+    ready: "bg-app-success-soft text-app-success-ink",
+    attention: "bg-app-warning-soft text-app-warning-ink",
+    unknown: "bg-app-surface-soft text-app-muted",
+    restricted: "bg-app-surface-soft text-app-muted",
   }[status];
 }
 
 function routeStatusTone(route: SystemOverviewRoute): string {
-  return route.controlPlane === "ready" ? "bg-emerald-50 text-emerald-700" : route.controlPlane === "not_obtained" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-800";
+  return route.controlPlane === "ready" ? "bg-app-success-soft text-app-success-ink" : route.controlPlane === "not_obtained" ? "bg-app-surface-soft text-app-muted" : "bg-app-warning-soft text-app-warning-ink";
 }
 
 export type AdminPendingActionState = "pending" | "clear" | "unknown";
@@ -168,12 +168,12 @@ export function AdminOverviewClient() {
   return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
     <AdminPageHeader title="平台总览" meta={overview ? <>{t("测量于")} {formatDate(overview.service.measuredAt, language, t)} · {overview.service.version}</> : loading ? t("正在读取最新状态…") : t("未取得最新状态")} />
 
-    {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
+    {error ? <p role="alert" className="app-feedback-error mt-6 text-sm"><UiErrorText text={error} /></p> : null}
 
     <section className="mt-5" aria-labelledby="admin-service-health-title">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500"><UiText text={"服务健康"} /></p><h2 id="admin-service-health-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text={"服务健康"} /></h2></div>
-        <span className="text-xs text-slate-500"><UiText text={"状态仅依据本次安全读取"} /></span>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-app-muted"><UiText text={"服务健康"} /></p><h2 id="admin-service-health-title" className="mt-1 text-lg font-semibold text-app-text"><UiText text={"服务健康"} /></h2></div>
+        <span className="text-xs text-app-muted"><UiText text={"状态仅依据本次安全读取"} /></span>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatusCard label="应用服务" value={loading ? t("读取中…") : overview ? t("正常") : t("未取得")} detail={loading ? t("等待安全读取") : overview ? `${t("版本")} ${overview.service.version}` : t("本次测量未取得应用状态。")} tone="emerald" />
@@ -182,26 +182,26 @@ export function AdminOverviewClient() {
       </div>
     </section>
 
-    <section className="mt-5 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="admin-pending-actions-title">
+    <section className="mt-5 app-panel p-5  sm:p-6" aria-labelledby="admin-pending-actions-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500"><UiText text={"操作队列"} /></p>
-          <h2 id="admin-pending-actions-title" className="mt-1 text-lg font-semibold text-slate-950"><UiText text={"待处理事项"} /></h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"只根据本次已取得的安全聚合判断。数量为 0 表示当前测量没有待办；“未取得”表示证据尚未返回。"} /></p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-app-muted"><UiText text={"操作队列"} /></p>
+          <h2 id="admin-pending-actions-title" className="mt-1 text-lg font-semibold text-app-text"><UiText text={"待处理事项"} /></h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-app-muted"><UiText text={"只根据本次已取得的安全聚合判断。数量为 0 表示当前测量没有待办；“未取得”表示证据尚未返回。"} /></p>
         </div>
       </div>
           <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">{pendingActions.map((action) => <ActionCard key={action.key} action={action} t={t} />)}</div>
     </section>
 
     <section className="mt-5 grid items-stretch gap-3 lg:grid-cols-[0.8fr_1.2fr]" aria-label={t("平台规模与额度")}>
-      <div className="flex h-full flex-col rounded-2xl border border-slate-200/80 bg-white p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500"><UiText text={"安全计数"} /></p><h2 className="mt-1 text-lg font-semibold"><UiText text={"平台规模"} /></h2><div className="mt-auto grid grid-cols-3 gap-2 pt-4"><Count label="用户" value={overview?.counts.users} language={language} /><Count label="有效会员" value={overview?.counts.activeMemberships} language={language} /><Count label="已验证平台连接" value={overview?.counts.verifiedPlatformModels} language={language} /></div></div>
-      <div className="flex h-full flex-col rounded-2xl border border-slate-200/80 bg-white p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500"><UiText text={"平台额度账本"} /></p><h2 className="mt-1 text-lg font-semibold"><UiText text={"平台额度总览"} /></h2><p className="mt-1 text-xs leading-5 text-slate-600"><UiText text={"只读聚合：累计发放、当前可用、预留 / 待核对占用和已确认消耗。"} /></p><div className="mt-auto grid grid-cols-2 gap-2 pt-4 sm:grid-cols-4"><Count label="累计发放" value={overview?.tokens.issuedTokens} language={language} /><Count label="当前可用" value={overview?.tokens.availableTokens} language={language} /><Count label="预留 / 待核对占用" value={overview?.tokens.reservedTokens} language={language} /><Count label="已确认消耗" value={overview?.tokens.consumedTokens} language={language} /></div></div>
+      <div className="flex h-full flex-col app-panel p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-app-muted"><UiText text={"安全计数"} /></p><h2 className="mt-1 text-lg font-semibold"><UiText text={"平台规模"} /></h2><div className="mt-auto grid grid-cols-3 gap-2 pt-4"><Count label="用户" value={overview?.counts.users} language={language} /><Count label="有效会员" value={overview?.counts.activeMemberships} language={language} /><Count label="已验证平台连接" value={overview?.counts.verifiedPlatformModels} language={language} /></div></div>
+      <div className="flex h-full flex-col app-panel p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-app-muted"><UiText text={"平台额度账本"} /></p><h2 className="mt-1 text-lg font-semibold"><UiText text={"平台额度总览"} /></h2><p className="mt-1 text-xs leading-5 text-app-muted"><UiText text={"只读聚合：累计发放、当前可用、预留 / 待核对占用和已确认消耗。"} /></p><div className="mt-auto grid grid-cols-2 gap-2 pt-4 sm:grid-cols-4"><Count label="累计发放" value={overview?.tokens.issuedTokens} language={language} /><Count label="当前可用" value={overview?.tokens.availableTokens} language={language} /><Count label="预留 / 待核对占用" value={overview?.tokens.reservedTokens} language={language} /><Count label="已确认消耗" value={overview?.tokens.consumedTokens} language={language} /></div></div>
     </section>
 
     <section className="mt-5" aria-labelledby="admin-kpi-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"今日 · Asia/Shanghai"} /></p><h2 id="admin-kpi-title" className="mt-1 text-xl font-semibold text-slate-950"><UiText text={"核心指标"} /></h2></div>
-        <span className="text-xs text-slate-400"><UiText text={"不含个人 BYOK · 未接入支付金额"} /></span>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text={"今日 · Asia/Shanghai"} /></p><h2 id="admin-kpi-title" className="mt-1 text-xl font-semibold text-app-text"><UiText text={"核心指标"} /></h2></div>
+        <span className="text-xs text-app-muted"><UiText text={"不含个人 BYOK · 未接入支付金额"} /></span>
       </div>
       <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">
         <KpiCard label="今日新增用户" value={analyticsValue(overview?.analytics.today.newUsers, loading, language, t)} detail="普通用户创建数" />
@@ -214,32 +214,32 @@ export function AdminOverviewClient() {
 
     <AnalyticsTrendSection overview={overview} loading={loading} language={language} t={t} />
 
-    <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="admin-readiness-title">
+    <section className="mt-6 app-panel p-6  sm:p-7" aria-labelledby="admin-readiness-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"首次设置清单"} /></p>
-          <h2 id="admin-readiness-title" className="mt-2 text-xl font-semibold text-slate-950"><UiText text={"平台首次就绪清单"} /></h2>
-          <p className="mt-2 text-xs leading-5 text-slate-500"><UiText text={"清单只反映已取得的安全状态；“已就绪”不代表外部模型调用已经现场验证。"} /></p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text={"首次设置清单"} /></p>
+          <h2 id="admin-readiness-title" className="mt-2 text-xl font-semibold text-app-text"><UiText text={"平台首次就绪清单"} /></h2>
+          <p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"清单只反映已取得的安全状态；“已就绪”不代表外部模型调用已经现场验证。"} /></p>
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">{loading ? t("读取中…") : overview ? `${overview.setupChecklist.filter((item) => item.status === "ready").length}/${overview.setupChecklist.length} ${t("项完成")}` : t("未取得")}</span>
+        <span className="rounded-full bg-app-surface-soft px-3 py-1.5 text-xs font-semibold text-app-muted">{loading ? t("读取中…") : overview ? `${overview.setupChecklist.filter((item) => item.status === "ready").length}/${overview.setupChecklist.length} ${t("项完成")}` : t("未取得")}</span>
       </div>
       <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-3">
-        {(overview?.setupChecklist ?? []).map((item) => <article key={item.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{t(item.label)}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{t(checklistStatusLabel(item.status))}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{setupChecklistDetail(item, overview!, language, t)}</p></article>)}
-        {!overview ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? t("正在读取就绪证据…") : t("未取得就绪证据。")}</div> : null}
+        {(overview?.setupChecklist ?? []).map((item) => <article key={item.key} className="app-panel-soft p-4"><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-app-text">{t(item.label)}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{t(checklistStatusLabel(item.status))}</span></div><p className="mt-2 text-xs leading-5 text-app-muted">{setupChecklistDetail(item, overview!, language, t)}</p></article>)}
+        {!overview ? <div className="rounded-panel border border-dashed border-app-border bg-app-surface-soft p-5 text-sm text-app-muted sm:col-span-2 lg:col-span-3">{loading ? t("正在读取就绪证据…") : t("未取得就绪证据。")}</div> : null}
       </div>
     </section>
 
-    <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="default-route-title">
+    <section className="mt-6 app-panel p-6  sm:p-7" aria-labelledby="default-route-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"平台默认路由"} /></p>
-          <h2 id="default-route-title" className="mt-2 text-xl font-semibold text-slate-950"><UiText text={"默认模型路由"} /></h2>
-          <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-600"><UiText text={"控制面状态来自 active 路由、平台供应商归属、验证版本和能力匹配检查。当前数据没有真实调用凭证，因此每项都单独标记为“真实调用证据未取得”。"} /></p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text={"平台默认路由"} /></p>
+          <h2 id="default-route-title" className="mt-2 text-xl font-semibold text-app-text"><UiText text={"默认模型路由"} /></h2>
+          <p className="mt-2 max-w-3xl text-xs leading-5 text-app-muted"><UiText text={"控制面状态来自 active 路由、平台供应商归属、验证版本和能力匹配检查。当前数据没有真实调用凭证，因此每项都单独标记为“真实调用证据未取得”。"} /></p>
         </div>
-        <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${overview?.defaultRoutes.controlPlane === "ready" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{loading ? t("读取中…") : routeReady === null || routeReady === undefined || overview === null ? t("未取得路由证据") : `${routeReady}/${overview.defaultRoutes.total} ${t("项控制面就绪")}`}</span>
+        <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${overview?.defaultRoutes.controlPlane === "ready" ? "bg-app-success-soft text-app-success-ink" : "bg-app-warning-soft text-app-warning-ink"}`}>{loading ? t("读取中…") : routeReady === null || routeReady === undefined || overview === null ? t("未取得路由证据") : `${routeReady}/${overview.defaultRoutes.total} ${t("项控制面就绪")}`}</span>
       </div>
       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? t("正在读取默认路由状态…") : t("未取得默认路由证据。")}</div>}
+        {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-panel border border-dashed border-app-border bg-app-surface-soft p-5 text-sm text-app-muted sm:col-span-2 lg:col-span-3">{loading ? t("正在读取默认路由状态…") : t("未取得默认路由证据。")}</div>}
       </div>
     </section>
 
@@ -263,14 +263,14 @@ function analyticsValue(value: number | null | undefined, loading: boolean, lang
 
 function KpiCard({ label, value, detail }: { label: string; value: string; detail: string }) {
   const t = useAppearance().t;
-  return <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm"><h3 className="truncate text-xs font-semibold text-slate-500">{t(label)}</h3><p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{value}</p><p className="mt-2 truncate text-xs text-slate-400">{t(detail)}</p></article>;
+  return <article className="min-w-0 app-panel p-4 "><h3 className="truncate text-xs font-semibold text-app-muted">{t(label)}</h3><p className="mt-3 text-2xl font-semibold tracking-tight text-app-text">{value}</p><p className="mt-2 truncate text-xs text-app-muted">{t(detail)}</p></article>;
 }
 
 function AnalyticsTrendSection({ overview, loading, language, t }: { overview: SystemOverview | null; loading: boolean; language: "zh-CN" | "en"; t: (text: string) => string }) {
   const trend = overview?.analytics.trends.days7 ?? [];
-  return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="admin-trend-title">
-    <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400"><UiText text={"近 7 天趋势"} /></p><h2 id="admin-trend-title" className="mt-1 text-xl font-semibold text-slate-950"><UiText text={"运营趋势"} /></h2></div><span className="text-xs text-slate-400"><UiText text={"每日零值保留，读取失败显示“未取得”"} /></span></div>
-    <div role="region" aria-label={t("运营趋势明细")} tabIndex={0} className="mt-4 overflow-x-auto"><table className="min-w-[600px] w-full border-collapse text-left text-xs"><thead><tr className="border-b border-slate-100 text-slate-400"><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"日期"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"新增用户"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"托管 Token"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"待核对调用"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"额度消耗"} /></th></tr></thead><tbody>{trend.length === 0 ? <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">{loading ? t("正在读取趋势…") : t("未取得趋势证据。")}</td></tr> : trend.map((point) => <tr key={point.date} className="border-b border-slate-50 last:border-0"><th className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700">{new Intl.DateTimeFormat(language === "zh-CN" ? "zh-CN" : "en-US", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${point.date}T00:00:00Z`))}</th><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.newUsers, loading, language, t)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.platformTokens, loading, language, t)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.unknownCalls, loading, language, t)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.settledQuota, loading, language, t)}</td></tr>)}</tbody></table></div>
+  return <section className="mt-6 app-panel p-5  sm:p-6" aria-labelledby="admin-trend-title">
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text={"近 7 天趋势"} /></p><h2 id="admin-trend-title" className="mt-1 text-xl font-semibold text-app-text"><UiText text={"运营趋势"} /></h2></div><span className="text-xs text-app-muted"><UiText text={"每日零值保留，读取失败显示“未取得”"} /></span></div>
+    <div role="region" aria-label={t("运营趋势明细")} tabIndex={0} className="mt-4 overflow-x-auto"><table className="min-w-[600px] w-full border-collapse text-left text-xs"><thead><tr className="border-b border-app-border text-app-muted"><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"日期"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"新增用户"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"托管 Token"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"待核对调用"} /></th><th className="whitespace-nowrap px-3 py-2 font-semibold"><UiText text={"额度消耗"} /></th></tr></thead><tbody>{trend.length === 0 ? <tr><td colSpan={5} className="px-3 py-6 text-center text-app-muted">{loading ? t("正在读取趋势…") : t("未取得趋势证据。")}</td></tr> : trend.map((point) => <tr key={point.date} className="border-b border-app-border last:border-0"><th className="whitespace-nowrap px-3 py-2.5 font-medium text-app-text">{new Intl.DateTimeFormat(language === "zh-CN" ? "zh-CN" : "en-US", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${point.date}T00:00:00Z`))}</th><td className="whitespace-nowrap px-3 py-2.5 text-app-muted">{analyticsValue(point.newUsers, loading, language, t)}</td><td className="whitespace-nowrap px-3 py-2.5 text-app-muted">{analyticsValue(point.platformTokens, loading, language, t)}</td><td className="whitespace-nowrap px-3 py-2.5 text-app-muted">{analyticsValue(point.unknownCalls, loading, language, t)}</td><td className="whitespace-nowrap px-3 py-2.5 text-app-muted">{analyticsValue(point.settledQuota, loading, language, t)}</td></tr>)}</tbody></table></div>
   </section>;
 }
 
@@ -301,7 +301,7 @@ function setupChecklistDetail(item: SystemOverview["setupChecklist"][number], ov
 
 function RouteCard({ route }: { route: SystemOverviewRoute }) {
   const t = useAppearance().t;
-  return <article className="flex h-full flex-col rounded-2xl border border-white/80 bg-white p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-900">{t(operationLabels[route.operation])}</h3><p className="mt-1 text-[12px] text-slate-500">{route.routeVersion === null ? t("暂无 active 版本") : `${t("控制面版本")} v${route.routeVersion}`}</p></div><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${routeStatusTone(route)}`}>{t(routeCodeLabels[route.code])}</span></div><p className="mt-auto pt-3 text-xs leading-5 text-slate-500"><UiText text={"真实模型调用："} /><span className="font-semibold text-slate-700"><UiText text={"未取得现场证据"} /></span></p></article>;
+  return <article className="flex h-full flex-col app-panel p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-app-text">{t(operationLabels[route.operation])}</h3><p className="mt-1 text-[12px] text-app-muted">{route.routeVersion === null ? t("暂无 active 版本") : `${t("控制面版本")} v${route.routeVersion}`}</p></div><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${routeStatusTone(route)}`}>{t(routeCodeLabels[route.code])}</span></div><p className="mt-auto pt-3 text-xs leading-5 text-app-muted"><UiText text={"真实模型调用："} /><span className="font-semibold text-app-text"><UiText text={"未取得现场证据"} /></span></p></article>;
 }
 
 function failureDetail(overview: SystemOverview, language: "zh-CN" | "en", t: (text: string) => string): string {
@@ -321,12 +321,12 @@ function failureSummary(label: string, aggregate: SystemOverviewFailureAggregate
 
 function ActionCard({ action, t }: { action: AdminPendingActionProjection; t: (text: string) => string }) {
   const styles = {
-    pending: "bg-amber-100 text-amber-900",
-    clear: "bg-emerald-100 text-emerald-800",
-    unknown: "bg-slate-100 text-slate-600",
+    pending: "bg-app-warning-soft text-app-warning-ink",
+    clear: "bg-app-success-soft text-app-success-ink",
+    unknown: "bg-app-surface-soft text-app-muted",
   } as const;
   const labels = { pending: "待处理", clear: "无待办", unknown: "未取得" } as const;
-  return <article className="min-w-0 rounded-2xl border border-white/80 bg-white p-4 shadow-sm"><div className="flex min-w-0 items-center justify-between gap-3"><h3 className="min-w-0 truncate whitespace-nowrap text-sm font-semibold text-slate-900">{t(action.title)}</h3><span className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-semibold ${styles[action.state]}`}>{t(labels[action.state])}</span></div><p className="mt-4 text-2xl font-semibold text-slate-950">{action.value}</p><p className="mt-2 min-h-10 text-xs leading-5 text-slate-500">{t(action.detail)}</p><Link href={action.href} className="mt-3 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-700 hover:text-indigo-900"><UiText text={"查看运营入口 →"} /></Link></article>;
+  return <article className="min-w-0 app-panel p-4 "><div className="flex min-w-0 items-center justify-between gap-3"><h3 className="min-w-0 truncate whitespace-nowrap text-sm font-semibold text-app-text">{t(action.title)}</h3><span className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-semibold ${styles[action.state]}`}>{t(labels[action.state])}</span></div><p className="mt-4 text-2xl font-semibold text-app-text">{action.value}</p><p className="mt-2 min-h-10 text-xs leading-5 text-app-muted">{t(action.detail)}</p><Link href={action.href} className="mt-3 inline-flex whitespace-nowrap text-xs font-semibold text-app-link hover:text-app-link"><UiText text={"查看运营入口 →"} /></Link></article>;
 }
 
 function backupStatusLabel(value: string, t: (text: string) => string): string {
@@ -362,16 +362,16 @@ function BackupCard({ backup, loading }: { backup?: SystemOverview["backup"]; lo
 
 function EvidenceCard({ title, eyebrow, value, detail, tone, href, linkLabel }: { title: string; eyebrow: string; value: string; detail: string; tone: "ready" | "attention" | "unknown" | "restricted"; href?: string; linkLabel?: string }) {
   const t = useAppearance().t;
-  return <article className="flex h-full flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{t(eyebrow)}</p><h2 className="mt-2 text-lg font-semibold text-slate-950">{t(title)}</h2><p className={`mt-4 inline-flex self-start rounded-full px-3 py-1.5 text-sm font-semibold ${statusTone(tone)}`}>{t(value)}</p><p className="mt-3 flex-1 text-xs leading-5 text-slate-500">{t(detail)}</p>{href && linkLabel ? <Link href={href} className="mt-4 inline-flex self-start rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{t(linkLabel)}</Link> : null}</article>;
+  return <article className="app-panel flex h-full flex-col p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted">{t(eyebrow)}</p><h2 className="mt-2 text-lg font-semibold text-app-text">{t(title)}</h2><p className={`mt-4 inline-flex self-start rounded-full px-3 py-1.5 text-sm font-semibold ${statusTone(tone)}`}>{t(value)}</p><p className="mt-3 flex-1 text-xs leading-5 text-app-muted">{t(detail)}</p>{href && linkLabel ? <Link href={href} className="app-button-secondary mt-4 self-start">{t(linkLabel)}</Link> : null}</article>;
 }
 
 function StatusCard({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "emerald" | "cyan" | "violet" }) {
   const t = useAppearance().t;
-  const styles = { emerald: "bg-emerald-50 text-emerald-700", cyan: "bg-cyan-50 text-cyan-700", violet: "bg-violet-50 text-violet-700" } as const;
-  return <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><p className="text-xs font-semibold text-slate-500">{t(label)}</p><p className={`mt-3 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${styles[tone]}`}>{t(value)}</p><p className="mt-3 text-xs leading-5 text-slate-500">{t(detail)}</p></article>;
+  const styles = { emerald: "bg-app-success-soft text-app-success-ink", cyan: "bg-app-accent-soft text-app-link", violet: "bg-app-accent-soft text-app-link" } as const;
+  return <article className="app-panel p-5 "><p className="text-xs font-semibold text-app-muted">{t(label)}</p><p className={`mt-3 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${styles[tone]}`}>{t(value)}</p><p className="mt-3 text-xs leading-5 text-app-muted">{t(detail)}</p></article>;
 }
 
 function Count({ label, value, language }: { label: string; value?: number | null; language: "zh-CN" | "en" }) {
   const t = useAppearance().t;
-  return <div className="rounded-2xl bg-slate-50 px-3 py-4"><p className="text-2xl font-semibold text-slate-900">{value === undefined || value === null ? "—" : value.toLocaleString(language)}</p><p className="mt-1 text-[12px] text-slate-500">{t(label)}</p></div>;
+  return <div className="rounded-panel bg-app-surface-soft px-3 py-4"><p className="text-2xl font-semibold text-app-text">{value === undefined || value === null ? "—" : value.toLocaleString(language)}</p><p className="mt-1 text-[12px] text-app-muted">{t(label)}</p></div>;
 }

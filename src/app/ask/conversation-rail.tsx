@@ -47,10 +47,10 @@ export function ConversationRail(props: {
     </div>
     <button className={props.collapsed ? styles.railIcon : styles.newConversation} onClick={props.create} disabled={props.busy} aria-label={t("新建会话")} title={t("新建会话")}><ShellIcon name="plus"/>{!props.collapsed ? <span><UiText text="新建会话"/></span> : null}</button>
     {!props.collapsed ? <>
-      <label className={ui.field}><span className={styles.visuallyHidden}><UiText text="会话列表"/></span><select aria-label={t("会话列表")} value={props.view} onChange={e => props.setView(e.target.value as ConversationView)}><option value="active"><UiText text="最近会话"/></option><option value="archived"><UiText text="已归档"/></option><option value="deleted"><UiText text="回收站"/></option></select></label>
-      <input className={ui.search} aria-label={t("搜索历史会话")} placeholder={t("搜索会话")} value={props.query} onChange={e => props.setQuery(e.target.value)}/>
-      {props.error ? <p className={ui.error} role="alert"><UiErrorText text={props.error} /><button className={ui.link} onClick={props.refresh}><UiText text="重新加载"/></button></p> : null}
+      <label className={ui.field}><span className={styles.visuallyHidden}><UiText text="会话列表"/></span><select aria-label={t("会话列表")} value={props.view} onChange={e => props.setView(e.target.value as ConversationView)} className="app-field"><option value="active"><UiText text="最近会话"/></option><option value="archived"><UiText text="已归档"/></option><option value="deleted"><UiText text="回收站"/></option></select></label>
+      <input className={["app-field", (ui.search)].filter(Boolean).join(' ')} aria-label={t("搜索历史会话")} placeholder={t("搜索会话")} value={props.query} onChange={e => props.setQuery(e.target.value)}/>
       <div className={styles.railList} aria-busy={props.loading}>
+        {props.error ? <p className={["app-feedback-error", (ui.error)].filter(Boolean).join(' ')} role="alert"><UiErrorText text={props.error} /><button className={ui.link} onClick={props.refresh}><UiText text="重新加载"/></button></p> : null}
         {props.loading && !props.items.length ? <p role="status"><UiText text="正在查找会话…"/></p> : props.items.length ? props.items.map(item => <div className={styles.railItem} key={item.id} data-current={props.currentId === item.id}>
           <button className={styles.railMain} disabled={props.busy} aria-current={props.currentId === item.id ? "true" : undefined} onClick={() => props.open(item.id)}>
             <span className={styles.railTitle}>{item.pinned ? <ShellIcon name="flag" className={styles.iconSmall}/> : null}{item.title}</span>

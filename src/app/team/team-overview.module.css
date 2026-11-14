@@ -14,7 +14,7 @@
   .table { display: block; }
   .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
   .table tbody { display: grid; gap: 10px; padding: 12px; }
-  .table tr { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 12px; border: 1px solid var(--app-border); border-radius: 10px; background: var(--app-surface); padding: 12px; }
+  .table tr { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 12px; border: 1px solid var(--app-border); border-radius: var(--radius-control); background: var(--app-surface); padding: 12px; }
   .table td { display: block; min-width: 0; padding: 0; border: 0; }
   .table th:nth-child(n), .table td:nth-child(n) { width: auto; }
   .table td:first-child { grid-column: 1; grid-row: 1; }

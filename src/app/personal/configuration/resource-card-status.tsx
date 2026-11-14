@@ -23,9 +23,9 @@ export function ResourceCardStatus({ total, verified, latest, verificationLabel 
         ? <UiText text={total === 1 ? "connection" : "connections"} />
         : <UiText text="个连接" />}
     </p>
-    <p className="text-xs font-medium text-slate-600">
+    <p className="text-xs font-medium text-app-muted">
       {total === 0 ? <UiText text="尚未添加连接" /> : <><UiText text="已验证" /> {verified}</>}
     </p>
-    <p className="mt-1 text-xs text-slate-500"><UiText text={verificationLabel} /> · {latestLabel}</p>
+    <p className="mt-1 text-xs text-app-muted"><UiText text={verificationLabel} /> · {latestLabel}</p>
   </div>;
 }

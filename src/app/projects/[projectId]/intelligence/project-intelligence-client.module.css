@@ -27,7 +27,7 @@
   justify-content: center;
   gap: var(--app-action-gap);
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--app-surface);
   padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   color: var(--app-muted);
@@ -55,7 +55,7 @@
 .errorNotice {
   margin-top: 1rem;
   border: 1px solid var(--app-danger-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   background: var(--app-danger-soft);
   padding: 0.75rem 1rem;
   color: var(--app-danger-ink);
@@ -65,7 +65,7 @@
 .loadingPanel {
   height: 8rem;
   margin-top: 1rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface-soft);
   animation: pulse 1.7s ease-in-out infinite;
 }
@@ -73,7 +73,7 @@
 .emptyState {
   margin-top: 1rem;
   border: 1px solid var(--app-border);
-  border-radius: 0.625rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
   padding: 2rem 1rem;
   color: var(--app-muted);
@@ -84,7 +84,7 @@
 .readinessDisclosure {
   margin-top: 1rem;
   border: 1px solid var(--app-border);
-  border-radius: 0.625rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
   scroll-margin-top: 5.5rem;
 }
@@ -187,7 +187,7 @@
 .contentSection {
   margin-top: 0.75rem;
   border: 1px solid var(--app-border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
   padding: 1.25rem;
   scroll-margin-top: 5.5rem;
@@ -210,4 +210,4 @@
 
 
 
-.pageHeader h1 { font-size: 25px; font-weight: 600; letter-spacing: 0; }
+.pageHeader h1 { font-size: var(--app-page-title-size); font-weight: 600; letter-spacing: 0; }

@@ -108,28 +108,28 @@ export function PersonalProjectHandoff({ content }: Readonly<{ content: string }
       onClose={() => handleOpenChange(false)}
       drawer
     >
-      <p className="mb-5 text-sm leading-6 text-slate-600"><UiText text={"复制只会在你明确操作后发生，原内容仍保存在个人知识库。项目资料按项目权限共享；个人通用记忆是另一项设置，只供你发起的项目 AI 参考。"} /></p>
-      {projectsLoading ? <p className="text-sm text-slate-600" role="status"><UiText text={"正在加载你可访问的进行中项目…"} /></p> : null}
-      {projectsError !== null ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700" role="alert"><p><UiErrorText text={projectsError} /></p><button type="button" onClick={loadProjects} className="mt-2 min-h-10 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700"><UiText text={"重新加载项目"} /></button></div> : null}
-      {!projectsLoading && projectsError === null && projects.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm leading-6 text-slate-600"><p><UiText text={"没有可访问的进行中项目。你可以先把内容留在个人知识库，或检查项目权限；归档项目不会显示在这里。"} /></p><Link href="/projects" onClick={() => setOpen(false)} className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"前往我的项目"} /></Link></div> : null}
+      <p className="mb-5 text-sm leading-6 text-app-muted"><UiText text={"复制只会在你明确操作后发生，原内容仍保存在个人知识库。项目资料按项目权限共享；个人通用记忆是另一项设置，只供你发起的项目 AI 参考。"} /></p>
+      {projectsLoading ? <p className="text-sm text-app-muted" role="status"><UiText text={"正在加载你可访问的进行中项目…"} /></p> : null}
+      {projectsError !== null ? <div className="rounded-field border border-app-danger-border bg-app-danger-soft p-4 text-sm text-app-danger-ink app-feedback-error" role="alert"><p><UiErrorText text={projectsError} /></p><button type="button" onClick={loadProjects} className="mt-2 min-h-10 rounded-control border px-3 py-2 text-xs font-semibold app-button-danger"><UiText text={"重新加载项目"} /></button></div> : null}
+      {!projectsLoading && projectsError === null && projects.length === 0 ? <div className="rounded-panel border border-dashed border-app-border bg-app-surface-soft px-4 py-5 text-sm leading-6 text-app-muted"><p><UiText text={"没有可访问的进行中项目。你可以先把内容留在个人知识库，或检查项目权限；归档项目不会显示在这里。"} /></p><Link href="/projects" onClick={() => setOpen(false)} className="mt-3 inline-flex min-h-9 items-center rounded-control border border-app-border bg-app-surface px-3 py-2 text-xs font-semibold text-app-link hover:bg-app-accent-soft"><UiText text={"前往我的项目"} /></Link></div> : null}
       {!projectsLoading && projects.length > 0 ? (
         <div className="space-y-4">
-          <label className="block text-sm font-semibold text-slate-700"><UiText text={"目标项目"} /><select aria-label={translateUi("选择目标项目")} value={projectId} onChange={(event) => { setProjectId(event.target.value); setCopyState("idle"); }} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-normal focus:border-indigo-400 focus:outline-none focus:ring-4 focus:ring-indigo-100">
+          <label className="block text-sm font-semibold text-app-text"><UiText text={"目标项目"} /><select aria-label={translateUi("选择目标项目")} value={projectId} onChange={(event) => { setProjectId(event.target.value); setCopyState("idle"); }} className="mt-2 min-h-11 w-full rounded-field border border-app-border bg-app-surface px-3.5 py-2.5 text-sm font-normal focus:border-app-accent-border focus:outline-none focus:ring-4 focus:ring-app-accent-border app-field">
               <option value=""><UiText text={"请选择项目"} /></option>
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
           </label>
-          <p className="text-xs leading-5 text-slate-500"><UiText text={"这里列出你可访问的进行中项目；保存资料需要编辑权限。选择目标后复制正文，再到项目的“添加资料”窗口粘贴并确认保存。"} /></p>
+          <p className="text-xs leading-5 text-app-muted"><UiText text={"这里列出你可访问的进行中项目；保存资料需要编辑权限。选择目标后复制正文，再到项目的“添加资料”窗口粘贴并确认保存。"} /></p>
           <DialogActions>
-            <button type="button" onClick={() => void copyBody()} disabled={!selectedProject} className="min-h-10 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"><UiText text={"复制正文"} /></button>
-            {selectedProject && (copyState === "copied" || copyState === "fallback") ? <Link href={buildProjectMaterialsAddHref(selectedProject.id)} onClick={() => setOpen(false)} className="inline-flex min-h-10 items-center rounded-lg border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><UiText text={"前往项目并粘贴"} /></Link> : null}
+            <button type="button" onClick={() => void copyBody()} disabled={!selectedProject} className="min-h-10 rounded-control px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 app-button-primary"><UiText text={"复制正文"} /></button>
+            {selectedProject && (copyState === "copied" || copyState === "fallback") ? <Link href={buildProjectMaterialsAddHref(selectedProject.id)} onClick={() => setOpen(false)} className="inline-flex min-h-10 items-center rounded-control border px-4 py-2 text-xs font-semibold app-button-secondary"><UiText text={"前往项目并粘贴"} /></Link> : null}
           </DialogActions>
-          {copyState === "copied" ? <p className="text-xs text-emerald-700" role="status"><UiText text={"正文已复制。前往项目后，在“文本资料”中粘贴并保存。"} /></p> : null}
+          {copyState === "copied" ? <p className="text-xs text-app-success-ink app-feedback-success" role="status"><UiText text={"正文已复制。前往项目后，在“文本资料”中粘贴并保存。"} /></p> : null}
           {copyState === "fallback" ? (
-            <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3" role="alert">
-              <p className="text-xs leading-5 text-amber-900"><UiText text={"自动复制失败。先选择下方正文，再按 Ctrl+C 或 ⌘C 复制；复制后可前往项目粘贴。"} /></p>
-              <textarea ref={fallbackTextareaRef} aria-label={translateUi("待手动复制的个人知识正文")} readOnly value={content} rows={5} className="w-full resize-y rounded-lg border border-amber-200 bg-white p-3 text-xs leading-5 text-slate-700" />
-              <button type="button" onClick={selectFallbackBody} className="min-h-9 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900"><UiText text={"选择正文"} /></button>
+            <div className="space-y-2 rounded-field border border-app-warning-border bg-app-warning-soft p-3 app-feedback-warning" role="alert">
+              <p className="text-xs leading-5 text-app-warning-ink"><UiText text={"自动复制失败。先选择下方正文，再按 Ctrl+C 或 ⌘C 复制；复制后可前往项目粘贴。"} /></p>
+              <textarea ref={fallbackTextareaRef} aria-label={translateUi("待手动复制的个人知识正文")} readOnly value={content} rows={5} className="w-full resize-y rounded-field border border-app-warning-border bg-app-surface p-3 text-xs leading-5 text-app-text app-field app-field-warning" />
+              <button type="button" onClick={selectFallbackBody} className="min-h-9 rounded-control border border-app-warning-border bg-app-surface px-3 py-2 text-xs font-semibold text-app-warning-ink"><UiText text={"选择正文"} /></button>
             </div>
           ) : null}
         </div>

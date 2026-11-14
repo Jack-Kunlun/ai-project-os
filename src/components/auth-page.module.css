@@ -141,9 +141,9 @@
 .workspace {
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
-  box-shadow: 0 14px 30px rgb(51 77 119 / 6%);
+  box-shadow: none;
 }
 
 .workspaceTop {
@@ -166,7 +166,7 @@
 .workspaceTop i {
   width: 13px;
   height: 13px;
-  border-radius: 3px;
+  border-radius: var(--radius-field);
   background: var(--app-accent);
 }
 
@@ -225,7 +225,7 @@
 .workspaceTitle small {
   flex: 0 0 auto;
   padding: 3px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-field);
   background: var(--app-accent-soft);
   color: var(--app-link);
   font-size: 8px;
@@ -269,7 +269,7 @@
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--app-border);
-  border-radius: 3px;
+  border-radius: var(--radius-field);
   color: var(--app-link);
   font-size: 7px;
   font-style: normal;
@@ -289,9 +289,9 @@
   width: 244px;
   padding: 14px 16px;
   border: 1px solid var(--app-border);
-  border-radius: 7px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
-  box-shadow: 0 8px 22px rgb(50 74 114 / 7%);
+  box-shadow: none;
 }
 
 .sourceCard .sourceTitle {
@@ -329,7 +329,7 @@
 .sourceTags span {
   padding: 2px 5px;
   border: 1px solid var(--app-border);
-  border-radius: 3px;
+  border-radius: var(--radius-field);
   color: var(--app-link);
   font-size: 8px;
   white-space: nowrap;
@@ -339,9 +339,9 @@
   min-width: 0;
   padding: 24px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
-  box-shadow: 0 12px 44px rgb(42 66 108 / 4%), 0 2px 6px rgb(42 66 108 / 2%);
+  box-shadow: none;
 }
 
 .footer {
@@ -493,10 +493,10 @@
   display: block;
   width: 100%;
   min-width: 0;
-  height: 44px;
+  height: 40px;
   padding: 0 12px;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-field);
   outline: none;
   background: var(--app-input);
   color: var(--app-text);
@@ -554,11 +554,11 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  height: 44px;
+  height: 40px;
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-field);
   background: var(--app-input);
 }
 
@@ -674,9 +674,9 @@
 .smsCodeField :global(input),
 .emailCodeField :global(input) {
   box-sizing: border-box;
-  height: 44px;
+  height: 40px;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-field);
   background: var(--app-input);
   padding: 0 12px;
   color: var(--app-text);
@@ -693,10 +693,11 @@
 
 .smsCodeField :global(button),
 .emailCodeField :global(button) {
-  height: 44px;
+  height: 40px;
+  min-height: 40px;
   min-width: 112px;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--app-surface-soft);
   padding: 0 9px;
   color: var(--app-link);
@@ -849,11 +850,11 @@
 }
 
 .identitySummary button {
-  min-height: 32px;
+  min-height: 40px;
   flex: 0 0 auto;
   padding: 0 8px;
   border: 1px solid var(--app-border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: var(--app-surface);
   color: var(--app-link);
   font: inherit;
@@ -879,11 +880,11 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  height: 44px;
+  height: 40px;
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-field);
   background: var(--app-input);
 }
 
@@ -923,7 +924,7 @@
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--app-muted);
 }
@@ -1051,9 +1052,9 @@
 
 .submitButton:hover:not(:disabled),
 .actionLinkButton:hover {
-  border-color: #2954af;
-  background: #2954af;
-  color: #fff;
+  border-color: var(--app-accent-hover);
+  background: var(--app-accent-hover);
+  color: var(--app-on-accent);
   text-decoration: none;
 }
 
@@ -1123,7 +1124,7 @@
   gap: 9px;
   padding: 8px 12px;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--app-surface);
   color: var(--app-text);
   font: inherit;
@@ -1335,6 +1336,23 @@
   .registerCredentialFields > div:first-child {
     grid-column: auto;
   }
+}
+
+@media (max-width: 700px) {
+  .fieldInput,
+  .textInput,
+  .phoneInput,
+  .inputShell,
+  .phoneShell,
+  .smsCodeField :global(input),
+  .emailCodeField :global(input),
+  .smsCodeField :global(button),
+  .emailCodeField :global(button),
+  .passwordShell { height: 44px; }
+
+  .smsCodeField :global(button),
+  .emailCodeField :global(button),
+  .identitySummary button { min-height: 44px; }
 }
 
 @media (max-width: 360px) {

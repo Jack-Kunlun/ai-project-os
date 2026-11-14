@@ -70,18 +70,18 @@ export function CreateProjectDialog({ workspaceId, onClose, onCreated }: { works
   }
 
   return <WorkspaceDialog title="新建项目" open onClose={close} busy={pending} inquiryEnabled={false} compact closeLabel="关闭" footer={<div className="flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="min-w-0 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{workspaceName ? <><UiText text="创建在" /> <span>{workspaceName}</span></> : <UiText text="创建在当前工作区" />}</p>
+        <p className="min-w-0 text-xs leading-5 text-app-muted [overflow-wrap:anywhere]">{workspaceName ? <><UiText text="创建在" /> <span>{workspaceName}</span></> : <UiText text="创建在当前工作区" />}</p>
         <div className="flex shrink-0 justify-end gap-4">
-          <button data-dialog-close type="button" onClick={close} disabled={pending} className="app-action-button rounded-lg border border-slate-200 font-semibold text-slate-600"><UiText text="取消" /></button>
-          <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="app-action-button rounded-lg bg-indigo-600 font-semibold text-white disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
+          <button data-dialog-close type="button" onClick={close} disabled={pending} className="app-button-secondary rounded-control border font-semibold"><UiText text="取消" /></button>
+          <button type="submit" form="projects-create-form" disabled={pending || !name.trim()} className="app-button-primary rounded-control font-semibold disabled:opacity-50">{pending ? t("创建中…") : t("创建项目")}</button>
         </div>
       </div>}>
         <form id="projects-create-form" onSubmit={submit}>
-          <label htmlFor="projects-project-name" className="text-sm font-semibold text-slate-700"><UiText text="项目名称" /></label>
-          <input id="projects-project-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("给项目一个清晰的名字")} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-          <label htmlFor="projects-project-description" className="mt-5 block text-sm font-semibold text-slate-700"><UiText text="项目描述" /> <span className="font-normal text-slate-400"><UiText text="（可选）" /></span></label>
-          <textarea id="projects-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder={t("这个项目要达成什么？")} className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-          {error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
+          <label htmlFor="projects-project-name" className="text-sm font-semibold text-app-text"><UiText text="项目名称" /></label>
+          <input id="projects-project-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder={t("给项目一个清晰的名字")} className="mt-2 w-full rounded-field border border-app-border bg-app-surface px-4 py-3 text-sm outline-none focus:border-app-accent-border focus:ring-4 focus:ring-app-accent-border app-field" />
+          <label htmlFor="projects-project-description" className="mt-4 block text-sm font-semibold text-app-text"><UiText text="项目描述" /> <span className="font-normal text-app-muted"><UiText text="（可选）" /></span></label>
+          <textarea id="projects-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder={t("这个项目要达成什么？")} className="mt-2 w-full resize-none rounded-field border border-app-border px-4 py-3 text-sm outline-none focus:border-app-accent-border focus:ring-4 focus:ring-app-accent-border app-field" />
+          {error ? <p role="alert" className="mt-4 rounded-field bg-app-danger-soft px-4 py-3 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
         </form>
     </WorkspaceDialog>;
 }

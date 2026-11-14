@@ -71,7 +71,7 @@
 }
 
 .statusGood { color: var(--app-muted); background: var(--app-surface-soft); }
-.statusWarning { color: var(--app-muted); background: var(--app-warning-soft); }
+.statusWarning { color: var(--app-warning-ink); background: var(--app-warning-soft); }
 .statusRisk { color: var(--app-muted); background: var(--app-danger-soft); }
 .statusNeutral { color: var(--app-muted); background: var(--app-surface-soft); }
 
@@ -149,7 +149,7 @@
   gap: 11px;
   margin-bottom: 20px;
   border: 1px solid var(--app-warning-border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   padding: 11px 14px;
   color: var(--app-muted);
   background: var(--app-warning-soft);
@@ -212,7 +212,7 @@
 .continuePanel {
   min-width: 0;
   border: 1px solid var(--app-border);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   padding: 20px;
   background: var(--app-surface);
 }
@@ -294,7 +294,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #87977c;
+  background: var(--app-success-fill);
 }
 
 .worldSummary {
@@ -330,7 +330,7 @@
 
 .emptyGoal {
   margin-top: 20px;
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
   padding: 14px;
   background: var(--app-surface-soft);
 }
@@ -365,10 +365,10 @@
   height: 7px;
   flex: 0 0 7px;
   border-radius: 50%;
-  background: #aab5a0;
+  background: var(--app-muted);
 }
 
-.workActive { background: #879b82; }
+.workActive { background: var(--app-accent); }
 .workBlocked { background: var(--app-danger-ink); }
 
 .workCopy,
@@ -491,7 +491,7 @@
   display: grid;
   gap: 5px;
   margin-top: 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
   padding: 12px;
   color: inherit;
   background: var(--app-surface-soft);
@@ -507,7 +507,7 @@
 .governanceDetails {
   margin-top: 19px;
   border: 1px solid var(--app-border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
 }
 
@@ -546,7 +546,7 @@
 
 .snapshotFooter button {
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 6px 9px;
   color: var(--app-muted);
   background: var(--app-surface);
@@ -560,16 +560,16 @@
 .inlineError,
 .inlineSuccess,
 .error {
-  border-radius: 6px;
-  padding: 10px 13px;
-  font-size: 11px;
-  line-height: 1.65;
+  border-radius: var(--radius-field);
+  padding: 12px 16px;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
-.archiveNotice { color: var(--app-muted); background: var(--app-warning-soft); }
+.archiveNotice { color: var(--app-warning-ink); background: var(--app-warning-soft); }
 .inlineError,
-.error { color: var(--app-muted); background: var(--app-danger-soft); }
-.inlineSuccess { color: var(--app-muted); background: var(--app-success-soft); }
+.error { color: var(--app-danger-ink); background: var(--app-danger-soft); }
+.inlineSuccess { color: var(--app-success-ink); background: var(--app-success-soft); }
 
 .error {
   display: flex;
@@ -578,21 +578,12 @@
   gap: 12px;
 }
 
-.error button {
-  border: 0;
-  color: var(--app-muted);
-  background: transparent;
-  font-size: 10px;
-  font-weight: 650;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 
 .skeletonPage { display: grid; gap: 17px; }
 .skeletonHeading,
 .skeletonMetrics > div,
 .skeletonMain > div {
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: linear-gradient(100deg, var(--app-surface-soft) 20%, var(--app-border) 40%, var(--app-surface-soft) 60%);
   background-size: 200% 100%;
   animation: shimmer 1.25s linear infinite;

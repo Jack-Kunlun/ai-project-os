@@ -82,30 +82,30 @@ export function ProjectSourceDetailClient({ username, isSystemAdmin }: { usernam
       <div data-page-content>
         <div className="mb-5">{fromNotifications ? <ParentPageLink href="/notifications" label={translateUi("返回通知中心")} /> : safeReturnTo ? <ParentPageLink href={safeReturnTo} label={translateUi("返回原始资料")} scroll={false} /> : <ProjectMaterialsParentLink projectId={projectId} />}</div>
         <section className="pb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600"><UiText text={"Source detail"} /></p>
-          <h1 className="mt-3 text-3xl font-semibold"><UiText text={"项目资料详情"} /></h1>
-          <p className="mt-2 font-mono text-xs text-slate-400 [overflow-wrap:anywhere]">{sourceId}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-app-link"><UiText text={"Source detail"} /></p>
+          <h1 className="app-page-title mt-3 font-semibold"><UiText text={"项目资料详情"} /></h1>
+          <p className="mt-2 font-mono text-xs text-app-muted [overflow-wrap:anywhere]">{sourceId}</p>
         </section>
-        {error ? <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><p><UiErrorText text={error} /></p><button type="button" onClick={() => void load()} className="mt-3 font-semibold underline underline-offset-4"><UiText text={"重试"} /></button></div> : null}
-        {loading && !source ? <div className="h-72 animate-pulse rounded-md bg-slate-200" aria-label={translateUi("正在加载资料详情")} /> : source ? <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(260px,0.75fr)]">
-          <section className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
-            <div className="border-b border-slate-100 p-5 sm:p-6"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-semibold text-slate-600"><UiText text={"原始资料"} /></span></div><h2 className="mt-3 text-lg font-semibold"><UiText text={"原始资料内容"} /></h2></div>
+        {error ? <div role="alert" className="rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><p><UiErrorText text={error} /></p><button type="button" onClick={() => void load()} className="mt-3 font-semibold underline underline-offset-4"><UiText text={"重试"} /></button></div> : null}
+        {loading && !source ? <div className="h-72 animate-pulse rounded-control bg-app-surface-soft" aria-label={translateUi("正在加载资料详情")} /> : source ? <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(260px,0.75fr)]">
+          <section className="min-w-0 overflow-hidden rounded-panel border border-app-border bg-app-surface app-panel">
+            <div className="border-b border-app-border p-5 sm:p-6"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-app-accent-soft px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide text-app-link">{source.kind}</span><span className="rounded-full border border-app-border bg-app-surface-soft px-2.5 py-1 text-[12px] font-semibold text-app-muted"><UiText text={"原始资料"} /></span></div><h2 className="mt-3 text-lg font-semibold"><UiText text={"原始资料内容"} /></h2></div>
             <pre data-source-document className="whitespace-pre-wrap break-words p-5 text-sm leading-7 sm:p-6">{source.contentText}</pre>
           </section>
           <aside className="min-w-0 space-y-4">
-            <section className="rounded-md border border-slate-200 bg-white p-5">
+            <section className="rounded-panel border border-app-border bg-app-surface p-5 app-panel">
               <h2 className="text-sm font-semibold"><UiText text={"资料信息"} /></h2>
               <dl className="mt-4 space-y-4 text-sm">
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"资料类型"} /></dt><dd className="mt-1 break-words">{source.kind}</dd></div>
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"外部来源"} /></dt><dd className="mt-1 break-all">{source.externalRef ?? <UiText text={"未提供外部来源"} />}</dd></div>
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"资料时间"} /></dt><dd className="mt-1">{formatDate(source.capturedAt, language)}</dd></div>
-                <div><dt className="text-xs font-medium text-slate-500"><UiText text={"接入于"} /></dt><dd className="mt-1">{formatDate(source.ingestedAt, language)}</dd></div>
+                <div><dt className="text-xs font-medium text-app-muted"><UiText text={"资料类型"} /></dt><dd className="mt-1 break-words">{source.kind}</dd></div>
+                <div><dt className="text-xs font-medium text-app-muted"><UiText text={"外部来源"} /></dt><dd className="mt-1 break-all">{source.externalRef ?? <UiText text={"未提供外部来源"} />}</dd></div>
+                <div><dt className="text-xs font-medium text-app-muted"><UiText text={"资料时间"} /></dt><dd className="mt-1">{formatDate(source.capturedAt, language)}</dd></div>
+                <div><dt className="text-xs font-medium text-app-muted"><UiText text={"接入于"} /></dt><dd className="mt-1">{formatDate(source.ingestedAt, language)}</dd></div>
               </dl>
-              <div className="mt-4 border-t border-slate-100 pt-4"><p className="text-xs font-semibold text-slate-500"><UiText text={"SHA-256"} /></p><code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code></div>
+              <div className="mt-4 border-t border-app-border pt-4"><p className="text-xs font-semibold text-app-muted"><UiText text={"SHA-256"} /></p><code className="mt-2 block break-all text-xs leading-5 text-app-muted">{source.contentHash}</code></div>
             </section>
-            <section aria-label={translateUi("资料下一步")} className="border-t border-slate-200 pt-5">
+            <section aria-label={translateUi("资料下一步")} className="border-t border-app-border pt-5">
               <h2 className="text-sm font-semibold"><UiText text={"资料已保存，接下来做什么？"} /></h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={"可直接整理这份资料；有原文依据且符合条件的内容形成事实，其余结果待核对。想查资料时，再单独确认更新问答索引。"} /></p>
+              <p className="mt-2 text-sm leading-6 text-app-muted"><UiText text={"可直接整理这份资料；有原文依据且符合条件的内容形成事实，其余结果待核对。想查资料时，再单独确认更新问答索引。"} /></p>
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <OperationPanel title={translateUi("整理这份资料")} triggerLabel="继续 AI 整理"><ProjectFactImport projectId={projectId} sourceIds={[source.id]} onChanged={async () => undefined} /></OperationPanel>
               </div>

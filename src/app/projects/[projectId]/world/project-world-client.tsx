@@ -106,16 +106,16 @@ export type WorldPayload = {
 };
 
 const statusMeta: Record<WorldStatus, { label: string; detail: string; tone: string; glow: string }> = {
-  on_track: { label: "运行正常", detail: "当前事实、关系与计划未出现阻断信号", tone: "bg-emerald-50 text-emerald-700 ring-emerald-200", glow: "bg-emerald-400" },
-  needs_attention: { label: "需要关注", detail: "存在风险、陈旧关系或需要处理的计划信号", tone: "bg-amber-50 text-amber-800 ring-amber-200", glow: "bg-amber-400" },
-  at_risk: { label: "存在风险", detail: "存在问题、事实冲突或受阻计划", tone: "bg-rose-50 text-rose-700 ring-rose-200", glow: "bg-rose-400" },
-  insufficient_data: { label: "资料不足", detail: "尚无当前有效、已确认的项目事实", tone: "bg-slate-100 text-slate-600 ring-slate-200", glow: "bg-slate-400" },
+  on_track: { label: "运行正常", detail: "当前事实、关系与计划未出现阻断信号", tone: "bg-app-success-soft text-app-success-ink ring-app-success-border", glow: "bg-app-success" },
+  needs_attention: { label: "需要关注", detail: "存在风险、陈旧关系或需要处理的计划信号", tone: "bg-app-warning-soft text-app-warning-ink ring-app-warning-border", glow: "bg-app-warning" },
+  at_risk: { label: "存在风险", detail: "存在问题、事实冲突或受阻计划", tone: "bg-app-danger-soft text-app-danger-ink ring-app-danger-border", glow: "bg-app-danger" },
+  insufficient_data: { label: "资料不足", detail: "尚无当前有效、已确认的项目事实", tone: "bg-app-surface-soft text-app-muted ring-app-accent-border", glow: "bg-app-surface-soft" },
 };
 const factMeta: Record<FactType, { label: string; tone: string }> = {
-  decision: { label: "决策", tone: "bg-indigo-50 text-indigo-700" },
-  progress: { label: "进展", tone: "bg-emerald-50 text-emerald-700" },
-  issue: { label: "问题", tone: "bg-rose-50 text-rose-700" },
-  risk: { label: "风险", tone: "bg-amber-50 text-amber-700" },
+  decision: { label: "决策", tone: "bg-app-accent-soft text-app-link" },
+  progress: { label: "进展", tone: "bg-app-success-soft text-app-success-ink" },
+  issue: { label: "问题", tone: "bg-app-danger-soft text-app-danger-ink" },
+  risk: { label: "风险", tone: "bg-app-warning-soft text-app-warning-ink" },
 };
 const lifecycleLabels: Record<FactLifecycle, string> = {
   active: "当前有效",
@@ -244,7 +244,7 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
 
   const RootElement = embedded ? "section" : "main";
   return (
-    <RootElement className={embedded ? "text-slate-950" : "min-h-screen bg-[var(--app-bg)] text-slate-950"}>
+    <RootElement className={embedded ? "text-app-text" : "min-h-screen bg-[var(--app-bg)] text-app-text"}>
       {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="world" isSystemAdmin={isSystemAdmin} /> : null}
       <div data-page-content={!embedded ? "" : undefined} className={embedded ? "" : ui.page}>
         {!embedded ? <>        <div className="mb-5"><ProjectOverviewParentLink projectId={projectId} /></div>
@@ -255,11 +255,11 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
             <p>{translateUi(meta.detail)}</p>
             <button type="button" onClick={() => void mutate({ operation: "captureState" }, "capture", "当前项目状态已固化；相同输入不会重复创建快照。")} disabled={!canEdit || pending !== null} className={`${ui.button} mt-4`}>{pending === "capture" ? <UiText text="固化中…" /> : <UiText text="固化当前状态" />}</button>
           </div>
-        </section></> : <div className="mb-5 flex items-center justify-between gap-4"><p className="text-xs text-slate-500"><UiText text={"当前项目状态与完整审计记录"} /></p><button type="button" onClick={() => void mutate({ operation: "captureState" }, "capture", "当前项目状态已固化。")} disabled={!canEdit || pending !== null} className="rounded border border-slate-200 px-3 py-2 text-xs"><UiText text={"固化状态快照"} /></button></div>}
+        </section></> : <div className="mb-5 flex items-center justify-between gap-4"><p className="text-xs text-app-muted"><UiText text={"当前项目状态与完整审计记录"} /></p><button type="button" onClick={() => void mutate({ operation: "captureState" }, "capture", "当前项目状态已固化。")} disabled={!canEdit || pending !== null} className="rounded-control border border-app-border px-3 py-2 text-xs"><UiText text={"固化状态快照"} /></button></div>}
 
-        {world?.permission === "view" ? <div className="mt-5 text-sm leading-6 text-slate-600"><UiText text={"你当前拥有只读权限，可以查看状态、证据和历史，但不能建立关系、替代事实或固化快照。"} /></div> : null}
-        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-md border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void reload()} className="inline-flex min-h-9 items-center justify-center font-semibold underline underline-offset-4"><UiText text={"重试"} /></button></div> : null}
-        {message ? <div role="status" className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700"><UiFeedbackText text={message} /></div> : null}
+        {world?.permission === "view" ? <div className="mt-5 text-sm leading-6 text-app-muted"><UiText text={"你当前拥有只读权限，可以查看状态、证据和历史，但不能建立关系、替代事实或固化快照。"} /></div> : null}
+        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void reload()} className="app-feedback-action"><UiText text={"重试"} /></button></div> : null}
+        {message ? <div role="status" className="mt-5 rounded-field border border-app-success-border bg-app-success-soft px-5 py-4 text-sm text-app-success-ink app-feedback-success"><UiFeedbackText text={message} /></div> : null}
 
         <section className={`mt-6 grid gap-4 ${embedded ? "grid-cols-2 sm:grid-cols-3" : "sm:grid-cols-2 lg:grid-cols-6"}`} aria-label={translateUi("项目状态指标")}>
           <Metric embedded={embedded} label={translateUi("当前事实")} value={world?.state.counts.activeFacts ?? 0} detail={translateUi("关联工作项 {count}").replace("{count}", String(world?.state.counts.linkedWorkItems ?? 0))} loading={loading} />
@@ -278,36 +278,36 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
             </div>
           </div>
           <aside className="space-y-6">
-            <section className={embedded ? "border-t border-slate-200 pt-4" : "rounded-md border border-slate-200 bg-white p-6"}>
+            <section className={[embedded ? "" : "app-panel", (embedded ? "border-t border-app-border pt-4" : "rounded-panel border border-app-border bg-app-surface p-6")].filter(Boolean).join(' ')}>
               <SectionHeading embedded={embedded} eyebrow="State manifest" title={translateUi("状态指纹")} detail="每次计算都固定实际输入，便于复现与核对。" compact />
-              <dl className="mt-5 space-y-4 text-xs"><FingerprintRow label={translateUi("输入清单")} value={world?.state.inputManifestFingerprint} /><FingerprintRow label={translateUi("当前状态")} value={world?.state.snapshotFingerprint} /><div><dt className="text-slate-400"><UiText text={"计算时点"} /></dt><dd className="mt-1 font-medium text-slate-700">{formatDate(world?.state.asOf ?? null, language)}</dd></div></dl>
+              <dl className="mt-5 space-y-4 text-xs"><FingerprintRow label={translateUi("输入清单")} value={world?.state.inputManifestFingerprint} /><FingerprintRow label={translateUi("当前状态")} value={world?.state.snapshotFingerprint} /><div><dt className="text-app-muted"><UiText text={"计算时点"} /></dt><dd className="mt-1 font-medium text-app-text">{formatDate(world?.state.asOf ?? null, language)}</dd></div></dl>
             </section>
-            <section className={embedded ? "border-t border-slate-200 pt-4" : "rounded-md border border-slate-200 bg-white p-6"}>
+            <section className={[embedded ? "" : "app-panel", (embedded ? "border-t border-app-border pt-4" : "rounded-panel border border-app-border bg-app-surface p-6")].filter(Boolean).join(' ')}>
               <SectionHeading embedded={embedded} eyebrow="Plan health" title={translateUi("计划联动")} detail="状态与项目计划使用同一套确定性健康度。" compact />
               <div className="mt-5 grid grid-cols-2 gap-3 text-center text-xs"><SmallMetric embedded={embedded} label={translateUi("逾期")} value={world?.state.planHealth.counts.overdue ?? 0} /><SmallMetric embedded={embedded} label={translateUi("受阻")} value={world?.state.planHealth.counts.blocked ?? 0} /><SmallMetric embedded={embedded} label={translateUi("即将到期")} value={world?.state.planHealth.counts.dueSoon ?? 0} /><SmallMetric embedded={embedded} label={translateUi("未分配")} value={world?.state.planHealth.counts.unassigned ?? 0} /></div>
-              <Link href={`/projects/${projectId}/plan`} className="mt-5 flex min-h-11 items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"><UiText text={"打开项目计划"} /></Link>
+              <Link href={`/projects/${projectId}/plan`} className="mt-5 flex min-h-11 items-center justify-center rounded-control border px-4 py-2.5 text-sm font-semibold app-button-primary"><UiText text={"打开项目计划"} /></Link>
             </section>
           </aside>
         </section>
 
         {canEdit ? <section className="mt-10 flex flex-wrap gap-3">
           <OperationPanel title={translateUi("建立事实关系")} triggerLabel="建立事实关系" open={relationOperationOpen} onOpenChange={(open) => { setRelationOperationOpen(open); if (open) setError(null); }} disabled={pending !== null} description="关系只连接已确认的当前事实，并固定双方当前证据版本；事实变化后旧关系会自动标记为陈旧。">
-          {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
+          {error ? <p role="alert" className="mb-4 rounded-field bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
           <Workbench>
             <SelectField label={translateUi("起点事实")} value={sourceItemId} onChange={setSourceItemId} disabled={!canEdit}><option value=""><UiText text={"选择事实"} /></option>{activeFacts.map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <SelectField label={translateUi("关系")} value={relationKind} onChange={(value) => setRelationKind(value as RelationKind)} disabled={!canEdit}>{(Object.keys(relationLabels) as RelationKind[]).map((kind) => <option key={kind} value={kind}>{translateUi(relationLabels[kind])}</option>)}</SelectField>
             <SelectField label={translateUi("终点事实")} value={targetItemId} onChange={setTargetItemId} disabled={!canEdit}><option value=""><UiText text={"选择事实"} /></option>{activeFacts.filter((fact) => fact.id !== sourceItemId).map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <TextField label={translateUi("关系依据")} value={relationRationale} onChange={setRelationRationale} placeholder={translateUi("说明为何建立这条关系，便于后续人工复核。")} disabled={!canEdit} />
-            <DialogActions><button type="button" onClick={async () => { if (await createRelation()) setRelationOperationOpen(false); }} disabled={pending !== null || !sourceItemId || !targetItemId || !relationRationale.trim()} className="app-action-button app-action-button--compact rounded-xl bg-indigo-600 font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">{pending === "create-relation" ? <UiText text={"建立中…"} /> : <UiText text={"建立关系"} />}</button></DialogActions>
+            <DialogActions><button type="button" onClick={async () => { if (await createRelation()) setRelationOperationOpen(false); }} disabled={pending !== null || !sourceItemId || !targetItemId || !relationRationale.trim()} className="app-button-primary app-button-compact rounded-control font-semibold disabled:opacity-40">{pending === "create-relation" ? <UiText text={"建立中…"} /> : <UiText text={"建立关系"} />}</button></DialogActions>
           </Workbench>
           </OperationPanel>
           <OperationPanel title={translateUi("建立事实替代链")} triggerLabel="建立事实替代链" open={supersessionOperationOpen} onOpenChange={(open) => { setSupersessionOperationOpen(open); if (open) setError(null); }} disabled={pending !== null} description="选择同类型的新事实替代旧事实。旧事实会成为只读历史；该操作不能撤销或形成循环。">
-          {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}
+          {error ? <p role="alert" className="mb-4 rounded-field bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
           <Workbench>
             <SelectField label={translateUi("被替代的旧事实")} value={predecessorItemId} onChange={(value) => { setPredecessorItemId(value); setSuccessorItemId(""); }} disabled={!canEdit}><option value=""><UiText text={"选择旧事实"} /></option>{activeFacts.map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <SelectField label={translateUi("作为当前版本的新事实")} value={successorItemId} onChange={setSuccessorItemId} disabled={!canEdit || !predecessor}><option value=""><UiText text={"选择同类型新事实"} /></option>{successorOptions.map((fact) => <option key={fact.id} value={fact.id}>{translateUi(factMeta[fact.type].label)} · {fact.title}</option>)}</SelectField>
             <TextField label={translateUi("替代理由")} value={supersessionReason} onChange={setSupersessionReason} placeholder={translateUi("说明变化原因和新事实适用范围。")} disabled={!canEdit} />
-            <DialogActions><button type="button" onClick={async () => { if (await supersede()) setSupersessionOperationOpen(false); }} disabled={pending !== null || !predecessorItemId || !successorItemId || !supersessionReason.trim()} className="app-action-button app-action-button--compact rounded-xl bg-slate-950 font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{pending === "supersede" ? <UiText text={"建立中…"} /> : <UiText text={"确认建立替代链"} />}</button></DialogActions>
+            <DialogActions><button type="button" onClick={async () => { if (await supersede()) setSupersessionOperationOpen(false); }} disabled={pending !== null || !predecessorItemId || !successorItemId || !supersessionReason.trim()} className="app-button-primary app-button-compact rounded-control font-semibold disabled:opacity-40">{pending === "supersede" ? <UiText text={"建立中…"} /> : <UiText text={"确认建立替代链"} />}</button></DialogActions>
           </Workbench>
           </OperationPanel>
         </section> : null}
@@ -322,8 +322,8 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
         <section className="mt-10 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <div>
             <SectionHeading embedded={embedded} eyebrow="Open conflicts" title={translateUi("当前冲突")} detail="这里只展示同时指向当前有效事实的开放冲突；处置仍在记忆质量页面完成。" />
-            <div className="mt-4 space-y-3">{(world?.qualityIssues.filter((issue) => issue.kind === "conflict") ?? []).length === 0 ? <Empty embedded={embedded} title={translateUi("没有当前事实冲突")} detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-md border border-rose-200 bg-white p-5"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-rose-600"><UiText text={"冲突强度"} />{" "}{Math.round(issue.score * 100)}%</span><span className="text-[12px] text-slate-400">{formatDate(issue.detectedAt, language)}</span></div><p className="mt-3 text-sm leading-6 text-slate-600">{issue.explanation}</p></article>)}</div>
-            <Link href={`/projects/${projectId}/memory-quality`} className="mt-4 flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700"><UiText text={"进入记忆质量处置"} /></Link>
+            <div className="mt-4 space-y-3">{(world?.qualityIssues.filter((issue) => issue.kind === "conflict") ?? []).length === 0 ? <Empty embedded={embedded} title={translateUi("没有当前事实冲突")} detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-panel border app-panel-danger bg-app-surface p-5 app-panel"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-app-danger-ink"><UiText text={"冲突强度"} />{" "}{Math.round(issue.score * 100)}%</span><span className="text-[12px] text-app-muted">{formatDate(issue.detectedAt, language)}</span></div><p className="mt-3 text-sm leading-6 text-app-muted">{issue.explanation}</p></article>)}</div>
+            <Link href={`/projects/${projectId}/memory-quality`} className="mt-4 flex min-h-11 items-center justify-center rounded-control border px-4 py-2.5 text-sm font-semibold app-button-secondary"><UiText text={"进入记忆质量处置"} /></Link>
           </div>
           <div>
             <SectionHeading embedded={embedded} eyebrow="Immutable history" title={translateUi("状态快照与审计")} detail="快照和审计只追加、不覆盖；每条记录都保留操作者与发生时点。" />
@@ -334,9 +334,9 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
           </div>
         </section>
 
-        <section className={embedded ? "mt-10 border-t border-slate-200 pt-4" : "mt-10 rounded-md border border-slate-200 bg-white p-6"}>
+        <section className={[embedded ? "" : "app-panel", (embedded ? "mt-10 border-t border-app-border pt-4" : "mt-10 rounded-panel border border-app-border bg-app-surface p-6")].filter(Boolean).join(' ')}>
           <SectionHeading embedded={embedded} eyebrow="Historical facts" title={translateUi("非当前事实")} detail="这些事实不会进入当前状态判断，但证据、版本和替代链仍可追溯。" compact />
-          <div className="mt-5 flex flex-wrap gap-2">{world?.facts.filter((fact) => fact.lifecycle !== "active").map((fact) => <span key={fact.id} title={fact.title} className="rounded-full bg-slate-100 px-3 py-2 text-xs font-medium text-slate-600">{translateUi(lifecycleLabels[fact.lifecycle])} · {fact.title}</span>)}{!loading && world?.facts.every((fact) => fact.lifecycle === "active") ? <span className="text-sm text-slate-400"><UiText text={"当前没有非当前事实。"} /></span> : null}</div>
+          <div className="mt-5 flex flex-wrap gap-2">{world?.facts.filter((fact) => fact.lifecycle !== "active").map((fact) => <span key={fact.id} title={fact.title} className="rounded-full bg-app-surface-soft px-3 py-2 text-xs font-medium text-app-muted">{translateUi(lifecycleLabels[fact.lifecycle])} · {fact.title}</span>)}{!loading && world?.facts.every((fact) => fact.lifecycle === "active") ? <span className="text-sm text-app-muted"><UiText text={"当前没有非当前事实。"} /></span> : null}</div>
         </section>
       </div>
     </RootElement>
@@ -344,17 +344,17 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
 }
 
 function Metric({ label, value, detail, loading, embedded = false }: { label: string; value: number; detail: string; loading: boolean; embedded?: boolean }) {
-  return <article className={embedded ? "min-w-0" : "rounded-md border border-slate-200/80 bg-white p-5"}><p className="text-xs font-semibold text-slate-500">{label}</p>{loading ? <div className="mt-3 h-8 w-14 animate-pulse rounded bg-slate-100" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>}<p className="mt-3 text-xs text-slate-400"><UiText text={detail} /></p></article>;
+  return <article className={[embedded ? "" : "app-panel", (embedded ? "min-w-0" : "rounded-panel border border-app-border bg-app-surface p-5")].filter(Boolean).join(' ')}><p className="text-xs font-semibold text-app-muted">{label}</p>{loading ? <div className="mt-3 h-8 w-14 animate-pulse rounded-control bg-app-surface-soft" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>}<p className="mt-3 text-xs text-app-muted"><UiText text={detail} /></p></article>;
 }
 
 function SectionHeading({ eyebrow, title, detail, compact = false, embedded = false }: { eyebrow: string; title: string; detail: string; compact?: boolean; embedded?: boolean }) {
-  return <div>{!embedded ? <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">{eyebrow}</p> : null}<h2 className={`${embedded ? "" : "mt-2"} font-semibold tracking-tight ${compact && !embedded ? "text-xl" : "text-base"}`}>{title}</h2><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={detail} /></p></div>;
+  return <div>{!embedded ? <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link">{eyebrow}</p> : null}<h2 className={`${embedded ? "" : "mt-2"} font-semibold tracking-tight ${compact && !embedded ? "text-xl" : "text-base"}`}>{title}</h2><p className="mt-2 text-sm leading-6 text-app-muted"><UiText text={detail} /></p></div>;
 }
 
 function FactCard({ fact, embedded = false }: { fact: WorldFact; embedded?: boolean }) {
   const translateUi = useTranslate();
   const meta = factMeta[fact.type];
-  return <article className={`min-w-0 max-w-full overflow-hidden ${embedded ? "border-b border-slate-200 pb-4" : "rounded-md border border-slate-200 bg-white p-5"}`}><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{translateUi(meta.label)}</span><span className="text-[12px] text-slate-400"><UiText text={"证据版本 #"} />{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-slate-900">{fact.title}</h3>{fact.content.trim() !== fact.title.trim() ? <p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-slate-600">{fact.content}</p> : null}<div className={`mt-4 min-w-0 max-w-full overflow-hidden text-xs text-slate-500 ${embedded ? "border-t border-slate-200 pt-3" : "rounded-md bg-slate-50 p-4"}`}><p className="max-w-full [overflow-wrap:anywhere]"><UiText text={"来源："} />{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}><UiText text={"证据清单"} />{" "}{shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]"><UiText text={"工作项："} />{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
+  return <article className={[embedded ? "" : "app-panel", (`min-w-0 max-w-full overflow-hidden ${embedded ? "border-b border-app-border pb-4" : "rounded-panel border border-app-border bg-app-surface p-5"}`)].filter(Boolean).join(' ')}><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{translateUi(meta.label)}</span><span className="text-[12px] text-app-muted"><UiText text={"证据版本 #"} />{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-app-text">{fact.title}</h3>{fact.content.trim() !== fact.title.trim() ? <p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-app-muted">{fact.content}</p> : null}<div className={[embedded ? "" : "app-panel", (`mt-4 min-w-0 max-w-full overflow-hidden text-xs text-app-muted ${embedded ? "border-t border-app-border pt-3" : "rounded-panel bg-app-surface-soft p-4"}`)].filter(Boolean).join(' ')}><p className="max-w-full [overflow-wrap:anywhere]"><UiText text={"来源："} />{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}><UiText text={"证据清单"} />{" "}{shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]"><UiText text={"工作项："} />{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
 }
 
 function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, error, onErrorDismiss, onRetire, embedded = false }: {
@@ -372,11 +372,11 @@ function RelationCard({ relation, sourceTitle, targetTitle, canEdit, pending, er
   const translateUi = useTranslate();
   const [reason, setReason] = useState("");
   const [open, setOpen] = useState(false);
-  return <article className={`${embedded ? "border-b pb-5" : "rounded-md border bg-white p-5"} ${relation.stale ? "border-amber-200" : "border-slate-200"}`}>
-    <div className="flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{translateUi(relationLabels[relation.kind])}</span>{relation.stale ? <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700"><UiText text={"版本已变化"} /></span> : <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"><UiText text={"当前有效"} /></span>}</div>
-    <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm"><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{sourceTitle}</span><span className="text-slate-300">→</span><span className="rounded-xl bg-slate-50 p-3 font-medium text-slate-700">{targetTitle}</span></div>
-    <p className="mt-4 text-sm leading-6 text-slate-600">{relation.rationale}</p>
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>{relation.createdBy.displayName ?? relation.createdBy.username} · {formatDate(relation.createdAt, language)}</span>{canEdit ? <OperationPanel title={translateUi("退役事实关系")} triggerLabel="退役关系" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending !== null} description="退役会将该关系从当前状态判断中移除，并保留历史记录。请填写原因。">{error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"><UiErrorText text={error} /></p> : null}<div><label className="block text-sm font-medium text-slate-700"><UiText text={"退役理由"} /><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={translateUi("说明为何不再使用这条关系")} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm" /></label><DialogActions><button type="button" onClick={async () => { if (await onRetire(relation, reason)) { setReason(""); setOpen(false); } }} disabled={pending !== null || !reason.trim()} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-500 disabled:opacity-40">{pending === `retire-${relation.id}` ? <UiText text={"退役中…"} /> : <UiText text={"确认退役关系"} />}</button></DialogActions></div></OperationPanel> : null}</div>
+  return <article className={[embedded ? "" : "app-panel", (`${embedded ? "border-b pb-5" : "rounded-panel border bg-app-surface p-5"}  ${relation.stale ? "app-panel-warning" : "border-app-border"}`)].filter(Boolean).join(' ')}>
+    <div className="flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-app-accent-soft px-3 py-1 text-xs font-semibold text-app-link">{translateUi(relationLabels[relation.kind])}</span>{relation.stale ? <span className="rounded-full bg-app-warning-soft px-3 py-1 text-xs font-semibold text-app-warning-ink"><UiText text={"版本已变化"} /></span> : <span className="rounded-full bg-app-success-soft px-3 py-1 text-xs font-semibold text-app-success-ink"><UiText text={"当前有效"} /></span>}</div>
+    <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm"><span className="rounded-panel bg-app-surface-soft p-3 font-medium text-app-text">{sourceTitle}</span><span className="text-app-muted">→</span><span className="rounded-panel bg-app-surface-soft p-3 font-medium text-app-text">{targetTitle}</span></div>
+    <p className="mt-4 text-sm leading-6 text-app-muted">{relation.rationale}</p>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-app-border pt-4 text-[12px] text-app-muted"><span>{relation.createdBy.displayName ?? relation.createdBy.username} · {formatDate(relation.createdAt, language)}</span>{canEdit ? <OperationPanel title={translateUi("退役事实关系")} triggerLabel="退役关系" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending !== null} description="退役会将该关系从当前状态判断中移除，并保留历史记录。请填写原因。">{error ? <p role="alert" className="mb-4 rounded-field bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}<div><label className="block text-sm font-medium text-app-text"><UiText text={"退役理由"} /><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={translateUi("说明为何不再使用这条关系")} className="mt-2 min-h-11 w-full rounded-field border border-app-border bg-app-surface px-4 py-2.5 text-sm app-field" /></label><DialogActions><button type="button" onClick={async () => { if (await onRetire(relation, reason)) { setReason(""); setOpen(false); } }} disabled={pending !== null || !reason.trim()} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-control px-4 py-2 font-semibold disabled:opacity-40 app-button-danger">{pending === `retire-${relation.id}` ? <UiText text={"退役中…"} /> : <UiText text={"确认退役关系"} />}</button></DialogActions></div></OperationPanel> : null}</div>
   </article>;
 }
 
@@ -385,33 +385,33 @@ function Workbench({ children }: { children: React.ReactNode }) {
 }
 
 function SelectField({ label, value, onChange, disabled, children }: { label: string; value: string; onChange: (value: string) => void; disabled: boolean; children: React.ReactNode }) {
-  return <label className="block text-xs font-semibold text-slate-600">{label}<select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-normal outline-none focus:border-indigo-400 disabled:bg-slate-100">{children}</select></label>;
+  return <label className="block text-xs font-semibold text-app-muted">{label}<select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className="mt-2 min-h-11 w-full rounded-field border border-app-border bg-app-surface px-4 py-2.5 text-sm font-normal outline-none focus:border-app-accent-border disabled:bg-app-surface-soft app-field">{children}</select></label>;
 }
 
 function TextField({ label, value, onChange, placeholder, disabled }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; disabled: boolean }) {
-  return <label className="block text-xs font-semibold text-slate-600">{label}<textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} disabled={disabled} rows={3} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-normal leading-6 outline-none focus:border-indigo-400 disabled:bg-slate-100" /></label>;
+  return <label className="block text-xs font-semibold text-app-muted">{label}<textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} disabled={disabled} rows={3} className="mt-2 w-full rounded-field border border-app-border bg-app-surface px-4 py-3 text-sm font-normal leading-6 outline-none focus:border-app-accent-border disabled:bg-app-surface-soft app-field" /></label>;
 }
 
 function Empty({ title, detail, href, action, embedded = false }: { title: string; detail: string; href?: string; action?: string; embedded?: boolean }) {
-  return <div className={embedded ? "py-4 text-center" : "rounded-md border border-dashed border-slate-300 bg-white px-6 py-10 text-center"}><p className="font-semibold text-slate-700">{title}</p><p className="mt-2 text-sm leading-6 text-slate-500"><UiText text={detail} /></p>{href && action ? <Link href={href} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white"><UiText text={action} /></Link> : null}</div>;
+  return <div className={embedded ? "py-4 text-center" : "rounded-panel border border-dashed border-app-border bg-app-surface px-6 py-10 text-center"}><p className="font-semibold text-app-text">{title}</p><p className="mt-2 text-sm leading-6 text-app-muted"><UiText text={detail} /></p>{href && action ? <Link href={href} className="mt-4 inline-flex min-h-10 items-center justify-center rounded-control px-4 py-2 text-xs font-semibold app-button-primary"><UiText text={action} /></Link> : null}</div>;
 }
 
 function FingerprintRow({ label, value }: { label: string; value?: string }) {
-  return <div><dt className="text-slate-400">{label}</dt><dd className="mt-1 break-all font-mono text-[12px] font-medium text-slate-700" title={value}>{value ? shortFingerprint(value) : "—"}</dd></div>;
+  return <div><dt className="text-app-muted">{label}</dt><dd className="mt-1 break-all font-mono text-[12px] font-medium text-app-text" title={value}>{value ? shortFingerprint(value) : "—"}</dd></div>;
 }
 
 function SmallMetric({ label, value, embedded = false }: { label: string; value: number; embedded?: boolean }) {
-  return <div className={embedded ? "min-w-0" : "rounded-xl bg-slate-50 p-3"}><strong className="block text-xl text-slate-900">{value}</strong><span className="mt-1 block text-slate-400">{label}</span></div>;
+  return <div className={embedded ? "min-w-0" : "rounded-panel bg-app-surface-soft p-3"}><strong className="block text-xl text-app-text">{value}</strong><span className="mt-1 block text-app-muted">{label}</span></div>;
 }
 
 function HistoryPanel({ title, children, embedded = false }: { title: string; children: React.ReactNode; embedded?: boolean }) {
-  return <section className={embedded ? "border-t border-slate-200 pt-4" : "rounded-md border border-slate-200 bg-white p-5"}><h3 className="text-sm font-semibold text-slate-800">{title}</h3><div className="mt-4 divide-y divide-slate-100">{children}</div></section>;
+  return <section className={[embedded ? "" : "app-panel", (embedded ? "border-t border-app-border pt-4" : "rounded-panel border border-app-border bg-app-surface p-5")].filter(Boolean).join(' ')}><h3 className="text-sm font-semibold text-app-text">{title}</h3><div className="mt-4 divide-y divide-app-border">{children}</div></section>;
 }
 
 function HistoryRow({ title, detail, fingerprint }: { title: string; detail: string; fingerprint?: string }) {
-  return <div className="py-3 first:pt-0 last:pb-0"><p className="text-sm font-semibold text-slate-700">{title}</p><p className="mt-1 text-xs text-slate-400">{detail}</p>{fingerprint ? <p className="mt-1 font-mono text-[10px] text-slate-300">{shortFingerprint(fingerprint)}</p> : null}</div>;
+  return <div className="py-3 first:pt-0 last:pb-0"><p className="text-sm font-semibold text-app-text">{title}</p><p className="mt-1 text-xs text-app-muted">{detail}</p>{fingerprint ? <p className="mt-1 font-mono text-[10px] text-app-muted">{shortFingerprint(fingerprint)}</p> : null}</div>;
 }
 
 function HistoryEmpty({ children }: { children: React.ReactNode }) {
-  return <p className="py-6 text-center text-sm text-slate-400">{children}</p>;
+  return <p className="py-6 text-center text-sm text-app-muted">{children}</p>;
 }

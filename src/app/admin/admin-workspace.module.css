@@ -34,13 +34,13 @@
 .workspace :global(.admin-header-actions) { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 .workspace :global(.header-account) { position: relative; }
 .workspace :global(.header-avatar) { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border: 1px solid var(--app-border); border-radius: 50%; background: var(--app-surface-soft); color: var(--app-text); font-size: 11px; cursor: pointer; }
-.workspace :global(.header-account-popover) { position: absolute; right: 0; top: calc(100% + 10px); z-index: 100; display: flex; width: 210px; flex-direction: column; gap: 4px; border: 1px solid var(--app-border); border-radius: 6px; padding: 8px; background: var(--app-surface); box-shadow: 0 12px 40px #15274020; }
+.workspace :global(.header-account-popover) { position: absolute; right: 0; top: calc(100% + 10px); z-index: 100; display: flex; width: 210px; flex-direction: column; gap: 4px; border: 1px solid var(--app-border); border-radius: 6px; padding: 8px; background: var(--app-surface); box-shadow: var(--app-dialog-shadow); }
 .workspace :global(.header-account-popover strong) { padding: 10px; overflow-wrap: anywhere; font-size: 12px; }
 .workspace :global(.header-account-popover a),
 .workspace :global(.header-account-popover button) { display: block; width: 100%; border-radius: 4px; padding: 9px 10px; text-align: left; font-size: 12px; }
 .workspace :global(.header-account-popover a:hover),
 .workspace :global(.header-account-popover button:hover) { background: var(--app-surface-soft); }
-.workspace :global(.account-signout) { border-top: 1px solid var(--app-border); color: var(--app-danger, #bc514f); }
+.workspace :global(.account-signout) { border-top: 1px solid var(--app-border); color: var(--app-danger-ink); }
 .workspace :global(.admin-icon-button) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 32px; min-height: 34px; border: 0; border-radius: 4px; padding: 6px; background: transparent; color: var(--admin-muted); cursor: pointer; font-size: 11px; line-height: 1.5; }
 .workspace :global(.admin-icon-button:hover) { background: var(--app-surface-soft); color: var(--admin-blue); }
 .workspace :global(.admin-icon-button svg) { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
@@ -53,53 +53,10 @@
 .workspace :global(.admin-page-header h1) { color: var(--admin-ink); font-size: 25px; font-weight: 650; letter-spacing: -0.025em; line-height: 1.35; }
 .workspace :global(.admin-page-header > div > p) { max-width: 76ch; color: var(--admin-muted); font-size: 12px; line-height: 1.8; }
 .workspace :global(.admin-page-header + section) { margin-top: 0; }
-.workspace :global(.admin-page-scroll h2) { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+.workspace :global(.admin-page-scroll h2:not(.app-dialog-header h2)) { font-size: 15px; font-weight: 600; letter-spacing: 0; }
 .workspace :global(.admin-page-scroll p.uppercase) { display: none; }
-.workspace :global(.rounded-3xl),
-.workspace :global(.rounded-2xl),
-.workspace :global(.rounded-xl) { border-radius: 6px; }
-.workspace :global(.rounded-lg) { border-radius: 4px; }
-.workspace :global(.shadow-sm) { box-shadow: none; }
-.workspace :global(.bg-white) { background-color: var(--app-surface); }
-.workspace :global(.bg-slate-50),
-.workspace :global(.bg-slate-100) { background-color: var(--app-surface-soft); }
-.workspace :global(.text-slate-400),
-.workspace :global(.text-slate-500),
-.workspace :global(.text-slate-600) { color: var(--admin-muted); }
-.workspace :global(.text-slate-700),
-.workspace :global(.text-slate-800),
-.workspace :global(.text-slate-900),
-.workspace :global(.text-slate-950) { color: var(--admin-ink); }
-.workspace :global(.text-indigo-600),
-.workspace :global(.text-indigo-700),
-.workspace :global(.text-indigo-800) { color: var(--admin-blue); }
-.workspace :global(.border-slate-100),
-.workspace :global(.border-slate-200),
-.workspace :global(.border-slate-300) { border-color: var(--admin-line); }
-.workspace :global(button.bg-slate-950),
-.workspace :global(button.bg-slate-900),
-.workspace :global(button.bg-indigo-600),
-.workspace :global(button.bg-indigo-700),
-.workspace :global(a.bg-slate-950),
-.workspace :global(a.bg-slate-900),
-.workspace :global(a.bg-indigo-600),
-.workspace :global(a.bg-indigo-700) { background: var(--app-accent) !important; color: var(--app-on-accent) !important; }
-.workspace :global(button.bg-slate-950:hover),
-.workspace :global(button.bg-slate-900:hover),
-.workspace :global(button.bg-indigo-600:hover),
-.workspace :global(button.bg-indigo-700:hover),
-.workspace :global(a.bg-slate-950:hover),
-.workspace :global(a.bg-slate-900:hover),
-.workspace :global(a.bg-indigo-600:hover),
-.workspace :global(a.bg-indigo-700:hover) { background: color-mix(in srgb, var(--app-accent) 88%, #000) !important; }
-.workspace :global(input:not([type=checkbox]):not([type=radio]):not([type=range])),
-.workspace :global(select),
-.workspace :global(textarea) { box-sizing: border-box; min-height: 40px; border-radius: 4px; border-color: var(--admin-line); background: var(--app-input); padding-left: 12px; padding-right: 12px; color: var(--admin-ink); font-size: 12px; }
-.workspace :global(textarea) { padding-top: 12px; padding-bottom: 12px; line-height: 1.7; }
 .workspace :global(input[type=checkbox]),
 .workspace :global(input[type=radio]) { flex-shrink: 0; accent-color: var(--app-accent); }
-.workspace :global(input::placeholder),
-.workspace :global(textarea::placeholder) { color: var(--admin-muted); }
 .workspace :global(table) { width: 100%; border-collapse: collapse; }
 .workspace :global(th),
 .workspace :global(td) { vertical-align: middle; }
@@ -141,29 +98,4 @@
   .workspace :global(.admin-page-scroll > div) { padding: var(--app-page-padding) !important; }
   .workspace :global(.admin-page-header h1) { font-size: 22px; }
   .workspace :global(.admin-page-header) { gap: 14px; }
-  .workspace :global(input:not([type=checkbox]):not([type=radio]):not([type=range])),
-  .workspace :global(select),
-  .workspace :global(textarea) { min-height: 44px; }
-}
-/* OperationPanel portals live outside the admin layout subtree. */
-:global(body):has(.workspace) :global([data-operation-surface]) { border-radius: 6px; color: var(--app-text); box-shadow: 0 20px 100px #1e355a26; }
-:global(body):has(.workspace) :global([data-operation-surface="modal"]) { max-width: 920px; }
-:global(body):has(.workspace) :global([data-operation-surface="drawer"]) { border-radius: 0; max-width: 720px; }
-:global(body):has(.workspace) :global([data-operation-header]) { min-height: 72px; padding: 20px 24px; }
-:global(body):has(.workspace) :global([data-operation-header] h2) { font-size: 16px; }
-:global(body):has(.workspace) :global([data-operation-content]) { padding: 24px; }
-:global(body):has(.workspace) :global([data-operation-content] input:not([type=checkbox]):not([type=radio])),
-:global(body):has(.workspace) :global([data-operation-content] select),
-:global(body):has(.workspace) :global([data-operation-content] textarea) { min-height: 40px; padding-left: 12px; padding-right: 12px; border-color: var(--app-border); border-radius: 4px; background: var(--app-input); color: var(--app-text); }
-:global(body):has(.workspace) :global([data-operation-content] textarea) { padding-top: 12px; padding-bottom: 12px; }
-:global(body):has(.workspace) :global([data-operation-content] button.rounded-xl:not(.app-icon-button)) { border-radius: 6px; }
-:global(body):has(.workspace) :global([data-operation-content] button.bg-slate-950),
-:global(body):has(.workspace) :global([data-operation-content] button.bg-indigo-600),
-:global(body):has(.workspace) :global([data-operation-content] button.bg-indigo-700) { background: var(--app-accent) !important; color: var(--app-on-accent) !important; }
-:global(body):has(.workspace) :global([data-operation-content] button.bg-slate-950:hover),
-:global(body):has(.workspace) :global([data-operation-content] button.bg-indigo-600:hover),
-:global(body):has(.workspace) :global([data-operation-content] button.bg-indigo-700:hover) { background: color-mix(in srgb, var(--app-accent) 88%, #000) !important; }
-@media (max-width: 700px) {
-  :global(body):has(.workspace) :global([data-operation-header]),
-  :global(body):has(.workspace) :global([data-operation-content]) { padding-left: 20px; padding-right: 20px; }
 }

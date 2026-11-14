@@ -207,19 +207,19 @@ export function SmsCodeInput({
           disabled={unavailable}
           aria-describedby={`${id}-message`}
           placeholder={t("输入 6 位验证码")}
-          className={`${controlHeight} min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50/80 px-3 text-base outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60`}
+          className={`app-field ${controlHeight} min-w-0 flex-1 text-base disabled:cursor-not-allowed`}
         />
         <button
           ref={sendButtonRef}
           type="button"
           onClick={sendCode}
           disabled={sendDisabled}
-          className={`${controlHeight} shrink-0 rounded-xl border border-indigo-200 bg-indigo-50 px-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400`}
+          className={`app-button-secondary app-button-compact ${controlHeight} shrink-0`}
         >
           {unavailable ? t("暂不可用") : pending ? t("发送中…") : secondsRemaining > 0 ? t("{{seconds}} 秒后重发").replace("{{seconds}}", String(secondsRemaining)) : t("获取验证码")}
         </button>
       </div>
-      <p id={`${id}-message`} role={currentMessage ? "status" : undefined} className={`mt-1.5 text-xs leading-5 ${currentMessage?.tone === "error" || unavailable ? "text-amber-800" : "text-slate-500"}`}>
+      <p id={`${id}-message`} role={currentMessage ? "status" : undefined} className={`mt-1.5 text-xs leading-5 ${currentMessage?.tone === "error" ? "text-app-danger-ink" : unavailable ? "text-app-warning-ink" : "text-app-muted"}`}>
         {currentMessage ? <UiFeedbackText text={currentMessage.text} /> : t(unavailable ? "短信服务暂不可用，请稍后重试或联系管理员。" : "验证码有效期为 5 分钟。")}
       </p>
       {captchaRequest ? (

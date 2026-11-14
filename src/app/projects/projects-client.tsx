@@ -145,10 +145,10 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             <h1><UiText text="我的项目" /></h1>
             <p className={styles.subtitle}><UiText text="项目资料、共识与工作都保存在各自的空间中。" /></p>
           </div>
-          {payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={`${styles.primaryButton} app-action-button`}>＋ <UiText text="新建项目" /></button> : null}
+          {payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={`${styles.primaryButton} app-button-primary`}>＋ <UiText text="新建项目" /></button> : null}
         </section>
 
-        {error ? <div className={styles.error} role="alert"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load({ showLoading: true })}><UiText text="重试" /></button></div> : null}
+        {error ? <div className={["app-feedback-error", (styles.error)].filter(Boolean).join(' ')} role="alert"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load({ showLoading: true })} className="app-feedback-action"><UiText text="重试" /></button></div> : null}
         <section className={styles.listSection} aria-label={t("项目列表")}>
           <div className={styles.toolbar}>
             <div className={styles.filters} role="group" aria-label={t("项目状态")}>
@@ -159,7 +159,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             <label className={styles.searchBox}>
               <span className="sr-only"><UiText text="搜索项目" /></span>
               <ShellIcon name="search" className="app-icon--control" />
-              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={t("搜索项目")} />
+              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={t("搜索项目")}  className="app-field"/>
             </label>
           </div>
 
@@ -171,7 +171,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             <div className={styles.emptyState}>
               <h2><UiText text={search.trim() ? "没有匹配的项目" : view === "active" ? payload.canCreateProject ? "还没有进行中的项目" : "等待工作区授权" : "还没有归档项目"} /></h2>
               <p><UiText text={search.trim() ? "换一个项目名称或描述关键词试试。" : view === "active" ? payload.canCreateProject ? "创建项目后，就可以添加资料、建立计划并继续工作。" : "请联系当前工作区 Owner/Admin 授予你创建项目或访问项目的权限。" : "归档项目会集中显示在这里；项目数据仍可恢复使用。"} /></p>
-              {!search.trim() && view === "active" && payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={`${styles.primaryButton} app-action-button`}><UiText text="创建第一个项目" /></button> : null}
+              {!search.trim() && view === "active" && payload.canCreateProject ? <button type="button" onClick={() => { setCreateWorkspaceId(workspaceId); setCreateOpen(true); }} className={`${styles.primaryButton} app-button-primary`}><UiText text="创建第一个项目" /></button> : null}
             </div>
           ) : (
             <><div className={styles.projectGrid}>
@@ -195,7 +195,7 @@ function ProjectCard({ project, language, t, onDelete }: { project: WorkspacePro
   const latestJob = project.backgroundJobs[0];
 
   return (
-    <article className={`${styles.projectCard} ${archived ? styles.archivedCard : ""}`}>
+    <article className={`${styles.projectCard}  ${archived ? styles.archivedCard : ""}`}>
       <div className={styles.cardHeading}>
         <div className={styles.projectIdentity}><span aria-hidden="true" className={styles.projectMark}>{project.name.slice(0, 1)}</span><div><h2>{project.name}</h2><p>{project.description || t("尚未填写项目说明。")}</p></div></div>
         <span className={styles.projectStatus}>{t(archived ? "已归档" : project.memoryIndexPointer ? "记忆已建立" : "待建立记忆")}</span>

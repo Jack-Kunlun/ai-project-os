@@ -124,13 +124,13 @@ export function ProfileClient({
       <div data-page-content className={styles.content}>
         <section className={styles.pageHeader}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">ACCOUNT</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-app-link">ACCOUNT</p>
             <h1 className={styles.pageTitle}><UiText text="账户设置" /></h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600"><UiText text="管理个人信息、安全与私有资源。" /></p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-app-muted"><UiText text="管理个人信息、安全与私有资源。" /></p>
           </div>
         </section>
 
-        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load()} className="font-semibold underline"><UiText text="重试" /></button></div> : null}
+        {error ? <div role="alert" className="mt-5 flex items-center justify-between gap-4 rounded-field border border-app-danger-border bg-app-danger-soft px-4 py-3 text-sm text-app-danger-ink app-feedback-error"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load()} className="app-feedback-action"><UiText text="重试" /></button></div> : null}
         {githubStatus ? <Message {...(githubStatusMessages[githubStatus] ?? githubStatusMessages.failed)} /> : null}
         {oidcStatus ? <Message {...(oidcStatusMessages[oidcStatus] ?? oidcStatusMessages.failed)} /> : null}
 
@@ -148,7 +148,7 @@ export function ProfileClient({
           </div>
         </section>
 
-        {operationMessage ? <p role="status" className="mt-3 text-sm text-emerald-700"><UiFeedbackText text={operationMessage} /></p> : null}
+        {operationMessage ? <p role="status" className="mt-3 text-sm text-app-success-ink app-feedback-success"><UiFeedbackText text={operationMessage} /></p> : null}
 
         <div className={profileStyles.settingsColumns}>
           <section className={profileStyles.settingsColumn}>
@@ -174,8 +174,8 @@ export function ProfileClient({
             <div className={profileStyles.settingsList}>
               <AccountSettingRow title="邮箱与验证" summary={profile ? <>{profile.email ?? <UiText text="未设置" />} · <UiText text={profile.emailVerifiedAt ? "已验证" : profile.email ? "未验证" : "尚未设置邮箱"} /></> : <UiText text="读取中…" />} description="查看邮箱验证状态，或继续验证当前邮箱。" disabled={!profile} open={openOperation === "email"} onOpenChange={(open) => setOpenOperation(open ? "email" : null)}>
                 <div>
-                  {profile?.email ? <p className="mb-4 text-sm text-slate-600">{profile.email}{profile.emailVerifiedAt ? <> · <UiText text="已验证" /></> : null}</p> : <p className="mb-4 text-sm text-slate-600"><UiText text="尚未设置邮箱；请先编辑个人资料添加邮箱。" /></p>}
-                  {profile?.email && !profile.emailVerifiedAt && profile.emailAuthStatus === "disabled" ? <p className="mb-4 text-sm text-amber-700"><UiText text="邮箱验证服务当前未启用。" /></p> : null}
+                  {profile?.email ? <p className="mb-4 text-sm text-app-muted">{profile.email}{profile.emailVerifiedAt ? <> · <UiText text="已验证" /></> : null}</p> : <p className="mb-4 text-sm text-app-muted"><UiText text="尚未设置邮箱；请先编辑个人资料添加邮箱。" /></p>}
+                  {profile?.email && !profile.emailVerifiedAt && profile.emailAuthStatus === "disabled" ? <p className="mb-4 text-sm text-app-warning-ink"><UiText text="邮箱验证服务当前未启用。" /></p> : null}
                   {profile?.email ? <EmailVerificationSection key={`${profile.email}:${profile.emailVerifiedAt ?? ""}`} email={profile.email} emailVerifiedAt={profile.emailVerifiedAt} availability={profile.emailAuthStatus} onVerified={(verifiedAt) => { setProfile((current) => current ? { ...current, emailVerifiedAt: verifiedAt } : current); setOpenOperation(null); }} /> : null}
                 </div>
               </AccountSettingRow>
@@ -196,7 +196,7 @@ export function ProfileClient({
         </div>
 
         <details className={profileStyles.accountDetails}>
-          <summary className={profileStyles.accountDetailsSummary}><span><strong><UiText text="账户详情" /></strong><span className="ml-2 text-sm text-slate-500"><UiText text="身份、工作区与会话信息" /></span></span><span className={profileStyles.accountDetailsChevron} aria-hidden="true">⌄</span></summary>
+          <summary className={profileStyles.accountDetailsSummary}><span><strong><UiText text="账户详情" /></strong><span className="ml-2 text-sm text-app-muted"><UiText text="身份、工作区与会话信息" /></span></span><span className={profileStyles.accountDetailsChevron} aria-hidden="true">⌄</span></summary>
           {profile ? <div className={profileStyles.accountDetailsContent}>
             <section className={profileStyles.accountDetailsSection}>
               <h3><UiText text="身份与会话" /></h3>
@@ -220,8 +220,8 @@ export function ProfileClient({
                 {profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className={profileStyles.identityItem}><strong>{identity.provider.name}</strong><p>{identity.email ?? <UiText text="没有邮箱声明" />}</p></div>)}
               </div>
             </section>
-          </div> : <div className="grid gap-4 p-5 sm:grid-cols-2">{[1, 2].map((item) => <div key={item} className="h-28 animate-pulse rounded-lg bg-slate-50" />)}</div>}
-          {profile && !isSystemAdmin ? <div className="border-t border-slate-200 px-5 pb-5"><OidcIdentityLinkSection providers={profile.oidcLinkableProviders} /></div> : null}
+          </div> : <div className="grid gap-4 p-5 sm:grid-cols-2">{[1, 2].map((item) => <div key={item} className="h-28 animate-pulse rounded-control bg-app-surface-soft" />)}</div>}
+          {profile && !isSystemAdmin ? <div className="border-t border-app-border px-5 pb-5"><OidcIdentityLinkSection providers={profile.oidcLinkableProviders} /></div> : null}
         </details>
       </div>
     </main>
@@ -253,11 +253,11 @@ function OidcIdentityLinkSection({ providers }: { providers: Profile["oidcLinkab
   }
 
   return (
-    <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400"><UiText text={"工作区登录"} /></p>
+    <section className="mt-6 rounded-panel border border-app-border bg-app-surface p-6 sm:p-7 app-panel">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-app-muted"><UiText text={"工作区登录"} /></p>
       <h2 className="mt-2 text-lg font-semibold"><UiText text={"绑定企业 OIDC 登录身份"} /></h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600"><UiText text={"仅显示你已确认加入工作区中的启用身份源。绑定需要再次通过该身份源验证；邮箱相同不会自动绑定到账户。"} /></p>
-      {providers.length === 0 ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500"><UiText text={"当前没有可绑定的工作区 OIDC 身份源。"} /></p> : (
+      <p className="mt-2 text-sm leading-6 text-app-muted"><UiText text={"仅显示你已确认加入工作区中的启用身份源。绑定需要再次通过该身份源验证；邮箱相同不会自动绑定到账户。"} /></p>
+      {providers.length === 0 ? <p className="mt-4 rounded-panel bg-app-surface-soft px-4 py-3 text-sm text-app-muted"><UiText text={"当前没有可绑定的工作区 OIDC 身份源。"} /></p> : (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {providers.map((provider) => (
             <button
@@ -265,10 +265,10 @@ function OidcIdentityLinkSection({ providers }: { providers: Profile["oidcLinkab
               type="button"
               disabled={pendingProviderId !== null}
               onClick={() => void beginLink(provider.id)}
-              className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3 text-left text-sm transition hover:border-violet-300 hover:bg-violet-50 disabled:opacity-50"
+              className="app-card-action app-card-action--row px-4 py-3 text-sm"
             >
-              <span><span className="block font-semibold text-slate-800">{provider.name}</span><span className="mt-1 block text-xs text-slate-500">{provider.workspace.name}</span></span>
-              <span className="shrink-0 font-semibold text-violet-700"><UiText text={pendingProviderId === provider.id ? "正在跳转…" : "绑定 →"} /></span>
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]"><span className="block font-semibold text-app-text">{provider.name}</span><span className="mt-1 block text-xs text-app-muted">{provider.workspace.name}</span></span>
+              <span className="shrink-0 font-semibold text-app-link"><UiText text={pendingProviderId === provider.id ? "正在跳转…" : "绑定 →"} /></span>
             </button>
           ))}
         </div>
@@ -295,7 +295,7 @@ function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; o
     } catch (cause) { setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "个人资料更新失败" }); }
     finally { setPending(false); }
   }
-  return <section className="grid gap-5 sm:grid-cols-[0.72fr_1.28fr]"><div><p className="text-xs leading-5 text-slate-400"><UiText text={"显示名称用于页面展示；修改邮箱后需要验证新地址。"} /></p><p className={`mt-2 text-xs leading-5 ${verifiedEmailLocked ? "text-emerald-700" : profile?.emailVerifiedAt ? "text-emerald-700" : "text-amber-700"}`}><UiText text={verifiedEmailLocked ? "已验证邮箱目前不能修改或移除。" : profile?.emailVerifiedAt ? "邮箱已验证，可用于工作区邀请匹配。" : "邮箱未验证前不能用于工作区邀请；你可以在下方验证当前保存的邮箱。"} /></p></div><DialogForm onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input aria-label={t("显示名称")} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={t("显示名称")} maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input aria-label={t("邮箱")} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("邮箱")} maxLength={320} readOnly={verifiedEmailLocked} className={`rounded-xl border border-slate-200 px-4 py-3 text-sm ${verifiedEmailLocked ? "cursor-not-allowed bg-slate-50 text-slate-500" : ""}`} /><div className="sm:col-span-2"><DialogActions><DialogSubmit disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"><UiText text={pending ? "保存中…" : "保存个人资料"} /></DialogSubmit></DialogActions>{message ? <Message {...message} /> : null}</div></DialogForm></section>;
+  return <section className="grid gap-5"><div><p className="text-xs leading-5 text-app-muted"><UiText text={"显示名称用于页面展示；修改邮箱后需要验证新地址。"} /></p><p className={`mt-2 text-xs leading-5 ${verifiedEmailLocked ? "text-app-success-ink" : profile?.emailVerifiedAt ? "text-app-success-ink" : "text-app-warning-ink"}`}><UiText text={verifiedEmailLocked ? "已验证邮箱目前不能修改或移除。" : profile?.emailVerifiedAt ? "邮箱已验证，可用于工作区邀请匹配。" : "邮箱未验证前不能用于工作区邀请；你可以在下方验证当前保存的邮箱。"} /></p></div><DialogForm onSubmit={submit} className="grid items-start gap-3 sm:grid-cols-2"><input aria-label={t("显示名称")} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={t("显示名称")} maxLength={160} className="rounded-field border border-app-border px-4 py-3 text-sm app-field" /><input aria-label={t("邮箱")} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("邮箱")} maxLength={320} readOnly={verifiedEmailLocked} className={["app-field", (`rounded-field border border-app-border px-4 py-3 text-sm ${verifiedEmailLocked ? "cursor-not-allowed bg-app-surface-soft text-app-muted" : ""}`)].filter(Boolean).join(' ')} /><div className="sm:col-span-2"><DialogActions><DialogSubmit disabled={pending || !profile} className="rounded-control px-5 py-3 text-sm font-semibold disabled:opacity-40 app-button-primary"><UiText text={pending ? "保存中…" : "保存个人资料"} /></DialogSubmit></DialogActions>{message ? <Message {...message} /> : null}</div></DialogForm></section>;
 }
 
 function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null; loading: boolean; onUpdated: (username: string) => void }) {
@@ -320,17 +320,17 @@ function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null
   }
 
   return (
-    <section className="grid gap-5 sm:grid-cols-[0.72fr_1.28fr]">
+    <section className="grid gap-5">
       <div>
-        <p className="text-xs leading-5 text-slate-400"><UiText text={"用于登录当前本地部署，修改后下次登录生效。"} /></p>
+        <p className="text-xs leading-5 text-app-muted"><UiText text={"用于登录当前本地部署，修改后下次登录生效。"} /></p>
       </div>
       <DialogForm onSubmit={submit}>
         <label htmlFor="profile-username" className="sr-only"><UiText text={"登录名"} /></label>
         <div className="flex flex-col gap-3 sm:flex-row">
-          <input id="profile-username" value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,63}" required disabled={loading || !profile} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50" />
-          <DialogActions><DialogSubmit disabled={pending || loading || !profile || username === profile.username} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-600 disabled:opacity-40"><UiText text={pending ? "保存中…" : "保存"} /></DialogSubmit></DialogActions>
+          <input id="profile-username" value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,63}" required disabled={loading || !profile} className="min-w-0 flex-1 rounded-field border border-app-border px-4 py-3 text-sm outline-none transition focus:border-app-accent-border focus:ring-4 focus:ring-app-accent-border disabled:bg-app-surface-soft app-field" />
+          <DialogActions><DialogSubmit disabled={pending || loading || !profile || username === profile.username} className="rounded-control px-5 py-3 text-sm font-semibold transition disabled:opacity-40 app-button-primary"><UiText text={pending ? "保存中…" : "保存"} /></DialogSubmit></DialogActions>
         </div>
-        <p className="mt-2 text-xs text-slate-400"><UiText text={"3–64 位，可使用字母、数字、点、下划线和连字符。"} /></p>
+        <p className="mt-2 text-xs text-app-muted"><UiText text={"3–64 位，可使用字母、数字、点、下划线和连字符。"} /></p>
         {message ? <Message {...message} /> : null}
       </DialogForm>
     </section>
@@ -364,7 +364,7 @@ function EmailVerificationSection({ email, emailVerifiedAt, availability, onVeri
   }
 
   if (!email || emailVerifiedAt || availability === "disabled") return null;
-  return <section className="grid gap-4 sm:grid-cols-[0.72fr_1.28fr]"><div><p className="text-xs leading-5 text-slate-500"><UiText text={"验证码将发送到当前保存的邮箱"} /> {email}<UiText text={"。验证后可用于工作区邀请匹配和密码修改。"} /></p></div><DialogForm onSubmit={submit} className="grid gap-3"><EmailCodeInput key={email} id="profile-email-verification-code" email={email} purpose="verify" availability={availability === "available" ? "available" : "unavailable"} code={code} onCodeChange={setCode} onChallengeIdChange={setChallengeId} /><DialogActions><DialogSubmit disabled={pending || !challengeId || code.length !== 6} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"><UiText text={pending ? "正在验证…" : "确认验证邮箱"} /></DialogSubmit></DialogActions>{message ? <Message {...message} /> : null}</DialogForm></section>;
+  return <section className="grid gap-4"><div><p className="text-xs leading-5 text-app-muted"><UiText text={"验证码将发送到当前保存的邮箱"} /> {email}<UiText text={"。验证后可用于工作区邀请匹配和密码修改。"} /></p></div><DialogForm onSubmit={submit} className="grid gap-3"><EmailCodeInput key={email} id="profile-email-verification-code" email={email} purpose="verify" availability={availability === "available" ? "available" : "unavailable"} code={code} onCodeChange={setCode} onChallengeIdChange={setChallengeId} /><DialogActions><DialogSubmit disabled={pending || !challengeId || code.length !== 6} className="rounded-control px-5 py-3 text-sm font-semibold disabled:opacity-40 app-button-primary"><UiText text={pending ? "正在验证…" : "确认验证邮箱"} /></DialogSubmit></DialogActions>{message ? <Message {...message} /> : null}</DialogForm></section>;
 }
 
 function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatus }: { hasLocalPassword: boolean; email: string | null; emailVerifiedAt: string | null; emailAuthStatus: Profile["emailAuthStatus"] }) {
@@ -408,26 +408,26 @@ function PasswordForm({ hasLocalPassword, email, emailVerifiedAt, emailAuthStatu
 
   return (
       <DialogForm onSubmit={submit} className="grid max-w-3xl gap-4">
-        <p className="text-sm leading-6 text-slate-600"><UiText text={hasLocalPassword ? "输入当前密码和新密码。" : "为企业身份账号设置本地恢复密码。"} /><UiText text={"更新后会撤销全部登录会话，并要求重新登录。"} /></p>
+        <p className="text-sm leading-6 text-app-muted"><UiText text={hasLocalPassword ? "输入当前密码和新密码。" : "为企业身份账号设置本地恢复密码。"} /><UiText text={"更新后会撤销全部登录会话，并要求重新登录。"} /></p>
         {hasLocalPassword ? <PasswordField id="profile-current-password" label="当前密码" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" /> : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <PasswordField id="profile-new-password" label="新密码" value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
           <PasswordField id="profile-confirm-password" label="再次输入新密码" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
         </div>
-        <p className="text-xs text-slate-400"><UiText text={"新密码 8–128 位，并同时包含字母和数字。"} /></p>
-        {emailAuthStatus !== "disabled" && email ? <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="mb-3 text-xs leading-5 text-slate-600">{emailVerifiedAt ? t("当前邮箱 {email} 需要通过验证码确认后才能修改密码。").replace("{email}", email) : <UiText text="请先在上方验证当前邮箱。" />}</p>{emailVerifiedAt ? <EmailCodeInput key={email} id="profile-password-email-code" email={email} purpose="password" availability={emailAuthStatus === "available" ? "available" : "unavailable"} code={emailCode} onCodeChange={setEmailCode} onChallengeIdChange={setEmailChallengeId} /> : null}</div> : null}
+        <p className="text-xs text-app-muted"><UiText text={"新密码 8–128 位，并同时包含字母和数字。"} /></p>
+        {emailAuthStatus !== "disabled" && email ? <div className="rounded-panel border border-app-border bg-app-surface p-4 app-panel"><p className="mb-3 text-xs leading-5 text-app-muted">{emailVerifiedAt ? t("当前邮箱 {email} 需要通过验证码确认后才能修改密码。").replace("{email}", email) : <UiText text="请先在上方验证当前邮箱。" />}</p>{emailVerifiedAt ? <EmailCodeInput key={email} id="profile-password-email-code" email={email} purpose="password" availability={emailAuthStatus === "available" ? "available" : "unavailable"} code={emailCode} onCodeChange={setEmailCode} onChallengeIdChange={setEmailChallengeId} /> : null}</div> : null}
         {message ? <Message {...message} /> : null}
-        <div><DialogActions><DialogSubmit disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword || (emailAuthStatus !== "disabled" && email !== null && (!emailVerifiedAt || emailAuthStatus !== "available" || !emailChallengeId || emailCode.length !== 6))} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40"><UiText text={pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"} /></DialogSubmit></DialogActions></div>
+        <div><DialogActions><DialogSubmit disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword || (emailAuthStatus !== "disabled" && email !== null && (!emailVerifiedAt || emailAuthStatus !== "available" || !emailChallengeId || emailCode.length !== 6))} className="rounded-control px-5 py-3 text-sm font-semibold transition disabled:opacity-40 app-button-primary"><UiText text={pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"} /></DialogSubmit></DialogActions></div>
       </DialogForm>
   );
 }
 
 function PasswordField({ id, label, value, onChange, autoComplete }: { id: string; label: string; value: string; onChange: (value: string) => void; autoComplete: string }) {
-  return <label htmlFor={id} className="text-sm font-semibold text-slate-700"><UiText text={label} /><input id={id} type="password" value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} minLength={8} maxLength={128} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>;
+  return <label htmlFor={id} className="text-sm font-semibold text-app-text"><UiText text={label} /><input id={id} type="password" value={value} onChange={(event) => onChange(event.target.value)} autoComplete={autoComplete} minLength={8} maxLength={128} required className="mt-2 w-full rounded-field border border-app-border px-4 py-3 text-sm outline-none focus:border-app-accent-border focus:ring-4 focus:ring-app-accent-border app-field" /></label>;
 }
 
 function Message({ tone, text }: { tone: "success" | "error"; text: string }) {
-  return <p role={tone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl px-4 py-3 text-sm ${tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{tone === "error" ? <UiErrorText text={text} /> : <UiFeedbackText text={text} />}</p>;
+  return <p role={tone === "error" ? "alert" : "status"} className={`mt-4 rounded-field px-4 py-3 text-sm ${tone === "success" ? "bg-app-success-soft text-app-success-ink app-feedback-success" : "bg-app-danger-soft text-app-danger-ink app-feedback-error"}`}>{tone === "error" ? <UiErrorText text={text} /> : <UiFeedbackText text={text} />}</p>;
 }
 
 function AccountSettingRow({ title, summary, description, children, disabled, danger = false, open, onOpenChange }: Readonly<{
@@ -440,12 +440,12 @@ function AccountSettingRow({ title, summary, description, children, disabled, da
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }>): React.JSX.Element {
-  return <div className={`${profileStyles.settingsOperationRow} ${danger ? profileStyles.settingsOperationRowDanger : ""}`}>
+  return <div className={`${profileStyles.settingsOperationRow}  ${danger ? profileStyles.settingsOperationRowDanger : ""}`}>
     <div className={profileStyles.settingsRowCopy}>
       <h3 className={profileStyles.settingsRowTitle}><UiText text={title} /></h3>
       <p className={profileStyles.settingsRowDescription}>{summary}</p>
     </div>
-    <OperationPanel className={profileStyles.operationTrigger} title={title} triggerLabel={title} description={description} disabled={disabled} variant="drawer" open={open} onOpenChange={onOpenChange}>
+    <OperationPanel className={profileStyles.operationTrigger} title={title} triggerLabel={title} triggerAppearance="row" description={description} disabled={disabled} variant="drawer" open={open} onOpenChange={onOpenChange}>
       {children}
     </OperationPanel>
   </div>;

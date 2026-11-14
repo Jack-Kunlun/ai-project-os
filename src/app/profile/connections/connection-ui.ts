@@ -42,6 +42,6 @@ export function formatConnectionDate(value: string | null, language: AppearanceL
   return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export const connectionFieldClass = "mt-1.5 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-500";
+export const connectionFieldClass = "app-field mt-1.5 w-full min-w-0 px-3.5 py-3 text-sm transition";
 
-export const connectionButtonClass = "inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-50";
+export const connectionButtonClass = "inline-flex min-h-10 items-center justify-center rounded-control px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";

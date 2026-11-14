@@ -43,7 +43,7 @@ export function AdminHeader({ username, onOpenNavigation, drawerOpen = false }: 
       </div>
     </header>
     <Suspense fallback={null}>{searchOpen ? <WorkspaceDialog title="搜索功能页面" open={searchOpen} onClose={() => setSearchOpen(false)}>
-      <div className="admin-navigation-search"><label><span>{t("搜索功能页面")}</span><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={t("输入功能名称，例如用户、模型或备份")} /></label>
+      <div className="admin-navigation-search"><label><span>{t("搜索功能页面")}</span><input className="app-field" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={t("输入功能名称，例如用户、模型或备份")} /></label>
         <nav aria-label={t("功能搜索结果")}>{matches.length ? matches.map(item => <Link href={item.href} key={item.href} onClick={() => setSearchOpen(false)}><span>{t(item.label)}</span><span aria-hidden="true">↗</span></Link>) : <p role="status">{t("没有匹配的功能页面")}</p>}</nav>
       </div>
     </WorkspaceDialog> : null}</Suspense>

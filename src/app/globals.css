@@ -9,19 +9,60 @@
 }
 
 /* Shared geometry from the approved product prototype. */
-:root { --app-page-padding: 28px 32px 32px; }
+:root { --app-page-padding: 28px 32px 32px; --app-page-title-size: 25px; --app-page-description-size: 13px; }
 
 @media (max-width: 1150px) {
   :root { --app-page-padding: 28px 26px 32px; }
 }
 @media (max-width: 700px) {
-  :root { --app-page-padding: 23px 18px 32px; }
+  :root { --app-page-padding: 23px 18px 32px; --app-page-title-size: 22px; }
 }
 
 /* Default page primitives. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-app-bg: var(--app-bg);
+  --color-app-surface: var(--app-surface);
+  --color-app-surface-soft: var(--app-surface-soft);
+  --color-app-text: var(--app-text);
+  --color-app-muted: var(--app-muted);
+  --color-app-border: var(--app-border);
+  --color-app-accent: var(--app-accent);
+  --color-app-accent-hover: var(--app-accent-hover);
+  --color-app-accent-soft: var(--app-accent-soft);
+  --color-app-accent-border: var(--app-accent-border);
+  --color-app-on-accent: var(--app-on-accent);
+  --color-app-input: var(--app-input);
+  --color-app-link: var(--app-link);
+  --color-app-danger-ink: var(--app-danger-ink);
+  --color-app-danger-soft: var(--app-danger-soft);
+  --color-app-danger-border: var(--app-danger-border);
+  --color-app-danger: var(--app-danger-fill);
+  --color-app-danger-hover: var(--app-danger-fill-hover);
+  --color-app-danger-fill: var(--app-danger-fill);
+  --color-app-danger-fill-hover: var(--app-danger-fill-hover);
+  --color-app-on-danger: var(--app-on-danger);
+  --color-app-warning-ink: var(--app-warning-ink);
+  --color-app-warning-soft: var(--app-warning-soft);
+  --color-app-warning-border: var(--app-warning-border);
+  --color-app-warning: var(--app-warning-fill);
+  --color-app-warning-hover: var(--app-warning-fill-hover);
+  --color-app-warning-fill: var(--app-warning-fill);
+  --color-app-warning-fill-hover: var(--app-warning-fill-hover);
+  --color-app-on-warning: var(--app-on-warning);
+  --color-app-success-ink: var(--app-success-ink);
+  --color-app-success-soft: var(--app-success-soft);
+  --color-app-success-border: var(--app-success-border);
+  --color-app-success: var(--app-success-fill);
+  --color-app-success-hover: var(--app-success-fill-hover);
+  --color-app-success-fill: var(--app-success-fill);
+  --color-app-success-fill-hover: var(--app-success-fill-hover);
+  --color-app-on-success: var(--app-on-success);
+  --color-app-backdrop: var(--app-backdrop);
+  --radius-panel: 6px;
+  --radius-control: 6px;
+  --radius-field: 4px;
 }
 
 * {
@@ -124,11 +165,6 @@ button:not(:disabled) {
   }
 }
 
-/* Tailwind's slate-400 is too light for small secondary text on light surfaces. */
-.text-slate-400 {
-  color: #475569;
-}
-
 /* Shared Tabler geometry: semantic roles pick a square size from this scale. */
 :root {
   --app-icon-meta: 12px;
@@ -144,32 +180,206 @@ button:not(:disabled) {
   --app-action-padding-inline: 16px;
   --app-action-gap: 8px;
   --app-action-group-gap: 16px;
-  --app-action-small-height: 32px;
 }
 
-/* Shared business actions only; tabs, icon-only controls and auth fields opt out. */
-.app-action-button {
+/* Shared semantic primitives stay visually stable inside both workspace shells. */
+.app-page-title { color: var(--app-text); font-size: var(--app-page-title-size); font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+.app-page-intro { margin-bottom: 24px; }
+.app-page-intro h1 { margin-top: 0; }
+.app-page-intro h1 + p { margin-top: 8px; font-size: var(--app-page-description-size); line-height: 1.8; }
+
+.app-panel {
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-panel);
+  background: var(--app-surface);
+  color: var(--app-text);
+  box-shadow: none;
+}
+
+.app-panel-danger { border-color: var(--app-danger-border); }
+.app-panel-warning { border-color: var(--app-warning-border); }
+.app-panel-success { border-color: var(--app-success-border); }
+.app-panel-accent { border-color: var(--app-accent-border); }
+
+/* Navigable cards retain their content layout and spacing, unlike action buttons. */
+.app-card-action {
+  display: block;
+  min-height: 40px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-panel);
+  background: var(--app-surface);
+  color: var(--app-text);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.app-card-action--row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.app-card-action:hover:not(:disabled) { border-color: var(--app-accent-border); background: var(--app-surface-soft); }
+.app-card-action:focus-visible { outline: 2px solid var(--app-focus, var(--app-link)); outline-offset: 2px; }
+.app-card-action:disabled { cursor: not-allowed; opacity: .52; }
+
+.app-panel-soft {
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-panel);
+  background: var(--app-surface-soft);
+  color: var(--app-text);
+  box-shadow: none;
+}
+
+.app-button-primary,
+.app-button-secondary,
+.app-button-ghost,
+.app-button-danger,
+.app-button-warning {
   box-sizing: border-box;
   display: inline-flex;
   min-height: var(--app-action-min-height);
   align-items: center;
   justify-content: center;
   gap: var(--app-action-gap);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
   padding: var(--app-action-padding-block) var(--app-action-padding-inline);
+  font: inherit;
   font-size: var(--app-action-font-size);
+  font-weight: 600;
   line-height: var(--app-action-line-height);
   text-align: center;
+  text-decoration: none;
   white-space: normal;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
-.app-action-button--compact {
-  min-height: var(--app-action-small-height);
+.app-button-primary { border-color: var(--app-accent); background: var(--app-accent); color: var(--app-on-accent); }
+.app-button-primary:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--app-accent-hover); background: var(--app-accent-hover); }
+.app-button-secondary { border-color: var(--app-border); background: var(--app-surface); color: var(--app-text); }
+.app-button-secondary:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--app-accent-border); background: var(--app-surface-soft); }
+.app-button-ghost { border-color: transparent; background: transparent; color: var(--app-muted); }
+.app-button-ghost:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--app-surface-soft); color: var(--app-text); }
+.app-button-danger { border-color: var(--app-danger-fill); background: var(--app-danger-fill); color: var(--app-on-danger); }
+.app-button-danger:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--app-danger-fill-hover); background: var(--app-danger-fill-hover); }
+.app-button-warning { border-color: var(--app-warning-fill); background: var(--app-warning-fill); color: var(--app-on-warning); }
+.app-button-warning:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--app-warning-fill-hover); background: var(--app-warning-fill-hover); }
+
+.app-button-compact {
   padding: 6px 12px;
   white-space: nowrap;
 }
 
-.app-action-button.whitespace-nowrap {
+:is(.app-button-primary, .app-button-secondary, .app-button-ghost, .app-button-danger, .app-button-warning):is(:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.app-button-readable-disabled:is(:disabled, [aria-disabled="true"]) {
+  border-color: var(--app-border);
+  background: var(--app-surface-soft);
+  color: var(--app-muted);
+  opacity: 1;
+}
+
+:is(.app-button-primary, .app-button-secondary, .app-button-ghost, .app-button-danger, .app-button-warning):focus-visible,
+.app-field:focus-visible {
+  outline: 2px solid var(--app-focus, var(--app-link));
+  outline-offset: 2px;
+}
+
+.app-field {
+  box-sizing: border-box;
+  min-height: 40px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--radius-field);
+  background: var(--app-input);
+  padding: 8px 12px;
+  color: var(--app-text);
+  font: inherit;
+}
+
+.app-field::placeholder { color: var(--app-muted); opacity: 1; }
+.app-field:disabled { cursor: not-allowed; opacity: .65; }
+.app-field-danger { border-color: var(--app-danger-border); }
+.app-field-danger:focus-visible { outline-color: var(--app-danger-ink); }
+.app-field-warning { border-color: var(--app-warning-border); }
+.app-field-warning:focus-visible { outline-color: var(--app-warning-ink); }
+.app-field-group { display: flex; min-height: 40px; align-items: center; overflow: hidden; padding: 0; }
+.app-field-group:focus-within { outline: 2px solid var(--app-focus, var(--app-link)); outline-offset: 2px; }
+.app-field-group > input { height: auto; min-height: 0; align-self: stretch; }
+textarea.app-field { min-height: 96px; }
+
+.app-dialog-surface {
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-text);
+  box-shadow: var(--app-dialog-shadow);
+}
+
+.app-dialog-surface--modal { border-radius: var(--radius-panel); }
+.app-dialog-surface--drawer { border: 0; border-left: 1px solid var(--app-border); border-radius: 0; box-shadow: none; }
+
+.app-dialog-header {
+  min-height: 72px;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface);
+  padding: 20px 24px;
+}
+.app-dialog-header h2 { font-size: 16px; font-weight: 600; line-height: 1.5; }
+
+.app-dialog-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+}
+
+.app-dialog-footer {
+  display: flex;
+  min-height: 64px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-surface);
+  padding: 12px 24px;
+}
+
+.app-feedback-info,
+.app-feedback-success,
+.app-feedback-warning,
+.app-feedback-error {
+  border: 1px solid transparent;
+  border-radius: var(--radius-field);
+  padding: 12px 16px;
+}
+
+.app-feedback-info { border-color: var(--app-accent-border); background: var(--app-accent-soft); color: var(--app-link); }
+.app-feedback-success { border-color: var(--app-success-border); background: var(--app-success-soft); color: var(--app-success-ink); }
+.app-feedback-warning { border-color: var(--app-warning-border); background: var(--app-warning-soft); color: var(--app-warning-ink); }
+.app-feedback-error { border-color: var(--app-danger-border); background: var(--app-danger-soft); color: var(--app-danger-ink); }
+:is(.app-feedback-info, .app-feedback-warning, .app-feedback-error, .app-feedback-success) .app-feedback-action {
+  flex-shrink: 0;
+  min-height: 40px;
   white-space: nowrap;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 700px) {
+  .app-field:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { min-height: 44px; }
+  .app-field-group { min-height: 44px; }
+  textarea.app-field { min-height: 112px; }
+  .app-dialog-header,
+  .app-dialog-content,
+  .app-dialog-footer { padding-inline: 20px; }
+  .app-dialog-footer { padding-block: 10px; }
 }
 
 /* Dialog form geometry is shared by user and admin surfaces. */

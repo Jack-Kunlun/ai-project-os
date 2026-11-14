@@ -15,9 +15,9 @@ export function AcceptInvitationClient({ token }: { token: string }) {
   return (
     <PublicInfoPage eyebrow="接受邀请" title="加入工作区" description="确认后，系统会按邀请中指定的工作区与项目角色授权当前账户。邀请令牌只会使用一次。">
       <InfoSection title="接受邀请">
-        {error ? <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><UiErrorText text={error} /></p> : null}
+        {error ? <p role="alert" className="rounded-field border border-app-danger-border bg-app-danger-soft px-4 py-3 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
         <div>
-          <button type="button" onClick={() => void accept()} disabled={pending} className={`app-action-button ${styles.formSubmit}`}><UiText text={pending ? "正在加入…" : "接受邀请"} /></button>
+          <button type="button" onClick={() => void accept()} disabled={pending} className={`app-button-primary ${styles.formSubmit}`}><UiText text={pending ? "正在加入…" : "接受邀请"} /></button>
         </div>
       </InfoSection>
     </PublicInfoPage>

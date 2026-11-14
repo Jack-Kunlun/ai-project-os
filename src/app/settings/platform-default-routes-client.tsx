@@ -384,68 +384,68 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation, 
   }
 
   return (
-    <section className="mt-10 rounded-3xl border border-indigo-200 bg-indigo-50/60 p-7 shadow-sm sm:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-indigo-100 pb-5">
+    <section className="mt-10 rounded-panel border border-app-accent-border bg-app-accent-soft p-7 sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-app-accent-border pb-5">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Platform default routes</p>
-          <h2 className="mt-2 text-2xl font-semibold text-slate-950">平台默认模型路由控制面</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里仅查看平台能力路由的当前状态、审计和影响。新的能力必须在平台模型页选择、真实测试并启用；本页不提供手工草稿或绕过真实测试的入口。</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link">Platform default routes</p>
+          <h2 className="mt-2 text-2xl font-semibold text-app-text">平台默认模型路由控制面</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted">这里仅查看平台能力路由的当前状态、审计和影响。新的能力必须在平台模型页选择、真实测试并启用；本页不提供手工草稿或绕过真实测试的入口。</p>
         </div>
-        <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800">Web AI 路由解析已接入</span>
+        <span className="rounded-full bg-app-success-soft px-3 py-1.5 text-xs font-semibold text-app-success-ink">Web AI 路由解析已接入</span>
       </div>
 
-      {providersLoaded && eligibleProviders.length === 0 ? <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4" role="status"><div><p className="text-sm font-semibold text-amber-900">尚无已验证的平台供应商</p><p className="mt-1 text-xs leading-5 text-amber-800">先配置并测试一个平台模型连接，才能创建默认路由。</p></div><a href="/admin/models" className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700">去配置平台模型</a></div> : null}
+      {providersLoaded && eligibleProviders.length === 0 ? <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-field border border-app-warning-border bg-app-warning-soft px-5 py-4 app-feedback-warning" role="status"><div><p className="text-sm font-semibold text-app-warning-ink">尚无已验证的平台供应商</p><p className="mt-1 text-xs leading-5 text-app-warning-ink">先配置并测试一个平台模型连接，才能创建默认路由。</p></div><a href="/admin/models" className="inline-flex min-h-10 items-center rounded-control px-4 py-2 text-xs font-semibold transition app-button-primary">去配置平台模型</a></div> : null}
 
-      {!readOnly ? <form onSubmit={saveDraft} className="mt-6 grid gap-4 rounded-2xl border border-white/80 bg-white p-5 shadow-sm lg:grid-cols-2">
-        <label className="text-xs font-semibold text-slate-600">操作
-          <select value={operation} disabled={editingRouteId !== null} onChange={(event) => changeOperation(event.target.value as Operation)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-400">
+      {!readOnly ? <form onSubmit={saveDraft} className="mt-6 grid gap-4 rounded-panel border border-app-border bg-app-surface p-5 lg:grid-cols-2 app-panel">
+        <label className="text-xs font-semibold text-app-muted">操作
+          <select value={operation} disabled={editingRouteId !== null} onChange={(event) => changeOperation(event.target.value as Operation)} className="mt-2 w-full rounded-field border border-app-border px-3 py-2.5 text-sm disabled:bg-app-surface-soft disabled:text-app-muted app-field">
             {OPERATIONS.map((entry) => <option key={entry} value={entry}>{operationLabels[entry]}</option>)}
           </select>
-          {editingRouteId !== null ? <span className="mt-1 block text-[12px] font-normal text-slate-400">编辑草稿时操作固定；如需其他操作，请取消编辑后新建。</span> : null}
+          {editingRouteId !== null ? <span className="mt-1 block text-[12px] font-normal text-app-muted">编辑草稿时操作固定；如需其他操作，请取消编辑后新建。</span> : null}
         </label>
-        <label className="text-xs font-semibold text-slate-600">有效平台供应商
-          <select value={providerId} onChange={(event) => changeProvider(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+        <label className="text-xs font-semibold text-app-muted">有效平台供应商
+          <select value={providerId} onChange={(event) => changeProvider(event.target.value)} required className="mt-2 w-full rounded-field border border-app-border px-3 py-2.5 text-sm app-field">
             <option value="">请选择供应商</option>
             {eligibleProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · 配置版本 {provider.configurationVersion}</option>)}
           </select>
         </label>
-        <label className="text-xs font-semibold text-slate-600">模型 ID
-          <input value={modelId} onChange={(event) => setModelId(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+        <label className="text-xs font-semibold text-app-muted">模型 ID
+          <input value={modelId} onChange={(event) => setModelId(event.target.value)} required className="mt-2 w-full rounded-field border border-app-border px-3 py-2.5 text-sm app-field" />
         </label>
-        {operation === "embedding" ? <label className="text-xs font-semibold text-slate-600">向量维度（必须精确匹配供应商）
-          <input type="number" min={8} max={8192} value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-        </label> : <label className="text-xs font-semibold text-slate-600">最大输出 Token
-          <input type="number" min={1} max={65536} value={maxOutputTokens} onChange={(event) => setMaxOutputTokens(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+        {operation === "embedding" ? <label className="text-xs font-semibold text-app-muted">向量维度（必须精确匹配供应商）
+          <input type="number" min={8} max={8192} value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} required className="mt-2 w-full rounded-field border border-app-border px-3 py-2.5 text-sm app-field" />
+        </label> : <label className="text-xs font-semibold text-app-muted">最大输出 Token
+          <input type="number" min={1} max={65536} value={maxOutputTokens} onChange={(event) => setMaxOutputTokens(event.target.value)} required className="mt-2 w-full rounded-field border border-app-border px-3 py-2.5 text-sm app-field" />
         </label>}
-        <label className="text-xs font-semibold text-slate-600">倍率
-          <input type="number" min={0.0001} max={10} step={0.0001} value={quotaMultiplier} onChange={(event) => setQuotaMultiplier(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
-          <span className="mt-1 block text-[12px] font-normal text-slate-400">按倍数填写；当前值 {draftQuotaMultiplierBps === null ? "待填写" : `${formatMultiplier(draftQuotaMultiplierBps)}×（${draftQuotaMultiplierBps} bps）`}。</span>
+        <label className="text-xs font-semibold text-app-muted">倍率
+          <input type="number" min={0.0001} max={10} step={0.0001} value={quotaMultiplier} onChange={(event) => setQuotaMultiplier(event.target.value)} required className="mt-2 w-full rounded-field border border-app-border px-3 py-2.5 text-sm app-field" />
+          <span className="mt-1 block text-[12px] font-normal text-app-muted">按倍数填写；当前值 {draftQuotaMultiplierBps === null ? "待填写" : `${formatMultiplier(draftQuotaMultiplierBps)}×（${draftQuotaMultiplierBps} bps）`}。</span>
         </label>
-        <div className="flex items-end gap-2"><button disabled={pending || providerId === ""} className="min-w-0 flex-1 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "处理中…" : editingRouteId === null ? "创建路由草稿" : "保存草稿修改"}</button>{editingRouteId !== null ? <button type="button" disabled={pending} onClick={cancelDraftEdit} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 disabled:opacity-40">取消编辑</button> : null}</div>
-      </form> : <p className="mt-6 rounded-2xl border border-indigo-100 bg-white px-5 py-4 text-xs leading-5 text-slate-600">路由写入已关闭。请前往 <a href="/admin/models" className="font-semibold text-indigo-700 underline underline-offset-2">平台能力配置</a> 完成选择、真实测试和启用。</p>}
+        <div className="flex items-end gap-2"><button disabled={pending || providerId === ""} className="min-w-0 flex-1 rounded-control px-4 py-3 text-sm font-semibold disabled:opacity-40 app-button-primary">{pending ? "处理中…" : editingRouteId === null ? "创建路由草稿" : "保存草稿修改"}</button>{editingRouteId !== null ? <button type="button" disabled={pending} onClick={cancelDraftEdit} className="rounded-control border border-app-border px-4 py-3 text-sm font-semibold text-app-muted disabled:opacity-40">取消编辑</button> : null}</div>
+      </form> : <p className="mt-6 rounded-panel border border-app-accent-border bg-app-surface px-5 py-4 text-xs leading-5 text-app-muted">路由写入已关闭。请前往 <a href="/admin/models" className="font-semibold text-app-link underline underline-offset-2">平台能力配置</a> 完成选择、真实测试和启用。</p>}
 
-      {message ? <p role="status" className="mt-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-700"><UiFeedbackText text={message} /></p> : null}
+      {message ? <p role="status" className="mt-4 rounded-field bg-app-surface px-4 py-3 text-sm text-app-text app-feedback-info"><UiFeedbackText text={message} /></p> : null}
 
       <div className="mt-7 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {OPERATIONS.map((entry) => {
           const state = readiness?.[entry];
-          return <article key={entry} className="rounded-2xl border border-white/80 bg-white p-4"><p className="text-xs font-semibold text-slate-500">{operationLabels[entry]}</p><p className={`mt-2 text-sm font-semibold ${state?.code === "ready" ? "text-emerald-700" : "text-amber-700"}`}>{state ? readinessLabels[state.code] : "读取中…"}</p><p className="mt-1 text-xs text-slate-500">就绪的 active 路由会被 Web AI 有效路由解析采用；真实模型调用需另行现场验收</p></article>;
+          return <article key={entry} className="rounded-panel border border-app-border bg-app-surface p-4 app-panel"><p className="text-xs font-semibold text-app-muted">{operationLabels[entry]}</p><p className={`mt-2 text-sm font-semibold ${state?.code === "ready" ? "text-app-success-ink" : "text-app-warning-ink"}`}>{state ? readinessLabels[state.code] : "读取中…"}</p><p className="mt-1 text-xs text-app-muted">就绪的 active 路由会被 Web AI 有效路由解析采用；真实模型调用需另行现场验收</p></article>;
         })}
       </div>
 
       <div className="mt-7 space-y-3">
-        {routes.length === 0 ? <div className="rounded-2xl border border-dashed border-indigo-200 bg-white/70 p-8 text-center text-sm text-slate-500">尚无路由草稿。创建前请先添加并测试一个平台供应商。</div> : routes.map((route) => {
+        {routes.length === 0 ? <div className="rounded-panel border border-dashed border-app-accent-border bg-app-surface p-8 text-center text-sm text-app-muted">尚无路由草稿。创建前请先添加并测试一个平台供应商。</div> : routes.map((route) => {
           const provider = providers.find((entry) => entry.id === route.providerConnectionId);
-          return <article key={route.id} className="rounded-2xl border border-white/80 bg-white p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">{operationLabels[route.operation]} · v{route.version}</h3><p className="mt-1 text-xs text-slate-500">{route.modelId} · 倍率 {formatMultiplier(route.quotaMultiplierBps)}×（{route.quotaMultiplierBps} bps） · {routeStatusLabels[route.status]}</p><p className="mt-1 text-xs text-slate-500">供应商：{provider?.name ?? "未知"} · 当前配置版本 {provider?.configurationVersion ?? "未知"} · 已验证版本 {route.validatedProviderConfigurationVersion ?? "未验证"} · {provider?.status ?? "未知"}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${routeValidationLabel(route, provider) === "已验证" ? "bg-emerald-50 text-emerald-700" : routeValidationLabel(route, provider) === "未验证" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-800"}`}>{routeValidationLabel(route, provider)}</span></div>
+          return <article key={route.id} className="rounded-panel border border-app-border bg-app-surface p-5 app-panel">
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-app-text">{operationLabels[route.operation]} · v{route.version}</h3><p className="mt-1 text-xs text-app-muted">{route.modelId} · 倍率 {formatMultiplier(route.quotaMultiplierBps)}×（{route.quotaMultiplierBps} bps） · {routeStatusLabels[route.status]}</p><p className="mt-1 text-xs text-app-muted">供应商：{provider?.name ?? "未知"} · 当前配置版本 {provider?.configurationVersion ?? "未知"} · 已验证版本 {route.validatedProviderConfigurationVersion ?? "未验证"} · {provider?.status ?? "未知"}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${routeValidationLabel(route, provider) === "已验证" ? "bg-app-success-soft text-app-success-ink" : routeValidationLabel(route, provider) === "未验证" ? "bg-app-surface-soft text-app-muted" : "bg-app-warning-soft text-app-warning-ink"}`}>{routeValidationLabel(route, provider)}</span></div>
             <div className="mt-4"><ScopeEvidenceCard title="路由配置边界" evidence={{ scope: `平台默认 · ${operationLabels[route.operation]}`, owner: "平台管理员", payer: "平台额度，由当前发起人扣减", affectedProjects: impact?.routeId === route.id ? `当前影响 ${impact.indexImpact.affectedProjectCount} 个项目` : "可能影响所有未采用个人委派的项目；精确数量请查看影响", latestSuccess: route.validatedAt ? `最近本地验证：${formatUiDateTime(new Date(route.validatedAt), language, { dateStyle: "medium", timeStyle: "short" })}` : "尚未完成本地验证" }} /></div>
-            <div className="mt-4 flex flex-wrap gap-2">{!readOnly ? <><button type="button" disabled={pending || route.status !== "draft"} onClick={() => editDraft(route)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">编辑草稿</button><button type="button" disabled={pending || route.status !== "draft"} onClick={() => void lifecycle(route, "validate")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">本地验证</button><button type="button" disabled={pending || route.status !== "verified"} onClick={() => void lifecycle(route, "activate")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">激活控制面路由</button><button type="button" disabled={pending || route.status === "retired"} onClick={() => void lifecycle(route, "retire")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">停用</button></> : null}<button type="button" disabled={pending} onClick={() => void showImpact(route)} className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-40">查看影响</button></div>
+            <div className="mt-4 flex flex-wrap gap-2">{!readOnly ? <><button type="button" disabled={pending || route.status !== "draft"} onClick={() => editDraft(route)} className="rounded-control border border-app-border px-3 py-2 text-xs font-semibold text-app-muted disabled:opacity-40">编辑草稿</button><button type="button" disabled={pending || route.status !== "draft"} onClick={() => void lifecycle(route, "validate")} className="rounded-control px-3 py-2 text-xs font-semibold disabled:opacity-40 app-button-primary">本地验证</button><button type="button" disabled={pending || route.status !== "verified"} onClick={() => void lifecycle(route, "activate")} className="rounded-control px-3 py-2 text-xs font-semibold disabled:opacity-40 app-button-primary">激活控制面路由</button><button type="button" disabled={pending || route.status === "retired"} onClick={() => void lifecycle(route, "retire")} className="rounded-control border border-app-border px-3 py-2 text-xs font-semibold text-app-muted disabled:opacity-40">停用</button></> : null}<button type="button" disabled={pending} onClick={() => void showImpact(route)} className="rounded-control border border-app-accent-border px-3 py-2 text-xs font-semibold text-app-link disabled:opacity-40">查看影响</button></div>
           </article>;
         })}
       </div>
 
-      {impact ? <section className="mt-5 rounded-2xl border border-indigo-100 bg-white p-5" aria-live="polite"><h3 className="text-sm font-semibold text-slate-900">影响预览 · {operationLabels[impact.operation]}</h3><p className="mt-2 text-xs text-slate-500">运行时状态：已接入 Web AI 有效路由解析；仅 active 且就绪的路由会影响后续运行。本页不会执行真实模型调用，也不会重建、删除或切换索引。</p><div className="mt-3 space-y-1 text-xs leading-5 text-slate-600">{operationImpactSummary(impact).map((summary) => <p key={summary}>{summary}</p>)}</div></section> : null}
-      <details className="mt-7 rounded-2xl border border-white/80 bg-white p-5"><summary className="cursor-pointer text-sm font-semibold text-slate-800">最近控制面审计（仅安全快照）</summary><div className="mt-4 space-y-3">{audits.length === 0 ? <p className="text-xs text-slate-500">暂无审计记录。</p> : audits.map((audit) => <div key={audit.id} className="border-b border-slate-100 pb-3 text-xs text-slate-600"><p className="font-semibold text-slate-800">{audit.action} · {operationLabels[audit.operation]} · v{audit.routeVersion}</p><p className="mt-1">Provider 配置版本 {audit.providerConfigurationVersion} · {audit.reason ?? "无原因"}</p></div>)}</div></details>
+      {impact ? <section className="mt-5 rounded-panel border app-panel-accent bg-app-surface p-5 app-panel" aria-live="polite"><h3 className="text-sm font-semibold text-app-text">影响预览 · {operationLabels[impact.operation]}</h3><p className="mt-2 text-xs text-app-muted">运行时状态：已接入 Web AI 有效路由解析；仅 active 且就绪的路由会影响后续运行。本页不会执行真实模型调用，也不会重建、删除或切换索引。</p><div className="mt-3 space-y-1 text-xs leading-5 text-app-muted">{operationImpactSummary(impact).map((summary) => <p key={summary}>{summary}</p>)}</div></section> : null}
+      <details className="mt-7 rounded-panel border border-app-border bg-app-surface p-5"><summary className="cursor-pointer text-sm font-semibold text-app-text">最近控制面审计（仅安全快照）</summary><div className="mt-4 space-y-3">{audits.length === 0 ? <p className="text-xs text-app-muted">暂无审计记录。</p> : audits.map((audit) => <div key={audit.id} className="border-b border-app-border pb-3 text-xs text-app-muted"><p className="font-semibold text-app-text">{audit.action} · {operationLabels[audit.operation]} · v{audit.routeVersion}</p><p className="mt-1">Provider 配置版本 {audit.providerConfigurationVersion} · {audit.reason ?? "无原因"}</p></div>)}</div></details>
       {dialog}
     </section>
   );

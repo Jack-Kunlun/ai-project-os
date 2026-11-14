@@ -233,18 +233,18 @@ export function DashboardClient({ username, initialNow, isSystemAdmin = false }:
 
         <p className={styles.subtitle}>{formatGreetingDate(initialNow, language)}<span aria-hidden="true"> / </span>{(workspaceName?.workspaceId === workspaceId ? workspaceName.name : null) ?? t("当前工作空间")}</p>
 
-        {error ? <div className={styles.error} role="alert"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load()}><UiText text="重试" /></button></div> : null}
+        {error ? <div className={["app-feedback-error", (styles.error)].filter(Boolean).join(' ')} role="alert"><span><UiErrorText text={error} /></span><button type="button" onClick={() => void load()}><UiText text="重试" /></button></div> : null}
 
         <section className={styles.featureGrid} aria-label={t("工作台常用信息")}>
           <section className={styles.panel} aria-labelledby="attention-heading">
             <div className={styles.sectionHeading}>
-              <div className={styles.headingTitle}><p className={styles.eyebrow}><UiText text={"ATTENTION"} /></p><div className={styles.titleWithCount}><h2 id="attention-heading"><UiText text="需要你关注" /></h2>{!loading && !error ? <span className={`${styles.count} ${attentionItems.length > 0 ? styles.countActive : ""}`} aria-label={`${attentionItems.length} ${t("项待处理")}`}>{attentionItems.length}</span> : null}</div></div>
+              <div className={styles.headingTitle}><p className={styles.eyebrow}><UiText text={"ATTENTION"} /></p><div className={styles.titleWithCount}><h2 id="attention-heading"><UiText text="需要你关注" /></h2>{!loading && !error ? <span className={`${styles.count}  ${attentionItems.length > 0 ? styles.countActive : ""}`} aria-label={`${attentionItems.length} ${t("项待处理")}`}>{attentionItems.length}</span> : null}</div></div>
               <Link href="/notifications" className={styles.cardAction}><UiText text="通知中心" /><ShellIcon name="arrow" className={`${styles.actionArrow} app-icon--compact`} /></Link>
             </div>
             <p className={styles.actionDescription}><UiText text="查看待处理事项，及时跟进项目进展。" /></p>
             {loading ? <LoadingRows t={t} /> : error ? <p className={styles.empty}><UiText text="状态读取失败，重试后再查看待办。" /></p> : attentionItems.length === 0 ? <p className={styles.empty}><UiText text="暂无待处理事项。" /></p> : (
               <div className={styles.attentionList}>{attentionItems.map((item) => <Link key={item.id} href={item.href} className={styles.attentionItem}>
-                <span className={`${styles.signal} ${styles[item.tone]}`} aria-hidden="true" />
+                <span className={`${styles.signal}  ${styles[item.tone]}`} aria-hidden="true" />
                 <span className={styles.itemCopy}><strong>{item.title}</strong><small>{item.detail}</small></span>
                 <ShellIcon name="chevron" className={`${styles.arrow} app-icon--compact`} />
               </Link>)}</div>

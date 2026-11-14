@@ -97,10 +97,10 @@ export function HelpTooltip({ label, children }: Readonly<{ label: string; child
         aria-controls={id}
         aria-describedby={open ? id : undefined}
         onClick={show}
-        className="inline-flex h-6 w-6 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-      ><span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-bold leading-none text-slate-600 hover:border-indigo-400 hover:text-indigo-700">?</span>
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-app-accent-soft"
+      ><span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-app-border bg-app-surface text-[10px] font-bold leading-none text-app-muted hover:border-app-accent-border hover:text-app-link">?</span>
       </button>
-      {position ? createPortal(<span ref={tooltip} id={id} role="tooltip" className="fixed z-[70] block w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 text-left text-xs font-normal leading-5 text-slate-700 shadow-xl" style={{ left: position.left, top: position.top, maxHeight: position.maxHeight, transform: `translate(-50%, ${position.above ? "-100%" : "0"})` }} onPointerEnter={cancelHide} onPointerLeave={scheduleHide}>{children}</span>, document.body) : null}
+      {position ? createPortal(<span ref={tooltip} id={id} role="tooltip" className="app-dialog-surface fixed z-[70] block w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-control p-3 text-left text-xs font-normal leading-5 text-app-text" style={{ left: position.left, top: position.top, maxHeight: position.maxHeight, transform: `translate(-50%, ${position.above ? "-100%" : "0"})` }} onPointerEnter={cancelHide} onPointerLeave={scheduleHide}>{children}</span>, document.body) : null}
     </span>
   );
 }

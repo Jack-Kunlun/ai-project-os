@@ -11,7 +11,7 @@
 
 .pageHeader h1 {
   margin-top: 7px;
-  font-size: 25px;
+  font-size: var(--app-page-title-size);
   font-weight: 600;
   letter-spacing: 0;
 }
@@ -31,7 +31,7 @@
   min-height: var(--app-action-min-height);
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   gap: var(--app-action-gap);
   padding: var(--app-action-padding-block) var(--app-action-padding-inline);
   font-size: var(--app-action-font-size);
@@ -116,7 +116,7 @@
 .sourceSection {
   margin-top: 1rem;
   border: 1px solid var(--app-border);
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
   padding: 1.25rem;
   scroll-margin-top: 5.5rem;
@@ -153,7 +153,7 @@
 .errorNotice,
 .successNotice {
   margin-top: 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   padding: 0.625rem 0.75rem;
   font-size: 0.75rem;
   line-height: 1.5;
@@ -189,7 +189,7 @@
 .categoryButton {
   min-height: 2.25rem;
   border: 0;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-control);
   background: transparent;
   padding: 0.5rem 0.625rem;
   color: var(--app-muted);
@@ -224,9 +224,9 @@
 
 .searchInput {
   width: 100%;
-  min-height: 2.375rem;
+  min-height: 40px;
   border: 1px solid var(--app-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-field);
   background: var(--app-surface);
   padding: 0.5rem 0.75rem;
   color: var(--app-link);
@@ -235,8 +235,8 @@
 }
 
 .searchInput:focus {
-  border-color: var(--app-border);
-  box-shadow: 0 0 0 3px rgb(219 234 254 / 70%);
+  border-color: var(--app-accent-border);
+  box-shadow: none;
 }
 
 .sourceList {
@@ -305,7 +305,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--app-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-control);
   background: var(--app-surface);
   padding: 0.375rem 0.625rem;
   color: var(--app-muted);
@@ -336,7 +336,7 @@
 
 .emptyState {
   border: 1px dashed var(--app-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-panel);
   margin-top: 0.875rem;
   padding: 2rem 1rem;
   text-align: center;
@@ -349,7 +349,7 @@
 
 .loadingRow {
   height: 4.25rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface-soft);
   animation: pulse 1.7s ease-in-out infinite;
 }
@@ -386,14 +386,13 @@
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 24px;
 }
 
 .reviewSection,
 .tasksSection {
   margin-top: 1rem;
   border: 1px solid var(--app-border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
   padding: 1.25rem;
   scroll-margin-top: 5.5rem;
@@ -402,7 +401,7 @@
 .reviewCard,
 .taskCard {
   border: 1px solid var(--app-border);
-  border-radius: 0.625rem;
+  border-radius: var(--radius-panel);
   background: var(--app-surface);
   padding: 1rem;
 }
@@ -483,6 +482,5 @@
   }
 }
 @media (max-width: 700px) {
-  .drawer > :global([data-dialog-header]),
-  .drawer > :global([data-dialog-body]) { padding-inline: 20px; }
+  .searchInput { min-height: 44px; }
 }

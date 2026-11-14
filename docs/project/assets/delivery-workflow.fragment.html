@@ -1,0 +1,117 @@
+<section id="delivery-workflow-v2" aria-label="项目研发交付流程与问题闭环">
+  <style>
+    #delivery-workflow-v2 { display: grid; gap: calc(var(--font-size-base) * 1.25); color: var(--foreground); }
+    #delivery-workflow-v2 .section-label { display: flex; justify-content: space-between; gap: calc(var(--font-size-base) * .75); align-items: baseline; flex-wrap: wrap; }
+    #delivery-workflow-v2 .management { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(var(--font-size-base) * 1.25); }
+    #delivery-workflow-v2 .management-item { display: grid; gap: calc(var(--font-size-base) * .25); }
+    #delivery-workflow-v2 .main-flow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: calc(var(--font-size-base) * 1.25); }
+    #delivery-workflow-v2 .stage { min-width: 0; display: grid; gap: calc(var(--font-size-base) * .5); align-content: start; position: relative; text-align: center; }
+    #delivery-workflow-v2 .stage:not(:last-child)::after { content: "→"; position: absolute; right: calc(var(--font-size-base) * -1.1); top: calc(var(--font-size-base) * .55); color: var(--muted-foreground); }
+    #delivery-workflow-v2 .stage-caption { color: var(--muted-foreground); }
+    #delivery-workflow-v2 .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(var(--font-size-base) * 1.25); margin-top: calc(var(--font-size-base) * .75); }
+    #delivery-workflow-v2 .detail-item { display: grid; align-content: start; gap: calc(var(--font-size-base) * .35); }
+    #delivery-workflow-v2 .exception-list { display: grid; gap: calc(var(--font-size-base) * 1); }
+    #delivery-workflow-v2 .lane { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: calc(var(--font-size-base) * 1); align-items: baseline; }
+    #delivery-workflow-v2 .path { display: flex; align-items: baseline; flex-wrap: wrap; gap: calc(var(--font-size-base) * .5); }
+    #delivery-workflow-v2 .arrow { color: var(--muted-foreground); }
+    #delivery-workflow-v2 .support { display: grid; gap: calc(var(--font-size-base) * .75); }
+    #delivery-workflow-v2 .return-note { color: var(--muted-foreground); }
+    @media (max-width: 600px) {
+      #delivery-workflow-v2 .main-flow { grid-template-columns: 1fr; gap: calc(var(--font-size-base) * 1.25); }
+      #delivery-workflow-v2 .stage { grid-template-columns: 5.5em minmax(0, 1fr); align-items: center; text-align: left; gap: calc(var(--font-size-base) * 1); }
+      #delivery-workflow-v2 .stage:not(:last-child)::after { content: "↓"; right: auto; left: 2.5em; top: auto; bottom: calc(var(--font-size-base) * -1.2); }
+      #delivery-workflow-v2 .detail-grid { grid-template-columns: 1fr; }
+      #delivery-workflow-v2 .management { grid-template-columns: 1fr; gap: calc(var(--font-size-base) * .5); }
+      #delivery-workflow-v2 .management-item { grid-template-columns: 7em 1fr; }
+      #delivery-workflow-v2 .lane { grid-template-columns: 1fr; gap: calc(var(--font-size-base) * .35); }
+    }
+  </style>
+
+  <h2>项目交付流程</h2>
+
+  <div class="management" aria-label="全程管理">
+    <div class="management-item"><span>目标与范围</span><span class="text-small text-muted">做什么 · 不做什么</span></div>
+    <div class="management-item"><span>总进度与任务</span><span class="text-small text-muted">做到哪 · 谁负责</span></div>
+    <div class="management-item"><span>依赖与风险</span><span class="text-small text-muted">等什么 · 卡在哪里</span></div>
+  </div>
+
+  <hr>
+
+  <div class="section-label"><h3>交付主线</h3><span class="text-small text-muted">各阶段验收通过后向前推进</span></div>
+  <div class="main-flow" role="group" aria-label="选择阶段查看交付与接收标准">
+    <div class="stage"><button type="button" class="btn btn-block" data-stage="requirements" aria-pressed="false" aria-controls="workflow-stage-detail">需求</button><span class="stage-caption text-small">立项 · PRD</span></div>
+    <div class="stage"><button type="button" class="btn btn-block" data-stage="design" aria-pressed="true" aria-controls="workflow-stage-detail">设计</button><span class="stage-caption text-small">原型 · 方案</span></div>
+    <div class="stage"><button type="button" class="btn btn-block" data-stage="development" aria-pressed="false" aria-controls="workflow-stage-detail">开发</button><span class="stage-caption text-small">模块 · 集成</span></div>
+    <div class="stage"><button type="button" class="btn btn-block" data-stage="testing" aria-pressed="false" aria-controls="workflow-stage-detail">测试</button><span class="stage-caption text-small">功能 · UI</span></div>
+    <div class="stage"><button type="button" class="btn btn-block" data-stage="acceptance" aria-pressed="false" aria-controls="workflow-stage-detail">验收</button><span class="stage-caption text-small">产品 · 设计</span></div>
+    <div class="stage"><button type="button" class="btn btn-block" data-stage="release" aria-pressed="false" aria-controls="workflow-stage-detail">发布</button><span class="stage-caption text-small">准备 · 上线</span></div>
+    <div class="stage"><button type="button" class="btn btn-block" data-stage="observation" aria-pressed="false" aria-controls="workflow-stage-detail">观察</button><span class="stage-caption text-small">健康 · 业务</span></div>
+  </div>
+  <div class="return-note text-small">未通过 → 回到对应阶段修正，再验收</div>
+
+  <div class="card" id="workflow-stage-detail" aria-live="polite" aria-atomic="true">
+    <h3 id="workflow-detail-title">设计交接</h3>
+    <div class="detail-grid">
+      <div class="detail-item"><span class="text-small">交付物</span><span id="workflow-deliverable">原型、视觉规范、页面状态清单与技术方案。</span></div>
+      <div class="detail-item"><span class="text-small">通过条件</span><span id="workflow-gate">关键流程走通；对齐、间距、错误态和窄屏有明确基准。</span></div>
+      <div class="detail-item"><span class="text-small">接收方</span><span id="workflow-receiver">开发负责人核对模块边界、依赖与验收要求。</span></div>
+    </div>
+  </div>
+
+  <hr>
+
+  <h3>例外处理与反馈</h3>
+  <div class="exception-list">
+    <div class="lane"><span>临时需求</span><div class="path"><span>登记变更</span><span class="arrow" aria-hidden="true">→</span><span>评估影响</span><span class="arrow" aria-hidden="true">→</span><span>调整任务</span><span class="arrow" aria-hidden="true">→</span><span>回到受影响阶段</span></div></div>
+    <div class="lane"><span>发现问题</span><div class="path"><span>登记问题</span><span class="arrow" aria-hidden="true">→</span><span>核定根因与边界</span><span class="arrow" aria-hidden="true">→</span><span>修复与回归</span><span class="arrow" aria-hidden="true">→</span><span>验收并复查效果</span></div></div>
+    <div class="lane"><span>持续升级</span><div class="path"><span>复发 / 跨模块 / 漏测 / 高风险</span><span class="arrow" aria-hidden="true">→</span><span>扩大核查、更新规范与检查</span></div></div>
+  </div>
+
+  <hr>
+
+  <div class="support" aria-label="贯穿所有阶段的交接与记录要求">
+    <div class="lane"><span>模块交接</span><div class="path"><span>谁交谁接</span><span class="arrow" aria-hidden="true">·</span><span>输入输出</span><span class="arrow" aria-hidden="true">·</span><span>数据与状态归属</span><span class="arrow" aria-hidden="true">·</span><span>失败责任</span><span class="arrow" aria-hidden="true">·</span><span>接收证据</span></div></div>
+    <div class="lane"><span>持续记录</span><div class="path"><span>任务与问题</span><span class="arrow" aria-hidden="true">·</span><span>变更与过程</span><span class="arrow" aria-hidden="true">·</span><span>验收与发布</span><span class="arrow" aria-hidden="true">·</span><span>复发经验</span></div></div>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.getElementById("delivery-workflow-v2");
+      const stages = {
+        requirements: { title: "需求交接", deliverable: "目标、范围、PRD 与可检查的验收场景。", gate: "业务规则、权限、异常和非目标明确；任务有主责。", receiver: "设计与技术负责人核对输入，澄清关键歧义。" },
+        design: { title: "设计交接", deliverable: "原型、视觉规范、页面状态清单与技术方案。", gate: "关键流程走通；对齐、间距、错误态和窄屏有明确基准。", receiver: "开发负责人核对模块边界、依赖与验收要求。" },
+        development: { title: "开发交接", deliverable: "可运行候选、接口与状态合同、自检结果和已知问题。", gate: "实现符合需求；上下游集成明确；未验证范围单列。", receiver: "测试负责人核对候选、场景、测试数据与证据。" },
+        testing: { title: "测试交接", deliverable: "功能、UI、边界与回归结果，以及缺陷和覆盖清单。", gate: "必需检查通过；失败、跳过、模拟与未执行分别记录。", receiver: "产品与设计验收者核对实际结果，不只看通过数字。" },
+        acceptance: { title: "验收交接", deliverable: "对应候选的需求、视觉、行为及模块接收结论。", gate: "阻断问题关闭；必要预防与回归有证据；遗留有归属。", receiver: "发布负责人核对同一候选、风险与运行依赖。" },
+        release: { title: "发布交接", deliverable: "精确版本、通过的适用 CI、同一镜像与发布回执。", gate: "身份、迁移与授权满足要求；用户发起既有发布流程。", receiver: "运行观察负责人核对实际版本、健康和关键业务。" },
+        observation: { title: "观察与接续", deliverable: "健康、核心流程、实际外部验证及遗留问题记录。", gate: "未验证如实保留；新问题入账；改进安排后续效果复查。", receiver: "项目负责人更新总进度，安排下一轮任务和改进。" }
+      };
+      const title = root.querySelector("#workflow-detail-title");
+      const deliverable = root.querySelector("#workflow-deliverable");
+      const gate = root.querySelector("#workflow-gate");
+      const receiver = root.querySelector("#workflow-receiver");
+      function select(key, persist) {
+        const item = stages[key];
+        if (!item) return;
+        root.querySelectorAll("button[data-stage]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.stage === key)));
+        title.textContent = item.title;
+        deliverable.textContent = item.deliverable;
+        gate.textContent = item.gate;
+        receiver.textContent = item.receiver;
+        if (persist && window.openai?.setWidgetState) window.openai.setWidgetState({ modelContent: { selectedStage: key }, privateContent: null }).catch(() => {});
+      }
+      root.addEventListener("click", event => {
+        const button = event.target.closest("button[data-stage]");
+        if (button && root.contains(button)) select(button.dataset.stage, true);
+      });
+      function restore(state) {
+        const key = state?.modelContent?.selectedStage ?? state?.selectedStage;
+        select(stages[key] ? key : "design", false);
+      }
+      restore(window.openai?.widgetState);
+      window.addEventListener("openai:set_globals", event => {
+        if (event.detail?.globals && "widgetState" in event.detail.globals) restore(event.detail.globals.widgetState);
+      });
+    })();
+  </script>
+</section>

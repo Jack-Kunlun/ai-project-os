@@ -1,0 +1,231 @@
+
+Running 87 tests using 1 worker
+
+(node:74922) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/87] e2e/00-first-run-appearance.spec.ts:5:5 › first-run setup supports Chinese light and English dark before an administrator exists
+[2/87] e2e/01-system-dialog-surfaces.spec.ts:331:5 › project status and configuration drawers render embedded content without page card shells
+[3/87] e2e/01-system-dialog-surfaces.spec.ts:378:5 › manual and automatic repository proposal dialogs fit and retain drafts in both appearance modes
+[4/87] e2e/01-system-dialog-surfaces.spec.ts:438:5 › shared Git, MCP, team invitation, and external-source dialogs use their body and footer space
+[5/87] e2e/adm008-effective-access.spec.ts:8:5 › ADM-008 user operations stay within the safe admin boundary and preserve account lifecycle previews
+e2e/adm008-effective-access.spec.ts:8:5 › ADM-008 user operations stay within the safe admin boundary and preserve account lifecycle previews
+prisma:error
+Invalid `prisma.project.delete()` invocation:
+
+
+Database error. Code: `23514`. Message: `PROJECT_GIT_AUTOMATION_PROJECT_DELETE_BLOCKED`
+
+prisma:error
+Invalid `prisma.workspace.delete()` invocation:
+
+
+Foreign key constraint violated on the constraint: `Project_workspaceId_fkey`
+
+[6/87] e2e/admin-model-list-layout.spec.ts:63:5 › destructive confirmation uses the same modal geometry inside the admin provider drawer
+[7/87] e2e/admin-model-list-layout.spec.ts:101:5 › new provider tests display safe failure reasons and clear stale results
+[8/87] e2e/admin-model-list-layout.spec.ts:188:5 › admin models use inline capability selection and read-only provider drawers across narrow and desktop layouts
+  1) e2e/admin-model-list-layout.spec.ts:188:5 › admin models use inline capability selection and read-only provider drawers across narrow and desktop layouts
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: "16px"
+    Received: "15px"
+
+      294 |     expect(dialogGeometry.right).toBeLessThanOrEqual(width);
+      295 |     expect(dialogGeometry.borderRadius).toBe("6px");
+    > 296 |     expect(dialogGeometry.headingFontSize).toBe("16px");
+          |                                            ^
+      297 |     await expectR02NoHorizontalOverflow(page, `add provider dialog en-dark ${width}`);
+      298 |
+      299 |     if (width === 390) {
+        at /Users/fenglan/projects/ai-project-os/e2e/admin-model-list-layout.spec.ts:296:44
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/admin-model-list-layout-ad-3d710--narrow-and-desktop-layouts/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/admin-model-list-layout-ad-3d710--narrow-and-desktop-layouts/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ui-remediation-final-20261115/admin-model-list-layout-ad-3d710--narrow-and-desktop-layouts/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/admin-model-list-layout-ad-3d710--narrow-and-desktop-layouts/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/ui-remediation-final-20261115/admin-model-list-layout-ad-3d710--narrow-and-desktop-layouts/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+(node:74993) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[9/87] e2e/admin-model-list-layout.spec.ts:321:7 › capability batch confirms once and enables each successful item immediately
+[10/87] e2e/admin-model-list-layout.spec.ts:321:7 › capability batch confirms once and stops after an uncertain test
+[11/87] e2e/admin-overlay-consistency.spec.ts:199:5 › admin profile overlays use shared geometry and phone verification stays inside the modal
+[12/87] e2e/admin-overlay-consistency.spec.ts:384:5 › English membership preview copy is complete in list and user detail operations
+[13/87] e2e/admin-overlay-consistency.spec.ts:485:5 › English credit operation footer actions stay single-line at 390px without overflow
+[14/87] e2e/auth-compact-layout.spec.ts:89:5 › email registration steps fit desktop and mobile viewports in English dark mode
+[15/87] e2e/auth-compact-layout.spec.ts:123:5 › phone recovery steps fit desktop and mobile viewports in English dark mode
+[16/87] e2e/auth-flow-style.spec.ts:23:5 › login methods share their height and keep SMS hints separated from actions
+[17/87] e2e/auth-flow-style.spec.ts:120:5 › registration shares the login layout, preserves a rejected draft, and creates a real personal account
+[18/87] e2e/auth-flow-style.spec.ts:152:5 › email registration stays local until the final submit and preserves the challenge while editing
+[19/87] e2e/auth-flow-style.spec.ts:251:5 › phone registration remains local until final submit and clears the challenge when the phone changes
+[20/87] e2e/auth-flow-style.spec.ts:347:5 › phone recovery stays local until final submit and preserves the challenge while editing
+[21/87] e2e/auth-flow-style.spec.ts:454:5 › unavailable phone recovery keeps its controls disabled and returns to the same login experience
+[22/87] e2e/compatibility-feedback.spec.ts:6:5 › credits and invitation compatibility screens localize failures without echoing API prose
+[23/87] e2e/connection-list-layout.spec.ts:150:5 › personal Git and MCP connection lists match the prototype across desktop and narrow appearances
+[24/87] e2e/feedback-layout-parity.spec.ts:40:5 › expanded project detail panels retain bottom insets for empty and populated content
+[25/87] e2e/feedback-layout-parity.spec.ts:110:7 › approved overview rows and sticky sections remain usable in zh-CN
+[26/87] e2e/feedback-layout-parity.spec.ts:110:7 › approved overview rows and sticky sections remain usable in en
+[27/87] e2e/icon-assistance.spec.ts:41:5 › operation assistance stays in the secondary footer and icons align with rendered labels
+[28/87] e2e/icon-assistance.spec.ts:232:5 › basic project and team invitation forms hide Ask and use shared action dimensions
+[29/87] e2e/icon-assistance.spec.ts:282:5 › model quota uses the real report envelope and Ask Escape preserves a confirmation input (isolated provider display fixture)
+[30/87] e2e/icon-assistance.spec.ts:317:5 › nested graph confirmation Escape preserves both operation panels without executing (client-only prepare fixture)
+[31/87] e2e/knowledge-localization.spec.ts:7:5 › personal knowledge index localizes its initial status and safe errors on English dark screens
+[32/87] e2e/login-style.spec.ts:105:5 › login preserves authentication drafts and error-state links in Chinese light and English dark
+[33/87] e2e/materials-request-race.spec.ts:87:5 › materials lists ignore delayed responses after filter changes and unmount
+[34/87] e2e/materials-request-race.spec.ts:245:5 › materials source previews wrap long URLs at narrow widths
+[35/87] e2e/materials-request-race.spec.ts:291:5 › materials tabs remain responsive during slow requests and a refused deletion keeps the list
+[36/87] e2e/page-operations-and-import.spec.ts:26:5 › compact project creation dialog fits narrow screens, traps focus, and preserves pending drafts
+[37/87] e2e/page-operations-and-import.spec.ts:160:5 › materials keep editing separate, retain drafts, and chain text import into one explicit model consent
+[38/87] e2e/page-operations-and-import.spec.ts:200:5 › material intake keeps its close control beside translated headings at narrow widths
+[39/87] e2e/page-operations-and-import.spec.ts:233:5 › long PDF pages use a dedicated import workspace and fit each consent batch
+[40/87] e2e/page-operations-and-import.spec.ts:278:5 › profile operations preserve a failed draft and return to the updated view on success
+[41/87] e2e/personal-knowledge-modal.spec.ts:15:5 › knowledge modals protect drafts, show small-screen validation and persist saved versions
+[42/87] e2e/personal-knowledge-modal.spec.ts:150:5 › personal vision import defaults to platform and requires page and billing confirmation
+[43/87] e2e/personal-project-search.spec.ts:6:5 › personal project search makes archived selection explicit and keeps all-accessible scoped to active projects
+[44/87] e2e/project-memory-operation-layout.spec.ts:45:5 › select all project sources, review the complete scope, and keep confirmation beside inquiry
+[45/87] e2e/projects-archive-actions.spec.ts:12:7 › archived project quick deletion preserves confirmation and refreshes the list (zh-CN/light)
+[46/87] e2e/projects-archive-actions.spec.ts:12:7 › archived project quick deletion preserves confirmation and refreshes the list (en/dark)
+[47/87] e2e/prototype-detail-lists.spec.ts:29:5 › source detail and project members follow prototype reading layouts (isolated GET display fixtures)
+[48/87] e2e/prototype-ui-polish.spec.ts:7:5 › one-click read-all persists for every notification page
+[49/87] e2e/server-resources-language.spec.ts:4:5 › resource monitoring localizes safe failures in English dark mode without exposing server errors
+[50/87] e2e/short-page-scroll.spec.ts:6:5 › short reading pages avoid launcher-only scroll while narrow pages retain clearance
+[51/87] e2e/smoke.spec.ts:333:5 › first-run administrator and personal workspace Owner stay separate across protected pages
+[52/87] e2e/system-audit.spec.ts:225:5 › administrator audit center keeps short labels on one line and separates common from advanced filters
+[53/87] e2e/system-audit.spec.ts:356:5 › audit detail drawer handles loading, failure, close and restores focus and list position
+[54/87] e2e/system-failure-inbox.spec.ts:38:5 › administrator can open the read-only failure inbox and non-admins remain blocked
+[55/87] e2e/team-narrow-layout.spec.ts:207:5 › team overview and member query layouts fit 390px in English dark mode with unbroken names
+[56/87] e2e/team-overview-table.spec.ts:105:5 › team overview uses scannable desktop tables and narrow card rows
+[57/87] e2e/ui-consistency-matrix.spec.ts:296:5 › all page routes remain consistent across Chinese light and English dark desktop/mobile
+[58/87] e2e/ui-style-states.spec.ts:18:5 › all application pages retain the new style during loading, failed reads and operation dialogs
+[59/87] e2e/unified-question.spec.ts:112:5 › unified Ask keeps real source snapshots across scopes (isolated client route fixture; history persistence is not proven here)
+[60/87] e2e/unified-question.spec.ts:733:5 › 3D knowledge graph rotates, pans, zooms and drags without losing direct source details
+[61/87] e2e/usage-flow-guidance.spec.ts:39:5 › personal knowledge hands off explicitly into project materials and guided AI steps
+  2) e2e/usage-flow-guidance.spec.ts:39:5 › personal knowledge hands off explicitly into project materials and guided AI steps
+
+    Error: Organize this source
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 2
+    + Received  + 2
+
+      Array [
+        "24px",
+    -   "24px",
+    -   "24px",
+    +   "20px",
+        "24px",
+    +   "20px",
+      ]
+
+      335 |       };
+      336 |     });
+    > 337 |     expect(geometry.bodyPadding, appearance.title).toEqual(["24px", "24px", "24px", "24px"]);
+          |                                                    ^
+      338 |     expect(geometry.panelPadding, appearance.title).toEqual(["0px", "0px", "0px", "0px"]);
+      339 |     expect(geometry.panelMarginTop, appearance.title).toBe("0px");
+      340 |     expect(geometry.panelBorderWidths, appearance.title).toEqual(["0px", "0px", "0px", "0px"]);
+        at /Users/fenglan/projects/ai-project-os/e2e/usage-flow-guidance.spec.ts:337:52
+
+    attachment #4: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #5: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video-2.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #6: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video-1.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #7: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video-3.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #8: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video-4.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #9: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video-5.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #10: video (video/webm) ─────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video-7.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #11: video (video/webm) ─────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video-6.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #12: video (video/webm) ─────────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/error-context.md
+
+    attachment #14: trace (application/zip) ────────────────────────────────────────────────────────
+    test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/ui-remediation-final-20261115/usage-flow-guidance-person-c4c48-terials-and-guided-AI-steps/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+(node:88388) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[62/87] e2e/usage-flow-guidance.spec.ts:367:5 › legacy memory questions prepare stale material and require separate confirmation before every model send
+[63/87] e2e/usage-flow-guidance.spec.ts:437:5 › processing tasks preserve background state and only offer safe cancellation
+[64/87] e2e/usage-flow-guidance.spec.ts:505:5 › invalid extraction detail separates incomplete output from open and closed call records
+[65/87] e2e/user-appearance.spec.ts:234:7 › user appearance zh-CN/light covers all primary routes
+[66/87] e2e/user-appearance.spec.ts:234:7 › user appearance zh-CN/dark covers all primary routes
+[67/87] e2e/user-appearance.spec.ts:234:7 › user appearance en/light covers all primary routes
+[68/87] e2e/user-appearance.spec.ts:234:7 › user appearance en/dark covers all primary routes
+[69/87] e2e/user-appearance.spec.ts:390:5 › knowledge and floating Ask AI preserve both drafts across tabs, modal transitions, and guarded close
+[70/87] e2e/user-appearance.spec.ts:511:5 › usage details keep native modal focus, close on Escape and backdrop, and place Ask AI in the secondary footer
+[71/87] e2e/user-appearance.spec.ts:553:5 › credits membership stays independent of usage filters and preserves confirmation keys and drafts (isolated UI fixtures)
+[72/87] e2e/user-appearance.spec.ts:631:5 › Git creation waits for its real provider catalog before accepting a click
+[73/87] e2e/user-appearance.spec.ts:656:5 › project memory shows its real project title while the index projection is pending
+[74/87] e2e/user-appearance.spec.ts:704:5 › dashboard feedback keeps direct actions, title counts, independent graph and top-layer Ask (isolated UI fixtures)
+[75/87] e2e/user-shell-navigation.spec.ts:6:5 › project picker preserves the selected section across desktop and mobile navigation
+[76/87] e2e/web-ai-confirmation.spec.ts:150:5 › memory confirmation prepare and execute are single-flight and stale input fails closed
+[77/87] e2e/z-admin-appearance.spec.ts:25:7 › admin prototype presentation zh-CN/light
+[78/87] e2e/z-admin-appearance.spec.ts:25:7 › admin prototype presentation zh-CN/dark
+[79/87] e2e/z-admin-appearance.spec.ts:25:7 › admin prototype presentation en/light
+[80/87] e2e/z-admin-appearance.spec.ts:25:7 › admin prototype presentation en/dark
+[81/87] e2e/z-admin-appearance.spec.ts:179:5 › admin navigation and search stay exclusive while the dialog chunk loads and restore focus
+[82/87] e2e/z-admin-appearance.spec.ts:233:5 › SMS captcha lazy-loads, retries and closes without sending a message (isolated UI fixtures)
+[83/87] e2e/z-r02-admin-navigation.spec.ts:309:5 › R02 production pages preserve the trusted admin entry and responsive admin navigation
+[84/87] e2e/z-supplemental-appearance.spec.ts:43:7 › supplemental auth, public and project pages zh-CN/light
+[85/87] e2e/z-supplemental-appearance.spec.ts:43:7 › supplemental auth, public and project pages zh-CN/dark
+[86/87] e2e/z-supplemental-appearance.spec.ts:43:7 › supplemental auth, public and project pages en/light
+[87/87] e2e/z-supplemental-appearance.spec.ts:43:7 › supplemental auth, public and project pages en/dark
+  Slow test file: e2e/ui-consistency-matrix.spec.ts (7.5m)
+  Consider running tests from slow files in parallel. See: https://playwright.dev/docs/test-parallel
+  2 failed
+    e2e/admin-model-list-layout.spec.ts:188:5 › admin models use inline capability selection and read-only provider drawers across narrow and desktop layouts
+    e2e/usage-flow-guidance.spec.ts:39:5 › personal knowledge hands off explicitly into project materials and guided AI steps
+  6 skipped
+  79 passed (17.5m)

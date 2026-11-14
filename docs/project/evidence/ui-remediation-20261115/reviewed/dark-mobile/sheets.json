@@ -1,0 +1,309 @@
+[
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-01.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_accept-invitation.png",
+        "label": "C7 en-dark-390 /accept-invitation"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin.png",
+        "label": "C7 en-dark-390 /admin"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_account.png",
+        "label": "C7 en-dark-390 /admin/account"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_audit.png",
+        "label": "C7 en-dark-390 /admin/audit"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_connectors_mcp.png",
+        "label": "C7 en-dark-390 /admin/connectors/mcp"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_credits.png",
+        "label": "C7 en-dark-390 /admin/credits"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-02.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_guide.png",
+        "label": "C7 en-dark-390 /admin/guide"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_models.png",
+        "label": "C7 en-dark-390 /admin/models"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_operations_backups.png",
+        "label": "C7 en-dark-390 /admin/operations/backups"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_operations_failures.png",
+        "label": "C7 en-dark-390 /admin/operations/failures"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_operations_probes.png",
+        "label": "C7 en-dark-390 /admin/operations/probes"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_sms.png",
+        "label": "C7 en-dark-390 /admin/sms"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-03.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_users.png",
+        "label": "C7 en-dark-390 /admin/users"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_users__userId_.png",
+        "label": "C7 en-dark-390 /admin/users/[userId]"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_users_memberships.png",
+        "label": "C7 en-dark-390 /admin/users/memberships"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_ask.png",
+        "label": "C7 en-dark-390 /ask"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_contact.png",
+        "label": "C7 en-dark-390 /contact"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_credits.png",
+        "label": "C7 en-dark-390 /credits"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-04.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_dashboard.png",
+        "label": "C7 en-dark-390 /dashboard"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_guide.png",
+        "label": "C7 en-dark-390 /guide"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_help.png",
+        "label": "C7 en-dark-390 /help"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_login.png",
+        "label": "C7 en-dark-390 /login"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_notifications.png",
+        "label": "C7 en-dark-390 /notifications"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal.png",
+        "label": "C7 en-dark-390 /personal"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-05.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_configuration.png",
+        "label": "C7 en-dark-390 /personal/configuration"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_connections_git.png",
+        "label": "C7 en-dark-390 /personal/connections/git"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_connections_mcp.png",
+        "label": "C7 en-dark-390 /personal/connections/mcp"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_knowledge.png",
+        "label": "C7 en-dark-390 /personal/knowledge"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_knowledge_graph.png",
+        "label": "C7 en-dark-390 /personal/knowledge/graph"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_models.png",
+        "label": "C7 en-dark-390 /personal/models"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-06.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_projects.png",
+        "label": "C7 en-dark-390 /personal/projects"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_usage.png",
+        "label": "C7 en-dark-390 /personal/usage"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_privacy.png",
+        "label": "C7 en-dark-390 /privacy"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_profile.png",
+        "label": "C7 en-dark-390 /profile"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId_.png",
+        "label": "C7 en-dark-390 /projects/[projectId]"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__actions.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/actions"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-07.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__assets.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/assets"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__automations.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/automations"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__configuration.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/configuration"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__control.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/control"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__external-sources.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/external-sources"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__github-syncs__syncRunId_.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/github-syncs/[syncRunId]"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-08.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__governance.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/governance"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__intelligence.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/intelligence"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__jobs__jobId_.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/jobs/[jobId]"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__materials.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/materials"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__materials_review.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/materials/review"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__materials_sources__sourceId_.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/materials/sources/[sourceId]"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-09.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__mcp-actions.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/mcp-actions"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__mcp-export.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/mcp-export"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__members.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/members"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__memory.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/memory"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__memory-quality.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/memory-quality"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__plan.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/plan"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-10.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__repositories.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/repositories"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__tools.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/tools"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__world.png",
+        "label": "C7 en-dark-390 /projects/[projectId]/world"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_recover.png",
+        "label": "C7 en-dark-390 /recover"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_register.png",
+        "label": "C7 en-dark-390 /register"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_setup.png",
+        "label": "C7 en-dark-390 /setup"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/dark-mobile/sheet-11.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_team.png",
+        "label": "C7 en-dark-390 /team"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_team__workspaceId_.png",
+        "label": "C7 en-dark-390 /team/[workspaceId]"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_terms.png",
+        "label": "C7 en-dark-390 /terms"
+      }
+    ]
+  }
+]

@@ -1,0 +1,71 @@
+{
+  "date": "2026-11-02",
+  "task": "T-031",
+  "scope": "personal reusable skill and isolated document exercises",
+  "skill": {
+    "status": "passed",
+    "checks": [
+      "skill-creator quick_validate",
+      "interface metadata",
+      "exact package files",
+      "relative links within package",
+      "Markdown table widths",
+      "no source-project paths or unfinished scaffold"
+    ],
+    "file_count": 7,
+    "link_count": 11,
+    "table_count": 5,
+    "entry_lines": 60,
+    "files": {
+      "SKILL.md": "656621d40aca3b6e7887330654c79044718087eec0d8065bb541d477c4ebbb75",
+      "agents/openai.yaml": "df90ff8796c5eaffbc7d58c2ce9917c34a2bf1cab05ccae30d21e044f4ba953b",
+      "references/adopt-project.md": "63abd773da3bce37879f52725bdd0a7266dc39116496f66c8a649c83bf54770b",
+      "references/delivery-gates.md": "6edddf35ee6fac882a3f47d8d1d39710a534b934c06b3ec8fcbb6f0c6a63a329",
+      "references/improvement.md": "9180d0975b9816656003dbd40fbc0d0a7d1020b04b4c65a8b9af2e2d728e82fe",
+      "references/legacy-project.md": "41955af15399f8e970e14db847dd8bc771d3b224710408d3112a7ace53737364",
+      "references/record-templates.md": "84a523631444b5c05aed98228b78a1830d0311d74134f8d310636642bad9011a"
+    }
+  },
+  "evaluation": {
+    "status": "passed",
+    "cases": 2,
+    "read_only_input_files_unchanged": 7,
+    "changed_project_documents": 4,
+    "links_resolve": 8,
+    "checks": [
+      "existing numbering and states preserved",
+      "active work resumption kept",
+      "adoption work trace recorded",
+      "recurrence prevention follow-up present",
+      "legacy no-ledger initialized",
+      "source existence separated from runtime and historical delivery",
+      "unknowns and untested coverage retained",
+      "business inputs hash-identical"
+    ],
+    "artifact_hashes": {
+      "existing/AGENTS.md": "a3438f91518051fe7e95557808f0422700f671437cf8e74fcea16a53bc997cac",
+      "existing/docs/PROJECT.md": "123d8a83270a0e37dfdba822b7076ed8f8a78d6824122f484d5c384e29d7b14f",
+      "existing/docs/work-items.md": "e552527537ab82f7fcd084d3fe36f9d64c651db3a5c408ffe5b98de7b0694476",
+      "existing/src/OrderList.vue": "7dc196a78721cfb55c1351eb83989d8d4f48b89ffe84426f1c23c60b50070e3b",
+      "existing/src/orders.js": "8bece63f8944d2562103f6fb119732f150366b3358ee144e33eb2aeabe278e80",
+      "legacy/README.txt": "35712e42b7eab3e0d2f0e9993e389e8ee92b30420871925b6bd2cd7e8ae16076",
+      "legacy/docs/PROJECT.md": "d83afdbf1026ece2851a9cdcea623a2e49bb49cd2f9dbd979a4354154e50ff2f",
+      "legacy/feedback.txt": "42999a88be6139060812a6307aad3d8ac00920c8373f74b55dcc2265f08faa7e",
+      "legacy/legacy/models.py": "c87adb60125a7074d8ac545f69a3553b06ae2eacf34fac54feced51e95936193",
+      "legacy/legacy/orders.py": "2dc4289472fdd18f75520b2251df14e9159185ad62c2583c92a1f5025950e150",
+      "legacy/requirements.txt": "c632a9776d21bac0837feb59cdab0a046b87f646360a7cf3cb3f81b3bf82e880",
+      "report.md": "e017ad71b0602eb24f25462696726524e6135ff6331cf99e8aea1d4844fc8cc0"
+    }
+  },
+  "installation": {
+    "status": "installed",
+    "file_count": 7
+  },
+  "limitations": [
+    "two fixture projects only",
+    "first exercise gaps corrected with feedback; not a second blind trial",
+    "no product test or production operation",
+    "no automatic picker or hot-load UI verification",
+    "no other real project adopted"
+  ]
+}

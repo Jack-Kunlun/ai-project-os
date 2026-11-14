@@ -1,0 +1,17 @@
+{
+  "changed": 119,
+  "presentationOnly": 109,
+  "review": [
+    "src/app/ask/conversation-rail.tsx",
+    "src/app/personal/knowledge/knowledge-client.tsx",
+    "src/app/profile/profile-client.tsx",
+    "src/app/projects/[projectId]/actions/project-actions-client.tsx",
+    "src/app/projects/[projectId]/materials/review/page.tsx",
+    "src/app/projects/[projectId]/mcp-actions/mcp-actions-client.tsx",
+    "src/app/projects/[projectId]/tools/project-tools-client.tsx",
+    "src/components/floating-inquiry.tsx",
+    "src/components/operation-panel.tsx",
+    "src/components/user-shell.tsx"
+  ],
+  "manualReview": "Nine entries change presentation containers, DOM grouping or style properties only; operation-panel also restores focus to its surviving parent when a nested trigger is remounted. No API, permission or business state-machine change."
+}

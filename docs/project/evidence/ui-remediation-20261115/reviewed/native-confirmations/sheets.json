@@ -1,0 +1,60 @@
+[
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/native-confirmations/sheet-01.png",
+    "items": [
+      {
+        "file": "test-results/admin-appearance/zh-CN-light-model-editor.png",
+        "label": "C7 zh-CN-light · model-editor"
+      },
+      {
+        "file": "test-results/admin-appearance/zh-CN-light-sms-editor.png",
+        "label": "C7 zh-CN-light · sms-editor"
+      },
+      {
+        "file": "test-results/admin-appearance/zh-CN-light-user-detail.png",
+        "label": "C7 zh-CN-light · user-detail"
+      },
+      {
+        "file": "test-results/admin-appearance/zh-CN-light-user-status-operation.png",
+        "label": "C7 zh-CN-light · user-status-operation"
+      },
+      {
+        "file": "test-results/admin-appearance/en-dark-model-editor.png",
+        "label": "C7 en-dark · model-editor"
+      },
+      {
+        "file": "test-results/admin-appearance/en-dark-sms-editor.png",
+        "label": "C7 en-dark · sms-editor"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/native-confirmations/sheet-02.png",
+    "items": [
+      {
+        "file": "test-results/admin-appearance/en-dark-user-detail.png",
+        "label": "C7 en-dark · user-detail"
+      },
+      {
+        "file": "test-results/admin-appearance/en-dark-user-status-operation.png",
+        "label": "C7 en-dark · user-status-operation"
+      },
+      {
+        "file": "evidence/v0.3x/T09-workbuddy/screenshots/audit-detail-drawer.png",
+        "label": "C7 audit-detail-drawer"
+      },
+      {
+        "file": "evidence/v0.3x/T09-workbuddy/screenshots/audit-detail-failure.png",
+        "label": "C7 audit-detail-failure"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/admin-confirmation-screenshots/admin-confirm-light-1440.png",
+        "label": "C7 admin-confirm-light-1440.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/admin-confirmation-screenshots/admin-confirm-dark-390.png",
+        "label": "C7 admin-confirm-dark-390.png"
+      }
+    ]
+  }
+]

@@ -1,0 +1,533 @@
+{
+  "boundary": "Isolated style fixtures built from current CSS and copied JSX class combinations. Not authenticated app/page evidence; no API/database/production calls.",
+  "results": [
+    {
+      "role": "user",
+      "theme": "light",
+      "width": 1440,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "8px",
+            "padding": "20px 32px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "oklab(0.962 0.000726771 -0.0179853 / 0.5)",
+          "color": "rgb(32, 36, 42)",
+          "radius": "8px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "6px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "theme": "light",
+      "width": 390,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "8px",
+            "padding": "20px 28px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "oklab(0.962 0.000726771 -0.0179853 / 0.5)",
+          "color": "rgb(32, 36, 42)",
+          "radius": "8px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "6px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "theme": "dark",
+      "width": 1440,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "8px",
+            "padding": "20px 32px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "rgb(38, 53, 74)",
+          "color": "rgb(230, 237, 246)",
+          "radius": "8px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "6px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "theme": "dark",
+      "width": 390,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "8px",
+            "padding": "20px 28px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "rgb(38, 53, 74)",
+          "color": "rgb(230, 237, 246)",
+          "radius": "8px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "6px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 1440,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "oklch(0.511 0.262 276.966)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "oklch(0.511 0.262 276.966)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "16px",
+            "padding": "20px 32px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "oklab(0.962 0.000726771 -0.0179853 / 0.5)",
+          "color": "rgb(32, 36, 42)",
+          "radius": "16px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "4px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 390,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(53, 102, 201)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "oklch(0.511 0.262 276.966)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "oklch(0.511 0.262 276.966)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "16px",
+            "padding": "20px 28px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "oklab(0.962 0.000726771 -0.0179853 / 0.5)",
+          "color": "rgb(32, 36, 42)",
+          "radius": "16px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "4px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 1440,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "rgb(53, 91, 167)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "rgb(53, 91, 167)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "16px",
+            "padding": "20px 32px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "rgb(38, 53, 74)",
+          "color": "rgb(230, 237, 246)",
+          "radius": "16px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "4px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 390,
+      "metrics": [
+        {
+          "id": "workspace-primary",
+          "background": "rgb(71, 116, 198)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "6px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "operation-footer",
+          "background": "rgb(53, 91, 167)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": null
+        },
+        {
+          "id": "confirm",
+          "background": "rgb(53, 91, 167)",
+          "color": "rgb(255, 255, 255)",
+          "radius": "8px",
+          "height": 40,
+          "minHeight": "40px",
+          "font": "12px",
+          "padding": "8px 16px",
+          "surface": {
+            "radius": "16px",
+            "padding": "20px 28px",
+            "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.25) 0px 25px 50px -12px"
+          }
+        },
+        {
+          "id": "embedded-usage-card",
+          "background": "rgb(38, 53, 74)",
+          "color": "rgb(230, 237, 246)",
+          "radius": "16px",
+          "height": 66,
+          "minHeight": "0px",
+          "font": "16px",
+          "padding": "20px",
+          "surface": null
+        },
+        {
+          "id": "tools-dark-hero-link",
+          "background": "oklab(0.828 0.0183479 0.188107 / 0.1)",
+          "color": "oklch(0.962 0.059 95.617)",
+          "radius": "4px",
+          "height": 44,
+          "minHeight": "44px",
+          "font": "14px",
+          "padding": "8px 16px",
+          "surface": null
+        }
+      ]
+    }
+  ]
+}

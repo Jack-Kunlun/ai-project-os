@@ -1,0 +1,9 @@
+
+Running 1 test using 1 worker
+
+(node:41069) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/1] e2e/ui-feedback-status.spec.ts:11:5 › project success, rejected form and archived states keep shared semantic styles
+  1 passed (7.6s)

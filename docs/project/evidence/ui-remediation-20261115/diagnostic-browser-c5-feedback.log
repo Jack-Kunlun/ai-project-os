@@ -1,0 +1,54 @@
+
+Running 1 test using 1 worker
+
+(node:30237) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/1] e2e/ui-feedback-status.spec.ts:11:5 › project success, rejected form and archived states keep shared semantic styles
+  1) e2e/ui-feedback-status.spec.ts:11:5 › project success, rejected form and archived states keep shared semantic styles
+
+    Error: expect(locator).toBeHidden() failed
+
+    Locator:  getByRole('dialog', { name: 'UI acceptance work item with long readable text', exact: true })
+    Expected: hidden
+    Received: visible
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeHidden" with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'UI acceptance work item with long readable text', exact: true })
+        14 × locator resolved to <section role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="_r_4_" aria-describedby="_r_5_" data-inquiry-owned="false" data-operation-surface="modal" class="flex w-full flex-col overflow-hidden outline-none max-h-[95dvh] max-w-[920px] app-dialog-surface--modal app-dialog-surface">…</section>
+           - unexpected value "visible"
+
+
+      94 |     await expect(manage).toBeHidden();
+      95 |     await page.keyboard.press("Escape");
+    > 96 |     await expect(detail).toBeHidden();
+         |                          ^
+      97 |
+      98 |     const latest = await page.request.get(`/api/projects/${project.id}`);
+      99 |     const current = (await latest.json()).project as { updatedAt: string };
+        at /Users/fenglan/projects/ai-project-os/e2e/ui-feedback-status.spec.ts:96:26
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ui-remediation-c5-feedback/ui-feedback-status-project-960ad-keep-shared-semantic-styles/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-c5-feedback/ui-feedback-status-project-960ad-keep-shared-semantic-styles/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ui-remediation-c5-feedback/ui-feedback-status-project-960ad-keep-shared-semantic-styles/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ui-remediation-c5-feedback/ui-feedback-status-project-960ad-keep-shared-semantic-styles/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/ui-remediation-c5-feedback/ui-feedback-status-project-960ad-keep-shared-semantic-styles/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e/ui-feedback-status.spec.ts:11:5 › project success, rejected form and archived states keep shared semantic styles

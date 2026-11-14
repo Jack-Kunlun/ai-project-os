@@ -1,0 +1,225 @@
+{
+  "recorded_on": "2026-11-02",
+  "task": "T-028",
+  "evidence": "E-016",
+  "source_commit": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+  "method": "read-only source/schema and current repository rules; targeted paths only; not exhaustive API or table audit",
+  "runtime_tests_executed": false,
+  "source_files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "6b5f997c54476856ad703b477aca7377c92b552324b00eaa01d0f71aa5268b9b"
+    },
+    {
+      "path": "compose.yaml",
+      "sha256": "f61bcfda5f3d7ec4c32515e969ea05bde1ec638e3266d4c2c82727878bfe2be3"
+    },
+    {
+      "path": "docs/production-release.md",
+      "sha256": "a0d5ea2082608f2e2826fc3a53865603e5d06a839e4c9f60428b2d9b0bef5aa2"
+    },
+    {
+      "path": "prisma/schema.prisma",
+      "sha256": "b8ac55e018cce43b0e2b2f2122dcd9635c33d96cbf7a9fe6dda1a05e4e958287"
+    },
+    {
+      "path": "src/app/api/mcp/route.ts",
+      "sha256": "4bb35d6518e5b19c789ca821659d1831d9615a7ed86c6ccbfa430b5128844f44"
+    },
+    {
+      "path": "src/app/settings/platform-operation-assignments.tsx",
+      "sha256": "34065730b31bdf296f74c82670e44a9ec58e9b1d8b3b560a372088c0c15ee62a"
+    },
+    {
+      "path": "src/app/settings/platform-operation-batch.ts",
+      "sha256": "416c0121468a23d2a03481918296a4224a42b099bd082a205fb95bfd2d33255a"
+    },
+    {
+      "path": "src/app/user-workspace.css",
+      "sha256": "22271150c6add8525fca6088283a1f2d2c2180e9e4000b8c123c4529217e62c8"
+    },
+    {
+      "path": "src/components/dialog-actions.tsx",
+      "sha256": "e57a1fff52bab4e5bb1cb18627cf7d04d3497348b33a8ea17fe9afa916a21864"
+    },
+    {
+      "path": "src/components/operation-panel.tsx",
+      "sha256": "16e7009b0a20c4d110c4222915a7cc5e3314d99db58855c6438978f4b4fcae71"
+    },
+    {
+      "path": "src/lib/access-control.ts",
+      "sha256": "d90f5d7da8d7bed56251085c8ccc4303fbe84b9b151ba56abd39bd3734fc2931"
+    },
+    {
+      "path": "src/lib/account-closure-service.ts",
+      "sha256": "b64b35f29c2799f0bb025a70613ff346f36cb5e29b43ff97bfed6f25d86d2803"
+    },
+    {
+      "path": "src/lib/action-engine.ts",
+      "sha256": "a3da29142fd437eeb41307318de539a4070dbf2f6d6eb0bed5edd76a0cd53e6d"
+    },
+    {
+      "path": "src/lib/ai-entitlements.ts",
+      "sha256": "63da53199f4dea3b5f2b34d71485b42a412e7ed1da20ff493822b2797ff4f8e8"
+    },
+    {
+      "path": "src/lib/ai-memory/candidates.ts",
+      "sha256": "7700ac978db49f0fc3757fc06d21e0573210a92fd215b30a6b6264e3ca303850"
+    },
+    {
+      "path": "src/lib/ai-memory/corpus-index.ts",
+      "sha256": "a886ba6eb0eb6fed7d6c4e856495e08baf750a05c7c2dcb4cd5342e9ce89346d"
+    },
+    {
+      "path": "src/lib/ai-memory/grounded-rag-service.ts",
+      "sha256": "1171e1ed90b58be1aad785fa5e01eb8fff4fcb9ac9c21c1784c099f942e9288e"
+    },
+    {
+      "path": "src/lib/ai-memory/read-only-agent.ts",
+      "sha256": "3b9675a117f02d32e04afb1b659e298c74094bbd946ad5257696775df9f0653d"
+    },
+    {
+      "path": "src/lib/authenticated-web-sources.ts",
+      "sha256": "02f5aa04945586c312c8a69d2132425f74568846906c666a2f62661f3708efd8"
+    },
+    {
+      "path": "src/lib/auto-fact-admission.ts",
+      "sha256": "af0c36f1892858e74fa3bccf6c8b0bf330fb0800b1aa00d0066b24129963ce45"
+    },
+    {
+      "path": "src/lib/automation.ts",
+      "sha256": "c382587a9680af742c04031d6e41787243c57269f940b9e36017e8de3a5442a4"
+    },
+    {
+      "path": "src/lib/browser-web-sources.ts",
+      "sha256": "8f57feab1c46a2fed8aff6604f9aff59617f22cae31ce004094c548d6702e81f"
+    },
+    {
+      "path": "src/lib/credential-vault.ts",
+      "sha256": "66e6c43de643ddb89a76a1cc0a71dbad755996b9b533d12f1c2fcc8f97fbfb92"
+    },
+    {
+      "path": "src/lib/mcp-export-grants.ts",
+      "sha256": "388a32ba4070154ada1cabcb1b1303de4ac92fc3f93ace425afcd90c48915fb5"
+    },
+    {
+      "path": "src/lib/mcp-export-oauth-config.ts",
+      "sha256": "2d0f9fa986f0c610d743ddcdd90a57e97f18ef56c06236fa479a6301d21238a8"
+    },
+    {
+      "path": "src/lib/membership-governance.ts",
+      "sha256": "fd8822100df6c505530eb0c46f64798a41634ff07265cf2d94670388aa927b15"
+    },
+    {
+      "path": "src/lib/model-provider-http.ts",
+      "sha256": "bc4f0a2976fdc5939709abe0ed9f175c1262608b8a2c4c419a0294436bd73762"
+    },
+    {
+      "path": "src/lib/notification-service.ts",
+      "sha256": "30a17f8caf31ddc6cd290bab892d6f871c9698cd4a3e4ef5ee24cd507f1a41a3"
+    },
+    {
+      "path": "src/lib/personal-knowledge-graph.ts",
+      "sha256": "6f729d9849f84a1c9b9b09275d0b93a603f67c6f14ac83c41ce5fa751e2e1b9c"
+    },
+    {
+      "path": "src/lib/personal-knowledge-qa-service.ts",
+      "sha256": "243a53018abb86cce98507b26590f9d7a2bddfa7d9a2bcd90a3b420572b6294d"
+    },
+    {
+      "path": "src/lib/personal-knowledge-semantic-service.ts",
+      "sha256": "b5a82655418262d20cdf9b83a76c12f3ca52435cf0aee5dbe060989803e6447c"
+    },
+    {
+      "path": "src/lib/personal-knowledge-service.ts",
+      "sha256": "d49d6c56b2660ee1cdff2d5151e4dc0381b2e578e8dd102cfd4b0743dd07c548"
+    },
+    {
+      "path": "src/lib/project-assets/parser.ts",
+      "sha256": "fcdb6756c1d7e4f8115600350c5e2d960a2ab22fddf3d2f525741815cfae6b3d"
+    },
+    {
+      "path": "src/lib/project-assets/service.ts",
+      "sha256": "6fbb9fcac9d106b9252166175f1a43d6180c4fe7ca15f05adbeece00cf4ec469"
+    },
+    {
+      "path": "src/lib/project-assets/vision.ts",
+      "sha256": "c674f2a40d06a5628df36abf17cb52471c8ee06e64720d46affe86983841b762"
+    },
+    {
+      "path": "src/lib/project-git-automation-execution-service.ts",
+      "sha256": "8b50e6fb17476350edcb561a670cea814f328bd2f6047e4921748011b3eaf370"
+    },
+    {
+      "path": "src/lib/project-git-automation-run-service.ts",
+      "sha256": "f8d0c6d2e91be1432ca6a37abb9940379490c29bb712b57bb9d91af8683a4e81"
+    },
+    {
+      "path": "src/lib/project-lifecycle.ts",
+      "sha256": "42f0d7142bc8519e6237ae9fdf8384d2d52b436bf80b110c625077bdfa8b789d"
+    },
+    {
+      "path": "src/lib/project-mcp-action-dispatch-service.ts",
+      "sha256": "cb62d4680e1b220437a02b51a454f622a5533abd5c324ea94546bd108b08d634"
+    },
+    {
+      "path": "src/lib/project-mcp-action-result-import-service.ts",
+      "sha256": "96bbb7e832ba0864a2da321bb0a8a255afa018adf51eed362b06fbfb1018a1a6"
+    },
+    {
+      "path": "src/lib/project-operations.ts",
+      "sha256": "74169eaeb1bf1a7ba3c08518ee86a40983cc13a319687a3fb5ff6163ba2ec4ef"
+    },
+    {
+      "path": "src/lib/project-plan.ts",
+      "sha256": "77e3cbc13dff927f65b3b967830aef3887d1e4a3865531d88e769b2973243505"
+    },
+    {
+      "path": "src/lib/project-processing-worker.ts",
+      "sha256": "26c78a3dbe75bff3231ad32058bef7c4b58e8b9f1dc715e3cb3b85675bac13cc"
+    },
+    {
+      "path": "src/lib/project-world.ts",
+      "sha256": "4e62c307ca14803dda80ffb58bd16fb1058e7624d4839bb010537157adf5104b"
+    },
+    {
+      "path": "src/lib/unified-question-contract.ts",
+      "sha256": "9c60e0de4f653fa81e346ec7719453d44c7c92bc4e0a8cdedd33825ca3ca5509"
+    },
+    {
+      "path": "src/lib/unified-question-service.ts",
+      "sha256": "082e62f601da9fd987888d7a43ce30a0018ab2a9db83b45dda234e87886a2350"
+    },
+    {
+      "path": "src/lib/user-token-usage.ts",
+      "sha256": "b4191d775170c9a31dae4ea4cb2e46d0cc84ccfc3c87899aa500601b69346278"
+    },
+    {
+      "path": "src/lib/web-browser-broker-client.ts",
+      "sha256": "5b29416eaf00cf6e119e103140fb815c823d812f4ede5dda555de2f6ca3b58a7"
+    },
+    {
+      "path": "src/lib/web-sources.ts",
+      "sha256": "78d8353ee1cbf41b3c77433784cec6bd961d3cddfa5c9a1fa9cb5e24f91d7795"
+    }
+  ],
+  "limits": [
+    "No browser, database, integration, CI, production or real provider execution",
+    "Cross-module rows are required scenarios, not executed test cases",
+    "Web/MCP flags and real configuration not verified"
+  ],
+  "corrections": [
+    {
+      "module": "F-007",
+      "fact": "Static/rendered/siteForm/Bearer are distinct; rendered needs Broker and review; siteForm Owner private preview only; Bearer disabled in production"
+    },
+    {
+      "module": "F-008",
+      "fact": "Generic legacy repositorySync pauses; dedicated authorized Git automation is separate"
+    },
+    {
+      "module": "F-009",
+      "fact": "Remote MCP reads and local /api/mcp export have distinct grants, state and configuration; export production needs OAuth and valid HTTPS public origin"
+    }
+  ]
+}

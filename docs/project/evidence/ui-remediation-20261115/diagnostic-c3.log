@@ -1,0 +1,156 @@
+
+Running 5 tests using 1 worker
+
+(node:1867) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/5] e2e/admin-model-list-layout.spec.ts:188:5 › admin models use inline capability selection and read-only provider drawers across narrow and desktop layouts
+[2/5] e2e/ui-populated-surfaces.spec.ts:9:5 › identity choices and project permission rows retain neutral readable surfaces
+[3/5] e2e/ui-populated-surfaces.spec.ts:97:5 › embedded outbound and rejection confirmations preserve semantic state colors
+  1) e2e/ui-populated-surfaces.spec.ts:97:5 › embedded outbound and rejection confirmations preserve semantic state colors
+
+    Test timeout of 120000ms exceeded.
+
+    Error: locator.click: Test timeout of 120000ms exceeded.
+    Call log:
+      - waiting for getByRole('dialog', { name: '拒绝会员申请确认', exact: true }).getByRole('button', { name: '取消', exact: true })
+
+
+      125 |       await page.getByRole("button", { name: "预览拒绝申请", exact: true }).click();
+      126 |       const confirmation = page.getByRole("dialog", { name: "拒绝会员申请确认", exact: true });
+    > 127 |       await expectSemanticCard(confirmation, "danger");
+          |                                                        ^
+      128 |       await confirmation.screenshot({ path: testInfo.outputPath(`reject-${path.endsWith("memberships") ? "list" : "detail"}-${mode.theme}.png`) });
+      129 |       await page.getByRole("button", { name: "取消", exact: true }).filter({ visible: true }).click();
+      130 |     }
+        at /Users/fenglan/projects/ai-project-os/e2e/ui-populated-surfaces.spec.ts:127:75
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ui-remediation-candidate3-diagnostic/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-candidate3-diagnostic/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ui-remediation-candidate3-diagnostic/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ui-remediation-candidate3-diagnostic/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/ui-remediation-candidate3-diagnostic/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+(node:2346) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[4/5] e2e/ui-style-states.spec.ts:18:5 › all application pages retain the new style during loading, failed reads and operation dialogs
+  2) e2e/ui-style-states.spec.ts:18:5 › all application pages retain the new style during loading, failed reads and operation dialogs
+
+    Error: all applicable page and operation states must preserve geometry
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  -  1
+    + Received  + 56
+
+    - Array []
+    + Array [
+    +   "/personal/knowledge@en-light-desktop: Error: /personal/knowledge failed-read en-light-desktop: feedback foreground This operation needs attention. Review the current status and contact an adminis
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"rgb(159, 45, 45)\"
+    + Received: \"rgb(100, 106, 115)\"",
+    +   "/personal/projects@en-light-desktop: Error: /personal/projects failed-read en-light-desktop: state border This operation needs attention. Review the current status and contact an adminis
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"rgb(230, 184, 179)\"
+    + Received: \"rgb(229, 231, 235)\"",
+    +   "/personal/usage@en-light-desktop: Error: /personal/usage failed-read en-light-desktop: state border Usage records are temporarily unavailable Refresh the page and retry. If the pro
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"rgb(230, 184, 179)\"
+    + Received: \"rgb(229, 231, 235)\"",
+    +   "/personal/knowledge@zh-dark-mobile: Error: /personal/knowledge failed-read zh-dark-mobile: feedback foreground 操作需要核对。请查看当前状态，必要时联系管理员。重新加载
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"rgb(255, 180, 171)\"
+    + Received: \"rgb(170, 182, 199)\"",
+    +   "/personal/projects@zh-dark-mobile: Error: /personal/projects failed-read zh-dark-mobile: state border 操作需要核对。请查看当前状态，必要时联系管理员。重试
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"rgb(129, 67, 75)\"
+    + Received: \"rgb(48, 61, 77)\"",
+    +   "/projects/[projectId]/automations@zh-dark-mobile: Error: /projects/b27c4e15-6e44-4a81-bfa1-0be65cdc8155/automations loading zh-dark-mobile: compact page title
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"22px\"
+    + Received: \"25px\"",
+    +   "/projects/[projectId]/automations@zh-dark-mobile operation: Error: /projects/b27c4e15-6e44-4a81-bfa1-0be65cdc8155/automations dialog-0 zh-dark-mobile: compact page title
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"22px\"
+    + Received: \"25px\"",
+    +   "/projects/[projectId]/intelligence@zh-dark-mobile: Error: /projects/b27c4e15-6e44-4a81-bfa1-0be65cdc8155/intelligence loading zh-dark-mobile: compact page title
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"22px\"
+    + Received: \"25px\"",
+    +   "/personal/usage@zh-dark-mobile: Error: /personal/usage failed-read zh-dark-mobile: state border 用量记录暂不可用 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。读取失败时不会用旧数据替代。用量记录暂不可用重试
+    +
+    + expect(received).toBe(expected) // Object.is equality
+    +
+    + Expected: \"rgb(129, 67, 75)\"
+    + Received: \"rgb(48, 61, 77)\"",
+    + ]
+
+      171 |       }
+      172 |     }
+    > 173 |     expect(errors, "all applicable page and operation states must preserve geometry").toEqual([]);
+          |                                                                                       ^
+      174 |   } finally {
+      175 |     await writeFile(testInfo.outputPath("ui-style-states.json"), JSON.stringify({ modes, entries, errors }, null, 2));
+      176 |     await adminContext.close();
+        at /Users/fenglan/projects/ai-project-os/e2e/ui-style-states.spec.ts:173:87
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ui-remediation-candidate3-diagnostic/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ui-remediation-candidate3-diagnostic/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ui-remediation-candidate3-diagnostic/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ui-remediation-candidate3-diagnostic/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/ui-remediation-candidate3-diagnostic/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+(node:3029) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[5/5] e2e/usage-flow-guidance.spec.ts:40:5 › personal knowledge hands off explicitly into project materials and guided AI steps
+  2 failed
+    e2e/ui-populated-surfaces.spec.ts:97:5 › embedded outbound and rejection confirmations preserve semantic state colors
+    e2e/ui-style-states.spec.ts:18:5 › all application pages retain the new style during loading, failed reads and operation dialogs
+  3 passed (5.8m)

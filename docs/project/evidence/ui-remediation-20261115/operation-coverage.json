@@ -1,0 +1,164 @@
+{
+  "candidate": "C7",
+  "operations": [
+    {
+      "id": "OP-001",
+      "files": [
+        "page-operations-and-import.spec.ts",
+        "projects-archive-actions.spec.ts",
+        "personal-project-search.spec.ts",
+        "ui-feedback-status.spec.ts"
+      ],
+      "checked": "创建表单、窄屏、校验/焦点、pending 草稿；归档删除名称确认、取消、403/409、过期版本及成功列表刷新",
+      "boundary": "创建/删除使用隔离项目；部分拒绝响应为路由夹具"
+    },
+    {
+      "id": "OP-002",
+      "files": [
+        "user-shell-navigation.spec.ts",
+        "z-r02-admin-navigation.spec.ts",
+        "team-narrow-layout.spec.ts",
+        "ui-populated-surfaces.spec.ts"
+      ],
+      "checked": "工作区/项目切换、当前项与清理旧查询、长名称、权限行、移动导航与焦点",
+      "boundary": "长名称/角色显示含只读夹具；权限守卫另由路由矩阵检查"
+    },
+    {
+      "id": "OP-003",
+      "files": [
+        "page-operations-and-import.spec.ts",
+        "01-system-dialog-surfaces.spec.ts",
+        "usage-flow-guidance.spec.ts"
+      ],
+      "checked": "文件导入、长 PDF 独立操作区、页数与确认批次、禁用和固定底栏、短/长正文留白",
+      "boundary": "本轮不向真实模型发送文件；外发状态使用明确隔离夹具"
+    },
+    {
+      "id": "OP-004",
+      "files": [
+        "project-memory-operation-layout.spec.ts",
+        "web-ai-confirmation.spec.ts",
+        "ui-populated-surfaces.spec.ts",
+        "usage-flow-guidance.spec.ts",
+        "ui-feedback-status.spec.ts"
+      ],
+      "checked": "全选与范围数量、摘要确认、单次提交/陈旧输入、警告卡状态色、取消后外发调用为空、处理任务失败与安全取消",
+      "boundary": "模型结果为隔离夹具；不声称真实供应商任务完成"
+    },
+    {
+      "id": "OP-005",
+      "files": [
+        "usage-flow-guidance.spec.ts",
+        "prototype-detail-lists.spec.ts",
+        "materials-request-race.spec.ts",
+        "ui-style-states.spec.ts"
+      ],
+      "checked": "资料/来源详情、长 URL、待核对/失败任务、列表延迟响应、拒绝删除、图文确认及关闭/重开",
+      "boundary": "图像识别与候选内容为隔离显示/请求夹具；服务端冲突算法未新增全量验证"
+    },
+    {
+      "id": "OP-006",
+      "files": [
+        "ui-consistency-matrix.spec.ts",
+        "ui-style-states.spec.ts",
+        "smoke.spec.ts",
+        "ui-feedback-status.spec.ts"
+      ],
+      "checked": "计划页七配置；真实目标回车提交、长文本工作项创建、503 后草稿保留与重试、保存刷新、详情内嵌套修改保存、父层焦点与 Escape、归档只读提示和依赖控件外观",
+      "boundary": "来源事实通过实际创建/确认 API 建立；拒绝为明确 503 夹具；未穷举全部依赖组合和业务状态机"
+    },
+    {
+      "id": "OP-007",
+      "files": [
+        "personal-knowledge-modal.spec.ts",
+        "knowledge-localization.spec.ts",
+        "usage-flow-guidance.spec.ts",
+        "ui-populated-surfaces.spec.ts"
+      ],
+      "checked": "新建/编辑/导入、长文/窄屏、必填校验、失败草稿、真实保存版本、问答入口、索引/搜索警告与错误色",
+      "boundary": "视觉识别/索引准备使用隔离路由夹具；不执行真实外发"
+    },
+    {
+      "id": "OP-008",
+      "files": [
+        "unified-question.spec.ts",
+        "user-appearance.spec.ts",
+        "icon-assistance.spec.ts",
+        "ui-style-states.spec.ts"
+      ],
+      "checked": "问答/浮窗开关和停靠、长回答/引用、草稿保留、嵌套 Escape、历史错误滚动范围",
+      "boundary": "问答结果为客户端夹具；对应测试明确不证明历史会话持久化"
+    },
+    {
+      "id": "OP-009",
+      "files": [
+        "admin-model-list-layout.spec.ts",
+        "smoke.spec.ts",
+        "ui-style-states.spec.ts"
+      ],
+      "checked": "连接编辑、能力目录/批量确认、处理中锁定、安全失败与未知结果、确认框校验/取消/焦点、portal 主按钮",
+      "boundary": "测试供应商响应隔离；T-013 原型逐项差异不在本轮关闭"
+    },
+    {
+      "id": "OP-010",
+      "files": [
+        "connection-list-layout.spec.ts",
+        "01-system-dialog-surfaces.spec.ts",
+        "icon-assistance.spec.ts",
+        "ui-style-states.spec.ts",
+        "user-appearance.spec.ts"
+      ],
+      "checked": "Git/MCP 列表与新建、加载前禁用、授权界面/帮助、撤销确认、浅深/窄屏及 MCP 入口对比度",
+      "boundary": "MCP 页面开关启用；未配置真实第三方服务"
+    },
+    {
+      "id": "OP-011",
+      "files": [
+        "admin-overlay-consistency.spec.ts",
+        "adm008-effective-access.spec.ts",
+        "team-narrow-layout.spec.ts",
+        "ui-populated-surfaces.spec.ts",
+        "compatibility-feedback.spec.ts"
+      ],
+      "checked": "成员角色/邀请、账户操作、权益预览与拒绝确认、错误文案、长内容、窄屏 footer",
+      "boundary": "权益和身份源显示/部分操作结果为隔离夹具，不代表真实账号/额度变更"
+    },
+    {
+      "id": "OP-012",
+      "files": [
+        "system-audit.spec.ts",
+        "01-system-dialog-surfaces.spec.ts",
+        "usage-flow-guidance.spec.ts",
+        "system-failure-inbox.spec.ts",
+        "ui-feedback-status.spec.ts"
+      ],
+      "checked": "状态/审计/任务详情、加载/失败/重试、无重复外壳、取消与焦点/列表位置、固定底栏",
+      "boundary": "运维与业务失败为隔离记录/响应，未操作生产"
+    },
+    {
+      "id": "OP-013",
+      "files": [
+        "00-first-run-appearance.spec.ts",
+        "login-style.spec.ts",
+        "auth-flow-style.spec.ts",
+        "auth-compact-layout.spec.ts",
+        "z-admin-appearance.spec.ts"
+      ],
+      "checked": "初始化与登录、注册/恢复步骤、禁用/拒绝草稿、验证码/错误留白、短信弹层重试和关闭、键盘/窄屏",
+      "boundary": "主配置与短信/邮箱启用配置分别执行；短信/邮件/验证码请求截获，无真实发送"
+    },
+    {
+      "id": "OP-014",
+      "files": [
+        "admin-model-list-layout.spec.ts",
+        "icon-assistance.spec.ts",
+        "user-appearance.spec.ts",
+        "admin-overlay-consistency.spec.ts",
+        "z-admin-appearance.spec.ts",
+        "ui-feedback-status.spec.ts"
+      ],
+      "checked": "确认/帮助/菜单、图标文字、定位/遮挡、嵌套焦点、Escape/背景关闭、名称确认与长文本",
+      "boundary": "实际 DOM 与动作可达性检查；不是所有用户数据内容的像素穷举"
+    }
+  ]
+}

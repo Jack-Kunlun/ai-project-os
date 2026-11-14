@@ -1,0 +1,5182 @@
+{
+  "baseCommit": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+  "candidate": "uncommitted-local-ui-remediation",
+  "method": "Static AST import/export/dynamic-import reachability; styling signals are candidates, not confirmed visual failures. JSX member/export selection not analyzed.",
+  "routes": [
+    {
+      "route": "/accept-invitation",
+      "file": "src/app/accept-invitation/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/accept-invitation/page.tsx",
+        "src/app/accept-invitation/accept-invitation-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/public-info-page.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/public-info-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/account",
+      "file": "src/app/admin/account/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/account/page.tsx",
+        "src/app/admin/account/admin-account-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/admin-page-header.tsx",
+        "src/components/account-phone-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/sms-code-input.tsx",
+        "src/components/graphic-captcha-dialog.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/audit",
+      "file": "src/app/admin/audit/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/audit/page.tsx",
+        "src/app/admin/audit/audit-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/app/admin/audit/audit-detail-drawer.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/admin-page-header.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/connectors/git",
+      "file": "src/app/admin/connectors/git/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/admin/connectors/git/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/connectors/mcp",
+      "file": "src/app/admin/connectors/mcp/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/connectors/mcp/page.tsx",
+        "src/app/admin/connectors/mcp/mcp-review-workbench.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/admin-page-header.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/parent-page-link.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/credits",
+      "file": "src/app/admin/credits/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/credits/page.tsx",
+        "src/app/admin/models/platform-credit-governance-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/app/admin/models/platform-grant-offer-policy-client.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/components/admin-page-header.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/guide",
+      "file": "src/app/admin/guide/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/guide/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/admin-page-header.tsx",
+        "src/app/guide/guide-page.module.css"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/models/governance",
+      "file": "src/app/admin/models/governance/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/admin/models/governance/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/models",
+      "file": "src/app/admin/models/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/models/page.tsx",
+        "src/app/settings/settings-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/model-form-fields.module.css",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/admin-shell.tsx",
+        "src/components/admin-header.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/components/admin-page-header.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/operation-panel.tsx",
+        "src/app/settings/platform-operation-assignments.tsx",
+        "src/app/admin/operations/probes/platform-probe-budget-client.tsx",
+        "src/components/scope-evidence-card.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/models/routes",
+      "file": "src/app/admin/models/routes/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/admin/models/routes/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/operations/backups",
+      "file": "src/app/admin/operations/backups/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/operations/backups/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/app/system/operations/system-operations-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/admin-shell.tsx",
+        "src/components/admin-header.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/components/admin-page-header.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/server-resources-panel.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/operations/failures",
+      "file": "src/app/admin/operations/failures/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/operations/failures/page.tsx",
+        "src/app/admin/operations/failures/failure-inbox-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/admin-page-header.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/operations/probes",
+      "file": "src/app/admin/operations/probes/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/operations/probes/page.tsx",
+        "src/app/admin/operations/probes/platform-probe-budget-client.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/admin-page-header.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin",
+      "file": "src/app/admin/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/page.tsx",
+        "src/components/admin-overview-loader.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/admin-overview-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/admin-page-header.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/sms",
+      "file": "src/app/admin/sms/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/sms/page.tsx",
+        "src/app/admin/sms/sms-provider-admin-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/graphic-captcha-dialog.tsx",
+        "src/components/admin-page-header.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/users/[userId]",
+      "file": "src/app/admin/users/[userId]/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/users/[userId]/page.tsx",
+        "src/app/admin/models/platform-credit-governance-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/app/admin/users/[userId]/user-detail-client.tsx",
+        "src/components/admin-page-header.tsx",
+        "src/components/parent-page-link.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/users/memberships",
+      "file": "src/app/admin/users/memberships/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/users/memberships/page.tsx",
+        "src/app/system/memberships/memberships-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/admin-shell.tsx",
+        "src/components/admin-header.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/components/admin-page-header.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/operation-panel.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/admin/users",
+      "file": "src/app/admin/users/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/admin/users/page.tsx",
+        "src/app/admin/users/users-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/admin-page-header.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/admin/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/ask",
+      "file": "src/app/ask/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/ask/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/app/ask/ask-client.tsx",
+        "src/app/ask/conversation-rail.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/shell-icon.tsx",
+        "src/app/ask/ask-client.module.css",
+        "src/components/workspace-ui.module.css",
+        "src/components/token-usage.tsx",
+        "src/components/token-usage.module.css",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/connections/mcp",
+      "file": "src/app/connections/mcp/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/connections/mcp/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/connections",
+      "file": "src/app/connections/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/connections/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/contact",
+      "file": "src/app/contact/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/contact/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/public-info-page.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/public-info-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/credits",
+      "file": "src/app/credits/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/credits/page.tsx",
+        "src/app/credits/credits-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/credits/credits-client.module.css",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/token-activity.tsx",
+        "src/components/token-activity.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "file": "src/app/dashboard/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/dashboard/page.tsx",
+        "src/app/dashboard/dashboard-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/app/dashboard/dashboard-client.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/guide",
+      "file": "src/app/guide/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/guide/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/app/support-pages.module.css",
+        "src/app/guide/guide-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/help",
+      "file": "src/app/help/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/help/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/public-info-page.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/public-info-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/login",
+      "file": "src/app/login/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/login/page.tsx",
+        "src/app/login/login-form.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/sms-code-input.tsx",
+        "src/components/graphic-captcha-dialog.tsx",
+        "src/components/auth-page.module.css",
+        "src/components/auth-page.tsx",
+        "src/components/appearance-controls.tsx",
+        "src/components/brand-mark.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/notifications",
+      "file": "src/app/notifications/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/notifications/page.tsx",
+        "src/app/notifications/notifications-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/app/support-pages.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/",
+      "file": "src/app/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/configuration",
+      "file": "src/app/personal/configuration/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/configuration/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/personal-workspace-nav.tsx",
+        "src/app/personal/configuration/resource-card-status.tsx",
+        "src/app/support-pages.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/connections/git",
+      "file": "src/app/personal/connections/git/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/connections/git/page.tsx",
+        "src/app/profile/connections/git/git-connections-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/help-tooltip.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/profile/connections/governance-panel.tsx",
+        "src/app/profile/connections/connection-create-dialog.tsx",
+        "src/app/profile/connections/connection-edit-dialog.tsx",
+        "src/app/profile/connections/connection-list.module.css",
+        "src/app/support-pages.module.css",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/personal-workspace-nav.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/connections/mcp",
+      "file": "src/app/personal/connections/mcp/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/connections/mcp/page.tsx",
+        "src/app/profile/connections/mcp/mcp-connections-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/help-tooltip.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/profile/connections/governance-panel.tsx",
+        "src/app/profile/connections/connection-create-dialog.tsx",
+        "src/app/profile/connections/connection-edit-dialog.tsx",
+        "src/app/profile/connections/connection-list.module.css",
+        "src/app/support-pages.module.css",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/personal-workspace-nav.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/knowledge/graph",
+      "file": "src/app/personal/knowledge/graph/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/knowledge/graph/page.tsx",
+        "src/app/personal/knowledge/graph/personal-knowledge-graph-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/personal/knowledge/graph/knowledge-graph-canvas.tsx",
+        "src/app/personal/knowledge/graph/knowledge-graph.module.css",
+        "src/app/personal/knowledge/graph/personal-knowledge-graph-tools.tsx",
+        "src/components/app-confirm-dialog.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/knowledge",
+      "file": "src/app/personal/knowledge/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/knowledge/page.tsx",
+        "src/app/personal/knowledge/knowledge-loader.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/app/personal/knowledge/knowledge-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/personal-workspace-nav.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/personal/knowledge/personal-knowledge-qa-panel.tsx",
+        "src/app/personal/knowledge/personal-knowledge-next-steps.tsx",
+        "src/app/personal/knowledge/personal-project-handoff.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/personal/knowledge/personal-project-search-panel.tsx",
+        "src/app/personal/knowledge/personal-semantic-index-panel.tsx",
+        "src/app/personal/knowledge/personal-semantic-search-panel.tsx",
+        "src/app/personal/knowledge/personal-knowledge-editor.tsx",
+        "src/app/personal/knowledge/personal-knowledge.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/models",
+      "file": "src/app/personal/models/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/models/page.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/personal-workspace-nav.tsx",
+        "src/app/profile/models/personal-models-client.tsx",
+        "src/app/profile/models/personal-model-overview.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/profile/models/personal-model-overview.module.css",
+        "src/components/model-form-fields.module.css",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/help-tooltip.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/app/support-pages.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal",
+      "file": "src/app/personal/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/page.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/personal-workspace-nav.tsx",
+        "src/app/personal/personal-overview-loader.tsx",
+        "src/app/personal/personal-overview-client.tsx",
+        "src/app/support-pages.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/projects",
+      "file": "src/app/personal/projects/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/projects/page.tsx",
+        "src/app/projects/projects-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/lazy-project-dialog.tsx",
+        "src/components/project-dialogs.tsx",
+        "src/components/project-lifecycle-dialog.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/projects/create-project-dialog.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/list-pagination.tsx",
+        "src/app/projects/projects-client.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/personal/usage",
+      "file": "src/app/personal/usage/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/personal/usage/page.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/app/personal/usage/usage-client.tsx",
+        "src/components/token-usage.tsx",
+        "src/components/token-usage.module.css",
+        "src/components/workspace-dialog.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/personal/usage/usage-client.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/privacy",
+      "file": "src/app/privacy/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/privacy/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/public-info-page.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/public-info-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/profile/connections/git",
+      "file": "src/app/profile/connections/git/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/profile/connections/git/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/profile/connections/mcp",
+      "file": "src/app/profile/connections/mcp/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/profile/connections/mcp/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/profile/models",
+      "file": "src/app/profile/models/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/profile/models/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/profile",
+      "file": "src/app/profile/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/profile/page.tsx",
+        "src/app/profile/profile-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/account-closure-panel.tsx",
+        "src/components/sms-code-input.tsx",
+        "src/components/graphic-captcha-dialog.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/account-phone-panel.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/email-code-input.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/app/support-pages.module.css",
+        "src/app/profile/profile-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/actions",
+      "file": "src/app/projects/[projectId]/actions/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/actions/page.tsx",
+        "src/app/projects/[projectId]/actions/project-actions-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/components/list-pagination.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/assets",
+      "file": "src/app/projects/[projectId]/assets/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/assets/page.tsx",
+        "src/app/projects/[projectId]/assets/project-assets-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/app/projects/[projectId]/project-fact-import.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/list-pagination.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/automations",
+      "file": "src/app/projects/[projectId]/automations/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/automations/page.tsx",
+        "src/app/projects/[projectId]/automations/project-automations-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/model-form-fields.module.css",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/components/token-usage.tsx",
+        "src/components/token-usage.module.css",
+        "src/app/projects/[projectId]/automations/project-automations-client.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/configuration",
+      "file": "src/app/projects/[projectId]/configuration/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/configuration/page.tsx",
+        "src/app/projects/[projectId]/configuration/project-configuration-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/lazy-project-dialog.tsx",
+        "src/components/project-dialogs.tsx",
+        "src/components/project-lifecycle-dialog.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/projects/create-project-dialog.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/control",
+      "file": "src/app/projects/[projectId]/control/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/control/page.tsx",
+        "src/app/projects/[projectId]/control/project-control-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/external-sources",
+      "file": "src/app/projects/[projectId]/external-sources/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/external-sources/page.tsx",
+        "src/app/projects/[projectId]/external-sources/project-external-sources-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/list-pagination.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/external-sources/browser-web-source-client.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/github-syncs/[syncRunId]",
+      "file": "src/app/projects/[projectId]/github-syncs/[syncRunId]/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/github-syncs/[syncRunId]/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/governance",
+      "file": "src/app/projects/[projectId]/governance/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/governance/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/app/projects/[projectId]/governance/project-management-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/projects/[projectId]/world/project-world-client.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/memory-quality/project-memory-quality-client.tsx",
+        "src/app/projects/[projectId]/actions/project-actions-client.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/list-pagination.tsx",
+        "src/app/projects/[projectId]/members/project-members-client.tsx",
+        "src/components/back-button.tsx",
+        "src/app/projects/[projectId]/members/project-members.module.css",
+        "src/app/projects/[projectId]/configuration/project-configuration-client.tsx",
+        "src/components/lazy-project-dialog.tsx",
+        "src/components/project-dialogs.tsx",
+        "src/components/project-lifecycle-dialog.tsx",
+        "src/app/projects/create-project-dialog.tsx",
+        "src/app/projects/[projectId]/governance/project-governance-client.tsx",
+        "src/app/projects/[projectId]/governance/project-management.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/intelligence",
+      "file": "src/app/projects/[projectId]/intelligence/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/intelligence/page.tsx",
+        "src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/app/projects/[projectId]/intelligence/project-intelligence-client.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/jobs/[jobId]",
+      "file": "src/app/projects/[projectId]/jobs/[jobId]/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/jobs/[jobId]/page.tsx",
+        "src/app/projects/[projectId]/jobs/[jobId]/project-job-detail-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/token-usage.tsx",
+        "src/components/token-usage.module.css",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/materials",
+      "file": "src/app/projects/[projectId]/materials/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/materials/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/app/projects/[projectId]/project-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/list-pagination.tsx",
+        "src/app/projects/[projectId]/project-materials.module.css",
+        "src/app/projects/[projectId]/project-material-intake.tsx",
+        "src/app/projects/[projectId]/project-fact-import.tsx",
+        "src/app/projects/[projectId]/project-material-review-queue.tsx",
+        "src/components/project-flow-guide.tsx",
+        "src/components/knowledge-lifecycle.tsx",
+        "src/app/projects/[projectId]/materials/materials-tab-link.tsx",
+        "src/app/projects/[projectId]/project-processing-tasks.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/materials/review",
+      "file": "src/app/projects/[projectId]/materials/review/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/materials/review/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/project-material-review-queue.tsx",
+        "src/components/list-pagination.tsx",
+        "src/components/project-flow-guide.tsx",
+        "src/components/knowledge-lifecycle.tsx",
+        "src/app/projects/[projectId]/materials/materials-tab-link.tsx",
+        "src/app/projects/[projectId]/project-materials.module.css",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/materials/sources/[sourceId]",
+      "file": "src/app/projects/[projectId]/materials/sources/[sourceId]/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/materials/sources/[sourceId]/page.tsx",
+        "src/app/projects/[projectId]/materials/sources/[sourceId]/source-detail-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/app/projects/[projectId]/project-fact-import.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/mcp-actions",
+      "file": "src/app/projects/[projectId]/mcp-actions/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/mcp-actions/page.tsx",
+        "src/app/projects/[projectId]/mcp-actions/mcp-actions-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/mcp-export",
+      "file": "src/app/projects/[projectId]/mcp-export/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/mcp-export/page.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/mcp-export/mcp-export-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/operation-panel.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/members",
+      "file": "src/app/projects/[projectId]/members/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/members/page.tsx",
+        "src/app/projects/[projectId]/members/project-members-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/back-button.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/operation-panel.tsx",
+        "src/app/projects/[projectId]/members/project-members.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/memory-quality",
+      "file": "src/app/projects/[projectId]/memory-quality/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/memory-quality/page.tsx",
+        "src/app/projects/[projectId]/memory-quality/project-memory-quality-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/memory",
+      "file": "src/app/projects/[projectId]/memory/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/memory/page.tsx",
+        "src/app/projects/[projectId]/memory/project-memory-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/project-flow-guide.tsx",
+        "src/app/projects/[projectId]/project-fact-import.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]",
+      "file": "src/app/projects/[projectId]/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/page.tsx",
+        "src/app/projects/[projectId]/project-overview-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/app/projects/[projectId]/governance/project-governance-client.tsx",
+        "src/components/list-pagination.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/project-overview-client.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/plan",
+      "file": "src/app/projects/[projectId]/plan/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/plan/page.tsx",
+        "src/app/projects/[projectId]/plan/project-plan-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/plan/project-plan-operations.tsx",
+        "src/app/projects/[projectId]/plan/project-plan-client.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/repositories",
+      "file": "src/app/projects/[projectId]/repositories/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/repositories/page.tsx",
+        "src/app/projects/[projectId]/repositories/project-repositories-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/app/profile/connections/connection-create-dialog.tsx",
+        "src/app/profile/connections/git/git-connections-client.tsx",
+        "src/components/help-tooltip.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/components/workspace-dialog.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/app/profile/connections/governance-panel.tsx",
+        "src/app/profile/connections/connection-edit-dialog.tsx",
+        "src/app/profile/connections/connection-list.module.css",
+        "src/app/support-pages.module.css",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/tools",
+      "file": "src/app/projects/[projectId]/tools/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/tools/page.tsx",
+        "src/app/projects/[projectId]/tools/project-tools-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx",
+        "src/app/projects/[projectId]/project-support.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects/[projectId]/world",
+      "file": "src/app/projects/[projectId]/world/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/projects/[projectId]/world/page.tsx",
+        "src/app/projects/[projectId]/world/project-world-client.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/workspace-ui.module.css",
+        "src/components/operation-panel.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/project-parent-link.tsx",
+        "src/components/parent-page-link.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/projects/[projectId]/layout.tsx",
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/projects",
+      "file": "src/app/projects/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/projects/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/recover",
+      "file": "src/app/recover/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/recover/page.tsx",
+        "src/components/auth-page.tsx",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/auth-page.module.css",
+        "src/app/recover/recovery-form.tsx",
+        "src/components/sms-code-input.tsx",
+        "src/components/graphic-captcha-dialog.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/register",
+      "file": "src/app/register/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/register/page.tsx",
+        "src/components/auth-page.tsx",
+        "src/components/appearance-controls.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/auth-page.module.css",
+        "src/app/register/register-form.tsx",
+        "src/components/sms-code-input.tsx",
+        "src/components/graphic-captcha-dialog.tsx",
+        "src/components/email-code-input.tsx"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/settings",
+      "file": "src/app/settings/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/settings/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/setup",
+      "file": "src/app/setup/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/setup/page.tsx",
+        "src/app/setup/setup-form.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/public-info-page.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/public-info-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/system/account-access",
+      "file": "src/app/system/account-access/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/system/account-access/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/system/memberships",
+      "file": "src/app/system/memberships/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/system/memberships/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/system/operations",
+      "file": "src/app/system/operations/page.tsx",
+      "redirect": true,
+      "files": [
+        "src/app/system/operations/page.tsx"
+      ],
+      "candidates": [],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/team/[workspaceId]",
+      "file": "src/app/team/[workspaceId]/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/team/[workspaceId]/page.tsx",
+        "src/app/team/team-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/app/support-pages.module.css",
+        "src/app/team/team-overview.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/team",
+      "file": "src/app/team/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/team/page.tsx",
+        "src/app/team/team-client.tsx",
+        "src/components/ui-error-text.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/app-confirm-dialog.tsx",
+        "src/components/inquiry-operation.tsx",
+        "src/components/shell-icon.tsx",
+        "src/components/app-header.tsx",
+        "src/components/user-shell.tsx",
+        "src/app/user-workspace.css",
+        "src/components/appearance-controls.tsx",
+        "src/components/header-account.tsx",
+        "src/app/logout-button.tsx",
+        "src/components/workspace-scope.tsx",
+        "src/components/user-shell.module.css",
+        "src/components/brand-mark.tsx",
+        "src/components/notification-bell.tsx",
+        "src/components/operation-panel.tsx",
+        "src/components/dialog-actions.tsx",
+        "src/components/scope-evidence-card.tsx",
+        "src/app/support-pages.module.css",
+        "src/app/team/team-overview.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    },
+    {
+      "route": "/terms",
+      "file": "src/app/terms/page.tsx",
+      "redirect": false,
+      "files": [
+        "src/app/terms/page.tsx",
+        "src/components/appearance-provider.tsx",
+        "src/components/public-info-page.tsx",
+        "src/components/brand-mark.tsx",
+        "src/components/public-info-page.module.css"
+      ],
+      "candidates": [
+        {
+          "file": "src/components/brand-mark.tsx",
+          "largeRadius": 0,
+          "mediumRadius": 1,
+          "shadow": 1,
+          "tint": 0,
+          "legacyPrimary": 1
+        }
+      ],
+      "layouts": [
+        "src/app/layout.tsx"
+      ]
+    }
+  ],
+  "css": [
+    {
+      "file": "src/app/admin/admin-workspace.module.css",
+      "lines": 102,
+      "important": 3,
+      "hex": 0
+    },
+    {
+      "file": "src/app/appearance.css",
+      "lines": 184,
+      "important": 0,
+      "hex": 65
+    },
+    {
+      "file": "src/app/ask/ask-client.module.css",
+      "lines": 126,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/credits/credits-client.module.css",
+      "lines": 9,
+      "important": 1,
+      "hex": 0
+    },
+    {
+      "file": "src/app/dashboard/dashboard-client.module.css",
+      "lines": 543,
+      "important": 0,
+      "hex": 3
+    },
+    {
+      "file": "src/app/globals.css",
+      "lines": 556,
+      "important": 0,
+      "hex": 11
+    },
+    {
+      "file": "src/app/guide/guide-page.module.css",
+      "lines": 397,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/inquiry.css",
+      "lines": 40,
+      "important": 2,
+      "hex": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/graph/knowledge-graph.module.css",
+      "lines": 74,
+      "important": 0,
+      "hex": 67
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-knowledge.module.css",
+      "lines": 532,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/personal/usage/usage-client.module.css",
+      "lines": 298,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/profile/connections/connection-list.module.css",
+      "lines": 284,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/profile/models/personal-model-overview.module.css",
+      "lines": 7,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/profile/profile-page.module.css",
+      "lines": 326,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/automations/project-automations-client.module.css",
+      "lines": 386,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/governance/project-management.module.css",
+      "lines": 3,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/intelligence/project-intelligence-client.module.css",
+      "lines": 214,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/members/project-members.module.css",
+      "lines": 16,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/plan/project-plan-client.module.css",
+      "lines": 626,
+      "important": 2,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-materials.module.css",
+      "lines": 487,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-overview-client.module.css",
+      "lines": 647,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-support.module.css",
+      "lines": 31,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/projects/projects-client.module.css",
+      "lines": 415,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/support-pages.module.css",
+      "lines": 403,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/team/team-overview.module.css",
+      "lines": 27,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/app/user-workspace.css",
+      "lines": 24,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/components/auth-page.module.css",
+      "lines": 1382,
+      "important": 9,
+      "hex": 0
+    },
+    {
+      "file": "src/components/model-form-fields.module.css",
+      "lines": 62,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/components/public-info-page.module.css",
+      "lines": 336,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/components/token-activity.module.css",
+      "lines": 2,
+      "important": 0,
+      "hex": 1
+    },
+    {
+      "file": "src/components/token-usage.module.css",
+      "lines": 119,
+      "important": 0,
+      "hex": 0
+    },
+    {
+      "file": "src/components/user-shell.module.css",
+      "lines": 633,
+      "important": 0,
+      "hex": 1
+    },
+    {
+      "file": "src/components/workspace-ui.module.css",
+      "lines": 15,
+      "important": 0,
+      "hex": 0
+    }
+  ],
+  "files": [
+    {
+      "file": "src/app/accept-invitation/accept-invitation-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/accept-invitation/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/account/admin-account-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/account/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/admin-workspace.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/audit/audit-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/audit/audit-detail-drawer.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/audit/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/connectors/frozen-connector-page.tsx",
+      "reachable": false,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/connectors/git/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/connectors/mcp/mcp-review-workbench.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/connectors/mcp/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/credits/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/guide/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/layout.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/models/governance/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/models/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/models/platform-credit-governance-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/models/platform-grant-offer-policy-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/models/routes/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/operations/backups/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/operations/failures/failure-inbox-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/operations/failures/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/operations/probes/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/operations/probes/platform-probe-budget-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/sms/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/sms/sms-provider-admin-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/users/[userId]/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/users/[userId]/user-detail-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/users/memberships/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/users/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/admin/users/users-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/appearance.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/ask/ask-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/ask/ask-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/ask/conversation-rail.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/ask/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/connections/connections-client.tsx",
+      "reachable": false,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/connections/mcp/mcp-connections-client.tsx",
+      "reachable": false,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/connections/mcp/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/connections/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/contact/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/credits/credits-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/credits/credits-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/credits/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/dashboard/dashboard-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/dashboard/dashboard-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/dashboard/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/globals.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/guide/guide-page.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/guide/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/help/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/inquiry.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/layout.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/login/login-form.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/login/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/logout-button.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/notifications/notifications-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/notifications/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/configuration/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/configuration/resource-card-status.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/connections/git/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/connections/mcp/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/graph/knowledge-graph-canvas.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/graph/knowledge-graph.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/graph/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/graph/personal-knowledge-graph-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/graph/personal-knowledge-graph-tools.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/knowledge-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/knowledge-loader.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-knowledge-editor.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-knowledge-next-steps.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-knowledge-qa-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-knowledge.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-project-handoff.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-project-search-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-semantic-index-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/knowledge/personal-semantic-search-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/models/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/personal-overview-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/personal-overview-loader.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/projects/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/usage/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/usage/usage-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/personal/usage/usage-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/privacy/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/connection-create-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/connection-edit-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/connection-list.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/git/git-connections-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/git/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/governance-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/mcp/mcp-connections-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/connections/mcp/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/models/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/models/personal-model-overview.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/models/personal-model-overview.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/models/personal-models-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/profile-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/profile/profile-page.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/actions/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/actions/project-actions-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/assets/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/assets/project-assets-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/automations/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/automations/project-automations-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/automations/project-automations-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/configuration/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/configuration/project-configuration-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/control/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/control/project-control-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/external-sources/browser-web-source-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/external-sources/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/external-sources/project-external-sources-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/github-syncs/[syncRunId]/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/governance/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/governance/project-governance-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/governance/project-management-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/governance/project-management.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/intelligence/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/intelligence/project-intelligence-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/jobs/[jobId]/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/jobs/[jobId]/project-job-detail-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/layout.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/materials/materials-tab-link.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/materials/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/materials/review/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/materials/sources/[sourceId]/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/materials/sources/[sourceId]/source-detail-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/mcp-actions/mcp-actions-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/mcp-actions/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/mcp-export/mcp-export-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/mcp-export/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/members/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/members/project-members-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/members/project-members.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/memory/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/memory/project-memory-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/memory-quality/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/memory-quality/project-memory-quality-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/plan/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/plan/project-plan-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/plan/project-plan-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/plan/project-plan-operations.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-fact-import.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-material-intake.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-material-review-queue.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-materials.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-overview-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-overview-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-processing-tasks.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/project-support.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/repositories/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/repositories/project-repositories-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/tools/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/tools/project-tools-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/world/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/[projectId]/world/project-world-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/create-project-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/projects-client.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/projects/projects-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/recover/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/recover/recovery-form.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/register/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/register/register-form.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/settings/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/settings/platform-default-routes-client.tsx",
+      "reachable": false,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/settings/platform-operation-assignments.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/settings/settings-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/setup/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/setup/setup-form.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/support-pages.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/system/account-access/account-access-client.tsx",
+      "reachable": false,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/system/account-access/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/system/memberships/memberships-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/system/memberships/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/system/operations/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/system/operations/system-operations-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/team/[workspaceId]/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/team/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/team/team-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/team/team-overview.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/terms/page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/app/user-workspace.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/account-closure-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/account-phone-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/admin-header.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/admin-overview-client.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/admin-overview-loader.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/admin-page-header.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/admin-shell.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/app-confirm-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/app-header.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/appearance-controls.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/appearance-provider.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/auth-page.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/auth-page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/back-button.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/brand-mark.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 1,
+      "shadow": 1,
+      "tint": 0,
+      "legacyPrimary": 1
+    },
+    {
+      "file": "src/components/connection-tabs.tsx",
+      "reachable": false,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/dialog-actions.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/email-code-input.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/floating-inquiry-loader.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/floating-inquiry.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/graphic-captcha-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/header-account.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/help-tooltip.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/inquiry-operation.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/knowledge-lifecycle.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/lazy-project-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/list-pagination.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/model-form-fields.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/notification-bell.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/operation-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/parent-page-link.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/personal-workspace-nav.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/project-dialogs.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/project-flow-guide.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/project-lifecycle-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/project-parent-link.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/public-info-page.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/public-info-page.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/scope-evidence-card.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/server-resources-panel.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/shell-icon-sprite.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/shell-icon.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/sms-code-input.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/token-activity.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/token-activity.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/token-usage.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/token-usage.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/ui-error-text.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/user-shell.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/user-shell.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/workspace-dialog.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/workspace-scope.tsx",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    },
+    {
+      "file": "src/components/workspace-ui.module.css",
+      "reachable": true,
+      "largeRadius": 0,
+      "mediumRadius": 0,
+      "shadow": 0,
+      "tint": 0,
+      "legacyPrimary": 0
+    }
+  ],
+  "missingFromInventory": [],
+  "missingFromSource": [],
+  "hashes": {
+    "src/app/accept-invitation/accept-invitation-client.tsx": "7faa0c85f4f4a3332d49f7ae8210d4be50d055f997dca2134270586dee61e01d",
+    "src/app/accept-invitation/page.tsx": "241e909b45a0f9572a5fdeee455022ebbd9a5cd8af8f871579423dea17810bd9",
+    "src/app/admin/account/admin-account-client.tsx": "be9a1faf2bd665eb5937d2875b87d8ea2dc4d113875a45dbe21a3658d0f4bf70",
+    "src/app/admin/account/page.tsx": "ed0dc31b4425ea399d4d7c87042246fec608a7d1f77df094f77bd6907e60762b",
+    "src/app/admin/admin-workspace.module.css": "25e658cda65b540ccd7efc3429094b16b37f896b14ae8ff702d37608597f8774",
+    "src/app/admin/audit/audit-client.tsx": "012271407ecc5c6a73e658892a1736f7b888782bb762d36d90b7efd4f1f147b5",
+    "src/app/admin/audit/audit-detail-drawer.tsx": "7ff3050e9afb0c7473d4ea71109be114eb0b33700e6e6057883d1fc5600b0e42",
+    "src/app/admin/audit/page.tsx": "bc46797a2b0adc5b2c192f1dde57f5b6e8ea7b3f00aa381b8f276e3e8431f0db",
+    "src/app/admin/connectors/frozen-connector-page.tsx": "b6c7dd5170c760c42b2cb035fe065889e51c8f9116a036ac077c69e6208bad28",
+    "src/app/admin/connectors/git/page.tsx": "474c8d16513a587dba0c663e7868034c11d46b3cacfec5e7434f0d2b4eae4056",
+    "src/app/admin/connectors/mcp/mcp-review-workbench.tsx": "0d33be0ae46371505c2d6d0f87829b958620e351e23912a07cadd6f2d98992c7",
+    "src/app/admin/connectors/mcp/page.tsx": "2acaee99f574c5edfbfdab04c431ce29a6e14f2809283de1ba832f4ec5909f35",
+    "src/app/admin/credits/page.tsx": "2e34c849a173bbf11356042c4684e0dd00fb5f0ddb6dc4f118ad32509f8cd988",
+    "src/app/admin/guide/page.tsx": "3d44a6d5fbfbbf35f0b431531a923b5ad226a0b02cf32c1bda981aab9a77c29c",
+    "src/app/admin/layout.tsx": "53c148c47e96fd36476492876d667dce81708795094e3bf73086bf1753756788",
+    "src/app/admin/models/governance/page.tsx": "bfe194a283643e97b36aac8db291d2ff64f83fe07de84f156ef3c785f602e9aa",
+    "src/app/admin/models/page.tsx": "da7d40ccb9d92c6cae25fc5828cb315f4646574a9590c21ebf8003af1f83def4",
+    "src/app/admin/models/platform-credit-governance-client.tsx": "90c61cbcea61abe5f0bf62ff864cf5b4b4aa6521fa293ff20692e988aaafc33e",
+    "src/app/admin/models/platform-grant-offer-policy-client.tsx": "a12d3dc81e7b5720b5a868a4f9d536aa631b205d934305970dfbed0b20f5b05c",
+    "src/app/admin/models/routes/page.tsx": "1e3d7db8e28d43aacaa03fae688c55c415d535e81208b409f99ef21b00d23430",
+    "src/app/admin/operations/backups/page.tsx": "9c631567c1642dfaae67942aefdef4239bee01ccb090e7c76c6c4a3ecf2363b4",
+    "src/app/admin/operations/failures/failure-inbox-client.tsx": "0588b44ee3ae706c65042f872d52b81d66a981aa89ac99e5108001e637087d2d",
+    "src/app/admin/operations/failures/page.tsx": "f86bfdec23b8b12eb69a413cce76a93a0b2cefeb723dd432d5712fce3fe0f984",
+    "src/app/admin/operations/probes/page.tsx": "33e0b4430737e8305b3dd32894882886bdc23bfb6acf6e429310bfa9c7ffa656",
+    "src/app/admin/operations/probes/platform-probe-budget-client.tsx": "b956d79702788d86271bd416a10c925bb8b0f4aa99a19cff4127dbfb748917c1",
+    "src/app/admin/page.tsx": "f8008327038b15f2e0c634ca35d8871f88803767b39ba4982596e163c4136147",
+    "src/app/admin/sms/page.tsx": "c88b0eb970abb6ef9afdda8a7d0076e3d57de5068bb6158163c6dcb1d71fade4",
+    "src/app/admin/sms/sms-provider-admin-client.tsx": "c103598aae1731a0ba82ed937dfa8b6e3533d7b62797343b651bfb59102981df",
+    "src/app/admin/users/[userId]/page.tsx": "808514a0360ddb0b8c9ea4ce4a2a4c0c3de0a1c10c7bdf4e55623d418ae12163",
+    "src/app/admin/users/[userId]/user-detail-client.tsx": "d0b72e8fbce9be219c6eab02613df98d703ac63374aecdd1dac5deee50ab89a6",
+    "src/app/admin/users/memberships/page.tsx": "87e6356f7fa52cefee11fc7efcfca05b1b5bdf15cde8d2a37cf45eebe5cefd37",
+    "src/app/admin/users/page.tsx": "6a14d68cbe10f02d4ec815ca31299153ee13041e6511da24980deda4c4854d1c",
+    "src/app/admin/users/users-client.tsx": "66ce6b1bd063f9abb5dba975f7e3057ef396f734dd1b62499b427875bdb52275",
+    "src/app/appearance.css": "5435891894c5aa64fecf37d11fc7cdb351b31ee9ae7ea560c417bf951ec049be",
+    "src/app/ask/ask-client.module.css": "ad0dce99be3c5d1a83a5b9d6d44ed9f47a6262e3b602dd18382e52a9490de51a",
+    "src/app/ask/ask-client.tsx": "b4c2cc42c5e1d5b46aa4233e33bcb8fa4d91a32319f5dd7324c028ac8612d24e",
+    "src/app/ask/conversation-rail.tsx": "277aa166115f1780ca33cf7bf1804ed8dc66db66d813d1014e810bc1bed8ddb5",
+    "src/app/ask/page.tsx": "ae4eeaf7842c1f641b8c57d4849171379ac31b6b8ecdec61692a023315705eac",
+    "src/app/connections/connections-client.tsx": "cd738ab6f4bf3bb9dc2519bf81248bf9641ff67cc3c0f755db44f25e4d5b2d5d",
+    "src/app/connections/mcp/mcp-connections-client.tsx": "0b15c80f1c30bda78135a404780f429105f169871aba4afbdcb94fb3a457cf08",
+    "src/app/connections/mcp/page.tsx": "1b98c0ce7dbbb30b6b63c2fb1cda77c7e43e4367d251a42bece403891f4c7efa",
+    "src/app/connections/page.tsx": "486e149feac3b233818034f882524410f95504399c5f8deed0c0095dc7f94dcd",
+    "src/app/contact/page.tsx": "9500a0d8c20d1716b66da93d4c892ccc65ffcbaf11636e38760369a34ad1a0f1",
+    "src/app/credits/credits-client.module.css": "b3079e15cb86d99d764cc6c9cd524383c4b195711e9fbb649f5b7fa3d9739913",
+    "src/app/credits/credits-client.tsx": "7bef92e3b537e300657b4cb7902a687515b6162808e9fed0b504969e5282a503",
+    "src/app/credits/page.tsx": "25a1ec425904297693e84a0f5c37340a919b1a5511b17822c7fd4ebc2f4d7c02",
+    "src/app/dashboard/dashboard-client.module.css": "037389acd130053a7705b860a80062485d982fd689b29e48b01c41378fd6382f",
+    "src/app/dashboard/dashboard-client.tsx": "8941feadc2a3f630ad048b9d53be8991617e466184e4725ee9fe661eb150c377",
+    "src/app/dashboard/page.tsx": "4df2a23c84669d5bb7126dca9602ce7e4084a002fd6e0e62600fe29c2ed71895",
+    "src/app/globals.css": "f5ef70de3f6927d385ec7814f857e018ef48e32580cc7bad6c97d603d87161aa",
+    "src/app/guide/guide-page.module.css": "4fb430a4d8cdbceb3b3d69ddac9dd3434bde14bd1364c5eb8b502137bd95deb8",
+    "src/app/guide/page.tsx": "4386b0464c07522245f20497c1c9672afa235568c57c9a5106e07b3d179d5d77",
+    "src/app/help/page.tsx": "ca9016e2da3c63a4089c5d4fe20d735d915e2dd7d9971528abe2f44862a46b6b",
+    "src/app/inquiry.css": "eac6f22ffbb12c11d4f8def40ccd21da4546b69604058561a60e7955246123b0",
+    "src/app/layout.tsx": "faa97503757216fedbcd18f010084da9c8b591706911f89daeb1dd22e4ec91ba",
+    "src/app/login/login-form.tsx": "b5fe536c0367890561398bbfe466558b0ac614d42692810bd0376d703cc6df8d",
+    "src/app/login/page.tsx": "59260a203cb3fb6ea054d37be531dd937def28595540ecdbf030d8cc1039833f",
+    "src/app/logout-button.tsx": "62ca25d9a64a17fc0d0e3d4160223d3a97320aa471fd20fcd566de88f2c9b6da",
+    "src/app/notifications/notifications-client.tsx": "c93e64ee00eaafaf5a07d9db3fc49459d17849a8ccb0c9f26a14879abbb9b07e",
+    "src/app/notifications/page.tsx": "1fd4bea87acb2cdc4412bf3f1a88d9ee16fb2949d49be10101536cd70b6a2f78",
+    "src/app/page.tsx": "1647d11237ca0129f22e644810ac1f6f2435dd07219d7f608c8fe6a84f178d21",
+    "src/app/personal/configuration/page.tsx": "66bf641b32772059eb1f1c98d0fe2f3ad247bdc6e6e8541f0104ab7a12f5e5fb",
+    "src/app/personal/configuration/resource-card-status.tsx": "50ca4f4e20da7eaa73a157623f6837a185bc0770d64fb9919d6e8ecd7557223c",
+    "src/app/personal/connections/git/page.tsx": "6716a01b687e510d30a8bbf48cac130dfaae623f78c48d07cf2956797001cc65",
+    "src/app/personal/connections/mcp/page.tsx": "ed4c78901f4788016480a57a02a3ad5b1fdebdb2231b7a3d86125bd1054a302a",
+    "src/app/personal/knowledge/graph/knowledge-graph-canvas.tsx": "1d079a870cf788ae3b5c87c374ee9d4b0146298ccb87e3e3a972eea3dacb0920",
+    "src/app/personal/knowledge/graph/knowledge-graph.module.css": "5a3c7449649074cf096672b1f10fe46479fe160f56d1e8eff639f70d75c4bc8f",
+    "src/app/personal/knowledge/graph/page.tsx": "e91a2ef7d8dd43b0fa5a3e0d78b397f0c19f490b77687c9fd6f3a08363068873",
+    "src/app/personal/knowledge/graph/personal-knowledge-graph-client.tsx": "5dc93d821c10c64a944d891cf7309d423a9688402b8ed10b576dc6c75a51366d",
+    "src/app/personal/knowledge/graph/personal-knowledge-graph-tools.tsx": "5a0e9a30a171c2b39388f708745dd8d317ccc3b7d3b313f2a01df128b8aeeda4",
+    "src/app/personal/knowledge/knowledge-client.tsx": "e7fec61f3b342de3b479583f7f36cb7b5e599e0dddaa01e65ee451f03dd255cd",
+    "src/app/personal/knowledge/knowledge-loader.tsx": "dcd9b358a7a7b13124a484fcbb9789cb422368f4f021f6e76b7ba745313a066c",
+    "src/app/personal/knowledge/page.tsx": "dca76cf5d5cff0e382995279f21b184d9018fb2dacd98e22b623d81e36d5e15c",
+    "src/app/personal/knowledge/personal-knowledge-editor.tsx": "ad906658d17a7d88f085d983c9597dccca6234642eb65384ab62837ddf65d090",
+    "src/app/personal/knowledge/personal-knowledge-next-steps.tsx": "bc4183e4541432cc8ce5c82e194b049e5547e8c4c8f4a067f486ed0e95644b94",
+    "src/app/personal/knowledge/personal-knowledge-qa-panel.tsx": "89657521011f65887c99ac49a80381b65fb0e9934bd414358aefc260816d7218",
+    "src/app/personal/knowledge/personal-knowledge.module.css": "3716d78c8d4cfaf540b636aea584fcf1e343713b30cf3adc1c470bed4d35aad3",
+    "src/app/personal/knowledge/personal-project-handoff.tsx": "0a58d847165291ceb76b5181881595352442dcb2e4d9a37d526acd848020033d",
+    "src/app/personal/knowledge/personal-project-search-panel.tsx": "0e1940bb164b1e45855ee1d3fa170c5dbef4edb0fcd9e6013e06303d0746340c",
+    "src/app/personal/knowledge/personal-semantic-index-panel.tsx": "f923e47fe03264815a37b8573be2ab855cb9f5054e5e691f3d1c5deeead4531a",
+    "src/app/personal/knowledge/personal-semantic-search-panel.tsx": "96ea23be0f931d60c3fa0c3b156e66638d6ef676784cb7ee6b01a93cdb50bfb3",
+    "src/app/personal/models/page.tsx": "c8a2b604f39089e2bfc3c220438b2affc1e79e20a6a3e36992ac4b863f2829d6",
+    "src/app/personal/page.tsx": "11bdad3293a2d65a429a11dcae85584fa2ebdfbdc1416d3e440579db57b3c89b",
+    "src/app/personal/personal-overview-client.tsx": "50838dfaaf27c97631df7ffec6c3876cad106438ac825d147238fac2f97aeb8a",
+    "src/app/personal/personal-overview-loader.tsx": "4f368aa34dd610b5e16da2b2f207661ad0b0c56d531c7a4d0995eec160c5f67a",
+    "src/app/personal/projects/page.tsx": "51966941d4473778324df6184d407ffd4c36a448a11a1fe53c5dbb31302df4f2",
+    "src/app/personal/usage/page.tsx": "21fed3695fbad9ef64e617119a42d0836564570fc2bd78a7068cb1d118dfe7c9",
+    "src/app/personal/usage/usage-client.module.css": "c1bf52f06ccbc29e7a5ce5a9823178d42487b706134cc71bf2a7504a51ff9eda",
+    "src/app/personal/usage/usage-client.tsx": "78e8ec1999a60a8698a707dcf34628d0fc521bbb9a68666027686623883d643f",
+    "src/app/privacy/page.tsx": "3b0bab4a444fc96c3af35351cc19e76415a72fc84a32e8cdc9f8e365f2b277be",
+    "src/app/profile/connections/connection-create-dialog.tsx": "8ac86b54776e141a972dd2fa6ffa4a79a545dd166a68c9806a14d7d8f25196d9",
+    "src/app/profile/connections/connection-edit-dialog.tsx": "9c2eb47ffdc328014ee26d1b0d9eda1a3f688cb2b259ee09c36840de8da67b7e",
+    "src/app/profile/connections/connection-list.module.css": "c7abc3fefb2c085fddd50efbe5f1c6f46500882300e7f1804f1de6622ff55425",
+    "src/app/profile/connections/git/git-connections-client.tsx": "42e3d0a879c803fd9b4959f5177cc045a5907b34bb2f0a7788d52963085fbd86",
+    "src/app/profile/connections/git/page.tsx": "fc78738e6d4012690229f31fc1a56baf87b6557dc930b0dd7b52802f5b4159ed",
+    "src/app/profile/connections/governance-panel.tsx": "c6ffd666063ce7c2a05775a2878502b8cc54b7b039bca899645998ca236a5fe0",
+    "src/app/profile/connections/mcp/mcp-connections-client.tsx": "5fc4f638566729c2ddd21465ef3dcadfa83d2ac7b139adda8f384d55009df6ad",
+    "src/app/profile/connections/mcp/page.tsx": "10a6d630862659ff1d7ef61e680419f6b588586a8a25e240728c1aa8faa89154",
+    "src/app/profile/models/page.tsx": "0a90474afc246c4c59b9bbd31e4309f993cbc4a74473c1e48676a55e55e3e29c",
+    "src/app/profile/models/personal-model-overview.module.css": "84dea2d286ccd41fcf750ca4a578bcfef5d1f87c764eeb22e47c4abb750e4d60",
+    "src/app/profile/models/personal-model-overview.tsx": "a443f2b98b5be44d507edc66f9eeafac36c7da7d77c28a43e61be6206e5f2fe5",
+    "src/app/profile/models/personal-models-client.tsx": "00b826666ecc2d0fea5e07a2d428e4adc259a6d8f0deb6d89e098853d7facde5",
+    "src/app/profile/page.tsx": "8285bb2b15c5e15f4a5f569603acb22d3cb4413f7894e66c1fceb2e523bff6e6",
+    "src/app/profile/profile-client.tsx": "be2184291eccfa979ed5a1e42398b728080417ba9dd5a34738ad016a5a9f2f24",
+    "src/app/profile/profile-page.module.css": "d88d3e47bd98d0ebbcb6c32f9b1227fd72cf3f20d040b4387a7a22a5d075933a",
+    "src/app/projects/[projectId]/actions/page.tsx": "4667b310747b39fc97fc124496cda1c3a1f5a496f69907f414e93acb86b57a20",
+    "src/app/projects/[projectId]/actions/project-actions-client.tsx": "83881659938617ba20ffd1ae964a3612c7d5818c52ed5b00c5fb17e021214305",
+    "src/app/projects/[projectId]/assets/page.tsx": "5e2ce8815781e8fac221e01ce270cd96ce5698f3032970396a895826aa469271",
+    "src/app/projects/[projectId]/assets/project-assets-client.tsx": "b21cf6b198965e44c43c86a3939b35e1f3d1ae8daf21e582f333af968c6d88df",
+    "src/app/projects/[projectId]/automations/page.tsx": "f887013f22c97514353fda3f6bedc6618ff7e830ccb821f74fbe83d373345083",
+    "src/app/projects/[projectId]/automations/project-automations-client.module.css": "7aa18e4809b09e5d221797532fd18163ae28b42dafa24388e6fb4a18c43ce6e9",
+    "src/app/projects/[projectId]/automations/project-automations-client.tsx": "246d0a2e8a8b4212637802afa86187814d019f5045e9c606b21fa0b295af989b",
+    "src/app/projects/[projectId]/configuration/page.tsx": "0f4a81779b337219402192db57b2d61f0a1ed9ef76084d1195d3ffe70468fec6",
+    "src/app/projects/[projectId]/configuration/project-configuration-client.tsx": "636d940f0c0cea35bc60969bfe316c4dc51983f87bdc8e17e541151bc230faf1",
+    "src/app/projects/[projectId]/control/page.tsx": "21777b94d45054e05969865ff571c6e8e63f617376e1e49f090206ff609e544f",
+    "src/app/projects/[projectId]/control/project-control-client.tsx": "1210f1386633087db03e1e1bf233b7e4b0a5008cebaec7266fc347f63b47199c",
+    "src/app/projects/[projectId]/external-sources/browser-web-source-client.tsx": "f29623182f7402cbb4a99b73ffe0a8711146a344503a3a22b4f2c5cba058206a",
+    "src/app/projects/[projectId]/external-sources/page.tsx": "0fcff6978d293f97f2410c712f71dff7ca871924de7d5b121b067c46dd4f8db8",
+    "src/app/projects/[projectId]/external-sources/project-external-sources-client.tsx": "2a1d15ca90b9b0dfe1254446ebc97407b608175476404bceef85f4b67110a046",
+    "src/app/projects/[projectId]/github-syncs/[syncRunId]/page.tsx": "fc973990237d757d40b4e625f6728cab46d880848d7b1a77adad775fdf8365b0",
+    "src/app/projects/[projectId]/governance/page.tsx": "a8195b693453069c27e0f515c907729c06a0b3457c3ba7c8d2faba6787f20c8f",
+    "src/app/projects/[projectId]/governance/project-governance-client.tsx": "92c925b6882e6af5193a4dd8a0be58fb1b9e497eba79d580d472aa4269b4d8aa",
+    "src/app/projects/[projectId]/governance/project-management-client.tsx": "668a042051af282a38279666f09b64010c42cf6d6e6ccc5f24818d510286e915",
+    "src/app/projects/[projectId]/governance/project-management.module.css": "8e34b9d489ecccab4d7284c1d23b08f3c6f3ef2eabf859f90e6fcb4f9eddce84",
+    "src/app/projects/[projectId]/intelligence/page.tsx": "9a845f430ee90ebf09a79e2795cce57dfced0f0328a0c4cfef17cbe876fa4219",
+    "src/app/projects/[projectId]/intelligence/project-intelligence-client.module.css": "e4ef19def0891209ec49502b7d368dc565dc233d6bc3d3103a61ee2f9e660a41",
+    "src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx": "19903b73d98d46fc88a5a9955b3f7de1042cdff5ff19a2f7dc435ed755a00d15",
+    "src/app/projects/[projectId]/jobs/[jobId]/page.tsx": "2c8ef0c0da56650f90aef2d6ab84048868e49c5050f7ffd9210c534031a19b63",
+    "src/app/projects/[projectId]/jobs/[jobId]/project-job-detail-client.tsx": "563b275d25d02319d775f89e7d9e545c7ad133e64ca7e389ff5c15d9cedd97b4",
+    "src/app/projects/[projectId]/layout.tsx": "3fa48d3d7aeacee8fd4666286596fd075890df38364bdff20816509cd7482cc8",
+    "src/app/projects/[projectId]/materials/materials-tab-link.tsx": "9b04d6b92fee35ca5acb48133dfa159432291782100e8011e07eadd4eb664416",
+    "src/app/projects/[projectId]/materials/page.tsx": "76c72b158f8de5886bf6087e369f97810537fb4028c09d9478632378033a1809",
+    "src/app/projects/[projectId]/materials/review/page.tsx": "1e8e124db8ff1a4a092701205e2737f977a6417d24280b8a302add2583cb0eb8",
+    "src/app/projects/[projectId]/materials/sources/[sourceId]/page.tsx": "8548a88252b4f2dc4ca77a87c2da30a5d33ec7e70e76e7f8ed95d9ffb723c066",
+    "src/app/projects/[projectId]/materials/sources/[sourceId]/source-detail-client.tsx": "382314506f62985266d16b0ef0c61c1cedeec1122e5b0804d2e1a578de18c7c7",
+    "src/app/projects/[projectId]/mcp-actions/mcp-actions-client.tsx": "a81a83f959f606a635ee29b6782e25c4424b81011259ec5ad32233a8a7ff96d5",
+    "src/app/projects/[projectId]/mcp-actions/page.tsx": "ee762541eae3bc6daae0a3db625c35088064f0f876a38654f606b5fc88b1a199",
+    "src/app/projects/[projectId]/mcp-export/mcp-export-client.tsx": "63b6ccd36ee22ac3e88268940964c7c48a87e07c14959bfe4150e3f2878e9d12",
+    "src/app/projects/[projectId]/mcp-export/page.tsx": "cccc4311ca92ba3aa86873089c738904c68f437e597a2a07cbc5fad59ebf8e0c",
+    "src/app/projects/[projectId]/members/page.tsx": "3981f658e8ae578265fe114d0676cb60633274f076f1c3b6d6a00f1ad77babeb",
+    "src/app/projects/[projectId]/members/project-members-client.tsx": "e94452e3fc65aa07e86c4740594057e18e7d1ca6fff39baf2fc82b6895275fa3",
+    "src/app/projects/[projectId]/members/project-members.module.css": "c18a5c975927cf4155d59d803b1e812f815f10b725e487e77a8ce55ec35e2c08",
+    "src/app/projects/[projectId]/memory/page.tsx": "2f4494cd525055fe8db666b56931a4b0de5fcadd2dcf9ed48deab85d3afb47de",
+    "src/app/projects/[projectId]/memory/project-memory-client.tsx": "798d409f9cf9de210577682fc07481956611b1178945dfbba2c4750bd0b2fb79",
+    "src/app/projects/[projectId]/memory-quality/page.tsx": "69f7bd61055208bb8996a1e1af009d11e2be903ef7f640952242127e8b750437",
+    "src/app/projects/[projectId]/memory-quality/project-memory-quality-client.tsx": "e555ec5dfcc7bd8f5325c42508de986dd97d2e5f9e6bfcecf643dd69f81b3554",
+    "src/app/projects/[projectId]/page.tsx": "a14e1dc524b547ceb4538d57c853895b8bf338333ce1469056bafa084d2fc587",
+    "src/app/projects/[projectId]/plan/page.tsx": "b5d8e45dc914bbe72b7f6f33b02e6b78ee9d737799b6bce498319cf7ca85cd90",
+    "src/app/projects/[projectId]/plan/project-plan-client.module.css": "964ee1ad78dda28ad4c823204a8143a2136849e7964e40f9b890fc55d567534a",
+    "src/app/projects/[projectId]/plan/project-plan-client.tsx": "215b8504a220680ff6457911ee7ef7c5d202a9a4a4b41950fc6325dc220bf237",
+    "src/app/projects/[projectId]/plan/project-plan-operations.tsx": "a8e982e0fb242636a74f781f60085201c860136cf00e761e2cc4c55a0283b018",
+    "src/app/projects/[projectId]/project-client.tsx": "82d973aef36e9822f90747ee0b1bca34a7a4a062727532ccae233a14644db8bf",
+    "src/app/projects/[projectId]/project-fact-import.tsx": "2b4d4542ead251fcea8526edf0ea5518481d90bcaa40b89e332f5668bf792e57",
+    "src/app/projects/[projectId]/project-material-intake.tsx": "f754528e660a2eb804070559b2868b67e41c27962a6537138e6cd5b170f4e199",
+    "src/app/projects/[projectId]/project-material-review-queue.tsx": "264394f51f72d7023229b163b1d4bee24a04af12881b86e5feb68bf0076a8c62",
+    "src/app/projects/[projectId]/project-materials.module.css": "88feb7933ec7c0b780b0b0028ad59a0545ede70dfdd0f04109bd5292049950d2",
+    "src/app/projects/[projectId]/project-overview-client.module.css": "2987f9b2a2d5ed2ba938ba888c00c3e6dea292368ef93697d32e25bd29f92fd6",
+    "src/app/projects/[projectId]/project-overview-client.tsx": "9a0381ec1cf8addc1ef6e538ec3e70bb4555814397dff58d7639b491766f8022",
+    "src/app/projects/[projectId]/project-processing-tasks.tsx": "b405bc57153367bf3caeff40939183ad4e3363d880474deeda7d08e585936822",
+    "src/app/projects/[projectId]/project-support.module.css": "d49790f81fd613a9818f0d104c156a8273b1ae1ccbc7840946026caf8fa896e3",
+    "src/app/projects/[projectId]/repositories/page.tsx": "e2a6ace024265eb286dfdda2723f7300460f13e3ec55c20aa9e84122022332ad",
+    "src/app/projects/[projectId]/repositories/project-repositories-client.tsx": "cb22aff30c03d74d6a93b13923c1d4dd5ce8ad84a749e8a12b7372369457445b",
+    "src/app/projects/[projectId]/tools/page.tsx": "35e94abbebccc95be47f74fea87062be3e9535129a2de78c4c55d3385cc7b49c",
+    "src/app/projects/[projectId]/tools/project-tools-client.tsx": "b640b3e3ad97a31b9ae55bc9c92c6e707be08b837546a2573d60e7523aced2bd",
+    "src/app/projects/[projectId]/world/page.tsx": "5cc25a5d30def3372d93ef59d4fb9f97c8bdca0e972368a7fca4dfea93610740",
+    "src/app/projects/[projectId]/world/project-world-client.tsx": "96a5bcf41b5d6719c848cb371d223af5e7893c79f113e5084d4be5d893c80b15",
+    "src/app/projects/create-project-dialog.tsx": "433c4894d9156b5dcccd429e4048c06ca9875b619fcf90d0cacfb28ea38a75e2",
+    "src/app/projects/page.tsx": "3509bf02bc86a4a1deb48409dd630a4652fbaa8c62a85ff35c4630a591e5c329",
+    "src/app/projects/projects-client.module.css": "82e3758a9e054d6f88bc60c924800a09c9a8386e9e05c556f97b07119525ff9a",
+    "src/app/projects/projects-client.tsx": "9127d127b0e08b4e75f1202d07bc52bae67d49a82a10280e92d8c6f360d4eccf",
+    "src/app/recover/page.tsx": "4cc1771878ce40e29fefab6f1d20c589dfe66ac553c820bbb68240572d6c1cca",
+    "src/app/recover/recovery-form.tsx": "6207f04624c1bc7a750719421616bbdb24e6c43570b7ee6cde2e662d20b2e540",
+    "src/app/register/page.tsx": "2cae4dd9cb3422d635f551f57b83558315067e2771ef4f4fb2c25eeb69329351",
+    "src/app/register/register-form.tsx": "ce0f0cfcf9a1ade248c105adecc9fa4a92be20d3f1659d0697e2c0c77d2aea1f",
+    "src/app/settings/page.tsx": "551fecc0453a923865e75d5a74a38d626d8202cc57f0d226948c6d35eeef6a87",
+    "src/app/settings/platform-default-routes-client.tsx": "e66c13437136208a83961892df4189c53abe18c0829cb13877ae28873ab9b11d",
+    "src/app/settings/platform-operation-assignments.tsx": "7dce39aa4b9c5a7842b0a7383f5a22619c053e2ce21d1315bbc84e6ce0928d58",
+    "src/app/settings/settings-client.tsx": "b645d8c4548e13607d7038a52d2a08394844c991dcf7354e5f17b113ee7ff1df",
+    "src/app/setup/page.tsx": "35641017740ce91bf33051a14722d702ae1ae82beecc96c1468b840b4aba9ee6",
+    "src/app/setup/setup-form.tsx": "b4d4ccdaf1829b43320f2bc552896b53cb43e6a33942e7fe120418d8d73f25b4",
+    "src/app/support-pages.module.css": "73b168dfc590e77c1ab52ef3ccad9069e230e2b722c5d2e572c9b387253fd22b",
+    "src/app/system/account-access/account-access-client.tsx": "93d3bbf8b926301ad16482a286f94ac8964bbb1c3f5b05b4899753dcd53f82ca",
+    "src/app/system/account-access/page.tsx": "ba6600995d2e3fdc3f0962098c89833ed1a62e45fe2566b1ef030581e93f9163",
+    "src/app/system/memberships/memberships-client.tsx": "d19ef74bf5085d3a86b7bdec934c9492755d254cdbb2a47c728ab867df605e10",
+    "src/app/system/memberships/page.tsx": "00343245225e29e733746786f1653ac6e2f1edd2f2046c5f5565c42b45e73afb",
+    "src/app/system/operations/page.tsx": "ea5a09788a6469faf10b179c49f014cc0d42b6744a76055ece911f7b153e2f40",
+    "src/app/system/operations/system-operations-client.tsx": "b3272d0ea5f0e9ab8e9cb34231e237a7e89d758b13767666485ed4fa6086ee73",
+    "src/app/team/[workspaceId]/page.tsx": "04e462edcf3d2a8098c375e7d6599be3a1079434526fb54bc4176bc8fca37aa7",
+    "src/app/team/page.tsx": "8d21245fc5f38a3e8a5f2f370ef6dd82da92260b4d976f2c9282880262011a46",
+    "src/app/team/team-client.tsx": "bbb869c7037c20c8f521444f10aa42400111d1245f065b8f62f91522513ba1f3",
+    "src/app/team/team-overview.module.css": "ac8c5e9f3415b13c6ce7f82780f2577fc586d81861e4c9b1d429df9845f0f1f7",
+    "src/app/terms/page.tsx": "d51247cff44c44ed1697555bef8be36a545fb8766fb9067e0e772704052993cf",
+    "src/app/user-workspace.css": "0ec25666f9a706fc6d02d6c33fa5598a23c773ef88f03bd41dc600ae2abb6b1e",
+    "src/components/account-closure-panel.tsx": "41fbe3c61f7dd928bb9e4be4ff5445241b21fc8a376d6b3c5ec3c5fe3b0578f4",
+    "src/components/account-phone-panel.tsx": "c9d0a3073ade2567fdcd7aeb4c0895d05514b85531b35e36a0b452e48c179150",
+    "src/components/admin-header.tsx": "a469a7653c066ff8332df5db9b96050dad4c68ae60a89a28ca6fba2234db6d49",
+    "src/components/admin-overview-client.tsx": "0885007516846bc2ba65e039c22036320a39130b3639ce649f7590c707ea5ca1",
+    "src/components/admin-overview-loader.tsx": "7294f1368a58a91f5bc0ae4e3adfb6d2224dad12c9a30126ddff653af1c4518a",
+    "src/components/admin-page-header.tsx": "974289e103851f950e1d487057c6eb96234c68adb192928e358a6f50f70d6df1",
+    "src/components/admin-shell.tsx": "3c0c73652ad45714d0459c0493a650d90e78499bdc90f0166e72894d7bc2028e",
+    "src/components/app-confirm-dialog.tsx": "46b5d9181b877111488f3c01e364f356a40f493eee5371b74825639e10c2ec2e",
+    "src/components/app-header.tsx": "59a62e017955f8a274a7e77e75e8cb07f9a986ffdeec70053906eb1b8fedd9d3",
+    "src/components/appearance-controls.tsx": "0f14206ec253f5dbfb2da024ba51b06462e30e9d27d1ce68073c2cc0e9ce398e",
+    "src/components/appearance-provider.tsx": "d036cba9e26eb9efa5fad2e4edbfe08908f9181cb53019ca869a56cd538bc14c",
+    "src/components/auth-page.module.css": "2598f4a0cc780e34778ca07ef6350143795344d0b38b1ea5daa629ac6cd3a6f9",
+    "src/components/auth-page.tsx": "b26223c6b53e432beec426979a426878676e3bffa9d9167c026d9c8de03752d1",
+    "src/components/back-button.tsx": "2b51f25d952bcb5d7d5c462483ec328fe96ca69e5eb8b03dd74b51b57ff359b2",
+    "src/components/brand-mark.tsx": "5ff445a47b300733309a5c9c62747d48c3967a9bfc2700205b9795ad7d3d03fa",
+    "src/components/connection-tabs.tsx": "f204ed655fd1b7adf9722e978bae8822a8aa8b062fa78b74fbb36374be9baae0",
+    "src/components/dialog-actions.tsx": "e57a1fff52bab4e5bb1cb18627cf7d04d3497348b33a8ea17fe9afa916a21864",
+    "src/components/email-code-input.tsx": "fdbd062c3e0731d13d4e946adee28cd39fd61b20c18dffa694524d1247ec49b3",
+    "src/components/floating-inquiry-loader.tsx": "b62ed98205460f55505a867d8734d5db40a5a7fa7368fa37075ff22493e697a5",
+    "src/components/floating-inquiry.tsx": "d704c170ceb0096cfc6bc35fb7dc9989b02f8d8a159e6c83a4487053f94f8f43",
+    "src/components/graphic-captcha-dialog.tsx": "0303b2553eac00e1588fe01c84ab1fdc3a6eeee240ee8047abda256abd02a21f",
+    "src/components/header-account.tsx": "c990de5e0ce9a1a2429a68331d337f8134e13af945b524cc6697bca95fcdf3c3",
+    "src/components/help-tooltip.tsx": "14c445325e86cf3c8145d17a597bab8796015c21658cdd5bdcda1aba7ec8517f",
+    "src/components/inquiry-operation.tsx": "368e150dda87b80e50dd9dcf36a70cad2663cb3ffc7f96cb4242cfc112aba734",
+    "src/components/knowledge-lifecycle.tsx": "60f84fcf081cb6b839cd82190100289249b4b5b51984fa0491cf657b763740b6",
+    "src/components/lazy-project-dialog.tsx": "fcbab9528a04028cd8c58d361626b72032e49f22b39fd97b126bc61bc2cb8ee1",
+    "src/components/list-pagination.tsx": "52f4cb3ab03c8334f79ab322c1078db32f34d4888486eeaa8420e66b763900a6",
+    "src/components/model-form-fields.module.css": "e30a96e037f680a0801012d258728d6218dee4a66e9d8a4013823684cbf1c97b",
+    "src/components/notification-bell.tsx": "ca5cda5055c1149e12379e2669d32e5be87fedf8f97cf42c558b37606282c36c",
+    "src/components/operation-panel.tsx": "b363cc66caca8e01c1cdea2f191e7415188b0820362b7cee4f913ff59156aa5d",
+    "src/components/parent-page-link.tsx": "d5c51d25f7c4248b8608b12468dd3cb17a4548309cfc584cc45e4be78b1a0e21",
+    "src/components/personal-workspace-nav.tsx": "5cde649bda07d13274b68700b1cc47a0de91a3313efa25851190bed3ce10b1f1",
+    "src/components/project-dialogs.tsx": "86f3bcc01ebec25becfbb06f509f186a87678217de05c533dc735786909cc991",
+    "src/components/project-flow-guide.tsx": "9171fc206b8850127a86c4c3afdb44ca4a94718135faf8f0bb86350dbf72e972",
+    "src/components/project-lifecycle-dialog.tsx": "9173739057ed6f50008252ee25b3175c91a6ee6fe67abbf3b29fb96a9a6be90e",
+    "src/components/project-parent-link.tsx": "0e7642988367a8e45f95ee8cbc524964ea88026e0b0c3510f7e681772c5dd2d8",
+    "src/components/public-info-page.module.css": "99793a1079fe9ff648dc32a92040f91efd8443891e35f7b192f0600f64a279a3",
+    "src/components/public-info-page.tsx": "559c738856cd9381cec8c90cd328d9255c5062a26783c8d849f7ab20f6dc73b7",
+    "src/components/scope-evidence-card.tsx": "ef75481d625496d78ca42b36def16d53e8b1d8d39c5d8199ea1bdd15eba30826",
+    "src/components/server-resources-panel.tsx": "0d516afb1afde2cd854d990538a9129d91aa5f52d6dc2c228054d64135ab33d8",
+    "src/components/shell-icon-sprite.tsx": "605b29f39ccec6c745a41b2c7651b2cac2a56e0d4dea1ff63b62eb27114b0305",
+    "src/components/shell-icon.tsx": "83d0351063bd5da5a71af3f79e39963cc81076fbf7626d0b03283be27cdbd2e0",
+    "src/components/sms-code-input.tsx": "fd171e6b600d6d7235caa044ac74c671ada78fea98268377ef6e526e75deaa48",
+    "src/components/token-activity.module.css": "b98d87038344464399ff0997606d683e57052686a4dbb6e30e01f072156a23bd",
+    "src/components/token-activity.tsx": "1086c2b03b280c2769c65bb055f71ea3b4ba96a7939a0dd0a8e4eaf269a645b4",
+    "src/components/token-usage.module.css": "83b245232061a4050b8559aa25be4706b5118404f10b55bade207df8012c2c4c",
+    "src/components/token-usage.tsx": "1d1ccfe75319f2726da7f7280b9c2ac0d7b988cb04f0edfdb3da44fb1b9c1267",
+    "src/components/ui-error-text.tsx": "f67a79938d01f58f4af32e89fea80aa6b71f4d067d07a558208cdaa7dec24bab",
+    "src/components/user-shell.module.css": "c1a01c504750b9d451d4febe6549e8210f3eda17eaa453ca80aff06971a9618a",
+    "src/components/user-shell.tsx": "6fd7d96a10adc889acd6636d8ac526e4df68ef024dbfb2351dd994f597aee309",
+    "src/components/workspace-dialog.tsx": "34aa4f8c51856642ac47ee236f9873366c97ac41867ca91d1ca9ed1e7eb66072",
+    "src/components/workspace-scope.tsx": "004771447241b34292b2a90367b5d52b830a6885f52ab772aad6159824000b9a",
+    "src/components/workspace-ui.module.css": "7b814c9f7a04042d81618142c7fad680130614f48b9727e1406cdad323273d2d"
+  }
+}

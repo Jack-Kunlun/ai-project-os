@@ -1,0 +1,21 @@
+
+> ai-project-os@1.2.25 performance:check /Users/fenglan/projects/ai-project-os
+> node --import tsx scripts/check-performance-budget.ts
+
+PASS shared JavaScript: 129.3 KiB / 145.0 KiB
+PASS largest JavaScript asset (static/chunks/5922-292479552ca25dd2.js): 64.3 KiB / 75.0 KiB
+PASS global CSS: 12.4 KiB / 15.3 KiB
+PASS all static client assets: 870.4 KiB / 875.0 KiB
+PASS route /setup: 147.7 KiB / 155.0 KiB
+PASS route /dashboard: 160.8 KiB / 165.0 KiB
+PASS route /personal/projects: 160.8 KiB / 166.0 KiB
+PASS route /guide: 155.5 KiB / 156.0 KiB
+PASS route /connections/mcp: 135.3 KiB / 175.0 KiB
+PASS route /system/account-access: 135.3 KiB / 155.0 KiB
+PASS route /personal: 155.8 KiB / 170.0 KiB
+PASS route /personal/knowledge: 157.2 KiB / 180.0 KiB
+PASS route /personal/knowledge/graph: 179.5 KiB / 185.0 KiB
+PASS route /login: 153.5 KiB / 155.0 KiB
+PASS route /register: 155.3 KiB / 156.0 KiB
+PASS route /admin/sms: 160.3 KiB / 161.0 KiB
+PASS route /ask: 173.0 KiB / 180.0 KiB

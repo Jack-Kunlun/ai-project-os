@@ -1,0 +1,36 @@
+[
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/validation/sheet-01.png",
+    "items": [
+      {
+        "label": "C7 invitation-error-1440.png",
+        "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-error-1440.png"
+      },
+      {
+        "label": "C7 invitation-error-390.png",
+        "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-error-390.png"
+      },
+      {
+        "label": "C7 invitation-ready-1440.png",
+        "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-ready-1440.png"
+      },
+      {
+        "label": "C7 invitation-ready-390.png",
+        "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-ready-390.png"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/validation/sheet-02.png",
+    "items": [
+      {
+        "label": "C7 knowledge-validation-320.png",
+        "file": "test-results/ui-remediation-verified-20261115/personal-knowledge-modal-k-d4ba3--and-persist-saved-versions/knowledge-validation-320.png"
+      },
+      {
+        "label": "C7 knowledge-validation-390.png",
+        "file": "test-results/ui-remediation-verified-20261115/personal-knowledge-modal-k-d4ba3--and-persist-saved-versions/knowledge-validation-390.png"
+      }
+    ]
+  }
+]

@@ -1,0 +1,259 @@
+[
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-01.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_account-failed-read.png",
+        "label": "C7 /admin/account · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_audit-failed-read.png",
+        "label": "C7 /admin/audit · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_connectors_mcp-failed-read.png",
+        "label": "C7 /admin/connectors/mcp · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_credits-failed-read.png",
+        "label": "C7 /admin/credits · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_models-failed-read.png",
+        "label": "C7 /admin/models · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_backups-failed-read.png",
+        "label": "C7 /admin/operations/backups · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-02.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_failures-failed-read.png",
+        "label": "C7 /admin/operations/failures · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_probes-failed-read.png",
+        "label": "C7 /admin/operations/probes · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin-failed-read.png",
+        "label": "C7 /admin · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_sms-failed-read.png",
+        "label": "C7 /admin/sms · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-failed-read.png",
+        "label": "C7 /admin/users/[userId] · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users_memberships-failed-read.png",
+        "label": "C7 /admin/users/memberships · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-03.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users-failed-read.png",
+        "label": "C7 /admin/users · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_ask-failed-read.png",
+        "label": "C7 /ask · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_credits-failed-read.png",
+        "label": "C7 /credits · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_dashboard-failed-read.png",
+        "label": "C7 /dashboard · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_guide-failed-read.png",
+        "label": "C7 /guide · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_notifications-failed-read.png",
+        "label": "C7 /notifications · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-04.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_configuration-failed-read.png",
+        "label": "C7 /personal/configuration · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_connections_git-failed-read.png",
+        "label": "C7 /personal/connections/git · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_connections_mcp-failed-read.png",
+        "label": "C7 /personal/connections/mcp · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_knowledge_graph-failed-read.png",
+        "label": "C7 /personal/knowledge/graph · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_knowledge-failed-read.png",
+        "label": "C7 /personal/knowledge · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_models-failed-read.png",
+        "label": "C7 /personal/models · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-05.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal-failed-read.png",
+        "label": "C7 /personal · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_projects-failed-read.png",
+        "label": "C7 /personal/projects · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-failed-read.png",
+        "label": "C7 /profile · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__actions-failed-read.png",
+        "label": "C7 /projects/[projectId]/actions · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__assets-failed-read.png",
+        "label": "C7 /projects/[projectId]/assets · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__automations-failed-read.png",
+        "label": "C7 /projects/[projectId]/automations · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-06.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__configuration-failed-read.png",
+        "label": "C7 /projects/[projectId]/configuration · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__control-failed-read.png",
+        "label": "C7 /projects/[projectId]/control · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__external-sources-failed-read.png",
+        "label": "C7 /projects/[projectId]/external-sources · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__github-syncs__syncRunId_-failed-read.png",
+        "label": "C7 /projects/[projectId]/github-syncs/[syncRunId] · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__governance-failed-read.png",
+        "label": "C7 /projects/[projectId]/governance · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__intelligence-failed-read.png",
+        "label": "C7 /projects/[projectId]/intelligence · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-07.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__jobs__jobId_-failed-read.png",
+        "label": "C7 /projects/[projectId]/jobs/[jobId] · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials-failed-read.png",
+        "label": "C7 /projects/[projectId]/materials · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_review-failed-read.png",
+        "label": "C7 /projects/[projectId]/materials/review · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_sources__sourceId_-failed-read.png",
+        "label": "C7 /projects/[projectId]/materials/sources/[sourceId] · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__mcp-actions-failed-read.png",
+        "label": "C7 /projects/[projectId]/mcp-actions · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__mcp-export-failed-read.png",
+        "label": "C7 /projects/[projectId]/mcp-export · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-08.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__members-failed-read.png",
+        "label": "C7 /projects/[projectId]/members · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-failed-read.png",
+        "label": "C7 /projects/[projectId]/memory · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-quality-failed-read.png",
+        "label": "C7 /projects/[projectId]/memory-quality · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId_-failed-read.png",
+        "label": "C7 /projects/[projectId] · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__plan-failed-read.png",
+        "label": "C7 /projects/[projectId]/plan · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__repositories-failed-read.png",
+        "label": "C7 /projects/[projectId]/repositories · failed read"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/failed-reads/sheet-09.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__tools-failed-read.png",
+        "label": "C7 /projects/[projectId]/tools · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__world-failed-read.png",
+        "label": "C7 /projects/[projectId]/world · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_team__workspaceId_-failed-read.png",
+        "label": "C7 /team/[workspaceId] · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_team-failed-read.png",
+        "label": "C7 /team · failed read"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_usage-failed-read.png",
+        "label": "C7 /personal/usage · failed read"
+      }
+    ]
+  }
+]

@@ -1,0 +1,168 @@
+[
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/populated-and-feedback/sheet-01.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/materials-title-dark.png",
+        "label": "C7 materials-title-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/materials-title-light.png",
+        "label": "C7 materials-title-light.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-archived-dark.png",
+        "label": "C7 overview-archived-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-archived-light.png",
+        "label": "C7 overview-archived-light.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-success-dark.png",
+        "label": "C7 overview-success-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-success-light.png",
+        "label": "C7 overview-success-light.png"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/populated-and-feedback/sheet-02.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-archived-dark.png",
+        "label": "C7 plan-archived-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-archived-light.png",
+        "label": "C7 plan-archived-light.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-form-error-dark.png",
+        "label": "C7 plan-form-error-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-form-error-light.png",
+        "label": "C7 plan-form-error-light.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-success-dark.png",
+        "label": "C7 plan-success-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-success-light.png",
+        "label": "C7 plan-success-light.png"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/populated-and-feedback/sheet-03.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/work-item-management-dark.png",
+        "label": "C7 work-item-management-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/work-item-management-light.png",
+        "label": "C7 work-item-management-light.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-3-dark-390.png",
+        "label": "C7 cards-3-dark-390.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-3-light-1440.png",
+        "label": "C7 cards-3-light-1440.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-6-dark-390.png",
+        "label": "C7 cards-6-dark-390.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-6-light-1440.png",
+        "label": "C7 cards-6-light-1440.png"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/populated-and-feedback/sheet-04.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/identity-dark-390.png",
+        "label": "C7 identity-dark-390.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/identity-light-1440.png",
+        "label": "C7 identity-light-1440.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/permissions-dark-390.png",
+        "label": "C7 permissions-dark-390.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/permissions-light-1440.png",
+        "label": "C7 permissions-light-1440.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-index-dark.png",
+        "label": "C7 outbound-index-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-index-light.png",
+        "label": "C7 outbound-index-light.png"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/populated-and-feedback/sheet-05.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-search-dark.png",
+        "label": "C7 outbound-search-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-search-light.png",
+        "label": "C7 outbound-search-light.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-detail-dark.png",
+        "label": "C7 reject-detail-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-detail-light.png",
+        "label": "C7 reject-detail-light.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-list-dark.png",
+        "label": "C7 reject-list-dark.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-list-light.png",
+        "label": "C7 reject-list-light.png"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/populated-and-feedback/sheet-06.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-admin-1440.png",
+        "label": "C7 guide-admin-1440.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-admin-390.png",
+        "label": "C7 guide-admin-390.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-user-1440.png",
+        "label": "C7 guide-user-1440.png"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-user-390.png",
+        "label": "C7 guide-user-390.png"
+      }
+    ]
+  }
+]

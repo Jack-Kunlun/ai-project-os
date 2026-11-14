@@ -1,0 +1,256 @@
+{
+  "date": "2026-11-02",
+  "timezone": "Asia/Shanghai",
+  "head": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+  "version": "1.2.25",
+  "scope": "Local documentation inventory; not runtime or production acceptance.",
+  "capability_groups": 12,
+  "historical_delivery_groups": 11,
+  "sources": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "6b5f997c54476856ad703b477aca7377c92b552324b00eaa01d0f71aa5268b9b",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "36f54b7548a295a5f5c8be84d630ee3da7d59d281735c4893bdd8e8dafb0b843",
+      "basis": "documentation record"
+    },
+    {
+      "path": "README.md",
+      "sha256": "e8e703fdf731b943642e7b40f5a1aae1e719dd955625bcea5f95ec844bc2e5bc",
+      "basis": "documentation record"
+    },
+    {
+      "path": "compose.yaml",
+      "sha256": "f61bcfda5f3d7ec4c32515e969ea05bde1ec638e3266d4c2c82727878bfe2be3",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "docs/admin-operation-guide.md",
+      "sha256": "22ff707a3d0ce6f3ccea3e7ff8c1370bba1fabcd5ca31d8df5a26d0f852cf9d8",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/production-release.md",
+      "sha256": "a0d5ea2082608f2e2826fc3a53865603e5d06a839e4c9f60428b2d9b0bef5aa2",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.0.0.md",
+      "sha256": "721e55f219dec521a68c544668821f1c9e2516615ff006d5542a739d8a508416",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.0.9.md",
+      "sha256": "274f7a5da744f9db852f242c7d53eca7ddc55574e1fbda65a2b9a31caa007bf1",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.1.0.md",
+      "sha256": "8861bdea7dec7d75e07d4c59847b01cb1d18c32548f54ee52c81bcf1a41f45fc",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.0.md",
+      "sha256": "45539a59636bc66ebf91ec54875f5f8127923da46ec7e11862aaa3c65c7f3e6d",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.13.md",
+      "sha256": "fe5522fccbd9b16025750af309c2e4b74bf2c342928c31b4ae678303eb4b3e64",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.14.md",
+      "sha256": "faeb2e5b4ad1d701d4a175b32b9bbb0a6cf21d0c676fd202d13777ee23e1a63d",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.16.md",
+      "sha256": "c05b986d5192f2af3aaf8e765a06a8950883ab236faae34ada5257dc2204c4eb",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.19.md",
+      "sha256": "e779cdef47b0906cfccd61448403e14e9234bb6be680093b58c4155524b9cf47",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.2.md",
+      "sha256": "65756c17d963d8baa15a49d81e4f7be60557e02c01495f6f43e18efc7337f348",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.20.md",
+      "sha256": "ffa45da1ffa871023b3e9fbc2ce5ad2e64ea81510d0a1e6ffcdb1b4c02f5e63d",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.21.md",
+      "sha256": "f6773037d0ae5527a0e1d9bcb956e990fc4d6aa58e99f191cf3d9397c90f29b6",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.22.md",
+      "sha256": "082c29880e9b52127229fd06c7a1bd6c72136727f7f87c3826f3d29eb0f26fb6",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.23.md",
+      "sha256": "9482371ccac04a359604461a0c37cf2401b726778b3ca1dbd38cba7b1832c64d",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.24.md",
+      "sha256": "897201fbef5d73f4ebf672ab04c7cca06c9ccfe728ddbe716346f60fcc07e6c1",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/releases/v1.2.25.md",
+      "sha256": "55323a482e8df6ab8075b13ac6098955910d1b6fc17fc234bae254111471a641",
+      "basis": "documentation record"
+    },
+    {
+      "path": "docs/user-operation-guide.md",
+      "sha256": "5e66b160cb466b1fc7254ba0c3ed5d2981fbf31863c6bf1cddd05966ce22f1e4",
+      "basis": "documentation record"
+    },
+    {
+      "path": "package.json",
+      "sha256": "aff162b86f668f74c73b0848e32b259713ccbff9b82188c1cafa9364dbcf124d",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "scripts/automation-worker.ts",
+      "sha256": "e89a9f61e536d98ed64d60e6252ddd63b789fca52aebb261e3bbf804b0e62d44",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/app/settings/platform-operation-assignments.tsx",
+      "sha256": "34065730b31bdf296f74c82670e44a9ec58e9b1d8b3b560a372088c0c15ee62a",
+      "basis": "targeted source inspection"
+    },
+    {
+      "path": "src/app/settings/platform-operation-batch.ts",
+      "sha256": "416c0121468a23d2a03481918296a4224a42b099bd082a205fb95bfd2d33255a",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/access-control.ts",
+      "sha256": "d90f5d7da8d7bed56251085c8ccc4303fbe84b9b151ba56abd39bd3734fc2931",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/ai-memory/grounded-rag-service.ts",
+      "sha256": "1171e1ed90b58be1aad785fa5e01eb8fff4fcb9ac9c21c1784c099f942e9288e",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/ai-memory/read-only-agent.ts",
+      "sha256": "3b9675a117f02d32e04afb1b659e298c74094bbd946ad5257696775df9f0653d",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/auth.ts",
+      "sha256": "d5b299e92c5c9433a3b4c9d8cd9ef09c01dd5a5c9cb3aee3cc2feaa4037b9d7c",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/automation.ts",
+      "sha256": "c382587a9680af742c04031d6e41787243c57269f940b9e36017e8de3a5442a4",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/mcp-tool-review-service.ts",
+      "sha256": "eba3872bf0dbb8415cc7c4040039d896e6ec4adda5473c6e1612eeb30992425d",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/notification-service.ts",
+      "sha256": "30a17f8caf31ddc6cd290bab892d6f871c9698cd4a3e4ef5ee24cd507f1a41a3",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/personal-knowledge-graph.ts",
+      "sha256": "6f729d9849f84a1c9b9b09275d0b93a603f67c6f14ac83c41ce5fa751e2e1b9c",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/personal-knowledge-qa-service.ts",
+      "sha256": "243a53018abb86cce98507b26590f9d7a2bddfa7d9a2bcd90a3b420572b6294d",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/personal-knowledge-semantic-service.ts",
+      "sha256": "b5a82655418262d20cdf9b83a76c12f3ca52435cf0aee5dbe060989803e6447c",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/personal-knowledge-service.ts",
+      "sha256": "d49d6c56b2660ee1cdff2d5151e4dc0381b2e578e8dd102cfd4b0743dd07c548",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/project-assets/parser.ts",
+      "sha256": "fcdb6756c1d7e4f8115600350c5e2d960a2ab22fddf3d2f525741815cfae6b3d",
+      "basis": "targeted source inspection"
+    },
+    {
+      "path": "src/lib/project-assets/policy.ts",
+      "sha256": "32db0231512096fb55e797a54980fbef4d85589482dda530200e6ce44f83b052",
+      "basis": "targeted source inspection"
+    },
+    {
+      "path": "src/lib/project-git-automation-execution-service.ts",
+      "sha256": "8b50e6fb17476350edcb561a670cea814f328bd2f6047e4921748011b3eaf370",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/project-lifecycle.ts",
+      "sha256": "42f0d7142bc8519e6237ae9fdf8384d2d52b436bf80b110c625077bdfa8b789d",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/project-mcp-action-dispatch-service.ts",
+      "sha256": "cb62d4680e1b220437a02b51a454f622a5533abd5c324ea94546bd108b08d634",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/project-mcp-action-result-import-service.ts",
+      "sha256": "96bbb7e832ba0864a2da321bb0a8a255afa018adf51eed362b06fbfb1018a1a6",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/project-plan.ts",
+      "sha256": "77e3cbc13dff927f65b3b967830aef3887d1e4a3865531d88e769b2973243505",
+      "basis": "targeted source inspection"
+    },
+    {
+      "path": "src/lib/project-processing-worker.ts",
+      "sha256": "26c78a3dbe75bff3231ad32058bef7c4b58e8b9f1dc715e3cb3b85675bac13cc",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/unified-question-contract.ts",
+      "sha256": "9c60e0de4f653fa81e346ec7719453d44c7c92bc4e0a8cdedd33825ca3ca5509",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/unified-question-service.ts",
+      "sha256": "082e62f601da9fd987888d7a43ce30a0018ab2a9db83b45dda234e87886a2350",
+      "basis": "targeted source inspection"
+    },
+    {
+      "path": "src/lib/user-token-usage.ts",
+      "sha256": "b4191d775170c9a31dae4ea4cb2e46d0cc84ccfc3c87899aa500601b69346278",
+      "basis": "implementation entry located; not fully audited"
+    },
+    {
+      "path": "src/lib/web-sources.ts",
+      "sha256": "78d8353ee1cbf41b3c77433784cec6bd961d3cddfa5c9a1fa9cb5e24f91d7795",
+      "basis": "implementation entry located; not fully audited"
+    }
+  ]
+}

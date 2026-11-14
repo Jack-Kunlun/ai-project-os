@@ -1,0 +1,38 @@
+{
+  "recordedAt": "2026-11-14T23:14:55.917405+00:00",
+  "task": "T-035",
+  "change": "C-016",
+  "baseCommit": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+  "implementationCommit": "315d3c09c45d98983458fcbab3e41eb072f774de",
+  "regressionCommit": "919e4169a7aebf8a6876b8415dc4a9f259c31579",
+  "candidate": "C7",
+  "candidateFingerprint": "65981bfce37426ffe1a755388fa5fed1d4b4e98033b4b9c412b6034733442217",
+  "productionHashMatches": 1050,
+  "browserInputHashMatches": 49,
+  "unitRecheck": {
+    "files": [
+      "test/admin-mcp-review-workbench-contract.test.ts",
+      "test/project-information-architecture.test.ts",
+      "test/recovery-drill-contract.test.ts",
+      "test/wp07-dashboard-activity-contract.test.ts"
+    ],
+    "hashes": {
+      "test/admin-mcp-review-workbench-contract.test.ts": "686fd9aae16c987c684fad357ed2f15bad8541c16d4c507919cf12d73c103f9e",
+      "test/project-information-architecture.test.ts": "cdcaac6601fd3ab97fc16bb88ab8bad6b8f21a920639db2e9b117bfcb4023f35",
+      "test/recovery-drill-contract.test.ts": "13300e437d919ccd6cfbe04d13be3f045c7fb194b146992454c83c74fdc57655",
+      "test/wp07-dashboard-activity-contract.test.ts": "c4e13a9a2e09dd8553673e3e10d87f1964dc07248f87dd8bfae0ae501f5c2817"
+    },
+    "command": "node --import tsx --test test/admin-mcp-review-workbench-contract.test.ts test/project-information-architecture.test.ts test/recovery-drill-contract.test.ts test/wp07-dashboard-activity-contract.test.ts",
+    "tests": 19,
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0,
+    "log": "git-targeted-unit.log"
+  },
+  "branch": "main",
+  "pushStatus": "pending",
+  "releaseRequested": false,
+  "releaseWorkflowTriggered": false,
+  "tagCreated": false,
+  "versionChanged": false
+}

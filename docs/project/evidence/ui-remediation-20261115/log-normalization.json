@@ -1,0 +1,73 @@
+{
+  "recordedAt": "2026-11-14T23:15:17.678209+00:00",
+  "reason": "git diff --cached --check found terminal-output whitespace in newly staged evidence",
+  "resultTextChanged": false,
+  "files": [
+    {
+      "file": "lint.log",
+      "originalSha256": "78c8161c3b0f07f7a9c6e363f17d0e83e9c58cb9e2929c3d7a0bb0d403ed9961",
+      "committedSha256": "b4fe922cc401f19e25b9598c737792d4ed75c2fb4a653a832166ecf947ca016f",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "lint-invitation.log",
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "committedSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "typecheck.log",
+      "originalSha256": "e9b49d440553881a0593d467366dffabc723888d9d6b01bfdb4e739dae97dad7",
+      "committedSha256": "08169c6b68f4c5b8b0a7d34d9d827daf33eab5ef7e211b7c8ddd76c375e5b314",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "diagnostic-browser-c5-preflight.log",
+      "originalSha256": "d607b4c7d2cdbcd99fded50164f1e678568d697062db796580ed2a7dd699e60a",
+      "committedSha256": "0047f6535f2a8dcf6f16925f06af06f705b8033eca69c78bcd33d315859e9448",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "diagnostic-c3.log",
+      "originalSha256": "44379e5ed0715289e35247ef5d10fadd91e41fed7e248cc437e5648554115c4b",
+      "committedSha256": "3936fe04acb22c13ca061b4cd32e9c3ea48158dc7ff97490280e5cc8ffab50eb",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "diagnostic-c2.log",
+      "originalSha256": "dc24617d80184838618bb4ec817c5bb46da5bb41dd86e78002c04812ce5fc651",
+      "committedSha256": "4facc22efe892bdb3316c4ea5388e58072601c2ecbaca8f33144a1be65327e3d",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "browser-main.log",
+      "originalSha256": "25878789c49d1877eb5831a8404cace56e361c088bf4912d52f0cde1aa2e95da",
+      "committedSha256": "b573a0f58811db43083b03b45d6bfecb6b075480c1e5ebc49e9561b1375c5bc3",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "diagnostic-c4.log",
+      "originalSha256": "6eccd610e767a3f08c0703d0c9d6548713a853ba4adba4cc08f93eac5b348055",
+      "committedSha256": "1df735382df3f660b15a9c0f1451f1fc705bc83951f8312844a66ad1d7d9877d",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "diagnostic-browser-c5-feedback.log",
+      "originalSha256": "75bdd93d282189d239f8cc52c9a8e79d42c3fe19375c61842a2b2a7c697abffa",
+      "committedSha256": "ffd29c210d7a398094a4240c9738a329b242494bbb6f0ccbbc6382796ccfb716",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "build.log",
+      "originalSha256": "a20a2306aa30f978d20ced5f40d699f30cad50a2881ab41b65e77efceb0baf49",
+      "committedSha256": "13e8b9db957fa001649fe39f038bee85edb916be9af48f0fb5085e26cafa32a2",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    },
+    {
+      "file": "GALLERY.md",
+      "originalSha256": "a1956491857b8f5e764f45387db8ccca8142d78e1c0cabe1624492362ca3ca14",
+      "committedSha256": "26d5223b869476897c788097ace969ec996159c2f5ff796882bc4b3c6b4ce0dd",
+      "transformation": "normalize line endings, trim trailing spaces and extra empty EOF lines only"
+    }
+  ]
+}

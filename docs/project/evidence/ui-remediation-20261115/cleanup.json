@@ -1,0 +1,20 @@
+{
+  "time": "2026-11-14T18:15:41.200230+00:00",
+  "candidate": "C7",
+  "stopped": [
+    "isolated application port 42185",
+    "isolated worker",
+    "auth application port 4302 previously stopped"
+  ],
+  "removedContainers": [
+    "aipos-ui-20261115-2b6a68fd",
+    "aipos-ui-auth-8fac4f09"
+  ],
+  "removedPrivateDirectories": [
+    "/private/tmp/aios-ui-remediation",
+    "/private/tmp/aios-ui-auth-remediation"
+  ],
+  "removedData": "isolated tmpfs databases, private runtime credentials, keys and upload fixtures",
+  "retained": "source edits, original user documents, final local test-results and versioned evidence",
+  "productionAccess": false
+}

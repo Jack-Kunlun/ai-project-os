@@ -1,0 +1,60 @@
+
+Running 3 tests using 1 worker
+
+(node:30134) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/3] e2e/personal-knowledge-modal.spec.ts:15:5 › knowledge modals protect drafts, show small-screen validation and persist saved versions
+[2/3] e2e/personal-knowledge-modal.spec.ts:151:5 › personal vision import defaults to platform and requires page and billing confirmation
+[3/3] e2e/ui-feedback-status.spec.ts:12:5 › project success, rejected form and archived states keep shared semantic styles
+e2e/ui-feedback-status.spec.ts:12:5 › project success, rejected form and archived states keep shared semantic styles
+prisma:error
+Invalid `prisma.projectItem.create()` invocation:
+
+
+Database error. Code: `23514`. Message: `project item current state is not represented by history`
+
+  1) e2e/ui-feedback-status.spec.ts:12:5 › project success, rejected form and archived states keep shared semantic styles
+
+    PrismaClientKnownRequestError:
+    Invalid `prisma.projectItem.create()` invocation:
+
+
+    Database error. Code: `23514`. Message: `project item current state is not represented by history`
+
+      29 |     const db = getDb();
+      30 |     try {
+    > 31 |       await db.projectItem.create({ data: { projectId: project.id, sourceId: details.sourceId, type: "progress", reviewStatus: "confirmed", title: "UI acceptance fixture", content: details.sourceText, sourceExcerpt: details.sourceText, confirmedAt: new Date() } });
+         |       ^
+      32 |     } finally { await db.$disconnect(); }
+      33 |     const base = `/projects/${project.id}`;
+      34 |     const check = async (name: string) => {
+        at vn.handleRequestError (/Users/fenglan/projects/ai-project-os/node_modules/.pnpm/@prisma+client@7.10.0_prisma@7.10.0_@types+node@20.19.43_@types+react-dom@19.2.5_@types_98bc688fc31f5bc845a4592cc06e2b66/node_modules/@prisma/client/src/runtime/RequestHandler.ts:238:13)
+        at vn.handleAndLogRequestError (/Users/fenglan/projects/ai-project-os/node_modules/.pnpm/@prisma+client@7.10.0_prisma@7.10.0_@types+node@20.19.43_@types+react-dom@19.2.5_@types_98bc688fc31f5bc845a4592cc06e2b66/node_modules/@prisma/client/src/runtime/RequestHandler.ts:184:12)
+        at vn.request (/Users/fenglan/projects/ai-project-os/node_modules/.pnpm/@prisma+client@7.10.0_prisma@7.10.0_@types+node@20.19.43_@types+react-dom@19.2.5_@types_98bc688fc31f5bc845a4592cc06e2b66/node_modules/@prisma/client/src/runtime/RequestHandler.ts:153:12)
+        at a (/Users/fenglan/projects/ai-project-os/node_modules/.pnpm/@prisma+client@7.10.0_prisma@7.10.0_@types+node@20.19.43_@types+react-dom@19.2.5_@types_98bc688fc31f5bc845a4592cc06e2b66/node_modules/@prisma/client/src/runtime/getPrismaClient.ts:1014:24)
+        at /Users/fenglan/projects/ai-project-os/e2e/ui-feedback-status.spec.ts:31:7
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/ui-remediation-c5-preflight/ui-feedback-status-project-960ad-keep-shared-semantic-styles/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/ui-remediation-c5-preflight/ui-feedback-status-project-960ad-keep-shared-semantic-styles/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/ui-remediation-c5-preflight/ui-feedback-status-project-960ad-keep-shared-semantic-styles/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/ui-remediation-c5-preflight/ui-feedback-status-project-960ad-keep-shared-semantic-styles/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/ui-remediation-c5-preflight/ui-feedback-status-project-960ad-keep-shared-semantic-styles/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 failed
+    e2e/ui-feedback-status.spec.ts:12:5 › project success, rejected form and archived states keep shared semantic styles
+  2 passed (5.6s)

@@ -1,0 +1,221 @@
+{
+  "reports": [
+    {
+      "viewport": 784,
+      "theme": "light",
+      "width": 752,
+      "height": 784.59375,
+      "overflow": [],
+      "buttons": [
+        {
+          "label": "需求",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "设计",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "开发",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "测试",
+          "width": 90.296875,
+          "height": 36
+        },
+        {
+          "label": "验收",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "发布",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "观察",
+          "width": 90.28125,
+          "height": 36
+        }
+      ],
+      "stageInteractions": 7,
+      "screenshot_sha256": "3a79d8a868914656dadd1f9ce08c8cf95430b3e1c525ec02588c1df52172daf3",
+      "manual_review": true
+    },
+    {
+      "viewport": 390,
+      "theme": "light",
+      "width": 358,
+      "height": 1663.75,
+      "overflow": [],
+      "buttons": [
+        {
+          "label": "需求",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "设计",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "开发",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "测试",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "验收",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "发布",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "观察",
+          "width": 88,
+          "height": 44
+        }
+      ],
+      "stageInteractions": 7,
+      "screenshot_sha256": "bf1ad51943a28da0165b0f2f32cc1d0df3cdd884114fcda3e6c132b4a8d9597d",
+      "manual_review": true
+    },
+    {
+      "viewport": 320,
+      "theme": "light",
+      "width": 288,
+      "height": 1715.75,
+      "overflow": [],
+      "buttons": [
+        {
+          "label": "需求",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "设计",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "开发",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "测试",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "验收",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "发布",
+          "width": 88,
+          "height": 44
+        },
+        {
+          "label": "观察",
+          "width": 88,
+          "height": 44
+        }
+      ],
+      "stageInteractions": 7,
+      "screenshot_sha256": "133f9f2176a46a03c0def04ba65d0aad2360dce8216c40863e4cb4322caec675",
+      "manual_review": false
+    },
+    {
+      "viewport": 784,
+      "theme": "dark",
+      "width": 752,
+      "height": 784.59375,
+      "overflow": [],
+      "buttons": [
+        {
+          "label": "需求",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "设计",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "开发",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "测试",
+          "width": 90.296875,
+          "height": 36
+        },
+        {
+          "label": "验收",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "发布",
+          "width": 90.28125,
+          "height": 36
+        },
+        {
+          "label": "观察",
+          "width": 90.28125,
+          "height": 36
+        }
+      ],
+      "stageInteractions": 7,
+      "screenshot_sha256": "8f3a5b2fedd9f8b447cd9a2ec4eb71ee19eff3cb5976f808db8049aa2edab991",
+      "manual_review": false
+    }
+  ],
+  "pageErrors": [],
+  "scope": "isolated diagram preview only; no application UI or business tests",
+  "recorded_date": "2026-11-02",
+  "task": "T-030",
+  "evidence": "E-019",
+  "user_reaccepted": false,
+  "files": [
+    {
+      "path": "docs/project/assets/delivery-workflow.fragment.html",
+      "sha256": "2318b16c39185660e82400fec204f71e0e0a10a4ab2aa1f57781e0e117530010"
+    },
+    {
+      "path": "docs/project/assets/delivery-workflow.html",
+      "sha256": "86940945c1459d4508fd7f15d354553cc539ed24384c8bc246d1d208399002ef"
+    },
+    {
+      "path": "docs/project/assets/delivery-workflow.png",
+      "sha256": "3a79d8a868914656dadd1f9ce08c8cf95430b3e1c525ec02588c1df52172daf3"
+    },
+    {
+      "path": "docs/project/evidence/flow-redraw-390.png",
+      "sha256": "bf1ad51943a28da0165b0f2f32cc1d0df3cdd884114fcda3e6c132b4a8d9597d"
+    }
+  ],
+  "failure_history": [
+    "Initial sandbox Chromium MachPort permission failure; approved local-only rerun",
+    "Visual review found narrow label orphan; widened label column",
+    "Preview overwrite required --force; stale preview results excluded; rebuilt final preview rerun"
+  ]
+}

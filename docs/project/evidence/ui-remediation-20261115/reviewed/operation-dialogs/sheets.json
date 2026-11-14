@@ -1,0 +1,305 @@
+[
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-01.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_account-dialog-0.png",
+        "label": "C7 en-light-desktop /admin/account dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_account-dialog-1.png",
+        "label": "C7 en-light-desktop /admin/account dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_credits-dialog-0.png",
+        "label": "C7 en-light-desktop /admin/credits dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_credits-dialog-1.png",
+        "label": "C7 en-light-desktop /admin/credits dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_models-dialog-0.png",
+        "label": "C7 en-light-desktop /admin/models dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_operations_probes-dialog-0.png",
+        "label": "C7 en-light-desktop /admin/operations/probes dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-02.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users__userId_-dialog-0.png",
+        "label": "C7 en-light-desktop /admin/users/[userId] dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users__userId_-dialog-1.png",
+        "label": "C7 en-light-desktop /admin/users/[userId] dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users__userId_-dialog-2.png",
+        "label": "C7 en-light-desktop /admin/users/[userId] dialog-2"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users_memberships-dialog-0.png",
+        "label": "C7 en-light-desktop /admin/users/memberships dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-0.png",
+        "label": "C7 en-light-desktop /profile dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-1.png",
+        "label": "C7 en-light-desktop /profile dialog-1"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-03.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-2.png",
+        "label": "C7 en-light-desktop /profile dialog-2"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-3.png",
+        "label": "C7 en-light-desktop /profile dialog-3"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-4.png",
+        "label": "C7 en-light-desktop /profile dialog-4"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-5.png",
+        "label": "C7 en-light-desktop /profile dialog-5"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__actions-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/actions dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__assets-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/assets dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-04.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__automations-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/automations dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__automations-dialog-1.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/automations dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__external-sources-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/external-sources dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__external-sources-dialog-1.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/external-sources dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__materials_sources__sourceId_-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/materials/sources/[sourceId] dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__memory-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/memory dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-05.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__memory-dialog-1.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/memory dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__plan-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/plan dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__plan-dialog-1.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/plan dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__repositories-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/repositories dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__tools-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/tools dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__world-dialog-0.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/world dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-06.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__world-dialog-1.png",
+        "label": "C7 en-light-desktop /projects/[projectId]/world dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_account-dialog-0.png",
+        "label": "C7 zh-dark-mobile /admin/account dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_account-dialog-1.png",
+        "label": "C7 zh-dark-mobile /admin/account dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_credits-dialog-0.png",
+        "label": "C7 zh-dark-mobile /admin/credits dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_credits-dialog-1.png",
+        "label": "C7 zh-dark-mobile /admin/credits dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_models-dialog-0.png",
+        "label": "C7 zh-dark-mobile /admin/models dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-07.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_probes-dialog-0.png",
+        "label": "C7 zh-dark-mobile /admin/operations/probes dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-dialog-0.png",
+        "label": "C7 zh-dark-mobile /admin/users/[userId] dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-dialog-1.png",
+        "label": "C7 zh-dark-mobile /admin/users/[userId] dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-dialog-2.png",
+        "label": "C7 zh-dark-mobile /admin/users/[userId] dialog-2"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users_memberships-dialog-0.png",
+        "label": "C7 zh-dark-mobile /admin/users/memberships dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-0.png",
+        "label": "C7 zh-dark-mobile /profile dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-08.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-1.png",
+        "label": "C7 zh-dark-mobile /profile dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-2.png",
+        "label": "C7 zh-dark-mobile /profile dialog-2"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-3.png",
+        "label": "C7 zh-dark-mobile /profile dialog-3"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-4.png",
+        "label": "C7 zh-dark-mobile /profile dialog-4"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-5.png",
+        "label": "C7 zh-dark-mobile /profile dialog-5"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__actions-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/actions dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-09.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__assets-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/assets dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__automations-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/automations dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__automations-dialog-1.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/automations dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__external-sources-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/external-sources dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__external-sources-dialog-1.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/external-sources dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_sources__sourceId_-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/materials/sources/[sourceId] dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-10.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/memory dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-dialog-1.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/memory dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__plan-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/plan dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__plan-dialog-1.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/plan dialog-1"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__repositories-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/repositories dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__tools-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/tools dialog-0"
+      }
+    ]
+  },
+  {
+    "file": "docs/project/evidence/ui-remediation-20261115/reviewed/operation-dialogs/sheet-11.png",
+    "items": [
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__world-dialog-0.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/world dialog-0"
+      },
+      {
+        "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__world-dialog-1.png",
+        "label": "C7 zh-dark-mobile /projects/[projectId]/world dialog-1"
+      }
+    ]
+  }
+]

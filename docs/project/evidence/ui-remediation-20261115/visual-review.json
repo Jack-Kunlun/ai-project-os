@@ -1,0 +1,1860 @@
+{
+  "candidate": "C7",
+  "sourceFingerprint": "65981bfce37426ffe1a755388fa5fed1d4b4e98033b4b9c412b6034733442217",
+  "reviewer": "root",
+  "sets": [
+    {
+      "name": "authentication",
+      "reviewedAt": "2026-11-14T17:57:22.583317+00:00",
+      "observations": "已查看12张实际截图；初始化、注册和恢复步骤的桌面/手机布局、字段、禁用态、焦点边框及留白一致。短信/邮箱使用隔离请求夹具。",
+      "items": [
+        {
+          "label": "C7 test-results/auth-compact-layout/recover-step-1-1280x720.png",
+          "file": "test-results/auth-compact-layout/recover-step-1-1280x720.png",
+          "sha256": "ec56b8c3cdb39cd04e4cd45d458e5abd032fd04fb137ffb2698bb48bea22a4a5"
+        },
+        {
+          "label": "C7 test-results/auth-compact-layout/recover-step-1-390x844.png",
+          "file": "test-results/auth-compact-layout/recover-step-1-390x844.png",
+          "sha256": "9457e920d4ae6799caaabd8e13c342af38caeccdf0b7dc95a7b977969bc5a18a"
+        },
+        {
+          "label": "C7 test-results/auth-compact-layout/recover-step-2-1280x720.png",
+          "file": "test-results/auth-compact-layout/recover-step-2-1280x720.png",
+          "sha256": "ce70a5073d28f1436b4166ae9274fa2df396b0252c3dfb9b002091b0ddc52af8"
+        },
+        {
+          "label": "C7 test-results/auth-compact-layout/recover-step-2-390x844.png",
+          "file": "test-results/auth-compact-layout/recover-step-2-390x844.png",
+          "sha256": "32c2bbf154a6defee9a68bfaed3df543d84263b1f6d33dfe33226857abf75409"
+        },
+        {
+          "label": "C7 test-results/auth-compact-layout/register-step-1-1280x720.png",
+          "file": "test-results/auth-compact-layout/register-step-1-1280x720.png",
+          "sha256": "e3da951c4a470c83b94fe0cdb03cded19e951df4d7da50a7fe9ed082fbf9efa7"
+        },
+        {
+          "label": "C7 test-results/auth-compact-layout/register-step-1-390x844.png",
+          "file": "test-results/auth-compact-layout/register-step-1-390x844.png",
+          "sha256": "5669b92ded0f4341f0622c4e19f3d2342d6b83bf3f6249baf7c8578cf9fd3245"
+        },
+        {
+          "label": "C7 test-results/auth-compact-layout/register-step-2-1280x720.png",
+          "file": "test-results/auth-compact-layout/register-step-2-1280x720.png",
+          "sha256": "2cf2e589157368e4474f5da7ea964be934404208aa0f049c44557bb57ba5e92a"
+        },
+        {
+          "label": "C7 test-results/auth-compact-layout/register-step-2-390x844.png",
+          "file": "test-results/auth-compact-layout/register-step-2-390x844.png",
+          "sha256": "a200bb9d878855033174635506f50adca27c2d19c59fc33a5c8b91b260acede4"
+        },
+        {
+          "label": "C7 test-results/first-run/en-dark-1440.png",
+          "file": "test-results/first-run/en-dark-1440.png",
+          "sha256": "8ac639f9cda053b9f3b42036d4c6a7d31151c94b4722c8a528c3c12b8077f9a8"
+        },
+        {
+          "label": "C7 test-results/first-run/en-dark-390.png",
+          "file": "test-results/first-run/en-dark-390.png",
+          "sha256": "7523740561a8dd38a2265c0ceb268d27237800ae38ca2f73a9cc4c32621f22bf"
+        },
+        {
+          "label": "C7 test-results/first-run/zh-CN-light-1440.png",
+          "file": "test-results/first-run/zh-CN-light-1440.png",
+          "sha256": "ff99d9dc524f6acd43f6dac1ba5a4cc1bb82de26a995d5dfdc1765d2292de72c"
+        },
+        {
+          "label": "C7 test-results/first-run/zh-CN-light-390.png",
+          "file": "test-results/first-run/zh-CN-light-390.png",
+          "sha256": "014a3749e90abd96297fde56186c526f64c1b63ef48a873a3967d18ad43e8708"
+        }
+      ]
+    },
+    {
+      "name": "validation",
+      "reviewedAt": "2026-11-14T17:59:46.679441+00:00",
+      "observations": "已查看邀请正常/拒绝及320/390px知识超长校验共6张截图；错误对比度、字号、正文滚动与底栏操作可达，未见视觉偏差。",
+      "items": [
+        {
+          "label": "C7 invitation-error-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-error-1440.png",
+          "sha256": "5de52b258fcf2c2cb2c5d28bb81dfb5078f3e221c5ff31dffe69408ecf5f5e4c"
+        },
+        {
+          "label": "C7 invitation-error-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-error-390.png",
+          "sha256": "0d90664228e111e415f1a277bcdab2e56d6398a3c054b7c4a49d3fab749617cd"
+        },
+        {
+          "label": "C7 invitation-ready-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-ready-1440.png",
+          "sha256": "208dc7fb45aba749e803ebf00eec353334e734dcc7ddabbae4ca4e44dc611afc"
+        },
+        {
+          "label": "C7 invitation-ready-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/compatibility-feedback-cre-98062-s-without-echoing-API-prose/invitation-ready-390.png",
+          "sha256": "ea46e493b4f093cf7f2400442314096f86a964bc518c31e5c15c6c895c6bde5a"
+        },
+        {
+          "label": "C7 knowledge-validation-320.png",
+          "file": "test-results/ui-remediation-verified-20261115/personal-knowledge-modal-k-d4ba3--and-persist-saved-versions/knowledge-validation-320.png",
+          "sha256": "ed1038352352efd308b84933396e4b4d5b25e4e8624964c9cf40220533cd365e"
+        },
+        {
+          "label": "C7 knowledge-validation-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/personal-knowledge-modal-k-d4ba3--and-persist-saved-versions/knowledge-validation-390.png",
+          "sha256": "85f82091c0cf94a6153fcdddc1606033ef6f7e6ed3b5c231e2dc8cadf1a0c462"
+        }
+      ]
+    },
+    {
+      "name": "light-desktop",
+      "reviewedAt": "2026-11-14T18:01:46.427126+00:00",
+      "observations": "逐张检查 63 个页面的标题、卡片、按钮、导航、间距和空态；本组未发现旧版样式或遮挡。",
+      "items": [
+        {
+          "label": "C7 zh-light-1920 /accept-invitation",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_accept-invitation.png",
+          "sha256": "e33a6eecb7ce254d0c0ff03346730166cbca3958c7648939b6fd50b40ea4eb5f"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin.png",
+          "sha256": "c965022401c0bd3cb533b6fc3e8d7248e545f76abf5ede4ac54132f66cdb49d3"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/account",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_account.png",
+          "sha256": "daf83512837d5d40ec81478f3f4d3ea04570edaee6c3dbfe00f25c65c657e216"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/audit",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_audit.png",
+          "sha256": "0ba5aac4d230e08ddff00047c5bd244934f03a085b241dfbcb9766e6556fbbb4"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/connectors/mcp",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_connectors_mcp.png",
+          "sha256": "7abeb84b00c6de342bb56ac589dd7cb36c4b55de3d8f753d1168b42230390fcc"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/credits",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_credits.png",
+          "sha256": "ccc27df83a2361eb8046bab6a9d51ba1faa30b053dd66191266992bf5df7ec1e"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/guide",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_guide.png",
+          "sha256": "628045b2833e10edbd316eb41a0a804763f996af337df9fb49d156b2b508ef37"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/models",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_models.png",
+          "sha256": "734d1b3cd586ea9a2c2a0527e9eb0b0a742add30cb3ecc88015179120475daf5"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/operations/backups",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_operations_backups.png",
+          "sha256": "38152a7cf81336cb5023a0d41ca0461448d38204ba558d1499fc8949110cf3b9"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/operations/failures",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_operations_failures.png",
+          "sha256": "b03d1176d771743f7c59f38ddd3222c8bfd8bfef58c5090a76ff7de0c56f4ed3"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/operations/probes",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_operations_probes.png",
+          "sha256": "d334b12f946744d7879c0d603503a2401e4b6991c3295ee477ba2024708cedec"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/sms",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_sms.png",
+          "sha256": "068ece50c81d3b89cfbea7298bd6ac4317d064fadc35ba74a7c2a9d8d8169f27"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/users",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_users.png",
+          "sha256": "3dac3b4dcb6071ab8b432be2a12e49da0e9a8812be8af7fa97695c4f6e564093"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/users/[userId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_users__userId_.png",
+          "sha256": "a3446464585628baa213a5f21d0a36e1b90d9d568d6cf0a74e27f68461945411"
+        },
+        {
+          "label": "C7 zh-light-1920 /admin/users/memberships",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_admin_users_memberships.png",
+          "sha256": "e848eab1ef078058d54ad7c36ec8fe4fbb0cb29b08aaa7daca19da814d758f05"
+        },
+        {
+          "label": "C7 zh-light-1920 /ask",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_ask.png",
+          "sha256": "9b2190fd4fa1d53504b6f9d77e6f3ad8a1bd00392f3a1d96a435a7fe05028cc6"
+        },
+        {
+          "label": "C7 zh-light-1920 /contact",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_contact.png",
+          "sha256": "3c9700aa896c028b32ce3ebd2136804fb721226058d8bc6e7cca9d23a87a2797"
+        },
+        {
+          "label": "C7 zh-light-1920 /credits",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_credits.png",
+          "sha256": "df79384fb4e171ba80754482ba48ee632ce912310dfda95e6c1d6a56fde74d6b"
+        },
+        {
+          "label": "C7 zh-light-1920 /dashboard",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_dashboard.png",
+          "sha256": "f720f497a4d2aa888ea37f2a7070aabb621fed86814da6b01afe9eb455b8bf01"
+        },
+        {
+          "label": "C7 zh-light-1920 /guide",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_guide.png",
+          "sha256": "a1a9c86b1ba2a92d38a3ff61f5fe3d09ec92314668ff008d73418e748282e1b8"
+        },
+        {
+          "label": "C7 zh-light-1920 /help",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_help.png",
+          "sha256": "f3d08468b3f136b4a64813939d8c5c24f872ac720b86d74e4fd7d77c96cd5f01"
+        },
+        {
+          "label": "C7 zh-light-1920 /login",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_login.png",
+          "sha256": "e33a6eecb7ce254d0c0ff03346730166cbca3958c7648939b6fd50b40ea4eb5f"
+        },
+        {
+          "label": "C7 zh-light-1920 /notifications",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_notifications.png",
+          "sha256": "5e42cca13df56c84079ea30d170c06679c6812ed9d34429098d40ec9731734ed"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal.png",
+          "sha256": "f507368fdae3b8a946adfed60723bfeef859d9be444bb921314a4a4aaa9e80ba"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/configuration",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_configuration.png",
+          "sha256": "fbfdf31fd323cacbd2a2761abe7621dfcef1bb1652c2e77d7d48f44c3d1101c8"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/connections/git",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_connections_git.png",
+          "sha256": "0bdcd2b857ee285a95b16c7ec74c19214fe80da025f7554579968d940d353559"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/connections/mcp",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_connections_mcp.png",
+          "sha256": "c7d7323e0a55562b65e6b35f7ef6b65a93586541c0eb261363c029b1df21afe8"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/knowledge",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_knowledge.png",
+          "sha256": "c0d396b89e682689da1883c71acf66c32b1555f5029b7777c5d3191b33e888ba"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/knowledge/graph",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_knowledge_graph.png",
+          "sha256": "3f45bb475524ffd8ea3b39b7d4788f91e47aebfbf18f4d2e35e2034c84592745"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/models",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_models.png",
+          "sha256": "e181fbf2f028020dfeceb62d6ef68f050dca6182d8ee260e33913302c6018f4f"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/projects",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_projects.png",
+          "sha256": "8a5f491989f2dc3834f74038114edddd72caf9878fb16c4ded7a68944a69c113"
+        },
+        {
+          "label": "C7 zh-light-1920 /personal/usage",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_personal_usage.png",
+          "sha256": "edfd0d7244b7513be370b164ee878579fb9e00605861b8b08cb77c99f876626c"
+        },
+        {
+          "label": "C7 zh-light-1920 /privacy",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_privacy.png",
+          "sha256": "43a9396a1bf9b59cdef2709c158f3504294471bfe2f0bcde9420acb189318e63"
+        },
+        {
+          "label": "C7 zh-light-1920 /profile",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_profile.png",
+          "sha256": "125d9f3bfe21a26050a35a10a69ff8bb7509a354df3427278a82213a39089a0e"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId_.png",
+          "sha256": "00823f3534b5b91cfbf322521875fcc20544dd306dc8313d5080a31ad6acf23f"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/actions",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__actions.png",
+          "sha256": "31dddb8d03f893ef8d4689521dbda0b3ac7a59776803869679c1a713b84e5dc6"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/assets",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__assets.png",
+          "sha256": "dae584aa5238ce67cf5aa662fe3bf92cfd692b15be00f03e027f2822ba053605"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/automations",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__automations.png",
+          "sha256": "2112102a99140400ab99fb4eba4c22c8d5f37a4602112e1f4ab6314fb620a86e"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/configuration",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__configuration.png",
+          "sha256": "be0b642fc880b2da83b2bdf4a98d1a5352c58b5da228bc0db2c17a6170eca115"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/control",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__control.png",
+          "sha256": "da86f9b4c4079eaef1e563a4ba21d38c288d3bec203855a69b96e919af2c508b"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/external-sources",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__external-sources.png",
+          "sha256": "7adac2c824f4aca083b86399c9a8a27682aa235b473a505feddf2bfaa35280ea"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/github-syncs/[syncRunId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__github-syncs__syncRunId_.png",
+          "sha256": "5a8908cb3efb80b916a69641d969231ebe98736468bd3ee53411cd08c3f0a226"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/governance",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__governance.png",
+          "sha256": "095aa8f5afe376db0cf3f3171b7ab0744138e62b04926f5a37b29cbf99e9ce81"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/intelligence",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__intelligence.png",
+          "sha256": "4f9235942d475d6800dd4984176448dceef2e9923976129a816ee058767475ea"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/jobs/[jobId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__jobs__jobId_.png",
+          "sha256": "cf7b21e899fe02a9ccc56d250f5f1a14baa846fcc304a4d16f3a4d82d5533f11"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/materials",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__materials.png",
+          "sha256": "0679a1909ffda82df99a145a7de9f7053ae3b56d784b22e0cd24433e951bbf91"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/materials/review",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__materials_review.png",
+          "sha256": "9dafe3b09f6d3674ecddf3130a66894819b59bf4e2c4f3b33d8f20766f01c08e"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/materials/sources/[sourceId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__materials_sources__sourceId_.png",
+          "sha256": "7f2b7971c1cdbe5dfb5c7cf850fad6f1539b02997ec9f76ce25eae5cf4a417ec"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/mcp-actions",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__mcp-actions.png",
+          "sha256": "43a64ff677661b84622bb34650e3c788e27226c7005aaa066da7fd9b529e66ea"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/mcp-export",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__mcp-export.png",
+          "sha256": "ed0a1b207d2adb814c96f23df572e1760943026aad3b04ca804272dec114e4aa"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/members",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__members.png",
+          "sha256": "0dd72d871235834c15942e48a3229973ace1571b4b55b5a05f6e8d6c8e021299"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/memory",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__memory.png",
+          "sha256": "c870ee31948abd20136f1f6aa002d87882e9a42fbacaa6ec8cfbe6fcedfbd9a5"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/memory-quality",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__memory-quality.png",
+          "sha256": "7d5087efdd281cec1c753e17a1d12c84db895e77e81c5c58abb943039aa412cf"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/plan",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__plan.png",
+          "sha256": "9056204ebece019522d30f1116ad905993b51e9d3078607b25a32d5392f93e3b"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/repositories",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__repositories.png",
+          "sha256": "08fe090f9a9365bbe22e940a47b54561885d319c6c0fe07e6b0f1d12a59fb0e1"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/tools",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__tools.png",
+          "sha256": "e6f17a6977e6a04c034288b194c01736f8823aa3983ad97714c54ff2a3835a2d"
+        },
+        {
+          "label": "C7 zh-light-1920 /projects/[projectId]/world",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_projects__projectId__world.png",
+          "sha256": "74257e07afb76af09b9d7dc01ef00d2d70887d22cbdd634772387d50af37fdd6"
+        },
+        {
+          "label": "C7 zh-light-1920 /recover",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_recover.png",
+          "sha256": "85d24c079fd6e07739c19bdb9d665ca47eace5c9f2e47bbfe66cdde64ef453d1"
+        },
+        {
+          "label": "C7 zh-light-1920 /register",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_register.png",
+          "sha256": "cce9ff54aa8f44af26c1a4bd186a2cda10c444d413e3634226ae542e04baf04b"
+        },
+        {
+          "label": "C7 zh-light-1920 /setup",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_setup.png",
+          "sha256": "e33a6eecb7ce254d0c0ff03346730166cbca3958c7648939b6fd50b40ea4eb5f"
+        },
+        {
+          "label": "C7 zh-light-1920 /team",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_team.png",
+          "sha256": "1f4f54c81ff0a8ea42dafce2e3f725faf6b3540a3b0de0f9105ea14a0eefc8d0"
+        },
+        {
+          "label": "C7 zh-light-1920 /team/[workspaceId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_team__workspaceId_.png",
+          "sha256": "6e2f725dcce8165010834278efd21493e56b4c926b7841d3c76e71bb29954754"
+        },
+        {
+          "label": "C7 zh-light-1920 /terms",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/zh-light-1920/_terms.png",
+          "sha256": "11acd9bdf27529d86fe71ee700358040b9881ac1b26af028a197a4755f2a4c1e"
+        }
+      ]
+    },
+    {
+      "name": "dark-mobile",
+      "reviewedAt": "2026-11-14T18:06:26.322908+00:00",
+      "observations": "63 个页面逐张核对深色文字层级、按钮/字段、卡片/空态、长英文换行及窄屏标题；未见旧样式残留。浮动问答保留既有位置，滚动与操作可达性由实际用例另验。",
+      "items": [
+        {
+          "label": "C7 en-dark-390 /accept-invitation",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_accept-invitation.png",
+          "sha256": "63c83d2460c8106ae64cce86c3c7942d2e217545997ac2074ba9b9034625a02c"
+        },
+        {
+          "label": "C7 en-dark-390 /admin",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin.png",
+          "sha256": "b729e7ac28af4dbe1f577fc6597d030011f0b6afd17c648562a12022dfab48bb"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/account",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_account.png",
+          "sha256": "d045b13a6fa62bb7d193520be1da673cef7f0041f7c93d850d15576fb09eda9e"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/audit",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_audit.png",
+          "sha256": "9c17474f316bec71dd298e0a7652c2ed6d141822229ed8490557e0663a392d35"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/connectors/mcp",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_connectors_mcp.png",
+          "sha256": "c23785925a9400de22327d87160104e755a42bec1cefc76e60dfe2de3517bba7"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/credits",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_credits.png",
+          "sha256": "6efee5af83258f415b7225929bab6280841f6668c4a1a1b6ac664498af3b7f7e"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/guide",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_guide.png",
+          "sha256": "174c8a729676bab7dcb1371dd07691e6cea9c93d0a189f6dacc1b4238cd533a1"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/models",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_models.png",
+          "sha256": "321107697731d38c2110e36fbc3d57a8cae662a4e60852ebdc8b81d767334a41"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/operations/backups",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_operations_backups.png",
+          "sha256": "cd162047976ca992c0bec5a1a415c8712c5de5cdd6b50fae0bffc2ff45fb9409"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/operations/failures",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_operations_failures.png",
+          "sha256": "1fb4f8f2653dded064ec2cc49d058294e0e36098b2168ce079f286c7041baf47"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/operations/probes",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_operations_probes.png",
+          "sha256": "f66dc0e167ac36e1c56774e980aab6d825c10b12908eca7ef4480382e9a0e706"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/sms",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_sms.png",
+          "sha256": "869491dbd020e186c5c0cba5dc0eac14a26ae5b97cbc61fd7f82aca133ea60be"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/users",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_users.png",
+          "sha256": "c374b96e467f7e02af1703332947a4fd50fd1d4b873d5244bbb88b74aff28df9"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/users/[userId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_users__userId_.png",
+          "sha256": "2caba77deb21a332e46bf0f329e9a17c9348b109b4ffe273f3debc865960ff8b"
+        },
+        {
+          "label": "C7 en-dark-390 /admin/users/memberships",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_admin_users_memberships.png",
+          "sha256": "031ac9f158067af13e957b7dbe0040a7c4e9e0eba1ae8989c0293b6353199bbc"
+        },
+        {
+          "label": "C7 en-dark-390 /ask",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_ask.png",
+          "sha256": "dafc42aabdb3cec7e71f57fdf5cc277a8716f1140dea928ebf553ef6e8e8e152"
+        },
+        {
+          "label": "C7 en-dark-390 /contact",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_contact.png",
+          "sha256": "643e2d1be7ed9b1dc370b9f2bf25e1d2d0cc7781e1ea362a750486082b34192c"
+        },
+        {
+          "label": "C7 en-dark-390 /credits",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_credits.png",
+          "sha256": "925a4d1d90f31dcd36ce66ba007ed7887c78cd47cfb349717f9485522d304855"
+        },
+        {
+          "label": "C7 en-dark-390 /dashboard",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_dashboard.png",
+          "sha256": "8915bbd65e4c34482d6feb077a5d091f00eff4d925992c16764f9bf14f747e5d"
+        },
+        {
+          "label": "C7 en-dark-390 /guide",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_guide.png",
+          "sha256": "9fa22e94aca69b131e42f07f28a81dd6c0fc306904cbf3f67441ef56eb7b8645"
+        },
+        {
+          "label": "C7 en-dark-390 /help",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_help.png",
+          "sha256": "5ab2001e03cf71fc4b1c07002a002ac1cf77b18dba3abb2eb94efe9e95f348f6"
+        },
+        {
+          "label": "C7 en-dark-390 /login",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_login.png",
+          "sha256": "63c83d2460c8106ae64cce86c3c7942d2e217545997ac2074ba9b9034625a02c"
+        },
+        {
+          "label": "C7 en-dark-390 /notifications",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_notifications.png",
+          "sha256": "8c4333acd046a1f54b8925477da2f894217b6b3e252b0794eb3982025cd65bc2"
+        },
+        {
+          "label": "C7 en-dark-390 /personal",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal.png",
+          "sha256": "e2847a43f788b0e700c6b2ab1b0c94552665ff849e7c9e45c9671fa1f3c588e1"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/configuration",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_configuration.png",
+          "sha256": "14acfdd87f724745753bf38a32e269e0a5fb8a33d0a2e3ff5f93e30f3f61aece"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/connections/git",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_connections_git.png",
+          "sha256": "161ab742a4c813266abde2eff64afb631119b95ee20925eaeb03bfb48748185b"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/connections/mcp",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_connections_mcp.png",
+          "sha256": "7ca27a19b7d06375fb70e332c52eb9260649b7789e289b894225037c9aa13006"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/knowledge",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_knowledge.png",
+          "sha256": "d6604bf241506b8695a2e151edc9110e96a6c859add9531466e5aa8d33ce7e58"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/knowledge/graph",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_knowledge_graph.png",
+          "sha256": "88a391fdcf32e6f925aff4e1cbbcf295e3d9f341dd3fc7a1bf9ff597d2779b70"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/models",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_models.png",
+          "sha256": "400cfb07f98f793609b23cc376a8546438417cfc66a0e7e961771488c9a61544"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/projects",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_projects.png",
+          "sha256": "f8afe99fa294cd52fcf0bbb456ff59c1b60de41167fac565dbb3d812f5532e83"
+        },
+        {
+          "label": "C7 en-dark-390 /personal/usage",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_personal_usage.png",
+          "sha256": "a7909e2be53eb0979ad23b3221d15e002cbcaa2c72b7c2fb668444da9094aab4"
+        },
+        {
+          "label": "C7 en-dark-390 /privacy",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_privacy.png",
+          "sha256": "07be833ebc449747ea83194c6d594e4a9114a326e654d474736e138eb8d3f524"
+        },
+        {
+          "label": "C7 en-dark-390 /profile",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_profile.png",
+          "sha256": "a058c6ef3dc950efc4af339f5feb626caa6d61c3163d4e9addd064e9e8256ac7"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId_.png",
+          "sha256": "29b89c3e1936f97b56741883cba736e0489894a68d2a67fb7a1e8756d02d8236"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/actions",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__actions.png",
+          "sha256": "62f1d6b62d542a7fe7f42c0f7135ad113651245ce58e91bdf956a5d5297213ec"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/assets",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__assets.png",
+          "sha256": "2be53d8d095fc1b4cee9b71d49c5842818f5f690e5f7f808b5163ac8cfe991fc"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/automations",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__automations.png",
+          "sha256": "56e6c86cac79d9679d57a1a9e9d60ad9ba722abc52aea873dc36340b6f417e8d"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/configuration",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__configuration.png",
+          "sha256": "e7da9d9e78a59a440e1293ec071af1be26c50d4873479c2de28fc252ec942d56"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/control",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__control.png",
+          "sha256": "87635cfc99b47e363001b8d1414a69d745d465a1511e3e32821cf709047b76d1"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/external-sources",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__external-sources.png",
+          "sha256": "63427ef3fe8adac6385e39e07297d6b81283ee6159931ba1f7584d43878f30b5"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/github-syncs/[syncRunId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__github-syncs__syncRunId_.png",
+          "sha256": "b07736af6745fb35085e23d241a56b84fcc66dd8f6dd37315a2c6e110f1b4a4e"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/governance",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__governance.png",
+          "sha256": "ddc3e6d4881e17d0e8aba1b034175576c1b76403ab5dedb131fc6511c5ecceab"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/intelligence",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__intelligence.png",
+          "sha256": "80ddd36897a59072299eaf92b9376ed51e230a8a0956153894d3d84ea1746f84"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/jobs/[jobId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__jobs__jobId_.png",
+          "sha256": "bcf0813a15f1705f3257292f051446b73620859eb5f8fe148324226df980eabe"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/materials",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__materials.png",
+          "sha256": "502c33ba01663af75f5fb7cd16d9888bab7b263b0902db60d7c8093105f1a613"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/materials/review",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__materials_review.png",
+          "sha256": "cc10aec9a9694d3663a87ce38c63f6a099edcbcc26841e9f3bda9e6baa254613"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/materials/sources/[sourceId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__materials_sources__sourceId_.png",
+          "sha256": "e9b9ad364ea25b0939a3114e7e15cb2a5d3b68392d6987106c6d616e56b01437"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/mcp-actions",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__mcp-actions.png",
+          "sha256": "e80f8ad573fb1a5b7b8eba28f3b1b9a0a6a1c1f01f43ce1871dab6a6abaaeac8"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/mcp-export",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__mcp-export.png",
+          "sha256": "9a8cc62b003a208be6ae5bd6a0a868c40f986887836c8539224a105d32e9f399"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/members",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__members.png",
+          "sha256": "673bc35e84953dcf892e2cb33f89c7b94235a96def7979bf0cbc2b961179dcec"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/memory",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__memory.png",
+          "sha256": "77069667a4a7bfd9ee1863db0d7115578467e99d5d57524bc4619bb8691b41ee"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/memory-quality",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__memory-quality.png",
+          "sha256": "b2cf73f906f25c989cfa7884070862246d0efbe4b0af5663808f0cf9e8f943e7"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/plan",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__plan.png",
+          "sha256": "c686b066a080910adf06319c772fe522a060ec8cc9b1c62046da7250973942f4"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/repositories",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__repositories.png",
+          "sha256": "0c974a8fc83bb1e399b29034e5d082e0615ac02a09d396b1f05121708cb14d8e"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/tools",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__tools.png",
+          "sha256": "0aebe0ad412079d6309c723056711c4bf6b7eafb15baadf4c27bf8162a83431b"
+        },
+        {
+          "label": "C7 en-dark-390 /projects/[projectId]/world",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_projects__projectId__world.png",
+          "sha256": "1b21ee9372c133227d827d574c7c8df1928f463c837725d7868dda15688bbd84"
+        },
+        {
+          "label": "C7 en-dark-390 /recover",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_recover.png",
+          "sha256": "df3cc6b8aa0ddea47b8ca9d9b693eb7dcfd9cccf3ef94ff9308fcdd0267048d0"
+        },
+        {
+          "label": "C7 en-dark-390 /register",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_register.png",
+          "sha256": "b420a73073d9e4b83dd44e1a19d870cffd57f9afbd3e1c3802bcbb0938ba11a1"
+        },
+        {
+          "label": "C7 en-dark-390 /setup",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_setup.png",
+          "sha256": "63c83d2460c8106ae64cce86c3c7942d2e217545997ac2074ba9b9034625a02c"
+        },
+        {
+          "label": "C7 en-dark-390 /team",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_team.png",
+          "sha256": "15ada24ec2798eecc2c96527dae059818ed144ba519db168fdd52a7cb4f42ca9"
+        },
+        {
+          "label": "C7 en-dark-390 /team/[workspaceId]",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_team__workspaceId_.png",
+          "sha256": "1438acdcdafc92a00de293eca4e9c6f7141c15f42ec2d1b8a260d2cc8f84606f"
+        },
+        {
+          "label": "C7 en-dark-390 /terms",
+          "file": "test-results/ui-remediation-verified-20261115/ui-consistency-matrix-all--6dc4e-English-dark-desktop-mobile/pages/en-dark-390/_terms.png",
+          "sha256": "4b7a57363e6bcccaf01fb76a4909fa3032204c0c2aed19ec5e690a3c05efbee5"
+        }
+      ]
+    },
+    {
+      "name": "populated-and-feedback",
+      "reviewedAt": "2026-11-14T18:08:28.182696+00:00",
+      "observations": "34 张实际页面图：成功/归档/保存拒绝、长工作项嵌套编辑、身份卡/权限行、指标卡/设置卡、危险与外发确认、两端指南；语义色、标题、内距与操作区符合当前合同。",
+      "items": [
+        {
+          "label": "C7 materials-title-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/materials-title-dark.png",
+          "sha256": "eb820aabb86e1ffa3f2ab5e6abff9560a687258fcc807f53462570219c4d4229"
+        },
+        {
+          "label": "C7 materials-title-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/materials-title-light.png",
+          "sha256": "8fbb5e5b3e9b6d569a107ac22b7ef02399a11c490f5a712a699872fdeb30837c"
+        },
+        {
+          "label": "C7 overview-archived-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-archived-dark.png",
+          "sha256": "684132e8c21c4e6ead40a7ffaf1ea92d4c43ed70338ebd8aaa4e9aca4e6d47af"
+        },
+        {
+          "label": "C7 overview-archived-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-archived-light.png",
+          "sha256": "0e2d27bf4e03ded557c5c44be36e890b44f9290c77afa2ce014ef36e8c9b9400"
+        },
+        {
+          "label": "C7 overview-success-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-success-dark.png",
+          "sha256": "f480322b872131181f9cef69d715c8ce5ea01ce384eea9ad4dee77908db59c9e"
+        },
+        {
+          "label": "C7 overview-success-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/overview-success-light.png",
+          "sha256": "2c469906394925839fbead746233ef0bb9cf79f0e45b265a90d2e251d6936481"
+        },
+        {
+          "label": "C7 plan-archived-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-archived-dark.png",
+          "sha256": "448f6ade12620cbdf9ceb22f7e2084d799282445762d4166baa6e6dba7ac2088"
+        },
+        {
+          "label": "C7 plan-archived-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-archived-light.png",
+          "sha256": "d96a7aed7848a472bd184961d1d0919d0f67bd0a8f2d5b343c440114ad1ed516"
+        },
+        {
+          "label": "C7 plan-form-error-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-form-error-dark.png",
+          "sha256": "635d8d3b41216499d4ebb742f459d4f590dbcba8cbb05629f663b247b5c3f504"
+        },
+        {
+          "label": "C7 plan-form-error-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-form-error-light.png",
+          "sha256": "e3b7b4a3c03ee7a69dc6785e85319c4bf95043d5fc1e19683c489b2ce7935c61"
+        },
+        {
+          "label": "C7 plan-success-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-success-dark.png",
+          "sha256": "b7974c3c17750bf90bb41a98c55d0b20e0059e2667b8bc03e8a7c09bea8cac3e"
+        },
+        {
+          "label": "C7 plan-success-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/plan-success-light.png",
+          "sha256": "78c5a6239ab0767e5d32760d300d1c86b230aac454b92a826ee05fe470711c68"
+        },
+        {
+          "label": "C7 work-item-management-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/work-item-management-dark.png",
+          "sha256": "b9d148994f0f0a5faacc1b0a59731eb0c77dcf3ff5777f95c96ee9f8e3228ebe"
+        },
+        {
+          "label": "C7 work-item-management-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-feedback-status-project-960ad-keep-shared-semantic-styles/work-item-management-light.png",
+          "sha256": "760565dad3a21fda242599c89f1f8590ceb6a3a5481be19b76c9357a045e6216"
+        },
+        {
+          "label": "C7 cards-3-dark-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-3-dark-390.png",
+          "sha256": "b705cbdb82db1676ca8f6206984f9bc9fed79c2af5faa61c4a3244f50f633ea9"
+        },
+        {
+          "label": "C7 cards-3-light-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-3-light-1440.png",
+          "sha256": "fb8aac517d27a1fcde7b5070d7600cd2ff15549d2b486182bcc6408960f3384b"
+        },
+        {
+          "label": "C7 cards-6-dark-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-6-dark-390.png",
+          "sha256": "8a6ebe7d05af9bbdae1dac95788302b14fda141e9c4d0ffd77489a0c38ddec9d"
+        },
+        {
+          "label": "C7 cards-6-light-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/cards-6-light-1440.png",
+          "sha256": "e7a426a8e86e01b6451da5abb38afbcfd973c7b92b06916c1537876547b25220"
+        },
+        {
+          "label": "C7 identity-dark-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/identity-dark-390.png",
+          "sha256": "d633d826767405a94f4d148e7c5abd05b8a11b317bc75dd82c05e9af7cec98fc"
+        },
+        {
+          "label": "C7 identity-light-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/identity-light-1440.png",
+          "sha256": "3311697c3cedb3650dd17f03f9fedd4567c9cb830b33db5ba26f6e01b75e91b0"
+        },
+        {
+          "label": "C7 permissions-dark-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/permissions-dark-390.png",
+          "sha256": "58ca3ef0ad14678c1c65f8d82d06a8524576d71ae3964003516114d0618bc8ff"
+        },
+        {
+          "label": "C7 permissions-light-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-iden-8bf16-n-neutral-readable-surfaces/permissions-light-1440.png",
+          "sha256": "f6dc025e75d92e6c69feaf1e9b83970ca621aac485acc677a9c65df4e953dd01"
+        },
+        {
+          "label": "C7 outbound-index-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-index-dark.png",
+          "sha256": "492f5d47db0431574f4b270d63afa5d73553f860c72ccb674778f8e9dc197da3"
+        },
+        {
+          "label": "C7 outbound-index-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-index-light.png",
+          "sha256": "d7bb46d57a97b65cd190af6c2068201384f5f163f9523c48c51908a34261ee2c"
+        },
+        {
+          "label": "C7 outbound-search-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-search-dark.png",
+          "sha256": "ed58ae1d5bd09b054ae8d7be3b1d50df5be19f6b4c1c22e9a163a74bfa773072"
+        },
+        {
+          "label": "C7 outbound-search-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/outbound-search-light.png",
+          "sha256": "a56767f6b6e5eae4f9d00b4714e5c3e09181ec0c1147926a44aed49a8edef11e"
+        },
+        {
+          "label": "C7 reject-detail-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-detail-dark.png",
+          "sha256": "995d5e0daa976f9b044a1ec6a1956595eccf49958715625c4919f27c92bc691c"
+        },
+        {
+          "label": "C7 reject-detail-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-detail-light.png",
+          "sha256": "dd1f6e715b6baed3fe49ea147ac523094fbe87aaceb5e7a0c1674ff26a2c3726"
+        },
+        {
+          "label": "C7 reject-list-dark.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-list-dark.png",
+          "sha256": "03fac1f22072ccbe56424df9e7042e774f690959ca60fa5a34550384b2f392ce"
+        },
+        {
+          "label": "C7 reject-list-light.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-embe-c84c3-serve-semantic-state-colors/reject-list-light.png",
+          "sha256": "b1da0e385163757d39ca07fe1a177c8ba833c06f4e42f90fa1ab75a8ea255f7e"
+        },
+        {
+          "label": "C7 guide-admin-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-admin-1440.png",
+          "sha256": "c56a66e92ca2c01ab633caecb2fad917b0cc41ec3a1a5c3b38668551fb9528e4"
+        },
+        {
+          "label": "C7 guide-admin-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-admin-390.png",
+          "sha256": "e65763e1fddb5b7da5cac0d265c76fad953ee92975295b455852c95c91baee8c"
+        },
+        {
+          "label": "C7 guide-user-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-user-1440.png",
+          "sha256": "0f9d4744a49d503ab06b73874e19a20a9c16dc2b377589a32ecdb7ca46be94bf"
+        },
+        {
+          "label": "C7 guide-user-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/ui-populated-surfaces-guid-5934c-r-above-the-reading-content/guide-user-390.png",
+          "sha256": "a986de985c94becd7c8f0826ba9714c045ebba76ddb63edbc8284b460c61d165"
+        }
+      ]
+    },
+    {
+      "name": "loading",
+      "reviewedAt": "2026-11-14T18:11:53.216665+00:00",
+      "observations": "已查看53张最终候选暗色手机加载截图；核对骨架、读取提示、禁用控件和页面框架，没有看到旧版重阴影或旧底色残留。静态内容仅覆盖其客户端公共读取状态，不代表服务端渲染故障注入。",
+      "items": [
+        {
+          "label": "C7 /admin/account · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_account-loading.png",
+          "sha256": "f9aba827e4889bbfbf574e783f3ba90e3372056865183b1e6e36d635e57102f1"
+        },
+        {
+          "label": "C7 /admin/audit · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_audit-loading.png",
+          "sha256": "34eb0ab826f1ea9679d8cb6b40613a0abe1cfb63677c5d0b330fe9c06143d90b"
+        },
+        {
+          "label": "C7 /admin/connectors/mcp · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_connectors_mcp-loading.png",
+          "sha256": "da197f793f42a082a87f5c2110c1ac72a15b7c97ecdec7fbfad7522ad6d58dee"
+        },
+        {
+          "label": "C7 /admin/credits · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_credits-loading.png",
+          "sha256": "6582e13b4be1c361120dad6ec7460f7850a81d0875781c6df21690839b2db796"
+        },
+        {
+          "label": "C7 /admin/models · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_models-loading.png",
+          "sha256": "6fa10909d50ae01bef6374778eb0d08972e9cefabf08a84e0cdd99858c6040c4"
+        },
+        {
+          "label": "C7 /admin/operations/backups · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_backups-loading.png",
+          "sha256": "eb1eca761324a3d1f67db2e508642a9b967a4d97e7acddbe274fed458d80e77c"
+        },
+        {
+          "label": "C7 /admin/operations/failures · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_failures-loading.png",
+          "sha256": "4e8b5c9659116ae0448444b02ec820789f8a8480e2f5a366e071a66d0a4352eb"
+        },
+        {
+          "label": "C7 /admin/operations/probes · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_probes-loading.png",
+          "sha256": "d1edd5ec7946548fcac6c151f561a92bf0c98259b337a4c65864f25fef8394b3"
+        },
+        {
+          "label": "C7 /admin · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin-loading.png",
+          "sha256": "d59e31df0d7699ae2f6d502626de94bf197ce2ce7e89f07f87248a619f8349ae"
+        },
+        {
+          "label": "C7 /admin/sms · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_sms-loading.png",
+          "sha256": "88181f1bebe72d54051f132e23ea9fb2a57a7153a26228531a0ba633c802e4fe"
+        },
+        {
+          "label": "C7 /admin/users/[userId] · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-loading.png",
+          "sha256": "9a6622995be28acae746b5ae0f38b6205b648d419a302fe6606b33a210e04eca"
+        },
+        {
+          "label": "C7 /admin/users/memberships · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users_memberships-loading.png",
+          "sha256": "e2061f64a03c3799c56f33f63024cefd4b6756e34cbaa731532e0df1dc857edf"
+        },
+        {
+          "label": "C7 /admin/users · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users-loading.png",
+          "sha256": "0f6230091753b1203f6d5a4256432d6a678a125423880139ae6117dd68cd399c"
+        },
+        {
+          "label": "C7 /ask · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_ask-loading.png",
+          "sha256": "0133f2b63f176f1a26981c74ff55e87a907b32a01c1c0962d34079fc560ba486"
+        },
+        {
+          "label": "C7 /credits · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_credits-loading.png",
+          "sha256": "35d6073910e1e2ba3d58fe8ad395a1e28cf9b894b471d4f0871bddb6dc35b247"
+        },
+        {
+          "label": "C7 /dashboard · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_dashboard-loading.png",
+          "sha256": "75a03a54b838472885a608f99a2ebff91f0ef41d19209d9a9d2a1bde2bb31e67"
+        },
+        {
+          "label": "C7 /guide · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_guide-loading.png",
+          "sha256": "febb70fdee2c7068800d38e978ddb5c64b2aa5153543ef2a30a90f137c831ee8"
+        },
+        {
+          "label": "C7 /notifications · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_notifications-loading.png",
+          "sha256": "d68759e96d4b71e1db8bad97c615dff0f812caa362776042b541fb1e68384cca"
+        },
+        {
+          "label": "C7 /personal/configuration · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_configuration-loading.png",
+          "sha256": "e377731212e1591d82616f3d261422bfce0507daeca462b1ae87e1a04d44ccb6"
+        },
+        {
+          "label": "C7 /personal/connections/git · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_connections_git-loading.png",
+          "sha256": "6fc4b37f7e45a19ac102270a81b7b64b86479204372ee5b529cb12ff9e5dd27a"
+        },
+        {
+          "label": "C7 /personal/connections/mcp · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_connections_mcp-loading.png",
+          "sha256": "b9b109a9c59d8627e8529320495a1843b2c8b62f0a30b8f949704fd1145059ec"
+        },
+        {
+          "label": "C7 /personal/knowledge/graph · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_knowledge_graph-loading.png",
+          "sha256": "de39572835f0e7cc5485880399fa979ee0b0472211ff84be50c1df7cb8a6ad8d"
+        },
+        {
+          "label": "C7 /personal/knowledge · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_knowledge-loading.png",
+          "sha256": "27b825cf89437fca0426c06b4ebaf15d32c5e83fe99de7db4f659c3e28e65002"
+        },
+        {
+          "label": "C7 /personal/models · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_models-loading.png",
+          "sha256": "08eb391cc09e72c8839854df281f24cab6006fe6c6f772ee3e7ce6b66540ff3d"
+        },
+        {
+          "label": "C7 /personal · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal-loading.png",
+          "sha256": "a311b1fb4270fa5e4f2162295bf9b8361bed29dd9053baa2b7901a067a519d6b"
+        },
+        {
+          "label": "C7 /personal/projects · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_projects-loading.png",
+          "sha256": "d2cd4a89abd00d9f929956c06e378490bd0ae2175836e14d10e43739209e6d90"
+        },
+        {
+          "label": "C7 /profile · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-loading.png",
+          "sha256": "ff627ee71d98b7e1d7d5a41bc1180c363cb3b8b25dac1fb4fa153e2d8a60edc0"
+        },
+        {
+          "label": "C7 /projects/[projectId]/actions · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__actions-loading.png",
+          "sha256": "a96e8d5f4816f08aaef22813f78edc469aebf2ddd17810a29d89117a81022860"
+        },
+        {
+          "label": "C7 /projects/[projectId]/assets · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__assets-loading.png",
+          "sha256": "dbcba5fac7a529d4ca9c71517b6b9f540c96bfcf4b692217d3306a920a932b0a"
+        },
+        {
+          "label": "C7 /projects/[projectId]/automations · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__automations-loading.png",
+          "sha256": "04f45742e601963735f917020a96287607a278f937e2c8b8886c3492f460e0a3"
+        },
+        {
+          "label": "C7 /projects/[projectId]/configuration · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__configuration-loading.png",
+          "sha256": "d4449a7a251c583b36091f87d83280d44f73caf4988b5e065d79a209a94cf810"
+        },
+        {
+          "label": "C7 /projects/[projectId]/control · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__control-loading.png",
+          "sha256": "3e7a9932dad6b50d8c7f63c0bd89d0a98f5062563d27dcce57b4d5b74f36f237"
+        },
+        {
+          "label": "C7 /projects/[projectId]/external-sources · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__external-sources-loading.png",
+          "sha256": "19d83091446f1265256c8c42436cc9c3d156e185550b49da3953a527c425c3c4"
+        },
+        {
+          "label": "C7 /projects/[projectId]/github-syncs/[syncRunId] · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__github-syncs__syncRunId_-loading.png",
+          "sha256": "52b9dbcd1e8502fdc9da79c267c18270b133f323335336c100a7bf84251fb248"
+        },
+        {
+          "label": "C7 /projects/[projectId]/governance · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__governance-loading.png",
+          "sha256": "b3fe602b616c34283f8b9e7e7330502fcf457940b1cd00f49b57282f30bd7b19"
+        },
+        {
+          "label": "C7 /projects/[projectId]/intelligence · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__intelligence-loading.png",
+          "sha256": "ef8485cbf6ebe2136b4fde25f62a4d4675d944d9b35156ac864b5fa2d8263b64"
+        },
+        {
+          "label": "C7 /projects/[projectId]/jobs/[jobId] · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__jobs__jobId_-loading.png",
+          "sha256": "d6132230730c89494262887b54a4a1d56f9d0998ffed8a4b5d5028c5cc55e8cb"
+        },
+        {
+          "label": "C7 /projects/[projectId]/materials · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials-loading.png",
+          "sha256": "b12f0b4f4866dcb60ed14f6fa414a4677437a72cd4bfc9880fab6beb91e48b9e"
+        },
+        {
+          "label": "C7 /projects/[projectId]/materials/review · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_review-loading.png",
+          "sha256": "6335a09c4dbffcf3d4e19f0072f57a6eceee16f8afc48349580fcce92bc8a0ad"
+        },
+        {
+          "label": "C7 /projects/[projectId]/materials/sources/[sourceId] · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_sources__sourceId_-loading.png",
+          "sha256": "8677b556ea4ed208bef16d80f99e917e452c29ed1c076f6b0ebdd374e9cdcfcf"
+        },
+        {
+          "label": "C7 /projects/[projectId]/mcp-actions · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__mcp-actions-loading.png",
+          "sha256": "15483157ea1b780b48b62c50e30e21d30cde64cc0603cbb4f4af259fc305e444"
+        },
+        {
+          "label": "C7 /projects/[projectId]/mcp-export · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__mcp-export-loading.png",
+          "sha256": "1939d61dcbff5bef43bbac7e5bd92eb36df99c58a1aff0311b8281555b5cee4b"
+        },
+        {
+          "label": "C7 /projects/[projectId]/members · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__members-loading.png",
+          "sha256": "41174ecae762cb00fc955644fdce50a61420c4e4f272bab52de87f5981eeed54"
+        },
+        {
+          "label": "C7 /projects/[projectId]/memory · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-loading.png",
+          "sha256": "76b78de586a13cdafb4836d88ac27944d8fcf09c9b9d80bf72d18d457ed9882c"
+        },
+        {
+          "label": "C7 /projects/[projectId]/memory-quality · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-quality-loading.png",
+          "sha256": "8299db126755d7b84d1fea30d7be90873c1e5dfed71d5c61645bba5b913682bf"
+        },
+        {
+          "label": "C7 /projects/[projectId] · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId_-loading.png",
+          "sha256": "844924bfc05b2f47f99d7eb47823a58d384f67bce140feaffb08d552a5e6545c"
+        },
+        {
+          "label": "C7 /projects/[projectId]/plan · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__plan-loading.png",
+          "sha256": "49cc4793319982136b4a832fc8ded9b1b82199f68ce8c48670eb601433967dba"
+        },
+        {
+          "label": "C7 /projects/[projectId]/repositories · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__repositories-loading.png",
+          "sha256": "4fcada2333a58cdb0ca69066d5430a26cfd3ba3f4a23ca7a71e564f679ec8eb6"
+        },
+        {
+          "label": "C7 /projects/[projectId]/tools · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__tools-loading.png",
+          "sha256": "849ff788c388ffe93943eac93164e0d875a6d2259ee305b721f0fb009809823b"
+        },
+        {
+          "label": "C7 /projects/[projectId]/world · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__world-loading.png",
+          "sha256": "215fcea1d44e7115708908fae1bc8abe2830f98c57bf9246f1223ffeab2dd211"
+        },
+        {
+          "label": "C7 /team/[workspaceId] · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_team__workspaceId_-loading.png",
+          "sha256": "9816005a5f42dbe87f7513f93e2e4cb601447e0e3ef4732edb7cd3af029aeea7"
+        },
+        {
+          "label": "C7 /team · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_team-loading.png",
+          "sha256": "48e793f1880a645162e91fcac4f6a569c14f55df5a8596391a87dddae0c1d794"
+        },
+        {
+          "label": "C7 /personal/usage · loading",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_usage-loading.png",
+          "sha256": "f16d1cf3c3cb84deecf7157969dcea0b3ffa45abe925010c86c264f62d83ed91"
+        }
+      ]
+    },
+    {
+      "name": "failed-reads",
+      "reviewedAt": "2026-11-14T18:11:53.320717+00:00",
+      "observations": "已查看53张最终候选暗色手机读取失败截图；错误、警告及信息提示颜色可读，重试入口和原有页面框架保持新版样式。该矩阵通过隔离客户端请求503注入，不代表真实第三方服务故障验收。",
+      "items": [
+        {
+          "label": "C7 /admin/account · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_account-failed-read.png",
+          "sha256": "6a2e3c99810d3ade6b69cfa24b6ae3d1a91509164597795cfb7c03bc13d8a0b4"
+        },
+        {
+          "label": "C7 /admin/audit · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_audit-failed-read.png",
+          "sha256": "ea5edaeb67da9a2f6b3dd3a1f1e7a35952b389ce63c9ac2d6f93189a05f41879"
+        },
+        {
+          "label": "C7 /admin/connectors/mcp · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_connectors_mcp-failed-read.png",
+          "sha256": "3e1e9c97117d4c284c2f619f9540f24764dd267e75eea3e8785a515d73035d71"
+        },
+        {
+          "label": "C7 /admin/credits · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_credits-failed-read.png",
+          "sha256": "9f10431cebe6b113407a797d0cb8f5f2230b11cd46fa9b275346b6663a6e1e47"
+        },
+        {
+          "label": "C7 /admin/models · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_models-failed-read.png",
+          "sha256": "5eb32dc61d2a3f148b24e0b6400b11723c83fe3ba0efc918849c8fcd49a3106e"
+        },
+        {
+          "label": "C7 /admin/operations/backups · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_backups-failed-read.png",
+          "sha256": "557a36cd2adebde2fbb9d038df72c86a12053c36fed8b852c1c2770b661b4cd9"
+        },
+        {
+          "label": "C7 /admin/operations/failures · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_failures-failed-read.png",
+          "sha256": "90343d53bdfb5e4c2f03011b9b987043eb86eaf137061c0dfcbc6b5f064c39d7"
+        },
+        {
+          "label": "C7 /admin/operations/probes · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_probes-failed-read.png",
+          "sha256": "2d3c4ed10eaef776ab8607c4bdcd3459326ff712496101896d5b158065a8e38f"
+        },
+        {
+          "label": "C7 /admin · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin-failed-read.png",
+          "sha256": "9eb5664dbaa2ff5776cd38f221724a6d0291db1e30581b7c607264f0fdd20659"
+        },
+        {
+          "label": "C7 /admin/sms · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_sms-failed-read.png",
+          "sha256": "35a80bf83cf35bf4eabe2dd1faaed600d27051cdc5ef0bc3fbafdb3d9aee01cb"
+        },
+        {
+          "label": "C7 /admin/users/[userId] · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-failed-read.png",
+          "sha256": "008b35677050a85b79a9a3c2630ba6d4082972a9a6aefabe930a40107af8b10c"
+        },
+        {
+          "label": "C7 /admin/users/memberships · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users_memberships-failed-read.png",
+          "sha256": "c180fc8b5b5a7e4d7ce69244f4c9cc724e711b7ca80cfaab3012ca366cd33521"
+        },
+        {
+          "label": "C7 /admin/users · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users-failed-read.png",
+          "sha256": "d277bc5fe26622461fb0810201e1ee27a462daef1fa1dd3441ea93dce610c116"
+        },
+        {
+          "label": "C7 /ask · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_ask-failed-read.png",
+          "sha256": "3178959dd2b15e033e463cfecd9647a8d92067b42d23c381b6c4494938bdaac4"
+        },
+        {
+          "label": "C7 /credits · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_credits-failed-read.png",
+          "sha256": "d042ef97447f349f6f71b26648827ad3a74f6c3f9d1d415b98e1f75986982dde"
+        },
+        {
+          "label": "C7 /dashboard · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_dashboard-failed-read.png",
+          "sha256": "58cc116abbcb35f496a3d59a3918268be54b9ca3c8137c6737e7c551dd3e9b91"
+        },
+        {
+          "label": "C7 /guide · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_guide-failed-read.png",
+          "sha256": "febb70fdee2c7068800d38e978ddb5c64b2aa5153543ef2a30a90f137c831ee8"
+        },
+        {
+          "label": "C7 /notifications · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_notifications-failed-read.png",
+          "sha256": "10551f04df80fd60de0d5464fd2a4fc492883cd7cca889e583405a92b0bbfbc6"
+        },
+        {
+          "label": "C7 /personal/configuration · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_configuration-failed-read.png",
+          "sha256": "e377731212e1591d82616f3d261422bfce0507daeca462b1ae87e1a04d44ccb6"
+        },
+        {
+          "label": "C7 /personal/connections/git · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_connections_git-failed-read.png",
+          "sha256": "feb91e4db2af366e5fe3be64e1444c03cc7d349d208f18f1ff1e5076b444434d"
+        },
+        {
+          "label": "C7 /personal/connections/mcp · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_connections_mcp-failed-read.png",
+          "sha256": "20b9c0f9b12f6ffabb07282614bd1b5fd7f62f05f20268bf2a7c09a641372407"
+        },
+        {
+          "label": "C7 /personal/knowledge/graph · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_knowledge_graph-failed-read.png",
+          "sha256": "e003606f31a3d7f7b65243b227e0c64c0d8594ab97f5995ac85f8720d78c7134"
+        },
+        {
+          "label": "C7 /personal/knowledge · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_knowledge-failed-read.png",
+          "sha256": "98971a22415f0feded88363b2f21d88e15a232533b63a281f948e1d65a1a49e8"
+        },
+        {
+          "label": "C7 /personal/models · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_models-failed-read.png",
+          "sha256": "da19667716d4feb9f0880d7f0e11781bb24a54d9ed042668a5eb11efe583f4e4"
+        },
+        {
+          "label": "C7 /personal · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal-failed-read.png",
+          "sha256": "028be6d575e23d530f2894a12bb15103e73f7abe914c86e6bf67e8d297bf7b5b"
+        },
+        {
+          "label": "C7 /personal/projects · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_projects-failed-read.png",
+          "sha256": "5567a270bf399c4ddc399ce7ab83d2f702b9a8b047312f83ce5c2e15e35c2338"
+        },
+        {
+          "label": "C7 /profile · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-failed-read.png",
+          "sha256": "74150f221b90e732061fb2977b4c918f220e9f72667ee2faaec87946a8c66fd1"
+        },
+        {
+          "label": "C7 /projects/[projectId]/actions · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__actions-failed-read.png",
+          "sha256": "6f4020763b17b66a77cec2f8001f4012c028778ded49bd3ff18e4dc84bbeff91"
+        },
+        {
+          "label": "C7 /projects/[projectId]/assets · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__assets-failed-read.png",
+          "sha256": "e4d9b1db905d15a9790d536c03673ab045e7e59344542e2c0a54a75856f8e444"
+        },
+        {
+          "label": "C7 /projects/[projectId]/automations · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__automations-failed-read.png",
+          "sha256": "359f1f5471d2353ec9f0b9eb7878dbd9c8ec5baab64f2ee4639a479208a66758"
+        },
+        {
+          "label": "C7 /projects/[projectId]/configuration · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__configuration-failed-read.png",
+          "sha256": "87366235f599f07969795f4cce35c622f0c87635e13e2d79680d9056af41ea37"
+        },
+        {
+          "label": "C7 /projects/[projectId]/control · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__control-failed-read.png",
+          "sha256": "8771fc0333fe3a19ab0b00117085728533d17ed0f6f49c1e8a67998411d03fa9"
+        },
+        {
+          "label": "C7 /projects/[projectId]/external-sources · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__external-sources-failed-read.png",
+          "sha256": "e6134b98779fc83d7806c4bf04439f816ba1f54a096a76319240b49e65c4de80"
+        },
+        {
+          "label": "C7 /projects/[projectId]/github-syncs/[syncRunId] · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__github-syncs__syncRunId_-failed-read.png",
+          "sha256": "52b9dbcd1e8502fdc9da79c267c18270b133f323335336c100a7bf84251fb248"
+        },
+        {
+          "label": "C7 /projects/[projectId]/governance · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__governance-failed-read.png",
+          "sha256": "5c101eae5fc4fd85cf181adff39a1d99eccd96e07fe7a51f8fddb48079455336"
+        },
+        {
+          "label": "C7 /projects/[projectId]/intelligence · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__intelligence-failed-read.png",
+          "sha256": "5fc011ffaf30603711c2b073a333fe1e591d802815c7859d7522aa861513799f"
+        },
+        {
+          "label": "C7 /projects/[projectId]/jobs/[jobId] · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__jobs__jobId_-failed-read.png",
+          "sha256": "741983041afed6dec19c0c77e500411f5d7cae7330be85890976b7cb72ba33cc"
+        },
+        {
+          "label": "C7 /projects/[projectId]/materials · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials-failed-read.png",
+          "sha256": "f0fcce535ed9a3837bfd2bb21e5d2ddd7cb682229526160230345e216d2059db"
+        },
+        {
+          "label": "C7 /projects/[projectId]/materials/review · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_review-failed-read.png",
+          "sha256": "8e58f7808a23a1ed59eb58c6c41c54822e12df5e82f37b5257fc2e8cd5ada68a"
+        },
+        {
+          "label": "C7 /projects/[projectId]/materials/sources/[sourceId] · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_sources__sourceId_-failed-read.png",
+          "sha256": "fbe4e4c82d857c5ec92d7c7388358d1091d4b52a81b7672d2a9d8af105f3e23f"
+        },
+        {
+          "label": "C7 /projects/[projectId]/mcp-actions · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__mcp-actions-failed-read.png",
+          "sha256": "4d35ea0bb8fa921ac183cab0a8bec9a91153bf2d587ba44205db652daacede56"
+        },
+        {
+          "label": "C7 /projects/[projectId]/mcp-export · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__mcp-export-failed-read.png",
+          "sha256": "43ff018d4b9ce78dff8891ba04dfa155fb02ac1bf13750163aef7b48d368770c"
+        },
+        {
+          "label": "C7 /projects/[projectId]/members · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__members-failed-read.png",
+          "sha256": "e76c57392a4bf056e546350ca457f52d261788c6291d3c53570278d2e155d4bb"
+        },
+        {
+          "label": "C7 /projects/[projectId]/memory · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-failed-read.png",
+          "sha256": "6de2edf7b061f0687004aaf0ac2122f42924084bdaf20779c8197ed301fbf0dc"
+        },
+        {
+          "label": "C7 /projects/[projectId]/memory-quality · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-quality-failed-read.png",
+          "sha256": "7ac059b5b5790f3513216d826075ed8ed8263399780e59c11646aa00d8378762"
+        },
+        {
+          "label": "C7 /projects/[projectId] · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId_-failed-read.png",
+          "sha256": "4362d94226bc6edac724faa8f700481677e37c4cc31ab94c4f7e1d8208a2084b"
+        },
+        {
+          "label": "C7 /projects/[projectId]/plan · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__plan-failed-read.png",
+          "sha256": "d61a24508347975e9cfdd6601dd66580e5441c91190da9e67b573a7f9a8b392e"
+        },
+        {
+          "label": "C7 /projects/[projectId]/repositories · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__repositories-failed-read.png",
+          "sha256": "8720e4aafaf8dff4e660a0cc3cf3af36055d93a8458696008d63fe5db08cf192"
+        },
+        {
+          "label": "C7 /projects/[projectId]/tools · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__tools-failed-read.png",
+          "sha256": "496eb96091577ddae076c31c121358847ff882fd3bbba2aa957b70fdfe8f69a1"
+        },
+        {
+          "label": "C7 /projects/[projectId]/world · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__world-failed-read.png",
+          "sha256": "508ef1e883e58d54d9d7805ce83e0a63bc1ad26e4f1ee0d75bbc791539ab125c"
+        },
+        {
+          "label": "C7 /team/[workspaceId] · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_team__workspaceId_-failed-read.png",
+          "sha256": "b0aa3d3862a78ea9d16f9606937258eb354f3185c3a003078026064084155e3f"
+        },
+        {
+          "label": "C7 /team · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_team-failed-read.png",
+          "sha256": "dd6fc1d49e87cbf18e66f56b3863ea8040f2d0006f8d947bca94f7e313525f3e"
+        },
+        {
+          "label": "C7 /personal/usage · failed read",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_personal_usage-failed-read.png",
+          "sha256": "655d5de3d2a31874f14a6d630e03ad9e2eb91cc30d7a5f2d64b0cfd2a81d0521"
+        }
+      ]
+    },
+    {
+      "name": "operation-dialogs",
+      "reviewedAt": "2026-11-14T18:11:53.397311+00:00",
+      "observations": "已查看62张最终候选操作弹窗截图，覆盖31种调用界面的英文浅色桌面和中文暗色手机；检查标题、字段、分隔线、底部操作、长表单滚动、警告和禁用态，未发现旧版紫黑按钮或过大圆角。重复成员行的相同弹窗由自动打开关闭记录覆盖。",
+      "items": [
+        {
+          "label": "C7 en-light-desktop /admin/account dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_account-dialog-0.png",
+          "sha256": "df800d18d5812bea0f078b9f70ae6bf4e0621eae5711979ece7e3ef6dbbac01a"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/account dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_account-dialog-1.png",
+          "sha256": "8988e21ba73ecdd0828f3958f7f719f03887587cb51659e6555d92f38b2307d9"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/credits dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_credits-dialog-0.png",
+          "sha256": "c0210bf9808bb4d865a5432994a7c0481dc8a8547905471da3a43efe19014bcc"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/credits dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_credits-dialog-1.png",
+          "sha256": "7d1818f6c3970cf7100f267f11489ac6b27ab9e8ae729b9480052390e7137c05"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/models dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_models-dialog-0.png",
+          "sha256": "26a509cfc8a226a1456d235ecd694a1b3af9d0eecc3802a49a6b80b96f858c13"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/operations/probes dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_operations_probes-dialog-0.png",
+          "sha256": "113cd9b2e1b7851e3a188c4533d1ced1f8e7f1b76aee793e989ce5299d23df65"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/users/[userId] dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users__userId_-dialog-0.png",
+          "sha256": "5c7570508528919b49c2b85dd0fb91a5e6870c04689fa8f5938614aeda65c951"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/users/[userId] dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users__userId_-dialog-1.png",
+          "sha256": "566d2eeeb87271dfc9758c79c5b43839422e93c4127b8bd459b209972ec4bdfd"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/users/[userId] dialog-2",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users__userId_-dialog-2.png",
+          "sha256": "a8d296018c1a5183597d660ef82920c28c867f2ca351e6d2874a141659dcb484"
+        },
+        {
+          "label": "C7 en-light-desktop /admin/users/memberships dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_admin_users_memberships-dialog-0.png",
+          "sha256": "684119944e614c04d4cf45727a5c9678c787c6e561859f04e6581e5d950b195b"
+        },
+        {
+          "label": "C7 en-light-desktop /profile dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-0.png",
+          "sha256": "d61c1f888d337e8c501b232dd54827f0914fd704ed958accc692a529152c7831"
+        },
+        {
+          "label": "C7 en-light-desktop /profile dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-1.png",
+          "sha256": "c78c4a379be345578b53c7393ce91e47b1ad07b4436d2561a382e4b701f1a717"
+        },
+        {
+          "label": "C7 en-light-desktop /profile dialog-2",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-2.png",
+          "sha256": "200500c487ac8cb0a9dc347c9942a8bad17c96ca100357ca12748d193bcfe187"
+        },
+        {
+          "label": "C7 en-light-desktop /profile dialog-3",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-3.png",
+          "sha256": "2a579b3e533ee26c88fdfeff0b3d4655a5769f5a709203e50336e44d89d3b35b"
+        },
+        {
+          "label": "C7 en-light-desktop /profile dialog-4",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-4.png",
+          "sha256": "1af083356d9d9311759688f1ca7ce7f31f0ebd688f8302df9b3e8740cc7951c6"
+        },
+        {
+          "label": "C7 en-light-desktop /profile dialog-5",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_profile-dialog-5.png",
+          "sha256": "bb7db001f1f47ccd85fd7e3f4e7967d723bb879acb03cf8e5d3673f5a43cec9b"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/actions dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__actions-dialog-0.png",
+          "sha256": "f6f8a0d75551adddf752f23a3d85b0e34499fded89f5bcbf305ca882173275c2"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/assets dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__assets-dialog-0.png",
+          "sha256": "441fc81195e84b7681fe6963b96d9ad2640882e706c63a7c0dd870ff492c4b33"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/automations dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__automations-dialog-0.png",
+          "sha256": "974906ed0c0ec8fe93a50effa1ab1755eb18a0cd8bb68165066b1f0f8a0839a7"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/automations dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__automations-dialog-1.png",
+          "sha256": "b613a65718930d80fcb76e2697d4c5b9d5e8c5446cc7e79d2186633a32b226b8"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/external-sources dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__external-sources-dialog-0.png",
+          "sha256": "c64330bc23eb8298c8e0f76614c57d35ed366c28d44cd3f9e610a81d12447caa"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/external-sources dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__external-sources-dialog-1.png",
+          "sha256": "ba3ef218d8ad0a5f4adf0ab8eb36b441399b2d6a5cee897ef433f0a82b8b8bf7"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/materials/sources/[sourceId] dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__materials_sources__sourceId_-dialog-0.png",
+          "sha256": "2be3634ebde2cc6ca780b972329b3fd2aa10924967643934303ce30e4ee6dba7"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/memory dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__memory-dialog-0.png",
+          "sha256": "17bd9e71b91184c9e7619c83a70a69d6eedda0fd2a1ca255ac0706ebe03d8940"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/memory dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__memory-dialog-1.png",
+          "sha256": "84b297f86f79c99c2df049c3834e31d3c0a8255ce419cba1a50a27d115bd4fbb"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/plan dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__plan-dialog-0.png",
+          "sha256": "021c64718dc9f9cfca1acdb25d89936a1bcb5ccd2bbac288961ecb7564f29c4f"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/plan dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__plan-dialog-1.png",
+          "sha256": "cc6d335f6d86f46e685d7ac6718582a17c00ff3921a93669d31b1130dd940da4"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/repositories dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__repositories-dialog-0.png",
+          "sha256": "9eada762b1f9122f9f2f0d5a340fc450107bc042b8c6a5c6a4acb7b1e07cebdc"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/tools dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__tools-dialog-0.png",
+          "sha256": "f4e51b66276764776beefc0e226e516135039a5bbdd079f623657363c682232b"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/world dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__world-dialog-0.png",
+          "sha256": "d0e0be6ea6d952b8cf8c94c07c1aed91a457ce381d1fbf779e076d2957d9d998"
+        },
+        {
+          "label": "C7 en-light-desktop /projects/[projectId]/world dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/en-light-desktop/_projects__projectId__world-dialog-1.png",
+          "sha256": "fa43065c42e83107678de2804770014604ca5df15676c5e97a7d47434b3cc70f"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/account dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_account-dialog-0.png",
+          "sha256": "29d9962a6569237f9cc3eb0f015979c2ab747f4c34636442677a5d5da30cb5fb"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/account dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_account-dialog-1.png",
+          "sha256": "26e714a007311b29daf18bd01e9422531dc1cef971b9bf889e9951c54f928f85"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/credits dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_credits-dialog-0.png",
+          "sha256": "38acf2f55811e897291e28e63ea98dbb494344625e22545f929fb9e9197dd9e9"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/credits dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_credits-dialog-1.png",
+          "sha256": "7f7692a4ec5d522d93f026b193bd102f15fb7d0f4857df20dc32fc133db672d7"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/models dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_models-dialog-0.png",
+          "sha256": "2550bec0fde3a6eb1d7fc701b834ec2954115ccdb6ad19e9982f808932c53c2d"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/operations/probes dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_operations_probes-dialog-0.png",
+          "sha256": "2550bec0fde3a6eb1d7fc701b834ec2954115ccdb6ad19e9982f808932c53c2d"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/users/[userId] dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-dialog-0.png",
+          "sha256": "f9893e3b62b8fcbba8116bb525cbcc5f0cba9cab683378a5c1b27b72f42cb0aa"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/users/[userId] dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-dialog-1.png",
+          "sha256": "5b0806575d9e4a7f5ef78473cb8327ca4eb5129a5a1b2bb0a6aa4b1f9014192b"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/users/[userId] dialog-2",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users__userId_-dialog-2.png",
+          "sha256": "b37a2fa9eacbfaaeb7b69200cb8ccad33bcd9f9d55695f2ce39b00c8facf7d94"
+        },
+        {
+          "label": "C7 zh-dark-mobile /admin/users/memberships dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_admin_users_memberships-dialog-0.png",
+          "sha256": "ce5b88ce004aa0cdb0e70177d37110c4e97a39aec6b324d29008b88fa5b363f6"
+        },
+        {
+          "label": "C7 zh-dark-mobile /profile dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-0.png",
+          "sha256": "c243465b94dc24395b2b2c17a3422e745d19b02877e9ff29227485a233490108"
+        },
+        {
+          "label": "C7 zh-dark-mobile /profile dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-1.png",
+          "sha256": "a2a6e397661982b752380767117a963999a987c76affbcb1c58bd21dcad67a99"
+        },
+        {
+          "label": "C7 zh-dark-mobile /profile dialog-2",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-2.png",
+          "sha256": "b9745ebacb13d469c340e271a317400e47cd91ff295c4a9a575fd65b3ecbc9d4"
+        },
+        {
+          "label": "C7 zh-dark-mobile /profile dialog-3",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-3.png",
+          "sha256": "b890320cd684903e1de72028d024c9e1178ded94f0550cd685d5f4af92003e97"
+        },
+        {
+          "label": "C7 zh-dark-mobile /profile dialog-4",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-4.png",
+          "sha256": "6dbb61c4614a166b4fb1470b1118868cb6320670e8dd35663347db5125109e5d"
+        },
+        {
+          "label": "C7 zh-dark-mobile /profile dialog-5",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_profile-dialog-5.png",
+          "sha256": "c9f60a456af2293bd5823b212f6a589152cad6f873fd8f3a28c0625d14cc8d2c"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/actions dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__actions-dialog-0.png",
+          "sha256": "26f3a7d413816f157445a0a4ced677977fe507d11f6284f6e493715513a7adb2"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/assets dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__assets-dialog-0.png",
+          "sha256": "23f927384ff879ad1be753a15966138a3efed8cb0f3c40959e7ae395d6966c55"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/automations dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__automations-dialog-0.png",
+          "sha256": "48d66fa76ed3403c69be97689a06fc8288843eb4fb0900d11f38da5f070818d9"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/automations dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__automations-dialog-1.png",
+          "sha256": "52fc3ce1fe0dae00bca95b5e509f1c7dcdde897e690717d579c17d6b76a6b9c1"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/external-sources dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__external-sources-dialog-0.png",
+          "sha256": "c618ae156171546907f89985d17585864df050ba5390343f2f45d844d9e0edff"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/external-sources dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__external-sources-dialog-1.png",
+          "sha256": "935bf99070229373127c274fe1a5394bca3a737481ceb342ef7949be0b6b1bc8"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/materials/sources/[sourceId] dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__materials_sources__sourceId_-dialog-0.png",
+          "sha256": "d48a633857d93378683b964165a9aca0257fd22c408fd46dc358cb1f6e194b23"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/memory dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-dialog-0.png",
+          "sha256": "ac274673b8e57a9a875aa9c4cea7cfec0d4b8b427c42b1a667e3ebbba022221f"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/memory dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__memory-dialog-1.png",
+          "sha256": "f341248fa11cba51be996dd64d07dd1fabb01393145bbc5326ae5769dd079cd6"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/plan dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__plan-dialog-0.png",
+          "sha256": "62284adeb5d1183439ae600a8e07c31a10fb7619d7a0bb50ee193ac53dc45687"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/plan dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__plan-dialog-1.png",
+          "sha256": "41a49400f38fd3603a6cca56d0afe60efdceef9c68314d70ee6f2fdd218099cb"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/repositories dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__repositories-dialog-0.png",
+          "sha256": "56d7fbf323dd3719aef16586dca926c46171402cc0b4a7a222fc7858a16159d7"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/tools dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__tools-dialog-0.png",
+          "sha256": "f9ce0b1a2fea0547ebcc047f937d733882c62b560697a47d3b0a530d2b8d1c31"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/world dialog-0",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__world-dialog-0.png",
+          "sha256": "46d5a20aafbe41f1eeefc9822b1d41179c22f19e95f20630a2dbcb765f9981bf"
+        },
+        {
+          "label": "C7 zh-dark-mobile /projects/[projectId]/world dialog-1",
+          "file": "test-results/ui-remediation-verified-20261115/ui-style-states-all-applic-e2d37-reads-and-operation-dialogs/states/zh-dark-mobile/_projects__projectId__world-dialog-1.png",
+          "sha256": "6372fb665ff1f8020f2419cb5cf5e84ecd0b2cb2f47581daea62200b4a547751"
+        }
+      ]
+    },
+    {
+      "name": "native-confirmations",
+      "reviewedAt": "2026-11-14T18:14:42.078363+00:00",
+      "observations": "已查看12张最终候选原生和管理操作截图；模型与短信新增、用户详情与状态操作覆盖中文浅色及英文深色，审计抽屉覆盖加载与失败，嵌套危险确认覆盖1440浅色与390深色。标题、留白、字段和危险语义一致；未真实发送短信、模型请求或执行删除。",
+      "items": [
+        {
+          "label": "C7 zh-CN-light · model-editor",
+          "file": "test-results/admin-appearance/zh-CN-light-model-editor.png",
+          "sha256": "dcad45ba7e759aa00e31a5175bc293672e7d6450355d05e12320b95faf0fef7a"
+        },
+        {
+          "label": "C7 zh-CN-light · sms-editor",
+          "file": "test-results/admin-appearance/zh-CN-light-sms-editor.png",
+          "sha256": "9981d48a680c6cbf5abdd66433da7ada6bf2854cb4372cba0443dd6aca0c62ab"
+        },
+        {
+          "label": "C7 zh-CN-light · user-detail",
+          "file": "test-results/admin-appearance/zh-CN-light-user-detail.png",
+          "sha256": "979df3a81ae4077216b2e60662e388970ec1338e7ef15d816b9e01c244fc93a9"
+        },
+        {
+          "label": "C7 zh-CN-light · user-status-operation",
+          "file": "test-results/admin-appearance/zh-CN-light-user-status-operation.png",
+          "sha256": "743125bf5f98968cbc1b3c2a8cb4d9ad7b0046f42205afd6c15c5e313ccc25bd"
+        },
+        {
+          "label": "C7 en-dark · model-editor",
+          "file": "test-results/admin-appearance/en-dark-model-editor.png",
+          "sha256": "e9306febc71acdbfe4e144fef7269f86f884fa36ba91b26527864ddd8a6c3417"
+        },
+        {
+          "label": "C7 en-dark · sms-editor",
+          "file": "test-results/admin-appearance/en-dark-sms-editor.png",
+          "sha256": "2d6c6df1b63fa39647a73810f0959256fe004d0be496507410dbcc87b3c2080e"
+        },
+        {
+          "label": "C7 en-dark · user-detail",
+          "file": "test-results/admin-appearance/en-dark-user-detail.png",
+          "sha256": "03f8a60a6e6cf6883d7b2ad128df2035f605109a659ec93e13cc1a32866589e1"
+        },
+        {
+          "label": "C7 en-dark · user-status-operation",
+          "file": "test-results/admin-appearance/en-dark-user-status-operation.png",
+          "sha256": "e41e686a4f0e8da55e317222485871662bcd028165f4e0b7bc29d9413f3968c4"
+        },
+        {
+          "label": "C7 audit-detail-drawer",
+          "file": "evidence/v0.3x/T09-workbuddy/screenshots/audit-detail-drawer.png",
+          "sha256": "bb93dfb16e9117750b4814e20f8a51e04aff51b2f54d39684569858e5ee3ab2a"
+        },
+        {
+          "label": "C7 audit-detail-failure",
+          "file": "evidence/v0.3x/T09-workbuddy/screenshots/audit-detail-failure.png",
+          "sha256": "38894de2e3b2658e91b3d0ad407524f8b155814341b74df11a10081ccf927d7b"
+        },
+        {
+          "label": "C7 admin-confirm-light-1440.png",
+          "file": "test-results/ui-remediation-verified-20261115/admin-confirmation-screenshots/admin-confirm-light-1440.png",
+          "sha256": "e16d6339bfc9dc330cbd0290c08029208973a6c2b602f45e869a0504c9dd39c8"
+        },
+        {
+          "label": "C7 admin-confirm-dark-390.png",
+          "file": "test-results/ui-remediation-verified-20261115/admin-confirmation-screenshots/admin-confirm-dark-390.png",
+          "sha256": "0ff42b9fd43a1190c2131d6a69a6021b2c92604f46c4e30b3576dd3b37193855"
+        }
+      ]
+    }
+  ]
+}

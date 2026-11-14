@@ -1,0 +1,77 @@
+{
+  "record_kind": "historical_evidence_extract",
+  "catalogued_at": "2026-11-02",
+  "application_revision": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+  "scope": "Local saved records; no fresh remote or production verification. Credentials, raw deployment logs and private endpoints are excluded.",
+  "design_sources": {
+    "DESIGN-REVISION-20261027.md": {
+      "source_repository_revision": "72c72f08f2207e03283afdd2be74ca2e40a36430",
+      "source_relative_path": "prototypes/project-os-rethink/DESIGN-REVISION-20261027.md",
+      "sha256": "5995e1b201c62c9e063972f24c0e432636726bf7afa0998b3055fd6637c783d1"
+    },
+    "DESIGN-REVISION-20261028.md": {
+      "source_repository_revision": "72c72f08f2207e03283afdd2be74ca2e40a36430",
+      "source_relative_path": "prototypes/project-os-rethink/DESIGN-REVISION-20261028.md",
+      "sha256": "f00a7c7f8bf937be476cb8451e1764875e287d38ae1b17a973b66f8095d19b45"
+    },
+    "DESIGN-MODEL-SETUP-20261027.md": {
+      "source_repository_revision": "72c72f08f2207e03283afdd2be74ca2e40a36430",
+      "source_relative_path": "prototypes/project-os-rethink/DESIGN-MODEL-SETUP-20261027.md",
+      "sha256": "8a1019a5a526b1a5c1038c72e93f0c6ad720cc3f3a4449e0ce0c2505a0f19d61"
+    },
+    "PROTOTYPE-RECOVERY-20261027.md": {
+      "source_repository_revision": "72c72f08f2207e03283afdd2be74ca2e40a36430",
+      "source_relative_path": "prototypes/RECOVERY.md",
+      "sha256": "6cfac530d5fdcf6d14b6a3a10ef98302c9c8e94000c1d524f8a7255116a34604"
+    }
+  },
+  "records": {
+    "v1.2.25-ci-summary.json": {
+      "source_sha256": "9e6ba3d243201672a82baf089fffe85e45f584c99496a50e78ad45781e51444b",
+      "retained_fields": {
+        "status": "completed",
+        "conclusion": "success",
+        "headSha": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+        "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/41227534324"
+      }
+    },
+    "v1.2.25-release-receipt.json": {
+      "source_sha256": "e478187102abe66788d88a0b9a4a61fca0ccc45ddc4a6a1d57e461dc9af4dfee",
+      "retained_fields": {
+        "status": "success",
+        "version": "1.2.25",
+        "revision": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+        "release_url": "https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.25",
+        "workflow_url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/41230151865",
+        "proxy_enabled": false
+      }
+    },
+    "v1.2.25-installed-receipt.json": {
+      "source_sha256": "167c4e25cd757de0dfb68973e36a9577c0a53a163804b935e42ed11bfb983a27",
+      "retained_fields": {
+        "version": "1.2.25",
+        "revision": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+        "status": "installed",
+        "updated_at": "2026-11-01T02:15:04+00:00",
+        "app_healthy": true,
+        "worker_healthy": true,
+        "database_unchanged": true,
+        "bridge_reachable": true,
+        "openai_401": true
+      }
+    },
+    "post-proxy-public-health.json": {
+      "source_sha256": "c392af6edf65a490ade9d99186c3e234113c9a25e51a4aba328e86a82f1ec591",
+      "retained_fields": {
+        "status": "ok",
+        "version": "1.2.25",
+        "database": "up",
+        "worker": {
+          "status": "up",
+          "heartbeatAgeMs": 8581,
+          "consecutiveFailures": 0
+        }
+      }
+    }
+  }
+}

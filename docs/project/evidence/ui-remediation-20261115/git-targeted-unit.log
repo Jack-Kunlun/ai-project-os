@@ -1,0 +1,27 @@
+✔ 管理员 MCP 页面由服务器守住权限并挂载审核工作台 (4.743291ms)
+✔ MCP 审核工作台只消费净化候选 API，不暴露连接材料或动作入口 (1.025666ms)
+✔ MCP 审核工作台的禁用按钮保持可读对比度 (1.105583ms)
+✔ project pages use persistent navigation and keep management and materials separate (7.047334ms)
+✔ platform provider form keeps GLM embedding-only defaults optional (0.892ms)
+✔ project memory uses all-source consent batches and fixed operation footers (1.439375ms)
+✔ project material and repository pages return to their immediate parent (0.869292ms)
+✔ AI workbench spacing avoids duplicate question entry and project overview keeps AI usage visible (1.101083ms)
+✔ project source lists stay compact while detail and notification opens keep server boundaries (1.204625ms)
+✔ local recovery drill is isolated, real-dump based, and cleans only exact resources (15.118083ms)
+✔ recovery drill evidence never accepts a host-provided Runbook URL (0.977ms)
+✔ system operations client presents only sanitized API failures (0.62825ms)
+✔ admin backup card requires production recovery evidence before showing ready (0.473ms)
+✔ credential recovery check is bounded, read-only, and never emits secret material (0.5795ms)
+✔ recovery drill uses only the heartbeat-only worker in its isolated target (0.496792ms)
+✔ empty project plans are explicit and never reported as healthy (0.377292ms)
+✔ notification history supports all/unread/system filters and validated cursors (3.727125ms)
+✔ notification return context restores the fetched page cursor for an appended record (0.075208ms)
+✔ Dashboard, deep links, return context and mobile admin entry are bounded contracts (3.330792ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 434.601459

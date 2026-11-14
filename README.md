@@ -179,3 +179,19 @@ pnpm dev
 - **非商业使用**：可按许可证使用软件。该许可不授予修改、制作衍生作品或分发软件的权利；如需这些权利，须另行取得书面授权。
 - **商业使用**：须事先取得单独书面授权。联系邮箱：[1837115857@qq.com](mailto:1837115857@qq.com)。
 - **其他材料**：第三方组件适用其各自许可；文档等其他材料未另行授权。
+
+## 项目研发与进度
+
+项目管理资料与源码一起保存在本仓库：
+
+- [项目总览与进度](docs/project/README.md)
+- [已有能力与完成记录](docs/project/DELIVERED.md)
+- [功能模块与交接边界](docs/project/MODULE-BOUNDARIES.md)
+- [复发问题与防复发记录](docs/project/LESSONS.md)
+- [任务与问题台账](docs/project/TASKS.md)、[执行日志](docs/project/ACTIVITY.md)与[需求变更](docs/project/CHANGES.md)
+- [完整执行流程](docs/project/WORKFLOW.md)与[阶段验收标准](docs/project/ACCEPTANCE.md)
+- [PRD 基线](docs/project/PRD.md)与[设计资料](docs/design/README.md)
+
+- [全系统样式整改与本地验收](docs/project/UI-REMEDIATION-20261115.md)（2026-11-15，C7；尚未发布）
+
+开发接续按 [AGENTS.md](AGENTS.md) 读取当前分支对应记录。

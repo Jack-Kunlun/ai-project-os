@@ -245,8 +245,8 @@ test("system operations client presents only sanitized API failures", async () =
   const client = await readFile("src/app/system/operations/system-operations-client.tsx", "utf8");
   assert.match(client, /safeResponseError/u);
   assert.doesNotMatch(client, /body\.error(?:\?\.)?message|function readError/u);
-  assert.match(client, /<dl className="min-w-0 bg-white px-5 py-4 sm:col-span-2"><dt[\s\S]*固定检查[\s\S]*<\/dt><dd[\s\S]*<\/dd><\/dl>/u);
-  assert.doesNotMatch(client, /<div className="min-w-0 bg-white px-5 py-4 sm:col-span-2"><dt/u);
+  assert.match(client, /<dl className="[^"]*"><dt[\s\S]*固定检查[\s\S]*<\/dt><dd[\s\S]*<\/dd><\/dl>/u);
+  assert.doesNotMatch(client, /<div className="[^"]*"><dt/u);
 });
 
 test("admin backup card requires production recovery evidence before showing ready", async () => {

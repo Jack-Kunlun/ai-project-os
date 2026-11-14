@@ -5,6 +5,7 @@ import { deleteArchivedProject, updateProjectLifecycle } from "@/lib/project-lif
 import { seedBrowserPersonalUser, type BrowserPersonalUser } from "./support/browser-fixtures";
 import { signInR02Admin, signInR02PersonalUser, signOutR02User } from "./support/r02-admin-navigation";
 import type { WorldPayload } from "@/app/projects/[projectId]/world/project-world-client";
+import { expectSemanticStyles } from "./support/ui-style-contract";
 
 test.setTimeout(120_000);
 
@@ -159,6 +160,8 @@ test("select all project sources, review the complete scope, and keep confirmati
     await page.getByRole("button", { name: "更新语义索引", exact: true }).click();
     const maintenance = page.getByRole("dialog", { name: "维护项目语义索引", exact: true });
     await expect(maintenance.getByRole("alert")).toContainText("MEMORY_INDEX_TOO_LARGE");
+    await expect(maintenance.getByRole("alert")).toHaveClass(/app-feedback-warning/u);
+    await expectSemanticStyles(maintenance, "index limit warning");
     await expect(maintenance.getByRole("alert")).toContainText("5,000 个片段或 24 MiB");
     await expect(maintenance.getByRole("button", { name: "读取本次外发摘要", exact: true })).toBeDisabled();
     expect(executed).toHaveLength(0);

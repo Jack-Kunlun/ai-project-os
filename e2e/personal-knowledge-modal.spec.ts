@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 import { signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
+import { expectDialogStyleContract } from "./support/ui-style-contract";
+import { settleVisualState } from "./support/settle-visual-state";
 
 async function expectKnowledgeDialogsClosed(page: Page): Promise<void> {
   const dialogs = page.locator('dialog[aria-label="个人知识详情"], dialog[aria-labelledby="knowledge-modal-title"]');
@@ -10,7 +12,7 @@ async function expectKnowledgeDialogsClosed(page: Page): Promise<void> {
   await expect(dialogs.nth(1)).toBeHidden();
 }
 
-test("knowledge modals protect drafts, show small-screen validation and persist saved versions", async ({ page }) => {
+test("knowledge modals protect drafts, show small-screen validation and persist saved versions", async ({ page }, testInfo) => {
   const pageErrors: string[] = [];
   page.on("pageerror", error => pageErrors.push(error.message));
   await signInR02Admin(page);
@@ -27,6 +29,8 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   const modal = page.getByRole("dialog", { name: "新建知识", exact: true });
   const modalElement = page.locator('dialog[aria-labelledby="knowledge-modal-title"]');
   await expect(modal).toBeVisible();
+  await settleVisualState(page);
+  await expectDialogStyleContract(modal, "knowledge create desktop");
   const title = modal.getByRole("textbox", { name: "标题", exact: true });
   await title.fill("未保存的验收草稿");
   await page.keyboard.press("Escape");
@@ -48,8 +52,11 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await modal.getByRole("checkbox", { name: /作为个人通用记忆/u }).check();
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 844 });
+    await settleVisualState(page);
+    await expectDialogStyleContract(modal, `knowledge validation ${width}`);
     const error = modal.getByRole("alert");
     await expect(error).toContainText("2,000 字符");
+    await expect(error).toHaveCSS("font-size", "12px");
     const measurements = await Promise.all([
       error.boundingBox(), modal.getByRole("button", { name: "创建知识", exact: true }).boundingBox(),
       modal.getByRole("button", { name: "取消", exact: true }).boundingBox(),
@@ -63,6 +70,7 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
     expect(errorBox!.y + errorBox!.height).toBeLessThanOrEqual(viewport.height);
     expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(viewport.height);
     expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.width);
+    await page.screenshot({ path: testInfo.outputPath(`knowledge-validation-${width}.png`), animations: "disabled" });
   }
   let creates = 0;
   page.on("request", request => {
@@ -81,6 +89,8 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   await page.getByRole("button").filter({ has: page.getByText(savedTitle, { exact: true }) }).click();
   const detail = page.getByRole("dialog", { name: "个人知识详情", exact: true });
   await expect(detail.getByRole("heading", { name: savedTitle, exact: true })).toBeVisible();
+  await settleVisualState(page);
+  await expectDialogStyleContract(detail, "knowledge detail");
   const providerResponse = await page.request.get("/api/me/ai-providers");
   expect(providerResponse.status()).toBe(200);
   expect(await providerResponse.json()).toHaveProperty("providers");
@@ -102,7 +112,10 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
   await detail.getByRole("button", { name: "关闭窗口", exact: true }).click();
   await page.getByRole("button", { name: "导入文件", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "导入知识", exact: true })).toBeVisible();
+  const importDialog = page.getByRole("dialog", { name: "导入知识", exact: true });
+  await expect(importDialog).toBeVisible();
+  await settleVisualState(page);
+  await expectDialogStyleContract(importDialog, "knowledge import");
   await page.keyboard.press("Escape");
   await expectKnowledgeDialogsClosed(page);
   expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
@@ -118,6 +131,9 @@ test("knowledge modals protect drafts, show small-screen validation and persist 
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.getByRole("button", { name: "New knowledge item", exact: true }).first().click();
     const englishEditor = page.getByRole("dialog", { name: "New knowledge item", exact: true });
+    await settleVisualState(page);
+    await expectDialogStyleContract(englishEditor, `knowledge editor dark ${width}`);
+    await page.screenshot({ path: `test-results/ui-knowledge-remediation/editor-dark-${width}.png` });
     const [cancelBox, submitBox] = await Promise.all([
       englishEditor.getByRole("button", { name: "Cancel", exact: true }).boundingBox(),
       englishEditor.getByRole("button", { name: "Create knowledge", exact: true }).boundingBox(),

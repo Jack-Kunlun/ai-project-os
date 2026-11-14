@@ -5,6 +5,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { adminNavigationItems } from "../src/lib/admin-navigation";
 import { englishUiMessages } from "../src/lib/ui-dictionary-source";
 import { R02_ADMIN_ROUTES, expectR02NoAccessibilityViolations, expectR02NoHorizontalOverflow, signInR02Admin } from "./support/r02-admin-navigation";
+import { expectDialogStyleContract } from "./support/ui-style-contract";
+import { settleVisualState } from "./support/settle-visual-state";
 
 const cases = [
   { language: "zh-CN", theme: "light" }, { language: "zh-CN", theme: "dark" },
@@ -127,6 +129,8 @@ for (const appearance of cases) {
         await page.getByRole("button", { name: tr("新增供应商"), exact: true }).click();
         const editor = page.getByRole("dialog", { name: tr("新增短信供应商"), exact: true });
         await expect(editor).toBeVisible();
+        await settleVisualState(page);
+        await expectDialogStyleContract(editor, `SMS editor ${surface}`);
         await expectFieldInsets(page, `SMS editor ${surface}`);
         await expectR02NoAccessibilityViolations(page, `SMS editor ${surface}`);
         await page.screenshot({ path: `test-results/admin-appearance/${appearance.language}-${appearance.theme}-sms-editor.png` });
@@ -254,6 +258,9 @@ test("SMS captcha lazy-loads, retries and closes without sending a message (isol
   await expect(page.getByText("尚未配置短信供应商", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "新增供应商", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "新增短信供应商", exact: true });
+  await expect(editor).toBeVisible();
+  await settleVisualState(page);
+  await expectDialogStyleContract(editor, "SMS editor narrow captcha flow");
   await editor.getByLabel("AccessKey ID", { exact: true }).fill("isolated-ui-key");
   await editor.getByLabel("AccessKey Secret", { exact: true }).fill("isolated-ui-secret");
   await editor.getByLabel("短信签名", { exact: true }).fill("UI preview");

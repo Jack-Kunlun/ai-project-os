@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { expectDialogStyleContract } from "./support/ui-style-contract";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { englishUiMessages } from "@/lib/ui-dictionary-source";
 import type { GitCatalogEntry } from "../src/app/profile/connections/git/git-connections-state";
@@ -270,6 +271,7 @@ async function assertOperationDialog(
   mode: AppearanceMode,
 ): Promise<void> {
   const body = await expectUnframedFullWidthRoot(dialog, "[data-operation-content]", rootLabel);
+  await expectDialogStyleContract(dialog, rootLabel);
   if (mode.width === 1440 && await body.locator(":scope > form").count() > 0) {
     await expect(dialog).toHaveCSS("max-width", "720px");
     expect(await dialog.evaluate(element => element.getBoundingClientRect().width), `${rootLabel} must use the compact form width`).toBeLessThanOrEqual(721);
@@ -298,6 +300,7 @@ async function assertConnectionDialog(
   mode: AppearanceMode,
 ): Promise<void> {
   const body = await expectUnframedFullWidthRoot(dialog, "[data-dialog-body]", rootLabel);
+  await expectDialogStyleContract(dialog, rootLabel);
   const footer = dialog.locator("[data-dialog-footer]");
   await expect(body).toHaveCSS("overflow-y", "auto");
   await expect(footer).toBeVisible();

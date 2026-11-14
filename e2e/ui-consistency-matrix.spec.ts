@@ -1,4 +1,6 @@
 import { expectIconLabelAlignment, expectIconOnlyAlignment } from "./support/icon-label-alignment";
+import { expectUiStyleContract } from "./support/ui-style-contract";
+import { settleVisualState } from "./support/settle-visual-state";
 import prototypeRoutes from "./support/prototype-route-catalog.json";
 import { readdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
@@ -292,7 +294,7 @@ async function assertUserShellInteractions(page: Page): Promise<void> {
 }
 
 test("all page routes remain consistent across Chinese light and English dark desktop/mobile", async ({ browser }, testInfo) => {
-  test.setTimeout(720_000);
+  test.setTimeout(900_000);
   const routes = discoverAppPageRoutes();
   expect(routes, "route discovery must cover every current src/app/**/page.tsx page").toHaveLength(77);
   for (const route of routes) expect(prototypeRoutes[route.path as keyof typeof prototypeRoutes], `${route.path} needs an explicit prototype view or compatibility destination`).toBeDefined();
@@ -363,10 +365,11 @@ test("all page routes remain consistent across Chinese light and English dark de
           const response = await page.goto(path, { waitUntil: "domcontentloaded" });
           status = response?.status() ?? null;
           await expect(page.locator("body"), `${path} must render a body for ${route.role}/${mode.id}`).toBeVisible();
-          await page.waitForTimeout(80);
+          await page.waitForLoadState("networkidle");
+          await settleVisualState(page);
           const finalUrl = new URL(page.url());
           finalPath = `${finalUrl.pathname}${finalUrl.search}`;
-          gatedNotFound = route.path === "/projects/[projectId]/mcp-actions" || route.path === "/projects/[projectId]/mcp-export";
+          gatedNotFound = (route.path === "/projects/[projectId]/mcp-actions" || route.path === "/projects/[projectId]/mcp-export") && status === 404;
 
           if (!(gatedNotFound && status === 404)) {
             expect(status, `${path} (${route.source}) must render or redirect successfully in ${mode.id}`).toBeLessThan(400);
@@ -376,6 +379,7 @@ test("all page routes remain consistent across Chinese light and English dark de
           await expect(page.locator("html")).toHaveAttribute("data-language", mode.language);
           await expect(page.locator("html")).toHaveAttribute("data-theme", mode.theme);
           await expectR02NoHorizontalOverflow(page, `${path}@${mode.id}`);
+          await expectUiStyleContract(page, `${path}@${mode.id}`);
 
           const iconMetrics = await readIconMetrics(page);
           iconCount = iconMetrics.length;
@@ -414,7 +418,7 @@ test("all page routes remain consistent across Chinese light and English dark de
           if (mode.id === "en-dark-390" && path === "/admin") {
             await testInfo.attach("ui-matrix-admin-en-dark-390.png", { body: await page.screenshot(), contentType: "image/png" });
           }
-          if (!gatedNotFound) await page.screenshot({path:testInfo.outputPath(`pages/${mode.id}/${route.path.replaceAll(/[^a-zA-Z0-9_-]/g,"_") || "index"}.png`)});
+          if (!(gatedNotFound && status === 404)) await page.screenshot({path:testInfo.outputPath(`pages/${mode.id}/${route.path.replaceAll(/[^a-zA-Z0-9_-]/g,"_") || "index"}.png`)});
           parentLinksAttempted = true;
           await exerciseParentLinks({
             page,

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
+import { expectSemanticStyles } from "./support/ui-style-contract";
 import {
   expectR02NoAccessibilityViolations,
   expectR02NoHorizontalOverflow,
@@ -152,6 +153,8 @@ test("personal knowledge hands off explicitly into project materials and guided 
   await projectPicker.selectOption(projectId);
   await handoff.getByRole("button", { name: "复制正文", exact: true }).click();
   await expect(handoff.getByRole("alert")).toContainText("自动复制失败");
+  await expect(handoff.getByRole("alert")).toHaveClass(/app-feedback-warning/u);
+  await expectSemanticStyles(handoff, "manual copy warning");
   await expect(handoff.getByLabel("待手动复制的个人知识正文", { exact: true })).toHaveValue(body);
   await expect(handoff.getByRole("status").filter({ hasText: "正文已复制" })).toHaveCount(0);
   const handoffLink = handoff.getByRole("link", { name: "前往项目并粘贴", exact: true });
@@ -334,7 +337,8 @@ test("personal knowledge hands off explicitly into project materials and guided 
         themeTextColor: getComputedStyle(scopeText).color,
       };
     });
-    expect(geometry.bodyPadding, appearance.title).toEqual(["24px", "24px", "24px", "24px"]);
+    const horizontalInset = appearance.width <= 700 ? "20px" : "24px";
+    expect(geometry.bodyPadding, appearance.title).toEqual(["24px", horizontalInset, "24px", horizontalInset]);
     expect(geometry.panelPadding, appearance.title).toEqual(["0px", "0px", "0px", "0px"]);
     expect(geometry.panelMarginTop, appearance.title).toBe("0px");
     expect(geometry.panelBorderWidths, appearance.title).toEqual(["0px", "0px", "0px", "0px"]);

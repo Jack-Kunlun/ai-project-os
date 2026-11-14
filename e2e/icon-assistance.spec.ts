@@ -64,7 +64,7 @@ test("operation assistance stays in the secondary footer and icons align with re
     const workItemFooter=dialog.locator("[data-operation-footer]");
     const workItemAction=workItemFooter.getByRole("button",{name:en?"Add to project plan":"加入项目计划",exact:true});
     await expect(workItemAction).toHaveCount(1);
-    await expect(workItemAction).toHaveClass(/app-action-button/u);
+    await expect(workItemAction).toHaveClass(/\bapp-button-primary\b/u);
     await expect(workItemFooter.getByRole("button",{name:en?"Cancel":"取消",exact:true})).toHaveCount(1);
     await expectActionButtonGeometry(workItemAction,true);
     const title=dialog.getByRole("textbox",{name:en?"Work item name":"工作项名称",exact:true});
@@ -240,7 +240,7 @@ test("basic project and team invitation forms hide Ask and use shared action dim
   await newProject.click();
   const projectDialog=page.getByRole("dialog",{name:"新建项目",exact:true});
   await expect(page.locator(".inquiry-launcher:visible")).toHaveCount(0);
-  const projectActions=projectDialog.locator("[data-dialog-footer] .app-action-button");
+  const projectActions=projectDialog.locator("[data-dialog-footer] :is(.app-button-primary, .app-button-secondary)");
   await expectActionRowGeometry(projectActions);
   await page.keyboard.press("Alt+j");
   await expect(page.locator("#global-inquiry-panel[open]")).toHaveCount(0);

@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 import { expectR02NoHorizontalOverflow, signInR02Admin, signInR02PersonalUser, signOutR02User } from "./support/r02-admin-navigation";
+import { expectUiStyleContract } from "./support/ui-style-contract";
+import { settleVisualState } from "./support/settle-visual-state";
 
-test("credits and invitation compatibility screens localize failures without echoing API prose", async ({ page }) => {
+test("credits and invitation compatibility screens localize failures without echoing API prose", async ({ page }, testInfo) => {
   await signInR02Admin(page);
   const user = await seedBrowserPersonalUser(`feedback-${randomUUID().slice(0, 8)}`, "Feedback2026Password!");
   await signOutR02User(page);
@@ -22,10 +24,16 @@ test("credits and invitation compatibility screens localize failures without ech
     await expect.poll(() => page.locator("main").getByRole("alert").first().innerText()).not.toMatch(/\p{Script=Han}|private-value/u);
     await expectR02NoHorizontalOverflow(page, `credits error en-dark-${width}`);
     await page.goto(`/accept-invitation?token=${"a".repeat(40)}`);
+    await settleVisualState(page);
+    await expectUiStyleContract(page, `invitation ready en-dark-${width}`);
+    await page.screenshot({ path: testInfo.outputPath(`invitation-ready-${width}.png`) });
     await page.getByRole("button", { name: "Accept invitation", exact: true }).click();
     await expect(page.locator("main").getByRole("alert")).toBeVisible();
     await expect.poll(() => page.locator("main").getByRole("alert").innerText()).not.toMatch(/\p{Script=Han}|private-value/u);
     await expectR02NoHorizontalOverflow(page, `invitation error en-dark-${width}`);
+    await settleVisualState(page);
+    await expectUiStyleContract(page, `invitation error en-dark-${width}`);
+    await page.screenshot({ path: testInfo.outputPath(`invitation-error-${width}.png`) });
   }
   await page.unrouteAll({ behavior: "wait" });
 });

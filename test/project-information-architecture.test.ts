@@ -115,7 +115,9 @@ test("project memory uses all-source consent batches and fixed operation footers
   assert.match(memory, /for \(const candidate of batch\)/u);
 
   assert.match(operationPanel, /data-operation-footer/u);
-  assert.match(operationPanel, /min-h-\[72px\]/u);
+  assert.match(operationPanel, /data-operation-footer[^>]+app-dialog-footer/u);
+  const dialogStyles = await readFile("src/app/globals.css", "utf8");
+  assert.match(dialogStyles, /\.app-dialog-footer\s*\{[^}]*min-height:\s*64px/u);
   assert.match(operationPanel, /useOperationPanelFooterTarget/u);
   assert.match(importFlow, /createPortal\(footerActions, footerTarget\)/u);
   assert.match(importFlow, /const preparationKey = `\$\{projectId\}:\$\{sourceKey\}:\$\{retry\}`/u);

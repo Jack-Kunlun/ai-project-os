@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectDialogStyleContract } from "./support/ui-style-contract";
 import { expectR02NoHorizontalOverflow, signInR02Admin } from "./support/r02-admin-navigation";
 
 const fixtureId = "00000000-0000-4000-8000-0000000000a1";
@@ -58,6 +59,44 @@ const platformOperations = {
     candidates: [{ ...candidate, modelId: operation === "embedding" ? "text-embedding-3-small" : "gpt-4.1-mini", embeddingDimensions: operation === "embedding" ? 1536 : null, maxOutputTokens: operation === "embedding" ? null : 2048 }],
   }])),
 };
+
+test("destructive confirmation uses the same modal geometry inside the admin provider drawer", async ({ page }, testInfo) => {
+  await signInR02Admin(page);
+  await page.route("**/api/settings/providers", (route) => route.fulfill({ json: {
+    providers: [{ ...provider, status: "disabled", _count: { platformDefaultAiRoutes: 0 } }], catalog,
+  } }));
+  await page.route("**/api/admin/platform-provider-probe/budget", (route) => route.fulfill({ json: { budget: null } }));
+  await page.route("**/api/settings/platform-ai-operations", (route) => route.fulfill({ json: { operations, candidates: Object.fromEntries(operations.map((operation) => [operation, { readiness: "missing", active: null, candidates: [] }])) } }));
+  const origin = new URL(page.url()).origin;
+  for (const mode of [{ theme: "light", width: 1440 }, { theme: "dark", width: 390 }]) {
+    await page.context().addCookies([{ name: "aipos-theme", value: mode.theme, url: origin }]);
+    await page.setViewportSize({ width: mode.width, height: 844 });
+    await page.goto("/admin/models");
+    await page.getByRole("button", { name: "管理连接", exact: true }).click();
+    await page.getByRole("button", { name: "永久删除", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: `永久删除“${fixtureName}”？`, exact: true });
+    await expect(dialog).toBeVisible();
+    await expectDialogStyleContract(dialog, `admin confirmation ${mode.theme}`);
+    if (mode.theme === "light") {
+      const original = await dialog.getAttribute("style");
+      try {
+        await dialog.evaluate((element) => { element.style.borderRadius = "16px"; });
+        await expect(expectDialogStyleContract(dialog, "legacy confirmation negative control")).rejects.toThrow();
+      } finally {
+        await dialog.evaluate((element, value) => value === null ? element.removeAttribute("style") : element.setAttribute("style", value), original);
+      }
+    }
+    const confirm = dialog.getByRole("button", { name: "确认永久删除", exact: true });
+    await expect(confirm).toBeDisabled();
+    await dialog.getByRole("textbox").fill(fixtureName);
+    await expect(confirm).toBeEnabled();
+    await expectR02NoHorizontalOverflow(page, `admin confirmation ${mode.width}`);
+    await testInfo.attach(`admin-confirm-${mode.theme}-${mode.width}.png`, { body: await page.screenshot(), contentType: "image/png" });
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole("button", { name: "永久删除", exact: true })).toBeFocused();
+  }
+});
 
 test("new provider tests display safe failure reasons and clear stale results", async ({ page }) => {
   await signInR02Admin(page);

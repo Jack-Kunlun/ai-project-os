@@ -49,9 +49,10 @@ test("MCP 审核工作台的禁用按钮保持可读对比度", async () => {
   const disabledClassNames = [...workbench.matchAll(/className="([^"]*disabled:[^"]*)"/gu)].map((match) => match[1]);
   assert.equal(disabledClassNames.length, 5);
   for (const className of disabledClassNames) {
-    assert.match(className, /disabled:border-slate-400/u);
-    assert.match(className, /disabled:bg-slate-200/u);
-    assert.match(className, /disabled:text-slate-700/u);
+    assert.match(className, /app-button-readable-disabled/u);
   }
   assert.doesNotMatch(workbench, /disabled:opacity-/u);
+  const styles = await readFile("src/app/globals.css", "utf8");
+  assert.match(styles, /\.app-button-readable-disabled[^}]+opacity:\s*1/u);
+  assert.match(styles, /\.app-button-readable-disabled[^}]+color:\s*var\(--app-muted\)/u);
 });

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expectDialogStyleContract } from "./support/ui-style-contract";
 import { englishUiMessages } from "../src/lib/ui-dictionary-source";
 import { expectR02NoHorizontalOverflow, signInR02Admin } from "./support/r02-admin-navigation";
 
@@ -84,6 +85,7 @@ async function closeOperation(trigger: Locator, dialog: Locator): Promise<void> 
 }
 
 async function expectModalGeometry(dialog: Locator, viewportWidth: number): Promise<void> {
+  await expectDialogStyleContract(dialog, "admin overlay");
   const geometry = await dialog.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const heading = element.querySelector<HTMLElement>("[data-operation-header] h2");
@@ -161,6 +163,7 @@ async function expectSingleLineFooterAction(dialog: Locator, form: Locator, expe
   expect(formId).toBeTruthy();
 
   const action = dialog.locator("[data-operation-footer] [data-dialog-actions]").getByRole("button", { name: expectedLabel, exact: true });
+  await expect(action, "the portaled primary action must explicitly select the shared visual contract").toHaveClass(/\bapp-button-primary\b/u);
   await expect(action).toHaveAttribute("form", formId!);
   const geometry = await action.evaluate((button) => {
     const footer = button.closest<HTMLElement>("[data-operation-footer]");

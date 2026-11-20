@@ -1,0 +1,186 @@
+{
+  "schema": 1,
+  "date": "2026-11-20",
+  "timezone": "Asia/Shanghai",
+  "tasks": [
+    "T-011",
+    "T-012",
+    "T-036"
+  ],
+  "version": "1.2.26",
+  "tag": "v1.2.26",
+  "tagType": "annotated",
+  "revision": "b3d30d1539066fcc36193d7ef9aae66d7fcd9e58",
+  "sourceRevision": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+  "sourceVersion": "1.2.25",
+  "ci": {
+    "runId": 44686520602,
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/44686520602",
+    "conclusion": "success",
+    "risk": "high",
+    "planFingerprint": "338f40e5e43acc4935b378b0976b332952c2d9eb363568da64c5d5ce58770866",
+    "unit": {
+      "schemaVersion": 1,
+      "kind": "unit",
+      "base": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+      "target": "b3d30d1539066fcc36193d7ef9aae66d7fcd9e58",
+      "releaseEligible": true,
+      "planFingerprint": "338f40e5e43acc4935b378b0976b332952c2d9eb363568da64c5d5ce58770866",
+      "mode": "full",
+      "status": "passed",
+      "fingerprint": "74b5c6dbeb0d9751d8f994813355178c75b8a55a9162021ee9a6600e2b7e9959"
+    },
+    "unitCounts": {
+      "tests": 1753,
+      "passed": 1579,
+      "skipped": 174,
+      "failed": 0
+    },
+    "browser": {
+      "schemaVersion": 1,
+      "kind": "browser",
+      "base": "992126540130e2f4591a32ce2ad7e4e86c5ea415",
+      "target": "b3d30d1539066fcc36193d7ef9aae66d7fcd9e58",
+      "releaseEligible": true,
+      "planFingerprint": "338f40e5e43acc4935b378b0976b332952c2d9eb363568da64c5d5ce58770866",
+      "mode": "full",
+      "status": "passed",
+      "testCount": 91,
+      "executedCount": 85,
+      "skippedCount": 6,
+      "fingerprint": "b2d4c2895ef4cefb18054da3dcfd08270535527feec4438de625b0874fbccde0"
+    },
+    "browserCounts": {
+      "tests": 91,
+      "passed": 85,
+      "skipped": 6,
+      "failed": 0,
+      "flaky": 0
+    },
+    "postgresGates": {
+      "passed": 91,
+      "total": 91
+    },
+    "phoneAuth": "passed",
+    "oid10": "passed",
+    "staticChecks": "passed",
+    "productionBuild": "passed",
+    "performanceBudget": "passed",
+    "sameImageCandidate": {
+      "health": "ok",
+      "restartPersistence": "ok",
+      "businessDataPersistence": "ok",
+      "workerRestart": "ok",
+      "migrations": 150,
+      "cleanup": "verified"
+    },
+    "imageRoundtrip": "passed"
+  },
+  "review": {
+    "agent": "release_gate_review",
+    "scope": "MCP isolated browser configuration, fixture and release identity; follow-up release-note header fix",
+    "conclusion": "no blocker"
+  },
+  "release": {
+    "runId": 44690973958,
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/44690973958",
+    "conclusion": "success",
+    "releaseUrl": "https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.26",
+    "publishedAt": "2026-11-20T07:01:14Z",
+    "isDraft": false,
+    "isPrerelease": false,
+    "receipt": "STABLE_DEPLOY_OK tag=v1.2.26 revision=b3d30d1539066fcc36193d7ef9aae66d7fcd9e58 migration_count=150 backup=not-required restore=not-required",
+    "receiptSha256": "e2c04bcce66df1b47acb64ac7c537e7a58f61c64bf9f99125ab72ed9b4586f12",
+    "receiptArtifactId": 14608593467,
+    "receiptArtifactZipSha256": "3cda67dfdb5c430c3b8118d2fa55daaf07340ad5632ca617f77b9c9dc0f20fc9",
+    "images": {
+      "schema": 1,
+      "revision": "b3d30d1539066fcc36193d7ef9aae66d7fcd9e58",
+      "version": "1.2.26",
+      "runId": 44686520602,
+      "images": {
+        "app": {
+          "ref": "ghcr.io/jack-kunlun/ai-project-os-app@sha256:d7c74dd09212ee78abe6e84c63f8f01d60f80398889cae3ca3aa410d4c61d6a1",
+          "id": "sha256:f499de9e083570c4ba06fde519119f4d0e7d482a4b44d7b390fd957986369a4c"
+        },
+        "worker": {
+          "ref": "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:1730f7fd49cb8b7ab1e16783b366a8bf819ec31668d1c4490195bf5ebcb181df",
+          "id": "sha256:bca9565ed70226c58083095ad99222ca710c65c4ef2e0eacc14a4fe7a05ff376"
+        },
+        "migrate": {
+          "ref": "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:7a3b8322cf8756f1861348dde69434d9878ff8742ee8967ef2676089216ee595",
+          "id": "sha256:e5f7570ca63cd4f7d40145fdc673cad1c36dec258810c80ad1d4034b05e75c29"
+        }
+      }
+    },
+    "migrationCount": 150,
+    "migrationDelta": "none",
+    "backup": "not-required",
+    "restore": "not-required"
+  },
+  "publicHealth": {
+    "status": "ok",
+    "version": "1.2.26",
+    "database": "up",
+    "worker": {
+      "status": "up",
+      "heartbeatAgeMs": 5623,
+      "consecutiveFailures": 0
+    },
+    "latencyMs": 4,
+    "timestamp": "2026-11-20T07:02:09.895Z"
+  },
+  "maintenance": {
+    "imageCleanup": {
+      "status": "OK",
+      "removedCount": 3,
+      "protectionVerified": true,
+      "retainedCurrentAndPrevious": true,
+      "unconfirmedAttemptCount": 0
+    },
+    "cacheBudget": {
+      "status": "met",
+      "targetMet": true,
+      "targetBytes": 2000000000,
+      "protectedBytes": 0,
+      "reclaimableBytes": 0,
+      "cleanupAttempted": false,
+      "measuredAt": "2026-11-20T07:00:49.045Z",
+      "protectionVerified": true
+    }
+  },
+  "priorFailures": [
+    {
+      "runId": 43652412458,
+      "reason": "isolated MCP feature flags missing",
+      "fixedBy": "4c09773"
+    },
+    {
+      "runId": 44685662096,
+      "reason": "STABLE_RELEASE_NOTES_INVALID",
+      "fixedBy": "b3d30d1"
+    },
+    {
+      "action": "initial workflow dispatch",
+      "reason": "work account lacked repository admin rights",
+      "resolution": "command-scoped authenticated repository owner; global active account unchanged"
+    }
+  ],
+  "boundaries": {
+    "realExternalServicesTested": false,
+    "realExternalServices": [
+      "model providers",
+      "Git providers",
+      "OIDC",
+      "SMS",
+      "third-party MCP"
+    ],
+    "visualEvidence": "C7 actual screenshot review reused after source hash comparison; same-image CI browser checks repeated for final candidate",
+    "unrelatedOpenTasks": [
+      "T-009 wider cross-module scope",
+      "T-010 wider cross-module scope",
+      "T-017 documentation backlog",
+      "T-026 wider testing scope"
+    ]
+  }
+}

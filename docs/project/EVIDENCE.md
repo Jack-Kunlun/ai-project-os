@@ -131,6 +131,10 @@ E-023 接收补充：实际推送与 ls-remote 核对均为 8d2f3b86d3cff5f5d7ea
 
 ## E-024 / v1.2.26 发布候选与线上回执
 
-C-017 / T-011、T-012、T-036，2026-11-20。发布前公开健康为 v1.2.25，数据库及 Worker up；旧候选 CI [43652412458](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/43652412458) 失败，原因及修复范围见 T-036 / A-041。后续精确候选、正式 CI、审查和生产回执按实际追加，当前不代表新版本已上线。
+C-017 / T-011、T-012、T-036，2026-11-20。发布前公开健康为 v1.2.25，数据库及 Worker up；旧候选 CI [43652412458](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/43652412458) 失败，原因及修复范围见 T-036 / A-041。以下保留准备期补验，并追加最终正式 CI 与生产结果。
 
 本地补验：`pnpm exec tsx --test test/browser-e2e-contract.test.ts test/release-version-identity.test.ts test/production-stable-workflow.test.ts test/production-release-tooling-contract.test.ts` 共 36 项通过、0 跳过；受影响 4 个 TS 文件 ESLint 通过。用旧/新 runner 的实际配置调用生产模式 gate 函数做负对照：旧两项关闭、新两项开启。C7 指纹复核 1050 个生产文件仅 package.json、src/lib/version.ts 版本变化；49 个浏览器输入仅 ui-style-states 唯一 slug 变化，页面实现未漂移。生产源 annotated tag v1.2.25 指向 992126540130e2f4591a32ce2ad7e4e86c5ea415，迁移目录累计差异为空。正式全量浏览器留给同一精确候选 CI，不把源码合同当真实页面通过。
+
+最终接收：[发布证据 JSON](evidence/release-20261120/release.json)绑定 annotated v1.2.26 / b3d30d1539066fcc36193d7ef9aae66d7fcd9e58、成功的 [CI 44686520602](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/44686520602) 和 [发布 44690973958](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/44690973958)。独立 review 无阻断项；源码 1579 通过/174 配置跳过，PostgreSQL 91/91 门禁通过，实际浏览器 85 通过/6 配置跳过/0 失败/0 flaky，同镜像重启与业务持久化检查通过。服务端预检识别说明格式遗漏后的定向 4 项复验通过，原失败详见 A-043。
+
+生产 STABLE_DEPLOY_OK 回执、实际镜像摘要与 CI 清单完全一致；150 条账本、无新增迁移，backup/restore=not-required。2026-11-20 15:02:09（Asia/Shanghai）公网 v1.2.26 / 应用、数据库及 Worker 健康 / 连续失败 0。旧镜像保护与清理成功，缓存预算 met。正式 [GitHub Release](https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.26) 已发布，非草稿/预发布。真实外部模型、Git、OIDC、短信和第三方 MCP 未联调，不将隔离 CI 当其现场证明。

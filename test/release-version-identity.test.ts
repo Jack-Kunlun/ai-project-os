@@ -19,5 +19,6 @@ test("application package, public health and OCI image use the same release vers
   } else {
     assert.equal(labels[0]?.[1], packageVersion);
   }
-  assert.ok(releaseNotes.startsWith(`# v${packageVersion} `));
+  // Match the server-side validate_target_tree release-note header contract.
+  assert.ok(releaseNotes.startsWith(`# v${packageVersion} — `));
 });

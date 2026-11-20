@@ -348,6 +348,12 @@ async function main() {
       AI_PROJECT_OS_SECURE_COOKIES: "false",
       AI_PROJECT_OS_PUBLIC_ORIGIN: baseUrl,
       LOCAL_REGISTRATION_ENABLED: "true",
+      // Cover conditional UI in the disposable app; production flags stay opt-in.
+      AI_PROJECT_OS_MCP_ACTIONS_ENABLED: "true",
+      AI_PROJECT_OS_MCP_EXPORT_ENABLED: "true",
+      AI_PROJECT_OS_MCP_EXPORT_OAUTH_ENABLED: "true",
+      // Reserved origin only supplies OAuth metadata; this suite makes no OAuth exchange.
+      AI_PROJECT_OS_MCP_EXPORT_PUBLIC_ORIGIN: "https://mcp-export.example.test",
       HOSTNAME: "0.0.0.0",
       PORT: "3000",
     };

@@ -54,6 +54,13 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.doesNotMatch(appEnvironment, /\.\.\.process\.env|DATABASE_PRINCIPAL_ADMIN_URL|MIGRATOR_DATABASE_URL|DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
   assert.doesNotMatch(workerEnvironment, /\.\.\.process\.env|DATABASE_PRINCIPAL_ADMIN_URL|MIGRATOR_DATABASE_URL|DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL|ENTITLEMENT_DATABASE_URL/u);
   assert.match(appEnvironment, /AI_PROJECT_OS_ASSET_DIR: "\/ci-secrets\/uploads"/u);
+  // Production-mode UI gates require all four values, including an HTTPS origin.
+  // Missing one must fail before the full-page suite can silently lose MCP coverage.
+  assert.match(appEnvironment, /AI_PROJECT_OS_MCP_ACTIONS_ENABLED: "true"/u);
+  assert.match(appEnvironment, /AI_PROJECT_OS_MCP_EXPORT_ENABLED: "true"/u);
+  assert.match(appEnvironment, /AI_PROJECT_OS_MCP_EXPORT_OAUTH_ENABLED: "true"/u);
+  assert.match(appEnvironment, /AI_PROJECT_OS_MCP_EXPORT_PUBLIC_ORIGIN: "https:\/\/mcp-export\.example\.test"/u);
+  assert.doesNotMatch(workerEnvironment, /AI_PROJECT_OS_MCP_(?:ACTIONS|EXPORT)/u);
   assert.match(workerEnvironment, /AI_PROJECT_OS_ASSET_DIR: "\/ci-secrets\/uploads"/u);
   assert.match(runner, /mkdir\(uploadsDirectory, \{ recursive: true, mode: 0o700 \}\)/u);
   assert.match(runner, /DROP DATABASE IF EXISTS/u);

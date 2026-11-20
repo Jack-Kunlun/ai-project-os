@@ -29,7 +29,7 @@ test("all application pages retain the new style during loading, failed reads an
     await signInR02PersonalUser(user, account);
     const response = await user.request.post("/api/projects", {
       headers: { origin: new URL(user.url()).origin },
-      data: { name: "UI acceptance long project name · 页面与异常状态统一检查", workspaceId: account.workspaceId },
+      data: { name: "UI acceptance long project name · 页面与异常状态统一检查", slug: `ui-states-${randomUUID()}`, workspaceId: account.workspaceId },
     });
     expect(response.status()).toBe(201);
     const project = (await response.json()).project as { id: string };

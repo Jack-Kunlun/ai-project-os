@@ -128,3 +128,9 @@ E-020 接收补充：7 文件安装哈希、两样例最终产物核对及项目
 C-016 / T-035，2026-11-15。[Git 交付记录](evidence/ui-remediation-20261115/git-handoff.json) 绑定 C7 指纹、实际实现/回归提交、4 个补验 unit 文件及 19 项通过结果；代码与浏览器检查复用 E-022 同输入证据。远端状态按实际推送后追加，不以本地 commit 代替 push，不表示正式 CI、版本发布或线上验证。
 
 E-023 接收补充：实际推送与 ls-remote 核对均为 8d2f3b86d3cff5f5d7ea6315c4cab36044289d30；前三个提交已交付，CI 当时 queued。文档收尾提交可从 A-040 的 Git 历史确定；未发布。
+
+## E-024 / v1.2.26 发布候选与线上回执
+
+C-017 / T-011、T-012、T-036，2026-11-20。发布前公开健康为 v1.2.25，数据库及 Worker up；旧候选 CI [43652412458](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/43652412458) 失败，原因及修复范围见 T-036 / A-041。后续精确候选、正式 CI、审查和生产回执按实际追加，当前不代表新版本已上线。
+
+本地补验：`pnpm exec tsx --test test/browser-e2e-contract.test.ts test/release-version-identity.test.ts test/production-stable-workflow.test.ts test/production-release-tooling-contract.test.ts` 共 36 项通过、0 跳过；受影响 4 个 TS 文件 ESLint 通过。用旧/新 runner 的实际配置调用生产模式 gate 函数做负对照：旧两项关闭、新两项开启。C7 指纹复核 1050 个生产文件仅 package.json、src/lib/version.ts 版本变化；49 个浏览器输入仅 ui-style-states 唯一 slug 变化，页面实现未漂移。生产源 annotated tag v1.2.25 指向 992126540130e2f4591a32ce2ad7e4e86c5ea415，迁移目录累计差异为空。正式全量浏览器留给同一精确候选 CI，不把源码合同当真实页面通过。

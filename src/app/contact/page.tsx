@@ -4,12 +4,15 @@ import Image from "next/image";
 import Link from "next/link";
 import { InfoSection, PublicInfoPage } from "@/components/public-info-page";
 import styles from "@/components/public-info-page.module.css";
+import { getPublicPageMetadata } from "@/lib/public-page-metadata";
 
-export const metadata: Metadata = { title: "联系作者 · AI Project OS" };
+export async function generateMetadata(): Promise<Metadata> {
+  return getPublicPageMetadata("联系作者", "Contact");
+}
 
 export default function ContactPage() {
   return (
-    <PublicInfoPage eyebrow="Contact" title="联系作者" description="使用反馈、问题建议，欢迎通过微信联系。">
+    <PublicInfoPage eyebrow="Contact" title="联系作者" documentTitle={{ chinese: "联系作者", english: "Contact" }} description="使用反馈、问题建议，欢迎通过微信联系。">
       <div className={styles.contactLayout}>
         <figure className={styles.qrFigure}>
           <Image

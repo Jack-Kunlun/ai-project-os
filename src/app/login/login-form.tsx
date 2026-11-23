@@ -181,7 +181,6 @@ export function LoginForm({
                       }}
                       autoComplete="tel-national"
                       minLength={11}
-                      maxLength={11}
                       required
                       pattern="1[3-9][0-9]{9}"
                       placeholder={t("输入 11 位手机号")}
@@ -212,7 +211,7 @@ export function LoginForm({
             <button type="submit" disabled={pending} className={styles.submitButton}>{pending ? t("登录中…") : t("登 录")}</button>
             </div>
 
-            <p className={styles.registerPrompt}>{t("还没有账号？")} <Link href="/register">{t("创建账号")}</Link></p>
+            <p className={styles.registerPrompt}>{t("还没有账号？")} <Link href={returnTo === "/dashboard" ? "/register" : `/register?returnTo=${encodeURIComponent(returnTo)}`}>{t("创建账号")}</Link></p>
 
             <div className={styles.alternativeHeading}><span />{t("其他登录方式")}<span /></div>
 

@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { z } from "zod";
 import { AppHeader } from "@/components/app-header";
 import { AccessControlError, assertProjectAccess } from "@/lib/access-control";
-import { requirePageSession } from "@/lib/auth";
+import { requirePageSessionWithReturnTo } from "@/lib/auth";
 import { getUploadPolicy } from "@/lib/project-assets/policy";
 import { APP_VERSION } from "@/lib/version";
 import pageStyles from "../support-pages.module.css";
@@ -33,7 +33,7 @@ const sections = [
 ] as const;
 
 export default async function GuidePage({ searchParams }: { searchParams: Promise<{ projectId?: string | string[] }> }) {
-  const user = await requirePageSession();
+  const user = await requirePageSessionWithReturnTo("/guide");
   const uploadPolicy = getUploadPolicy();
   const rawProjectId = (await searchParams).projectId;
   const parsedProjectId = typeof rawProjectId === "string" ? z.string().uuid().safeParse(rawProjectId) : null;

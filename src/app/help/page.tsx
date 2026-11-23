@@ -3,12 +3,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { InfoSection, PublicInfoPage } from "@/components/public-info-page";
 import styles from "@/components/public-info-page.module.css";
+import { getPublicPageMetadata } from "@/lib/public-page-metadata";
 
-export const metadata: Metadata = { title: "帮助文档 · AI Project OS" };
+export async function generateMetadata(): Promise<Metadata> {
+  return getPublicPageMetadata("帮助文档", "Help documentation");
+}
 
 export default function HelpPage() {
   return (
-    <PublicInfoPage eyebrow="Help" title="登录与访问帮助" description="无需登录即可查看常见登录问题；完整的项目配置、资料、AI、自动化和管理指南需要登录工作区后访问。">
+    <PublicInfoPage eyebrow="Help" title="登录与访问帮助" documentTitle={{ chinese: "帮助文档", english: "Help documentation" }} description="无需登录即可查看常见登录问题；完整的项目配置、资料、AI、自动化和管理指南需要登录工作区后访问。">
       <InfoSection title="无法使用账号登录">
         <p><UiText text={"先确认用户名和密码来自当前工作区。连续失败时请联系工作区管理员核对账号是否启用；当前部署不会通过登录页发送密码重置邮件。"} /></p>
       </InfoSection>

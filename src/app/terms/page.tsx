@@ -1,12 +1,15 @@
 import { UiText } from "@/components/appearance-provider";
 import type { Metadata } from "next";
 import { InfoSection, PublicInfoPage } from "@/components/public-info-page";
+import { getPublicPageMetadata } from "@/lib/public-page-metadata";
 
-export const metadata: Metadata = { title: "服务条款 · AI Project OS" };
+export async function generateMetadata(): Promise<Metadata> {
+  return getPublicPageMetadata("服务条款", "Terms of service");
+}
 
 export default function TermsPage() {
   return (
-    <PublicInfoPage eyebrow="Terms" title="服务条款" description="AI Project OS 提供可审阅的项目协作与知识治理能力。使用前请确认你已获得对应工作区、项目资料、仓库和外部服务的访问授权。">
+    <PublicInfoPage eyebrow="Terms" title="服务条款" documentTitle={{ chinese: "服务条款", english: "Terms of service" }} description="AI Project OS 提供可审阅的项目协作与知识治理能力。使用前请确认你已获得对应工作区、项目资料、仓库和外部服务的访问授权。">
       <InfoSection title="授权使用">
         <p><UiText text={"你只能在所属组织允许的范围内使用系统，并应确保上传资料、连接仓库、调用模型或只读工具时拥有必要权限。不得把他人的密码、Token 或未获授权的敏感数据录入项目资料。"} /></p>
       </InfoSection>

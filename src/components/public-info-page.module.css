@@ -52,6 +52,13 @@
   transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
 }
 
+.headerActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
 .loginLink:hover {
   border-color: var(--app-accent);
   background: var(--app-accent-soft);

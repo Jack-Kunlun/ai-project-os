@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { BrandMark } from "@/components/brand-mark";
+import { AppearanceControls } from "@/components/appearance-controls";
+import { LocalizedDocumentTitle } from "@/components/localized-document-title";
 import { UiText } from "@/components/appearance-provider";
 import styles from "@/components/public-info-page.module.css";
 
@@ -8,15 +10,18 @@ export function PublicInfoPage({
   eyebrow,
   title,
   description,
+  documentTitle,
   children,
 }: {
   eyebrow: string;
   title: string;
   description: string;
+  documentTitle?: Readonly<{ chinese: string; english: string }>;
   children: ReactNode;
 }) {
   return (
     <main className={styles.page}>
+      {documentTitle ? <LocalizedDocumentTitle {...documentTitle} /> : null}
       <div className={styles.shell}>
         <header className={styles.header}>
           <Link href="/login" className={styles.brand} aria-labelledby="public-info-login-label">
@@ -24,7 +29,10 @@ export function PublicInfoPage({
             <span className={styles.brandName}>AI Project OS</span>
             <span id="public-info-login-label" className="sr-only"><UiText text="返回 AI Project OS 登录页" /></span>
           </Link>
-          <Link href="/login" className={styles.loginLink}><UiText text="返回登录" /></Link>
+          <div className={styles.headerActions}>
+            <AppearanceControls />
+            <Link href="/login" className={styles.loginLink}><UiText text="返回登录" /></Link>
+          </div>
         </header>
 
         <section className={styles.content}>

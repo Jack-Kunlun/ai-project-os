@@ -15,12 +15,14 @@ type RegistrationMethod = "email" | "phone" | "legacy";
 
 type RegisterFormProps = {
   localRegistrationEnabled: boolean;
+  returnTo?: string;
   phoneAuthStatus?: PhoneAuthStatus;
   emailAuthStatus?: EmailAuthStatus;
 };
 
 export function RegisterForm({
   localRegistrationEnabled,
+  returnTo = "/dashboard",
   phoneAuthStatus = "disabled",
   emailAuthStatus = "disabled",
 }: RegisterFormProps) {
@@ -136,7 +138,7 @@ export function RegisterForm({
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
         throw new Error(payload?.error?.message ?? "注册失败，请稍后重试。");
       }
-      router.replace("/dashboard");
+      router.replace(returnTo);
       router.refresh();
     } catch (registrationError) {
       setError(registrationError instanceof Error ? registrationError.message : "注册失败，请稍后重试。");
@@ -225,7 +227,6 @@ export function RegisterForm({
                           onChange={(event) => { setPhone(normalizeMainlandPhoneInput(event.target.value)); setSmsCode(""); setSmsChallengeId(null); }}
                           autoComplete="tel-national"
                           minLength={11}
-                          maxLength={11}
                           required
                           pattern="1[3-9][0-9]{9}"
                           placeholder={t("输入 11 位手机号")}

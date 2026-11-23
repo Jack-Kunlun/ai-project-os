@@ -1,12 +1,15 @@
 import { UiText } from "@/components/appearance-provider";
 import type { Metadata } from "next";
 import { InfoSection, PublicInfoPage } from "@/components/public-info-page";
+import { getPublicPageMetadata } from "@/lib/public-page-metadata";
 
-export const metadata: Metadata = { title: "隐私政策 · AI Project OS" };
+export async function generateMetadata(): Promise<Metadata> {
+  return getPublicPageMetadata("隐私政策", "Privacy policy");
+}
 
 export default function PrivacyPage() {
   return (
-    <PublicInfoPage eyebrow="Privacy" title="隐私政策" description="说明 AI Project OS 当前如何处理账号、项目资料、凭据与模型传输。实际数据位置和保留周期由部署该系统的工作区管理员负责配置与说明。">
+    <PublicInfoPage eyebrow="Privacy" title="隐私政策" documentTitle={{ chinese: "隐私政策", english: "Privacy policy" }} description="说明 AI Project OS 当前如何处理账号、项目资料、凭据与模型传输。实际数据位置和保留周期由部署该系统的工作区管理员负责配置与说明。">
       <InfoSection title="收集与保存的内容">
         <p><UiText text={"系统会保存登录账号、工作区与项目权限、用户主动录入或上传的项目资料、审核记录、运行记录和审计信息，以提供可追溯的项目管理能力。"} /></p>
       </InfoSection>

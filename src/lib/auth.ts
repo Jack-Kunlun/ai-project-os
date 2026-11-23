@@ -15,6 +15,7 @@ import { isEmailAuthEnabled, loadEmailAuthConfig } from "@/lib/email-auth-config
 import { consumeEmailAuthProof, type EmailAuthProof } from "@/lib/email-auth-service";
 import { normalizeEmailAddress } from "@/lib/email-auth-identity";
 import { emailDatabaseClock } from "@/lib/email-auth-budget";
+import { canonicalInternalReturnPath } from "@/lib/redirects";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
@@ -961,11 +962,14 @@ export async function requireApiSessionReadOnly(
  * /admin.  The optional business Owner bootstrap must not block the platform
  * control plane; it has its own dedicated guard below.
  */
-export async function requireAuthenticatedPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
+export async function requireAuthenticatedPageSession(db: PrismaClient = getDb(), returnTo?: string): Promise<SafeSessionUser> {
   const store = await cookies();
   const user = await readSessionToken(store.get(SESSION_COOKIE_NAME)?.value ?? null, db);
   if (user !== null) return user;
-  redirect((await isApplicationInitialized(db)) ? "/login" : "/setup");
+  const initialized = await isApplicationInitialized(db);
+  if (!initialized) redirect("/setup");
+  const safeReturnTo = returnTo === undefined ? null : canonicalInternalReturnPath(returnTo);
+  redirect(safeReturnTo === null ? "/login" : `/login?returnTo=${encodeURIComponent(safeReturnTo)}`);
 }
 
 /**
@@ -973,14 +977,18 @@ export async function requireAuthenticatedPageSession(db: PrismaClient = getDb()
  * alias because existing user pages already use it; admins are redirected to
  * their independent platform surface before any user-domain projection runs.
  */
-export async function requireUserPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
-  const user = await requireAuthenticatedPageSession(db);
+export async function requireUserPageSession(db: PrismaClient = getDb(), returnTo?: string): Promise<SafeSessionUser> {
+  const user = await requireAuthenticatedPageSession(db, returnTo);
   if (user.role === "admin") redirect("/admin");
   return user;
 }
 
 export async function requirePageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
   return requireUserPageSession(db);
+}
+
+export async function requirePageSessionWithReturnTo(returnTo: string, db: PrismaClient = getDb()): Promise<SafeSessionUser> {
+  return requireUserPageSession(db, returnTo);
 }
 
 export async function getPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser | null> {

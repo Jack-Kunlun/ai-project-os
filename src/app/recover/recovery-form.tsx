@@ -108,7 +108,6 @@ export function RecoveryForm({ phoneAuthStatus }: { phoneAuthStatus: "disabled" 
               autoComplete="tel-national"
               value={phone}
               minLength={11}
-              maxLength={11}
               pattern="1[3-9][0-9]{9}"
               required
               placeholder={t("输入 11 位手机号")}

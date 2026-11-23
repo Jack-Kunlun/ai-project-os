@@ -64,7 +64,7 @@ export function WorkspacePicker({ username, onNameChange }: { username: string; 
   const t = useTranslate();
   const router = useRouter();
   const selected = useWorkspaceSelection(username);
-  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [spaces, setSpaces] = useState<WorkspaceOption[]>([]);
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -96,7 +96,7 @@ export function WorkspacePicker({ username, onNameChange }: { username: string; 
             } else {
               const selectedBody = await selectedResponse.json();
               if (controller.signal.aborted) return;
-              const selectedWorkspace = selectedBody.selectedWorkspace as Space | null;
+              const selectedWorkspace = selectedBody.selectedWorkspace as WorkspaceOption | null;
               if (selectedWorkspace && typeof selectedWorkspace.id === "string" && typeof selectedWorkspace.name === "string") unique.push(selectedWorkspace);
               else selectWorkspace(username, home.id);
             }

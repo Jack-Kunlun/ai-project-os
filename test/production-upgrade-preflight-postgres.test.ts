@@ -147,6 +147,12 @@ async function installLegacySchema(databaseUrl: string, temporaryPrismaRoot: str
   await installMigrationSnapshot(databaseUrl, temporaryPrismaRoot, LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name));
 }
 
+// This historical preflight covers only the two September probe-evidence migrations.
+async function installProbeEvidenceUpgrade(url: string, root: string) {
+  const target = await migrationNamesThrough("20260918023000_add_platform_route_consumption_reference");
+  await installMigrationSnapshot(url, root, target);
+}
+
 async function seedLegacyProbeEvidence(client: Client): Promise<Readonly<{ settledAttemptId: string; rejectedAttemptId: string; providerConnectionId: string }>> {
   const actorId = randomUUID();
   const credentialId = randomUUID();
@@ -283,10 +289,7 @@ test(
         await otherDatabaseBackend.end();
       }
 
-      await execFile("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], {
-        cwd: process.cwd(),
-        env: { ...process.env, DATABASE_URL: url },
-      });
+      await installProbeEvidenceUpgrade(url, temporaryPrismaRoot);
       const upgraded = await client.query<{
         migration_count: number;
         platform_bootstrap: string | null;
@@ -415,10 +418,7 @@ test(
       assert.deepEqual(sourceMigrationNames, LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name));
       await installMigrationSnapshot(compatibilityUrl.toString(), temporaryPrismaRoot, sourceMigrationNames);
 
-      await execFile("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], {
-        cwd: process.cwd(),
-        env: { ...process.env, DATABASE_URL: compatibilityUrl.toString() },
-      });
+      await installProbeEvidenceUpgrade(compatibilityUrl.toString(), temporaryPrismaRoot);
 
       const compatibilityClient = new Client({ connectionString: compatibilityUrl.toString(), connectionTimeoutMillis: 5_000 });
       await compatibilityClient.connect();

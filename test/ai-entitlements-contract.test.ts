@@ -55,7 +55,7 @@ test("signup offer and GLM embedding defaults remain explicit", () => {
   assert.equal(SIGNUP_TOKEN_AMOUNT, 500_000);
   assert.equal(SIGNUP_TOKEN_TTL_DAYS, 30);
   assert.equal(SIGNUP_OFFER_VERSION, "signup-500k-v1");
-  assert.deepEqual(getProviderDefinition("glm").embeddingModelSuggestions[0], { id: "embedding-3", dimensions: 1024 });
+  assert.deepEqual(getProviderDefinition("glm").embeddingModelSuggestions[0], { id: "embedding-3", dimensions: 2048 });
 });
 
 test("migration preserves project deletion while retaining billing history", () => {

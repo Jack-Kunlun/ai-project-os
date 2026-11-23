@@ -267,10 +267,13 @@ function AutomationForm({ projectId, onCreated }: { projectId: string; onCreated
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<AutomationPreview | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const previewRequestVersion = useRef(0);
 
   function invalidatePreview() {
-    if (preview !== null) setPreview(null);
+    previewRequestVersion.current += 1;
+    setPreview(null);
   }
 
   function chooseKind(value: RuleKind) {
@@ -284,19 +287,25 @@ function AutomationForm({ projectId, onCreated }: { projectId: string; onCreated
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setMessage(null);
+    const requestVersion = ++previewRequestVersion.current;
     try {
       const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
       const response = await fetch(`/api/projects/${projectId}/automations/preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, kind, intervalMinutes: Number(intervalMinutes), config: config(), browserTimeZone }) });
       if (!response.ok) throw new Error(await responseError(response, "自动化预览失败"));
-      setPreview((await response.json() as { preview: AutomationPreview }).preview);
+      const result = await response.json() as { preview: AutomationPreview };
+      if (previewRequestVersion.current !== requestVersion) return;
+      setPreview(result.preview);
       setMessage("影响预览已生成，请确认后保存规则。");
-    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "自动化预览失败"); }
+    } catch (cause) {
+      if (previewRequestVersion.current === requestVersion) setMessage(cause instanceof Error ? cause.message : "自动化预览失败");
+    }
     finally { setPending(false); }
   }
 
   async function confirm() {
     if (preview === null) return;
     setPending(true); setMessage(null);
+    setConfirming(true);
     try {
       const response = await fetch(`/api/projects/${projectId}/automations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: preview.canonicalPayload.name, kind: preview.canonicalPayload.kind, intervalMinutes: preview.canonicalPayload.intervalMinutes, config: preview.canonicalPayload.config, startAt: preview.canonicalPayload.startAtUtc, expectedPreviewFingerprint: preview.previewFingerprint, previewPayload: preview.canonicalPayload }) });
       if (!response.ok) throw new Error(await responseError(response, "自动化规则创建失败"));
@@ -304,10 +313,10 @@ function AutomationForm({ projectId, onCreated }: { projectId: string; onCreated
       onCreated(rule); setPreview(null); setMessage("规则已保存，Worker 会在首次运行时间领取任务。");
       confirmButtonRef.current?.focus();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "自动化规则创建失败"); }
-    finally { setPending(false); }
+    finally { setPending(false); setConfirming(false); }
   }
 
-  return <DialogForm onSubmit={submit}><Field label={translateUi("任务类型")}><select value={kind} onChange={(event) => chooseKind(event.target.value as RuleKind)} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')}><option value="repositorySync" disabled><UiText text={"代码仓库同步（尚未开放）"} /></option>{Object.entries(kindLabels).filter(([value]) => value !== "repositorySync").map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></Field><Field label={translateUi("规则名称")}><input value={name} onChange={(event) => { setName(event.target.value); invalidatePreview(); }} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')} required /></Field><Field label={translateUi("执行间隔")}><select value={intervalMinutes} onChange={(event) => { setIntervalMinutes(event.target.value); invalidatePreview(); }} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')}><option value="60"><UiText text={"每小时"} /></option><option value="360"><UiText text={"每 6 小时"} /></option><option value="720"><UiText text={"每 12 小时"} /></option><option value="1440"><UiText text={"每天"} /></option><option value="10080"><UiText text={"每周"} /></option></select></Field>{kind === "projectPlanHealth" ? <div className="mt-5 rounded-panel border border-app-accent-border bg-app-accent-soft p-4"><Field label={translateUi("即将到期窗口")}><select value={dueSoonDays} onChange={(event) => { setDueSoonDays(event.target.value); invalidatePreview(); }} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')}><option value="1"><UiText text={"1 天"} /></option><option value="3"><UiText text={"3 天"} /></option><option value="7"><UiText text={"7 天"} /></option><option value="14"><UiText text={"14 天"} /></option></select></Field><label className="mt-4 flex items-center gap-3 text-sm text-app-text"><input type="checkbox" checked={includeAssignees} onChange={(event) => { setIncludeAssignees(event.target.checked); invalidatePreview(); }} /><UiText text={"同时提醒相关负责人"} /></label><p className="mt-3 text-xs leading-5 text-app-link"><UiText text={"此检查只读取本地计划、审批和证据状态，不调用模型，也不发送项目内容到外部服务。"} /></p></div> : null}{kind === "memoryIndex" || kind === "projectBrief" ? <p className="mt-5 rounded-panel border border-app-warning-border bg-app-warning-soft px-4 py-3 text-xs leading-5 text-app-warning-ink"><UiText text={"此任务只创建 waitingConsent 通知：不选模型、不扣费、不发送项目内容；真实付费方仅在你到 AI 工作台当次确认后解析。"} /></p> : null}{message ? <p role="status" className="mt-4 text-xs text-app-muted"><UiFeedbackText text={message} /></p> : null}<DialogActions><DialogSubmit ref={confirmButtonRef} type="submit" disabled={pending} className="mt-6 flex min-h-11 w-full items-center justify-center rounded-control px-4 py-3 text-sm font-semibold disabled:opacity-50 app-button-primary">{pending ? <UiText text={"预览中…"} /> : <UiText text={"预览并确认"} />}</DialogSubmit></DialogActions>{preview ? <AutomationPreviewPanel preview={preview} pending={pending} onCancel={() => { setPreview(null); setMessage(null); confirmButtonRef.current?.focus(); }} onConfirm={() => void confirm()} /> : null}</DialogForm>;
+  return <DialogForm onSubmit={submit}><Field label={translateUi("任务类型")}><select value={kind} disabled={confirming} onChange={(event) => chooseKind(event.target.value as RuleKind)} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')}><option value="repositorySync" disabled><UiText text={"代码仓库同步（尚未开放）"} /></option>{Object.entries(kindLabels).filter(([value]) => value !== "repositorySync").map(([value, label]) => <option key={value} value={value}>{translateUi(label)}</option>)}</select></Field><Field label={translateUi("规则名称")}><input value={name} disabled={confirming} onChange={(event) => { setName(event.target.value); invalidatePreview(); }} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')} required /></Field><Field label={translateUi("执行间隔")}><select value={intervalMinutes} disabled={confirming} onChange={(event) => { setIntervalMinutes(event.target.value); invalidatePreview(); }} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')}><option value="60"><UiText text={"每小时"} /></option><option value="360"><UiText text={"每 6 小时"} /></option><option value="720"><UiText text={"每 12 小时"} /></option><option value="1440"><UiText text={"每天"} /></option><option value="10080"><UiText text={"每周"} /></option></select></Field>{kind === "projectPlanHealth" ? <div className="mt-5 rounded-panel border border-app-accent-border bg-app-accent-soft p-4"><Field label={translateUi("即将到期窗口")}><select value={dueSoonDays} disabled={confirming} onChange={(event) => { setDueSoonDays(event.target.value); invalidatePreview(); }} className={["app-field", (`${formFields.field} field`)].filter(Boolean).join(' ')}><option value="1"><UiText text={"1 天"} /></option><option value="3"><UiText text={"3 天"} /></option><option value="7"><UiText text={"7 天"} /></option><option value="14"><UiText text={"14 天"} /></option></select></Field><label className="mt-4 flex items-center gap-3 text-sm text-app-text"><input type="checkbox" checked={includeAssignees} disabled={confirming} onChange={(event) => { setIncludeAssignees(event.target.checked); invalidatePreview(); }} /><UiText text={"同时提醒相关负责人"} /></label><p className="mt-3 text-xs leading-5 text-app-link"><UiText text={"此检查只读取本地计划、审批和证据状态，不调用模型，也不发送项目内容到外部服务。"} /></p></div> : null}{kind === "memoryIndex" || kind === "projectBrief" ? <p className="mt-5 rounded-panel border border-app-warning-border bg-app-warning-soft px-4 py-3 text-xs leading-5 text-app-warning-ink"><UiText text={"此任务只创建 waitingConsent 通知：不选模型、不扣费、不发送项目内容；真实付费方仅在你到 AI 工作台当次确认后解析。"} /></p> : null}{message ? <p role="status" className="mt-4 text-xs text-app-muted"><UiFeedbackText text={message} /></p> : null}<DialogActions><DialogSubmit ref={confirmButtonRef} type="submit" disabled={pending} className="mt-6 flex min-h-11 w-full items-center justify-center rounded-control px-4 py-3 text-sm font-semibold disabled:opacity-50 app-button-primary">{pending ? <UiText text={"预览中…"} /> : <UiText text={"预览并确认"} />}</DialogSubmit></DialogActions>{preview ? <AutomationPreviewPanel preview={preview} pending={pending} onCancel={() => { setPreview(null); setMessage(null); confirmButtonRef.current?.focus(); }} onConfirm={() => void confirm()} /> : null}</DialogForm>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="mt-5 block text-sm font-medium text-app-text">{label}{children}</label>; }

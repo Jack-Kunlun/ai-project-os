@@ -21,11 +21,8 @@ import {
 } from "@/lib/ai-providers/transport";
 import { canonicalProviderBaseUrl, getProviderDefinition } from "@/lib/ai-providers/registry";
 import { getDb } from "@/lib/db";
-import { persistNotification } from "@/lib/notification-service";
 import {
   PLATFORM_PROVIDER_PROBE_LEASE_MS,
-  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_DURATION_MS,
-  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_UNITS,
   PlatformProviderProbeServiceError,
   type PlatformProviderProbeServiceErrorCode,
 } from "@/lib/platform-provider-probe-contract";
@@ -33,8 +30,6 @@ import {
 export {
   PLATFORM_PROVIDER_PROBE_LEASE_MS,
   PLATFORM_PROVIDER_PROBE_MAX_BODY_BYTES,
-  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_DURATION_MS,
-  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_UNITS,
   PLATFORM_PROVIDER_PROBE_MAX_UNITS,
   PlatformProviderProbeServiceError,
 } from "@/lib/platform-provider-probe-contract";
@@ -45,25 +40,7 @@ const probeInputSchema = z.object({
   expectedConfigurationVersion: z.number().int().positive(),
 }).strict();
 
-const budgetInputSchema = z.object({
-  unitLimit: z.number().int().min(1).max(PLATFORM_PROVIDER_PROBE_MAX_BUDGET_UNITS),
-  alertThresholdUnits: z.number().int().min(0).max(PLATFORM_PROVIDER_PROBE_MAX_BUDGET_UNITS),
-  startsAt: z.string().datetime({ offset: true }).transform((value) => new Date(value)),
-  expiresAt: z.string().datetime({ offset: true }).transform((value) => new Date(value)),
-}).strict().superRefine((value, context) => {
-  if (value.alertThresholdUnits > value.unitLimit) {
-    context.addIssue({ code: "custom", path: ["alertThresholdUnits"], message: "alertThresholdUnits must not exceed unitLimit" });
-  }
-  if (value.expiresAt <= value.startsAt) {
-    context.addIssue({ code: "custom", path: ["expiresAt"], message: "expiresAt must be after startsAt" });
-  }
-  if (value.expiresAt.getTime() - value.startsAt.getTime() > PLATFORM_PROVIDER_PROBE_MAX_BUDGET_DURATION_MS) {
-    context.addIssue({ code: "custom", path: ["expiresAt"], message: "budget duration exceeds the safety bound" });
-  }
-});
-
 type ProbeInput = z.infer<typeof probeInputSchema>;
-type BudgetInput = z.infer<typeof budgetInputSchema>;
 type ProbeDb = PrismaClient | Prisma.TransactionClient;
 
 type ProviderProbeRow = Readonly<{
@@ -343,11 +320,6 @@ async function admitProbe(
       });
       if (active !== null) fail("PLATFORM_PROVIDER_PROBE_IN_PROGRESS");
 
-      await lockProbeBudget(tx);
-      const budget = await tx.platformProviderProbeBudget.findFirst({
-        where: { status: "active", startsAt: { lte: now }, expiresAt: { gt: now } },
-        orderBy: { version: "desc" },
-      });
       const capabilities = capabilityList(provider);
       if (capabilities.length === 0) {
         const attemptId = await createRejectedAttempt(tx, {
@@ -361,37 +333,11 @@ async function admitProbe(
         });
         return { attemptId, provider, credentialSecretFingerprint: "", capabilities, terminal: true, deadlineAt: now };
       }
-      if (budget === null) {
-        const attemptId = await createRejectedAttempt(tx, {
-          providerId,
-          actor: currentActor,
-          providerConfigurationVersion: provider.configurationVersion,
-          keyHash,
-          fingerprint,
-          safeErrorCode: "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED",
-          now,
-        });
-        return { attemptId, provider, credentialSecretFingerprint: "", capabilities, terminal: true, deadlineAt: now };
-      }
-      const available = budget.unitLimit - budget.reservedUnits - budget.settledUnits - budget.heldUnits;
-      if (available < capabilities.length) {
-        const attemptId = await createRejectedAttempt(tx, {
-          budgetId: budget.id,
-          providerId,
-          actor: currentActor,
-          providerConfigurationVersion: provider.configurationVersion,
-          keyHash,
-          fingerprint,
-          safeErrorCode: "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED",
-          now,
-        });
-        return { attemptId, provider, credentialSecretFingerprint: "", capabilities, terminal: true, deadlineAt: now };
-      }
       const credentialSecretFingerprint = await currentCredentialFingerprint(tx, provider.credentialId);
       if (credentialSecretFingerprint === null) fail("PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE");
       const attempt = await tx.platformProviderProbeAttempt.create({
         data: {
-          budgetId: budget.id,
+          budgetId: null,
           providerConnectionId: provider.id,
           actorId: currentActor.id,
           actorAccountAccessVersion: currentActor.accountAccessVersion ?? 1,
@@ -405,10 +351,9 @@ async function admitProbe(
         },
         select: { id: true },
       });
-      await tx.platformProviderProbeBudget.update({ where: { id: budget.id }, data: { reservedUnits: { increment: capabilities.length } } });
       for (const [index, capability] of capabilities.entries()) {
         await tx.platformProviderProbeLedger.create({
-          data: { budgetId: budget.id, attemptId: attempt.id, actorId: currentActor.id, ordinal: index + 1, event: "reserved", capability: capability.capability, units: 1 },
+          data: { budgetId: null, attemptId: attempt.id, actorId: currentActor.id, ordinal: index + 1, event: "reserved", capability: capability.capability, units: 1 },
         });
       }
       return { attemptId: attempt.id, provider, credentialSecretFingerprint, capabilities, terminal: false, deadlineAt: new Date(now.getTime() + PLATFORM_PROVIDER_PROBE_LEASE_MS) };
@@ -450,11 +395,7 @@ async function verifyProbeFence(
       if (provider.protocol !== "chatCompletions" || provider.configurationVersion !== expectedConfigurationVersion || provider.baseUrl !== canonicalProviderBaseUrl(provider.kind)) return false;
       const fingerprint = await currentCredentialFingerprint(tx, provider.credentialId);
       if (fingerprint !== expectedCredentialFingerprint) return false;
-      const budget = initialAttempt.budgetId === null
-        ? null
-        : (await lockProbeBudget(tx), await tx.platformProviderProbeBudget.findUnique({ where: { id: initialAttempt.budgetId }, select: { status: true, startsAt: true, expiresAt: true } }));
-      const now = new Date();
-      return budget !== null && budget.status === "active" && budget.startsAt <= now && budget.expiresAt > now;
+      return true;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 5_000 });
   } catch {
     return false;
@@ -493,11 +434,6 @@ async function markProbeDispatched(
       if (fingerprint !== expectedCredentialFingerprint) return false;
       const existing = await tx.platformProviderProbeLedger.findUnique({ where: { attemptId_ordinal_event: { attemptId, ordinal, event: "dispatched" } }, select: { id: true } });
       if (existing !== null) return true;
-      const budget = initialAttempt.budgetId === null
-        ? null
-        : await tx.platformProviderProbeBudget.findUnique({ where: { id: initialAttempt.budgetId }, select: { status: true, startsAt: true, expiresAt: true } });
-      const now = new Date();
-      if (budget === null || budget.status !== "active" || budget.startsAt > now || budget.expiresAt <= now) return false;
       await tx.platformProviderProbeLedger.create({ data: { attemptId, budgetId: initialAttempt.budgetId, actorId: initialAttempt.actorId, ordinal, event: "dispatched", capability, units: 1 } });
       await tx.platformProviderProbeAttempt.update({ where: { id: attemptId }, data: { status: "running", dispatchedUnits: { increment: 1 }, startedAt: new Date() } });
       return true;
@@ -535,7 +471,6 @@ async function settleProbeOrdinal(
     await tx.platformProviderProbeAttempt.update({ where: { id: attemptId }, data: { settledUnits: { increment: 1 }, ...(safeErrorCode === null ? {} : { safeErrorCode }) } });
     if (attempt.budgetId !== null) {
       await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: { reservedUnits: { decrement: 1 }, settledUnits: { increment: 1 } } });
-      await createThresholdNotifications(tx, attempt.budgetId);
     }
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 8_000, maxWait: 8_000 });
 }
@@ -586,31 +521,8 @@ async function holdProbeOrdinal(
     await tx.platformProviderProbeAttempt.update({ where: { id: attemptId }, data: { heldUnits: { increment: 1 }, safeErrorCode } });
     if (attempt.budgetId !== null) {
       await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: { reservedUnits: { decrement: 1 }, heldUnits: { increment: 1 } } });
-      await createThresholdNotifications(tx, attempt.budgetId);
     }
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 8_000, maxWait: 8_000 });
-}
-
-async function createThresholdNotifications(tx: Prisma.TransactionClient, budgetId: string): Promise<void> {
-  const budget = await tx.platformProviderProbeBudget.findUnique({ where: { id: budgetId }, select: { alertThresholdUnits: true, settledUnits: true, heldUnits: true, version: true } });
-  if (budget === null || budget.alertThresholdUnits <= 0 || budget.settledUnits + budget.heldUnits < budget.alertThresholdUnits) return;
-  const admins = await tx.appUser.findMany({ where: { role: "admin", disabledAt: null }, select: { id: true } });
-  const dedupeMaterial = `ai-project-os:platform-provider-probe:threshold:v1:${budget.version}:${budget.alertThresholdUnits}`;
-  for (const admin of admins) {
-    await persistNotification({
-      userId: admin.id,
-      projectId: null,
-      subjectKind: "legacy",
-      subjectId: null,
-      attentionIntent: "informational",
-      kind: "system",
-      severity: "warning",
-      title: "平台连接探测预算已达到告警阈值",
-      body: "平台连接探测需要管理员关注预算摘要；未知外发不会自动重试。",
-      actionHref: null,
-      dedupeKey: dedupeMaterial,
-    }, tx as unknown as PrismaClient);
-  }
 }
 
 async function finalizeProbe(
@@ -675,7 +587,6 @@ async function finalizeProbe(
         await tx.aiProviderConnection.updateMany({ where: { id: provider.id, scope: "platform", configurationVersion: attempt.providerConfigurationVersion, status: { not: "disabled" } }, data: { status: "error", lastTestedAt: new Date(), lastErrorCode: terminalError, disabledAt: null } });
       }
     }
-    if (held && attempt.budgetId !== null) await createThresholdNotifications(tx, attempt.budgetId);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 10_000, maxWait: 10_000 });
 }
 
@@ -704,14 +615,14 @@ async function executeProbe(admission: Admission, input: ProbeInput, db: PrismaC
       // therefore cannot reclaim a healthy three-capability probe mid-flight.
       const absoluteDeadlineAt = admission.deadlineAt;
       if (capability.capability === "generation") {
-        await invokeChatCompletion({ connection, operation: "projectAnalysis", modelId: capability.modelId, messages: [{ role: "system", content: "Connectivity check. Reply OK." }, { role: "user", content: "OK" }], maxOutputTokens: 8, temperature: 0, disableThinking: true, absoluteDeadlineAt });
+        await invokeChatCompletion({ connection, operation: "projectAnalysis", modelId: capability.modelId, messages: [{ role: "system", content: "Connectivity check. Reply OK." }, { role: "user", content: "OK" }], maxOutputTokens: 1024, temperature: 0, disableThinking: true, absoluteDeadlineAt });
       } else if (capability.capability === "embedding") {
         const result = await invokeEmbeddings({ connection, modelId: capability.modelId, texts: ["AI Project OS platform connectivity check"], expectedDimensions: capability.dimensions, absoluteDeadlineAt });
         await settleProbeOrdinal(admission.attemptId, admission.provider.id, ordinal, null, result.dimensions, db);
         continue;
       } else {
         const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
-        await invokeVisionCompletion({ connection, modelId: capability.modelId, image, mimeType: "image/png", prompt: "Reply OK", maxOutputTokens: 8, disableThinking: true, absoluteDeadlineAt });
+        await invokeVisionCompletion({ connection, modelId: capability.modelId, image, mimeType: "image/png", prompt: "Reply OK", maxOutputTokens: 1024, disableThinking: true, absoluteDeadlineAt });
       }
       await settleProbeOrdinal(admission.attemptId, admission.provider.id, ordinal, null, null, db);
     } catch (error) {
@@ -742,14 +653,6 @@ export function parsePlatformProviderProbeInput(input: unknown): ProbeInput {
   }
 }
 
-export function parsePlatformProviderProbeBudgetInput(input: unknown): BudgetInput {
-  try {
-    return budgetInputSchema.parse(input);
-  } catch {
-    fail("PLATFORM_PROVIDER_PROBE_INVALID_INPUT");
-  }
-}
-
 export async function runPlatformProviderProbe(
   providerId: string,
   actor: PlatformProviderActor,
@@ -763,46 +666,6 @@ export async function runPlatformProviderProbe(
   if (admission.terminal) return attemptWithPublic(db, admission.attemptId);
   await executeProbe(admission, input, db);
   return attemptWithPublic(db, admission.attemptId);
-}
-
-export async function getPlatformProviderProbeBudgetSummary(
-  actor: PlatformProviderActor,
-  db: PrismaClient = getDb(),
-  now = new Date(),
-) {
-  await assertPlatformProviderAdmin(actor, db);
-  const budget = await db.platformProviderProbeBudget.findFirst({ where: { status: "active" }, orderBy: { version: "desc" }, select: { version: true, status: true, unitLimit: true, alertThresholdUnits: true, reservedUnits: true, settledUnits: true, heldUnits: true, startsAt: true, expiresAt: true } });
-  if (budget === null) return Object.freeze({ budget: null });
-  const lifecycle = budget.expiresAt <= now ? "expired" : budget.startsAt > now ? "scheduled" : "active";
-  return Object.freeze({ budget: Object.freeze({ version: budget.version, status: lifecycle, unitLimit: budget.unitLimit, alertThresholdUnits: budget.alertThresholdUnits, reservedUnits: budget.reservedUnits, settledUnits: budget.settledUnits, heldUnits: budget.heldUnits, availableUnits: Math.max(0, budget.unitLimit - budget.reservedUnits - budget.settledUnits - budget.heldUnits), startsAt: budget.startsAt.toISOString(), expiresAt: budget.expiresAt.toISOString() }) });
-}
-
-export async function createAndActivatePlatformProviderProbeBudget(
-  rawInput: unknown,
-  actor: PlatformProviderActor,
-  db: PrismaClient = getDb(),
-) {
-  const input = parsePlatformProviderProbeBudgetInput(rawInput);
-  const actorHint = assertPlatformProviderAdminHint(actor);
-  try {
-    return await db.$transaction(async (tx) => {
-      await setProbeMutationContext(tx);
-      await lockMembershipUser(tx, actorHint.id);
-      const current = await assertPlatformProviderAdmin(actorHint, tx);
-      await lockProbeBudget(tx);
-      const previous = await tx.platformProviderProbeBudget.findFirst({ where: { status: "active" }, orderBy: { version: "desc" }, select: { id: true } });
-      if (previous !== null) await tx.platformProviderProbeBudget.update({ where: { id: previous.id }, data: { status: "retired", retiredById: current.id, retiredAt: new Date() } });
-      const latest = await tx.platformProviderProbeBudget.findFirst({ orderBy: { version: "desc" }, select: { version: true } });
-      const budget = await tx.platformProviderProbeBudget.create({
-        data: { version: (latest?.version ?? 0) + 1, status: "active", unitLimit: input.unitLimit, alertThresholdUnits: input.alertThresholdUnits, startsAt: input.startsAt, expiresAt: input.expiresAt, createdById: current.id, activatedById: current.id, activatedAt: new Date() },
-        select: { version: true, status: true, unitLimit: true, alertThresholdUnits: true, startsAt: true, expiresAt: true },
-      });
-      return Object.freeze({ version: budget.version, status: budget.status, unitLimit: budget.unitLimit, alertThresholdUnits: budget.alertThresholdUnits, startsAt: budget.startsAt.toISOString(), expiresAt: budget.expiresAt.toISOString() });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 10_000, maxWait: 10_000 });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") fail("PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT");
-    throw error;
-  }
 }
 
 export async function reconcilePlatformProviderProbeAttempts(
@@ -836,7 +699,6 @@ export async function reconcilePlatformProviderProbeAttempts(
         }
         if (attempt.budgetId !== null && (held > 0 || released > 0)) {
           await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: { reservedUnits: { decrement: held + released }, heldUnits: { increment: held } } });
-          if (held > 0) await createThresholdNotifications(tx, attempt.budgetId);
         }
         const totalHeld = attempt.heldUnits + held;
         const totalSettled = attempt.settledUnits;

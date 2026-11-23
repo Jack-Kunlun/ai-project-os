@@ -671,7 +671,7 @@ async function testPersonalProviderInTransaction(
           { role: "system", content: "You are a connectivity probe. Follow the exact reply constraint." },
           { role: "user", content: "Reply with exactly: OK" },
         ],
-        maxOutputTokens: 8,
+        maxOutputTokens: 1024,
         temperature: 0,
         absoluteDeadlineAt,
       });
@@ -710,7 +710,7 @@ async function testPersonalProviderInTransaction(
         image: VISION_PROBE_IMAGE,
         mimeType: "image/png",
         prompt: "Return exactly: OK",
-        maxOutputTokens: 8,
+        maxOutputTokens: 1024,
         absoluteDeadlineAt,
       });
       vision = true;

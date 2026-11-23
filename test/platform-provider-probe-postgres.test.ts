@@ -8,11 +8,21 @@ import test, { after } from "node:test";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { updateProviderConnection } from "../src/lib/ai-providers";
 import { applyPlatformAiOperation, probePlatformAiOperation } from "../src/lib/platform-ai-operation-service";
-import { createAndActivatePlatformProviderProbeBudget, PlatformProviderProbeServiceError, runPlatformProviderProbe, reconcilePlatformProviderProbeAttempts } from "../src/lib/platform-provider-probe-service";
+import { PlatformProviderProbeServiceError, runPlatformProviderProbe, reconcilePlatformProviderProbeAttempts } from "../src/lib/platform-provider-probe-service";
 import { getDb } from "../src/lib/db";
 import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const shouldRun = process.env.PLATFORM_PROVIDER_PROBE_POSTGRES_GATE === "1";
+
+// Recreate pre-upgrade history only inside the isolated PostgreSQL contract.
+async function seedLegacyProbeBudget(input: { unitLimit: number; alertThresholdUnits: number; startsAt: string; expiresAt: string }, actor: { id: string }, db: PrismaClient) {
+  await db.$transaction(async tx => {
+    await tx.$executeRaw`SELECT set_config('ai_project_os.platform_provider_probe_mutation', 'service-v1', true)`;
+    await tx.platformProviderProbeBudget.updateMany({ where: { status: "active" }, data: { status: "retired", retiredById: actor.id, retiredAt: new Date() } });
+    const previous = await tx.platformProviderProbeBudget.findFirst({ orderBy: { version: "desc" }, select: { version: true } });
+    await tx.platformProviderProbeBudget.create({ data: { ...input, version: (previous?.version ?? 0) + 1, status: "active", activatedAt: new Date(), createdById: actor.id, activatedById: actor.id } });
+  });
+}
 
 function matchesGuard(pattern: RegExp) {
   return (error: unknown): boolean => pattern.test(String(error));
@@ -68,7 +78,7 @@ after(async () => {
 });
 
 test(
-  "platform provider probes are independently budgeted, marked before fetch, idempotent, and fail closed",
+  "platform provider probes run without an allowance, marked before fetch, idempotent, and fail closed",
   { skip: !shouldRun ? "PLATFORM_PROVIDER_PROBE_POSTGRES_GATE=1 is required" : false },
   async () => {
     const db = getDb();
@@ -78,7 +88,6 @@ test(
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
     const adminId = "00000000-0000-4000-8000-000000000010";
     const actor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
-    const firstClientKey = randomUUID();
     const previousFetch = globalThis.fetch;
     let fetches = 0;
     try {
@@ -93,28 +102,10 @@ test(
       }, actor, db);
       assert.equal(provider.id.length > 0, true);
 
-      const scheduledNow = new Date();
-      await createAndActivatePlatformProviderProbeBudget({
-        unitLimit: 20,
-        alertThresholdUnits: 3,
-        startsAt: new Date(scheduledNow.getTime() + 60_000).toISOString(),
-        expiresAt: new Date(scheduledNow.getTime() + 600_000).toISOString(),
-      }, actor, db);
-
-      const noBudget = await runPlatformProviderProbe(provider.id, actor, {
-        clientRequestKey: firstClientKey,
-        expectedConfigurationVersion: provider.configurationVersion,
-      }, db);
-      assert.equal(noBudget.attempt.status, "rejected");
-      assert.equal(noBudget.attempt.safeErrorCode, "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED");
-      assert.equal(fetches, 0);
-      assert.equal(await db.providerCallAudit.count({ where: { providerConnectionId: provider.id } }), 0);
-      assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: adminId } }), 0);
-
       const now = new Date();
-      await createAndActivatePlatformProviderProbeBudget({
-        unitLimit: 20,
-        alertThresholdUnits: 3,
+      await seedLegacyProbeBudget({
+        unitLimit: 1,
+        alertThresholdUnits: 1,
         startsAt: new Date(now.getTime() - 1_000).toISOString(),
         expiresAt: new Date(now.getTime() + 600_000).toISOString(),
       }, actor, db);
@@ -147,11 +138,10 @@ test(
       assert.deepEqual(replay, first);
       assert.equal(fetches, 3);
       const attempts = await db.platformProviderProbeAttempt.findMany({ where: { providerConnectionId: provider.id }, select: { id: true, actorId: true, status: true, clientRequestKeyHash: true, plannedUnits: true, dispatchedUnits: true, settledUnits: true, releasedUnits: true, heldUnits: true } });
-      assert.equal(attempts.length, 2);
+      assert.equal(attempts.length, 1);
       const settled = attempts.find((attempt) => attempt.status === "settled");
-      const rejected = attempts.find((attempt) => attempt.status === "rejected");
       assert.ok(settled);
-      assert.ok(rejected);
+      assert.equal(await db.platformProviderProbeAttempt.count({ where: { providerConnectionId: provider.id, budgetId: { not: null } } }), 0);
       assert.equal(settled.actorId, adminId);
       assert.equal(settled.plannedUnits, 3);
       assert.deepEqual({ dispatched: settled.dispatchedUnits, settled: settled.settledUnits, released: settled.releasedUnits, held: settled.heldUnits }, { dispatched: 3, settled: 3, released: 0, held: 0 });
@@ -206,7 +196,7 @@ test(
         visionModelId: null,
       }, actor, db);
       const now = new Date();
-      await createAndActivatePlatformProviderProbeBudget({
+      await seedLegacyProbeBudget({
         unitLimit: 5,
         alertThresholdUnits: 1,
         startsAt: new Date(now.getTime() - 1_000).toISOString(),
@@ -231,7 +221,7 @@ test(
       const attempt = await db.platformProviderProbeAttempt.findFirstOrThrow({ where: { providerConnectionId: provider.id }, select: { id: true, status: true, leaseExpiresAt: true, plannedUnits: true, dispatchedUnits: true, budgetId: true, providerConfigurationVersion: true } });
       assert.equal(attempt.status, "held");
       assert.equal(attempt.dispatchedUnits, 1);
-      assert.ok(attempt.budgetId);
+      assert.equal(attempt.budgetId, null);
       const reconciled = await reconcilePlatformProviderProbeAttempts(db, new Date(attempt.leaseExpiresAt.getTime() + 1_000));
       assert.equal(reconciled, 0);
       assert.equal(fetches, 1);
@@ -253,7 +243,7 @@ test(
       const heldAfterRotation = await db.platformProviderProbeAttempt.findUniqueOrThrow({ where: { id: attempt.id }, select: { status: true, heldUnits: true, providerConfigurationVersion: true } });
       assert.deepEqual(heldAfterRotation, { status: "held", heldUnits: 1, providerConfigurationVersion: attempt.providerConfigurationVersion });
       assert.equal(await db.platformProviderProbeLedger.count({ where: { attemptId: attempt.id, event: "held" } }), heldLedgerCount);
-      assert.equal((await db.platformProviderProbeBudget.findUniqueOrThrow({ where: { id: attempt.budgetId }, select: { heldUnits: true } })).heldUnits, 1);
+      assert.equal(await db.platformProviderProbeBudget.count({ where: { heldUnits: { gt: 0 } } }), 0);
     } finally {
       globalThis.fetch = previousFetch;
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
@@ -288,7 +278,7 @@ test(
         visionModelId: null,
       }, actor, db);
       const now = new Date();
-      await createAndActivatePlatformProviderProbeBudget({
+      await seedLegacyProbeBudget({
         unitLimit: 10,
         alertThresholdUnits: 1,
         startsAt: new Date(now.getTime() - 1_000).toISOString(),
@@ -300,9 +290,9 @@ test(
       assert.equal(successful.attempt.status, "settled");
       const settledAttempt = await db.platformProviderProbeAttempt.findFirstOrThrow({ where: { providerConnectionId: provider.id, status: "settled" }, select: { id: true, budgetId: true, actorId: true } });
       const settledLedger = await db.platformProviderProbeLedger.findFirstOrThrow({ where: { attemptId: settledAttempt.id, event: "settled" }, select: { id: true } });
-      assert.equal(settledAttempt.budgetId, firstBudget.id);
+      assert.equal(settledAttempt.budgetId, null);
 
-      await createAndActivatePlatformProviderProbeBudget({
+      await seedLegacyProbeBudget({
         unitLimit: 10,
         alertThresholdUnits: 1,
         startsAt: new Date(now.getTime() - 1_000).toISOString(),
@@ -381,7 +371,7 @@ test(
           "credentialSecretFingerprint", "clientRequestKeyHash", "requestFingerprint", "status", "plannedUnits", "leaseExpiresAt", "updatedAt"
         ) VALUES (
           ${randomUUID()}::uuid, NULL::uuid, ${provider.id}::uuid, ${adminId}::uuid, 1, ${provider.configurationVersion},
-          repeat('a', 64), repeat('b', 64), repeat('c', 64), 'reserved'::"PlatformProviderProbeAttemptStatus", 1,
+          repeat('a', 64), repeat('b', 64), repeat('c', 64), 'reserved'::"PlatformProviderProbeAttemptStatus", 0,
           ${new Date(now.getTime() + 60_000)}::timestamp, ${now}::timestamp
         )
       `), /shape_check|check constraint/iu);
@@ -406,7 +396,7 @@ test(
         )
       `), /shape_check|check constraint/iu);
 
-      await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: null, attemptId: settledAttempt.id, actorId: adminId, ordinal: 1, event: "held", capability: "generation" }), /shape_check|check constraint/iu);
+      await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: null, attemptId: settledAttempt.id, actorId: adminId, ordinal: 0, event: "held", capability: "generation" }), /shape_check|check constraint/iu);
       await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: activeBudget.id, attemptId: settledAttempt.id, actorId: adminId, ordinal: 1, event: "held", capability: "generation" }), /ledger binding|parity/iu);
       await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: firstBudget.id, attemptId: settledAttempt.id, actorId: otherActorId, ordinal: 1, event: "held", capability: "generation" }), /ledger binding|parity/iu);
       await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: firstBudget.id, attemptId: settledAttempt.id, actorId: adminId, ordinal: 1, event: "held", capability: "vision" }), /ledger binding|parity/iu);

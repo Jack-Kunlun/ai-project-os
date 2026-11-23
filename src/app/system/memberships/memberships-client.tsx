@@ -139,13 +139,13 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
         <button type="button" onClick={() => void load()} className="rounded-control px-5 py-3 text-sm font-semibold app-button-primary"><UiText text={"搜索"} /></button>
       </div>
       <p className="mt-4 text-xs leading-6 text-app-muted"><UiText text={"Git / MCP 私有连接与平台自动化属于独立配置，不会因会员撤销被修改。个人模型配置会保留，但会员失效期间不可使用。"} /></p>
-      {error ? <div role="alert" className="mt-5 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></div> : null}
+      {error ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /><button type="button" onClick={() => void load()} disabled={loading} className="app-button-secondary rounded-control border px-3 py-2 text-xs font-semibold disabled:opacity-50"><UiText text={"重试读取"} /></button></div> : null}
       <section className="mt-6 overflow-hidden rounded-panel border border-app-border bg-app-surface app-panel" aria-labelledby="membership-list-title">
         <div className="border-b border-app-border px-5 py-5 sm:px-6">
           <h2 id="membership-list-title" className="text-lg font-semibold text-app-text"><UiText text={"会员资格列表"} /></h2>
           <p className="mt-1 text-xs leading-5 text-app-muted"><UiText text={"列表用于查看状态；授予、延期、撤销或拒绝操作在对应用户的操作面板中完成，并保留原有预览确认流程。"} /></p>
         </div>
-        {loading ? <div className="px-6 py-12 text-center text-sm text-app-muted"><UiText text={"读取中…"} /></div> : items.length === 0 ? <div className="px-6 py-12 text-center text-sm text-app-muted"><UiText text={"没有匹配的用户。"} /></div> : <div className="overflow-x-auto">
+        {loading ? <div className="px-6 py-12 text-center text-sm text-app-muted"><UiText text={"读取中…"} /></div> : error ? <div className="px-6 py-12 text-center text-sm text-app-muted"><UiText text={"列表读取失败；请重试后再判断是否有匹配的用户。"} /></div> : items.length === 0 ? <div className="px-6 py-12 text-center text-sm text-app-muted"><UiText text={"没有匹配的用户。"} /></div> : <div className="overflow-x-auto">
           <table className="min-w-[860px] w-full text-left text-sm">
             <thead className="bg-app-surface-soft text-xs font-semibold text-app-muted">
               <tr>

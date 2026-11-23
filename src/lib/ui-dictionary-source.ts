@@ -11,11 +11,12 @@ import { uiUserMessages } from "./ui-user-messages";
 import { uiResourceMessages } from "./ui-resource-messages";
 import { uiUsageMessages } from "./ui-usage-messages";
 import { uiPersonalConnectionsMessages } from "./ui-personal-connections-messages";
+import { uiProjectReadStateMessages } from "./ui-project-read-state-messages";
 
 /** Server/build input only. Clients load the versioned JSON when English is selected. */
 export const englishUiMessages: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries({
-    ...uiMessages, ...uiUserMessages, ...uiCoreMessages, ...uiProjectExtraMessages,
+    ...uiMessages, ...uiUserMessages, ...uiCoreMessages, ...uiProjectExtraMessages, ...uiProjectReadStateMessages,
     ...uiProjectMiddleMessages, ...uiUserTailMessages, ...uiResourceMessages,
     ...uiUsageMessages, ...uiAuthMessages, ...uiPersonalConnectionsMessages, ...englishAdminMessages, ...englishAdminShellMessages, ...uiPolishMessages,
   }).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0),

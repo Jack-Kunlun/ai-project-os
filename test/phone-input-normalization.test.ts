@@ -15,6 +15,7 @@ test("all phone inputs let formatted paste reach the shared normalizer", async (
     "src/app/recover/recovery-form.tsx",
     "src/app/register/register-form.tsx",
     "src/components/account-phone-panel.tsx",
+    "src/app/admin/sms/sms-provider-admin-client.tsx",
   ];
   for (const path of consumers) {
     const source = await readFile(path, "utf8");

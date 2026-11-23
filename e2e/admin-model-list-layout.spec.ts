@@ -1,3 +1,4 @@
+import { expectProviderDefaults } from "./support/provider-defaults";
 import { expect, test } from "@playwright/test";
 import { expectDialogStyleContract } from "./support/ui-style-contract";
 import { expectR02NoHorizontalOverflow, signInR02Admin } from "./support/r02-admin-navigation";
@@ -65,7 +66,6 @@ test("destructive confirmation uses the same modal geometry inside the admin pro
   await page.route("**/api/settings/providers", (route) => route.fulfill({ json: {
     providers: [{ ...provider, status: "disabled", _count: { platformDefaultAiRoutes: 0 } }], catalog,
   } }));
-  await page.route("**/api/admin/platform-provider-probe/budget", (route) => route.fulfill({ json: { budget: null } }));
   await page.route("**/api/settings/platform-ai-operations", (route) => route.fulfill({ json: { operations, candidates: Object.fromEntries(operations.map((operation) => [operation, { readiness: "missing", active: null, candidates: [] }])) } }));
   const origin = new URL(page.url()).origin;
   for (const mode of [{ theme: "light", width: 1440 }, { theme: "dark", width: 390 }]) {
@@ -101,7 +101,6 @@ test("destructive confirmation uses the same modal geometry inside the admin pro
 test("new provider tests display safe failure reasons and clear stale results", async ({ page }) => {
   await signInR02Admin(page);
   await page.route("**/api/settings/providers", (route) => route.fulfill({ json: { providers: [provider], catalog } }));
-  await page.route("**/api/admin/platform-provider-probe/budget", (route) => route.fulfill({ json: { budget: null } }));
   await page.route("**/api/settings/platform-ai-operations", (route) => route.fulfill({ json: platformOperations }));
   let probeReply: { status: number; body: unknown } | null = null;
   let probeGate = Promise.resolve();
@@ -120,8 +119,6 @@ test("new provider tests display safe failure reasons and clear stale results", 
   const run = dialog.getByRole("button", { name: "测试连接", exact: true });
   const save = dialog.getByRole("button", { name: /^(?:保存连接|保存中…)$/u });
   for (const [suffix, reason] of [
-    ["BUDGET_REQUIRED", "当前没有生效的模型测试额度"],
-    ["BUDGET_EXHAUSTED", "平台连接测试额度不足"],
     ["PROVIDER_AUTH_FAILED", "供应商凭据无效或权限不足"],
     ["PROVIDER_RATE_LIMITED", "供应商触发限流或配额不足"],
     ["PROVIDER_TIMEOUT", "供应商响应超时"],
@@ -136,7 +133,6 @@ test("new provider tests display safe failure reasons and clear stale results", 
     await expect(alert).toContainText(reason);
     await expect(alert).toContainText(code);
     await expect(save).toBeDisabled();
-    if (suffix.startsWith("BUDGET_")) await expect(alert.getByRole("link", { name: "调整测试额度" })).toHaveAttribute("href", "/admin/operations/probes");
   }
   probeReply = { status: 401, body: { error: { code: "PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED", message: "secret=private-provider-detail" } } };
   await run.click();
@@ -158,7 +154,7 @@ test("new provider tests display safe failure reasons and clear stale results", 
   probeReply = null;
   await run.click();
   await expect(dialog.getByRole("alert")).toContainText("未能取得连接测试结果，请检查网络后重试");
-  probeReply = { status: 200, body: { draftProbeId: fixtureId, attempt: { safeErrorCode: null } } };
+  probeReply = { status: 200, body: { draftProbeId: fixtureId, expiresAt: new Date(Date.now() + 300_000).toISOString(), attempt: { safeErrorCode: null } } };
   let finishProbe!: () => void;
   probeGate = new Promise<void>((resolve) => { finishProbe = resolve; });
   await run.click();
@@ -168,8 +164,21 @@ test("new provider tests display safe failure reasons and clear stale results", 
   await expect(save).toBeDisabled();
   finishProbe();
   await expect(dialog.getByRole("status")).toBeVisible();
-  await expect(dialog.getByRole("status")).toContainText("真实连接测试通过");
+  await expect(dialog.getByRole("status")).toContainText("测试通过");
   await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(save).toBeEnabled();
+  const badge = dialog.locator("header").getByText("测试通过", { exact: true });
+  await expect(badge).toBeVisible();
+  const footer = await dialog.locator("footer").boundingBox();
+  const action = await save.boundingBox();
+  expect(footer!.x + footer!.width - action!.x - action!.width).toBeLessThanOrEqual(32);
+  const badgeColor = await badge.evaluate(el => getComputedStyle(el).color);
+  const [red, green] = (badgeColor.match(/\d+/gu) ?? []).map(Number);
+  expect(green).toBeGreaterThan(red);
+  await dialog.getByLabel("连接名称", { exact: true }).fill("Change verified configuration");
+  await expect(badge).toBeHidden();
+  await expect(save).toBeDisabled();
+  await run.click();
   await expect(save).toBeEnabled();
   await page.route("**/api/settings/providers", (route) => route.fulfill({ status: 409, json: { error: { code: "PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT", message: "secret=private-proof-detail" } } }));
   await save.click();
@@ -179,7 +188,7 @@ test("new provider tests display safe failure reasons and clear stale results", 
   await expect(dialog).not.toContainText("private-proof-detail");
   await expect(save).toBeDisabled();
   await dialog.getByLabel("连接名称", { exact: true }).fill("Changed after test");
-  await expect(dialog.getByRole("status")).toHaveCount(0);
+  await expect(dialog.locator("header").getByRole("status")).toHaveText("");
   await expect(dialog.getByRole("alert")).toHaveCount(0);
   await expect(save).toBeDisabled();
   await expectR02NoHorizontalOverflow(page, "provider test feedback 390px");
@@ -196,10 +205,6 @@ test("admin models use inline capability selection and read-only provider drawer
   await page.route("**/api/settings/providers", async (route) => {
     if (route.request().method() !== "GET") return route.abort();
     return route.fulfill({ json: { providers: [provider], catalog } });
-  });
-  await page.route("**/api/admin/platform-provider-probe/budget", async (route) => {
-    if (route.request().method() !== "GET") return route.abort();
-    return route.fulfill({ json: { budget: null } });
   });
   await page.route("**/api/settings/platform-ai-operations", async (route) => {
     if (route.request().method() !== "GET") return route.abort();
@@ -323,12 +328,9 @@ for (const uncertain of [false, true]) {
     const origin = new URL(page.url()).origin;
     await page.context().addCookies([{ name: "aipos-language", value: "en", url: origin }]);
     const calls: string[] = [];
+    page.on("request", request => { if (new URL(request.url()).pathname === "/api/admin/platform-provider-probe/budget") calls.push("obsolete allowance request"); });
     const bodies = new Map<string, { clientRequestKey: string; modelId: string }>();
     await page.route("**/api/settings/providers", (route) => route.fulfill({ json: { providers: [provider], catalog } }));
-    await page.route("**/api/admin/platform-provider-probe/budget", (route) => {
-      expect(route.request().method()).toBe("GET");
-      return route.fulfill({ json: { budget: { version: 1, status: "active", unitLimit: 10, availableUnits: 10, reservedUnits: 0, settledUnits: 0, heldUnits: 0, alertThresholdUnits: 8, startsAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString() } } });
-    });
     await page.route("**/api/settings/platform-ai-operations", (route) => route.fulfill({ json: platformOperations }));
     await page.route("**/api/settings/platform-ai-operations/*/probe", async (route) => {
       const operation = new URL(route.request().url()).pathname.split("/").at(-2)!;
@@ -369,3 +371,28 @@ for (const uncertain of [false, true]) {
     expect(new Set([...bodies.values()].map((body) => body.clientRequestKey)).size).toBe(bodies.size);
   });
 }
+
+test("admin model defaults and scrolling work at desktop and mobile viewport sizes", async ({ page }, testInfo) => {
+  await signInR02Admin(page);
+  for (const viewport of [{ width: 1680, height: 970 }, { width: 390, height: 740 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/admin/models");
+    await page.getByRole("button", { name: "新增供应商", exact: true }).first().click();
+    const form = page.getByRole("dialog", { name: "新增供应商", exact: true });
+    await expectProviderDefaults(form, false);
+    await expect(form.getByRole("button", { name: "保存连接", exact: true })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(form).toBeHidden();
+    const body = page.locator("main.admin-page-scroll");
+    const geometry = await body.evaluate(el => {
+      el.scrollTop = el.scrollHeight;
+      return { documentHeight: document.documentElement.scrollHeight, viewport: innerHeight, documentOffset: scrollY,
+        bottom: Math.round(el.getBoundingClientRect().bottom), scrolled: el.scrollTop, content: el.scrollHeight, available: el.clientHeight };
+    });
+    expect(geometry.documentHeight).toBe(geometry.viewport);
+    expect(geometry.documentOffset).toBe(0);
+    expect(geometry.bottom).toBe(geometry.viewport);
+    expect(geometry.scrolled).toBeGreaterThanOrEqual(geometry.content - geometry.available - 1);
+    await testInfo.attach(`model-page-scroll-${viewport.width}.json`, { body: JSON.stringify(geometry), contentType: "application/json" });
+  }
+});

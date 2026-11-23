@@ -70,9 +70,8 @@
   },
   "/admin/operations/probes": {
     "route": "/admin/operations/probes",
-    "view": "admin-probes",
-    "name": "探测预算",
-    "group": "admin"
+    "kind": "redirect",
+    "destination": "/admin/models"
   },
   "/admin": {
     "route": "/admin",

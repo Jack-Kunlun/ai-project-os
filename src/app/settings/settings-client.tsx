@@ -60,18 +60,6 @@ type ProviderCheck = Readonly<{
   }>;
 }>;
 
-type ProbeBudgetSummary = Readonly<{
-  version: number;
-  status: "active" | "scheduled" | "expired";
-  unitLimit: number;
-  reservedUnits: number;
-  settledUnits: number;
-  heldUnits: number;
-  availableUnits: number;
-  startsAt: string;
-  expiresAt: string;
-}>;
-
 async function readError(response: Response, fallback: string): Promise<string> {
   return (await safeResponseError(response, fallback)).message;
 }
@@ -94,11 +82,7 @@ function describeProviderCheck(check: ProviderCheck, t: (text: string) => string
   if (check.attempt.capabilities.vision === "passed") messages.push(t("图片识别连接通过"));
   if (messages.length === 0) {
     const code = check.attempt.safeErrorCode;
-    const detail = t(code === "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED"
-      ? "尚未设置模型测试额度，请先设置最大测试次数和有效期。"
-      : code === "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED"
-        ? "模型测试次数不足；请设置新的有效周期后重试。"
-        : code === "PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED"
+    const detail = t(code === "PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED"
           ? "供应商拒绝了凭据，请检查 API Key 是否有效并重新保存。"
           : code === "PLATFORM_PROVIDER_PROBE_PROVIDER_RATE_LIMITED"
             ? "供应商触发限流，请稍后再试或检查供应商配额。"
@@ -123,15 +107,6 @@ function requiredProbeUnits(provider: Provider, catalog?: ProviderCatalogEntry):
   if (provider.defaultEmbeddingModelId !== null && provider.embeddingDimensions !== null) units += 1;
   if (provider.defaultVisionModelId !== null && catalog?.supportsVision === true) units += 1;
   return units;
-}
-
-function probeBudgetMessage(budget: ProbeBudgetSummary | null, requiredUnits: number, t: (text: string) => string): string | null {
-  if (requiredUnits === 0) return t("请先为该连接配置至少一个可测试模型，再执行连接测试。");
-  if (budget === null) return t("连接测试需要模型测试额度，请先设置最大测试次数和有效期。");
-  if (budget.status === "scheduled") return t("模型测试额度尚未生效，请检查开始时间。");
-  if (budget.status === "expired") return t("模型测试额度已过期，请设置新的有效周期。");
-  if (budget.availableUnits < requiredUnits) return t("模型测试次数不足，请减少本次测试模型或设置新的测试额度。");
-  return null;
 }
 
 const statusLabel = {
@@ -190,10 +165,10 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
 
   const content = (
     <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
-        <AdminPageHeader title="模型与能力" description="先验证供应商连接，再勾选需要的能力，一次测试并启用。测试额度按请求次数计量。" actions={canManageProviders ? <button ref={createTriggerRef} disabled={operationsBusy} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-control px-4 py-2.5 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 app-button-primary"><UiText text={"新增供应商"} /></button> : undefined} />
+        <AdminPageHeader title="模型与能力" description="先验证供应商连接，再勾选需要的能力，一次测试并启用。" actions={canManageProviders ? <button ref={createTriggerRef} disabled={operationsBusy || loading || catalog.length === 0} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-control px-4 py-2.5 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 app-button-primary"><UiText text={"新增供应商"} /></button> : undefined} />
 
         {!canManageProviders ? <section className="mt-7 border-t border-app-border pt-6"><h2 className="text-xl font-semibold"><UiText text={"平台模型由系统管理员管理"} /></h2><p className="mt-3 text-sm leading-7 text-app-muted"><UiText text={"普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。"} />{activeMembership ? t("当前会员有效，你可以在“我的空间”配置自己的模型连接。") : membershipStatus === "expired" ? t("会员资格已到期；重新获得资格后才可配置个人模型。") : membershipStatus === "revoked" ? t("会员资格已撤销；重新获得资格后才可配置个人模型。") : t("如需配置个人模型，请先完成会员申请。")}</p>{activeMembership ? <a href="/personal/models" className="mt-5 inline-flex rounded-control px-5 py-3 text-sm font-semibold app-button-primary"><UiText text={"配置个人模型"} /></a> : null}</section> : null}
-        {canManageProviders && error ? <div role="alert" className="mb-6 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></div> : null}
+        {canManageProviders && error ? <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /><button type="button" onClick={() => void reload()} disabled={loading} className="app-button-secondary rounded-control border px-3 py-2 text-xs font-semibold disabled:opacity-50"><UiText text={"重试读取"} /></button></div> : null}
 
         {canManageProviders ? <fieldset disabled={operationsBusy} className="mt-5 min-w-0 space-y-4">
           <div className="flex items-end justify-between px-1">
@@ -203,7 +178,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
             </div>
             <span className="text-xs text-app-muted">{loading ? t("读取中…") : entityCountLabel(providers.length, "1 个供应商", "个供应商", t)}</span>
           </div>
-          {loading ? <div className="rounded-panel border border-app-border bg-app-surface px-6 py-12 text-center text-sm text-app-muted app-panel"><UiText text={"读取中…"} /></div> : providers.length === 0 ? (
+          {loading ? <div className="rounded-panel border border-app-border bg-app-surface px-6 py-12 text-center text-sm text-app-muted app-panel"><UiText text={"读取中…"} /></div> : error ? <div className="rounded-panel border border-app-border bg-app-surface px-6 py-12 text-center text-sm text-app-muted app-panel"><UiText text={"供应商列表读取失败；重试成功前不会显示空列表。"} /></div> : providers.length === 0 ? (
             <div className="rounded-panel border border-dashed border-app-border bg-app-surface px-6 py-12 text-center text-sm text-app-muted"><UiText text={"尚未配置供应商。"} /><button type="button" onClick={() => setCreateOpen(true)} className="ml-1 font-semibold text-app-link underline underline-offset-2"><UiText text={"新增供应商"} /></button></div>
           ) : <div role="table" aria-label={t("供应商连接")} className="overflow-hidden rounded-panel border border-app-border bg-app-surface app-panel">
             <div role="rowgroup" className="hidden border-b border-app-border bg-app-surface-soft px-4 py-3 text-xs font-semibold text-app-muted md:block">
@@ -235,6 +210,8 @@ const dialogFocusableSelector = [
   "[tabindex]:not([tabindex=\"-1\"])",
 ].join(",");
 
+type DraftProbeProof = { draftProbeId: string; createRequestKey: string; expiresAt: number };
+
 function ProviderCreateDialog({
   open,
   catalog,
@@ -251,7 +228,13 @@ function ProviderCreateDialog({
   const { t } = useAppearance();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [proof, setProof] = useState<DraftProbeProof | null>(null);
   const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (!proof) return;
+    const timer = window.setTimeout(() => setProof(null), Math.max(0, proof.expiresAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [proof]);
   const pendingRef = useRef(false);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -305,38 +288,43 @@ function ProviderCreateDialog({
     <div ref={dialogRef} data-operation-surface="modal" role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className={["app-dialog-surface app-dialog-surface--modal", (`relative z-10 flex max-h-[min(44rem,calc(100dvh-1.5rem))] w-full max-w-[920px] flex-col overflow-hidden rounded-panel sm:max-h-[min(44rem,calc(100dvh-3rem))] ${modalSurfaceClassName}`)].filter(Boolean).join(' ')}>
       <header data-operation-header className={`${modalHeaderClassName} flex items-start justify-between gap-4 px-5 py-4 sm:px-6`}>
         <div>
-          <h2 id="provider-create-dialog-title" className="text-base font-semibold text-app-text"><UiText text={"新增供应商"} /></h2>
+          <div className="flex flex-wrap items-center gap-2"><h2 id="provider-create-dialog-title" className="text-base font-semibold text-app-text"><UiText text={"新增供应商"} /></h2>
+            <span role="status" aria-live="polite">{proof && <span className="inline-flex items-center gap-1 rounded-full bg-app-success-soft px-2 py-1 text-xs font-semibold text-app-success-ink"><UiText text="测试通过" /></span>}</span>
+          </div>
           <p id="provider-create-dialog-description" className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"使用官方固定端点先测试未保存凭据，测试成功后才能保存为已验证连接。"} /></p>
         </div>
         <button ref={closeRef} type="button" aria-label={t("关闭新增供应商")} onClick={close} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button>
       </header>
-      <ProviderCreateForm catalog={catalog} onCreated={onCreated} onPendingChange={setPending} />
+      <ProviderCreateForm proof={proof} setProof={setProof} catalog={catalog} onCreated={onCreated} onPendingChange={setPending} />
     </div>
   </div>;
 }
 
 function ProviderCreateForm({
-  catalog,
+  proof, setProof, catalog,
   onCreated,
   onPendingChange,
 }: {
   catalog: ProviderCatalogEntry[];
   onCreated: (provider: Provider) => void;
   onPendingChange: (pending: boolean) => void;
+  proof: DraftProbeProof | null;
+  setProof: (proof: DraftProbeProof | null) => void;
 }) {
   const { t } = useAppearance();
-  const [kind, setKind] = useState<ProviderKind>("deepseek");
+  const initial = catalog.find(entry => entry.kind === "deepseek") ?? catalog[0];
+  const [kind, setKind] = useState<ProviderKind>(initial?.kind ?? "deepseek");
   const definition = useMemo(() => catalog.find((entry) => entry.kind === kind), [catalog, kind]);
-  const [name, setName] = useState("DeepSeek");
+  const [name, setName] = useState(initial?.displayName ?? "");
   const [apiKey, setApiKey] = useState("");
-  const [generationModelId, setGenerationModelId] = useState("deepseek-flash");
-  const [visionModelId, setVisionModelId] = useState("deepseek-flash");
-  const [embeddingEnabled, setEmbeddingEnabled] = useState(false);
-  const [embeddingModelId, setEmbeddingModelId] = useState("");
-  const [embeddingDimensions, setEmbeddingDimensions] = useState("");
-  const [pending, setPending] = useState(false);
+  const [generationModelId, setGenerationModelId] = useState(initial?.generationModelSuggestions[0] ?? "");
+  const [visionModelId, setVisionModelId] = useState(initial?.visionModelSuggestions[0] ?? "");
+  const [embeddingEnabled, setEmbeddingEnabled] = useState(Boolean(initial?.embeddingModelSuggestions[0]));
+  const [embeddingModelId, setEmbeddingModelId] = useState(initial?.embeddingModelSuggestions[0]?.id ?? "");
+  const [embeddingDimensions, setEmbeddingDimensions] = useState(String(initial?.embeddingModelSuggestions[0]?.dimensions ?? ""));
+  const [action, setAction] = useState<"test" | "save" | null>(null);
+  const pending = action !== null;
   const [message, setMessage] = useState<string | null>(null);
-  const [proof, setProof] = useState<{ draftProbeId: string; createRequestKey: string } | null>(null);
   const [failure, setFailure] = useState<SafeErrorPresentation | null>(null);
 
   function clearProof() {
@@ -348,11 +336,12 @@ function ProviderCreateForm({
   function chooseKind(nextKind: ProviderKind) {
     clearProof();
     setKind(nextKind);
+    setApiKey("");
     const next = catalog.find((entry) => entry.kind === nextKind);
     if (!next) return;
     setName(next.displayName);
-    setGenerationModelId(nextKind === "glm" ? "" : next.generationModelSuggestions[0] ?? "");
-    setVisionModelId(nextKind === "glm" ? "" : next.visionModelSuggestions[0] ?? "");
+    setGenerationModelId(next.generationModelSuggestions[0] ?? "");
+    setVisionModelId(next.visionModelSuggestions[0] ?? "");
     const embedding = next.embeddingModelSuggestions[0];
     setEmbeddingEnabled(next.supportsEmbeddings && embedding !== undefined);
     setEmbeddingModelId(embedding?.id ?? "");
@@ -367,7 +356,7 @@ function ProviderCreateForm({
 
   async function testConnection(): Promise<void> {
     const createRequestKey = crypto.randomUUID();
-    setPending(true);
+    setAction("test");
     onPendingChange(true);
     setMessage(null);
     setFailure(null);
@@ -391,29 +380,34 @@ function ProviderCreateForm({
         setFailure(await safeResponseError(response, "供应商连接测试失败"));
         return;
       }
-      const payload = await response.json() as { draftProbeId: string | null; attempt: { safeErrorCode: string | null } };
+      const payload = await response.json() as { draftProbeId: string | null; expiresAt?: string; attempt: { safeErrorCode: string | null } };
       if (typeof payload?.draftProbeId !== "string" || payload.draftProbeId.length === 0) {
         setFailure(safeErrorPresentation({ error: { code: payload?.attempt?.safeErrorCode } }, "供应商连接测试未通过"));
         return;
       }
-      setProof({ draftProbeId: payload.draftProbeId, createRequestKey });
-      setMessage("真实连接测试通过；现在可以保存为已验证连接。 ");
+      const expiresAt = Date.parse(payload.expiresAt ?? "");
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        setFailure(safeErrorPresentation({ error: { code: "PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT" } }, "供应商连接测试未通过"));
+        return;
+      }
+      setProof({ draftProbeId: payload.draftProbeId, createRequestKey, expiresAt });
     } catch {
       setProof(null);
       setFailure(safeErrorPresentation(null, "未能取得连接测试结果，请检查网络后重试。"));
     } finally {
-      setPending(false);
+      setAction(null);
       onPendingChange(false);
     }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (proof === null) {
+    if (proof === null || proof.expiresAt <= Date.now()) {
+      setProof(null);
       setMessage("请先完成真实连接测试，再保存连接。");
       return;
     }
-    setPending(true);
+    setAction("save");
     onPendingChange(true);
     setMessage(null);
     setFailure(null);
@@ -447,7 +441,7 @@ function ProviderCreateForm({
     } catch {
       setFailure(safeErrorPresentation(null, "供应商创建失败"));
     } finally {
-      setPending(false);
+      setAction(null);
       onPendingChange(false);
     }
   }
@@ -476,20 +470,19 @@ function ProviderCreateForm({
         ) : <p className="mt-3 rounded-panel border border-app-warning-border bg-app-warning-soft px-4 py-3 text-xs leading-5 text-app-warning-ink"><UiText text={"DeepSeek 当前作为生成供应商使用；语义索引需为项目另选 OpenAI、Qwen 或 GLM。"} /></p>}
         <details className="mt-3 rounded-panel border border-app-border bg-app-surface-soft px-4 py-3 text-xs leading-5 text-app-muted">
           <summary className="cursor-pointer font-semibold text-app-text"><UiText text={"能力说明与推荐模型"} /></summary>
-          <p className="mt-1"><UiText text={"生成模型用于文本、摘要和计划；图片识别模型可选，留空即关闭；向量模型可选，维度必须匹配，切换模型或维度后需重建相关索引。API Key 只在服务端加密保存；连接测试按实际模型类型使用 1–3 次模型测试额度。"} /></p>
+          <p className="mt-1"><UiText text={"生成模型用于文本、摘要和计划；图片识别模型可选，留空即关闭；向量模型可选，维度必须匹配，切换模型或维度后需重建相关索引。API Key 只在服务端加密保存。"} /></p>
           {definition ? <div className="mt-3 space-y-1 text-app-muted"><p><UiText text={"生成推荐："} />{definition.generationModelSuggestions.join("、") || "暂无"}</p><p><UiText text={"图片推荐："} />{definition.visionModelSuggestions.join("、") || "暂无"}</p><p><UiText text={"向量推荐："} />{definition.embeddingModelSuggestions.map((item) => `${item.id}（${item.dimensions} 维）`).join("、") || "暂无"}</p></div> : null}
         </details>
         </fieldset>
       </div>
-      <footer className={`${modalFooterClassName} grid shrink-0 gap-3 px-5 py-4 sm:grid-cols-2 sm:px-6`}>
-        {failure ? <div role="alert" className="min-w-0 space-y-1 break-words rounded-field border border-app-danger-border bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink sm:col-span-2 app-feedback-error">
+      <footer className={`${modalFooterClassName} flex shrink-0 flex-col items-stretch gap-3 px-5 py-4 sm:px-6`}>
+        {failure ? <div role="alert" className="w-full min-w-0 space-y-1 break-words rounded-field border border-app-danger-border bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink sm:col-span-2 app-feedback-error">
           <p className="font-semibold">{t(failure.summary)}</p>
           <p>{t(failure.nextStep)}</p>
           {failure.code ? <p className="[overflow-wrap:anywhere]">{t("安全错误码")}：{failure.code}</p> : null}
-          {failure.code?.startsWith("PLATFORM_PROVIDER_PROBE_BUDGET_") ? <a href="/admin/operations/probes" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center font-semibold underline underline-offset-2">{t("调整测试额度")}</a> : null}
         </div> : null}
         {message ? <p className="text-xs leading-5 text-app-muted sm:col-span-2" role="status"><UiFeedbackText text={message} /></p> : null}
-        <button type="button" onClick={() => void testConnection()} disabled={pending || catalog.length === 0 || apiKey.trim().length < 8} className="rounded-control border px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 app-button-primary">{pending ? t("处理中…") : t("测试连接")}</button><button disabled={pending || catalog.length === 0 || proof === null} className="rounded-control px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 app-button-primary">{pending ? t("保存中…") : t("保存连接")}</button>
+        <div className="flex w-full flex-wrap items-center justify-end gap-2"><button type="button" onClick={() => void testConnection()} disabled={pending || catalog.length === 0 || apiKey.trim().length < 8} className="rounded-control border px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 app-button-secondary">{action === "test" ? t("处理中…") : t("测试连接")}</button><button disabled={pending || catalog.length === 0 || proof === null} className="rounded-control px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 app-button-primary">{action === "save" ? t("保存中…") : t("保存连接")}</button></div>
       </footer>
 
     </form>
@@ -514,7 +507,6 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
   const [embeddingModelId, setEmbeddingModelId] = useState(provider.defaultEmbeddingModelId ?? "");
   const [embeddingDimensions, setEmbeddingDimensions] = useState(provider.embeddingDimensions ? String(provider.embeddingDimensions) : "");
   const [apiKey, setApiKey] = useState("");
-  const [probeBudgetHref, setProbeBudgetHref] = useState<string | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
   const disableBlocked = provider.status !== "disabled" && provider._count.platformDefaultAiRoutes > 0;
   const disableBlockReasons = [
@@ -528,15 +520,9 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
     setTesting(true);
     setMessage(null);
     setCheckResult(null);
-    setProbeBudgetHref(null);
     try {
-      const budgetResponse = await fetch("/api/admin/platform-provider-probe/budget", { cache: "no-store" });
-      if (!budgetResponse.ok) throw new Error(await readError(budgetResponse, "测试额度读取失败"));
-      const budgetPayload = await budgetResponse.json() as { budget: ProbeBudgetSummary | null };
-      const budgetMessage = probeBudgetMessage(budgetPayload.budget, requiredProbeUnits(provider, catalog), t);
-      if (budgetMessage !== null) {
-        setMessage(budgetMessage);
-        if (requiredProbeUnits(provider, catalog) > 0) setProbeBudgetHref("/admin/operations/probes");
+      if (requiredProbeUnits(provider, catalog) === 0) {
+        setMessage("请先为该连接配置至少一个可测试模型，再执行连接测试。");
         return;
       }
       const clientRequestKey = globalThis.crypto.randomUUID();
@@ -644,7 +630,7 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished
           <dl className="grid gap-3 rounded-panel border border-app-border p-4 text-xs sm:grid-cols-3"><div><dt className="text-app-muted"><UiText text={"生成模型"} /></dt><dd className="mt-1 break-words font-medium text-app-text">{provider.defaultGenerationModelId ?? t("未配置")}</dd></div><div><dt className="text-app-muted"><UiText text={"图片识别"} /></dt><dd className="mt-1 break-words font-medium text-app-text">{provider.defaultVisionModelId ?? t("未配置")}</dd></div><div><dt className="text-app-muted"><UiText text={"向量模型"} /></dt><dd className="mt-1 break-words font-medium text-app-text">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} ${t("维")}` : t("未配置")}</dd></div></dl>
           <ScopeEvidenceCard title="供应商配置边界" evidence={{ scope: t("平台供应商连接"), owner: t("平台管理员"), payer: t("使用平台默认路由时由当前发起人扣减平台额度"), affectedProjects: provider._count.platformDefaultAiRoutes > 0 ? `${t("项目影响需经活动默认路由影响预览核实；当前有")} ${provider._count.platformDefaultAiRoutes} ${t("条活动默认路由引用")}` : t("尚无活动默认路由引用；暂无项目影响证据"), latestSuccess: provider.lastTestedAt ? `${t("最近连接测试")}：${dateLabel(provider.lastTestedAt, language, t)}` : t("尚未完成连接测试") }} />
           {provider.status === "disabled" ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-app-danger-border bg-app-danger-soft px-4 py-3"><p className="text-xs leading-5 text-app-danger-ink"><UiText text={"永久删除仅适用于没有活动平台默认路由或历史审计引用的连接，并会同时删除加密凭据。"} /></p><DialogActions><button type="button" onClick={() => void removeConnection()} disabled={pending} className="min-h-10 rounded-control px-4 py-2.5 text-xs font-semibold disabled:opacity-40 app-button-danger"><UiText text={"永久删除"} /></button></DialogActions></div> : null}
-          {(checkResult || message) && !editing ? <p role="status" className="text-xs leading-5 text-app-muted">{checkResult ? describeProviderCheck(checkResult, t) : <UiFeedbackText text={message ?? ""} />}{probeBudgetHref ? <> <a href={probeBudgetHref} className="font-semibold text-app-link underline underline-offset-2"><UiText text={"设置模型测试额度"} /></a></> : null}</p> : null}
+          {(checkResult || message) && !editing ? <p role="status" className="text-xs leading-5 text-app-muted">{checkResult ? describeProviderCheck(checkResult, t) : <UiFeedbackText text={message ?? ""} />}</p> : null}
           {provider.lastErrorCode ? <p className="text-xs text-app-danger-ink"><UiText text={"最近一次连接测试未通过："} />{describeProviderCheck({ attempt: { status: "failed", safeErrorCode: provider.lastErrorCode, capabilities: { generation: "notConfigured", embedding: "notConfigured", vision: "notConfigured" }, embeddingDimensions: null } }, t)}</p> : null}
         </div>
       </OperationPanel></div>

@@ -15,7 +15,7 @@ test("admin shell is independent from the user workspace and uses the supplied b
   assert.match(header, /平台管理/u);
   assert.doesNotMatch(header, /\/dashboard|\/projects|\/team/u);
   assert.doesNotMatch(shell, /key: "git"|href: "\/dashboard"/u);
-  assert.equal(adminNavigationItems.length, 13);
+  assert.equal(adminNavigationItems.length, 12);
   for (const href of ["/admin", "/admin/users", "/admin/models", "/admin/connectors/mcp", "/admin/operations/failures", "/admin/account"]) {
     assert.ok(adminNavigationItems.some(item => item.href === href));
   }
@@ -49,7 +49,7 @@ test("platform model responsibilities are split into independent admin surfaces"
   assert.match(navigation, /label: "模型与能力"/u);
   assert.doesNotMatch(shell, /href: "\/admin\/models\/routes"/u);
   assert.match(navigation, /href: "\/admin\/credits"/u);
-  assert.match(navigation, /href: "\/admin\/operations\/probes"/u);
+  assert.doesNotMatch(navigation, /href: "\/admin\/operations\/probes"/u);
   assert.doesNotMatch(shell, /modelGovernance|href: "\/admin\/models\/governance"/u);
   assert.match(legacyGovernance, /requireSystemAdminPage/u);
   assert.match(legacyGovernance, /redirect\("\/admin\/models"\)/u);
@@ -63,7 +63,7 @@ test("platform model responsibilities are split into independent admin surfaces"
   assert.match(routesClient, /quotaMultiplierBps,/u);
   assert.match(credits, /PlatformGrantOfferPolicyPanel/u);
   assert.match(credits, /PlatformCreditGovernancePanel/u);
-  assert.match(probes, /PlatformProbeBudgetClient/u);
+  assert.match(probes, /redirect\("\/admin\/models"\)/u);
 });
 
 test("provider probe refreshes the stored provider state after every completed test", async () => {

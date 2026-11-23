@@ -113,5 +113,6 @@ test("read-all route is same-origin, authenticated, strict-empty-body, and refre
   assert.match(client, /body: "\{\}"/u);
   assert.match(client, /ai-project-os:notifications-changed/u);
   assert.match(client, /if \(filter === "unread" && cursor !== null\) setCursor\(null\);\s*else await reload\(\)/u);
-  assert.match(client, /disabled=\{markingAllRead \|\| unreadCount === 0/u);
+  assert.match(client, /disabled=\{!hasLoaded \|\| markingAllRead \|\| unreadCount === 0/u);
+  assert.match(client, /error && notifications\.length === 0/u, "failed reads do not render the successful empty state");
 });

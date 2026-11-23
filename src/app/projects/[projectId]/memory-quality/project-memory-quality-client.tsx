@@ -109,14 +109,14 @@ export function ProjectMemoryQualityClient({ username, projectId, isSystemAdmin,
 
         {error ? <div role="alert" className="mt-6 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></div> : null}
         <section className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-          <ScoreCard score={quality?.score ?? 100} loading={loading} />
-          {(Object.keys(kindMeta) as QualityKind[]).map((kind) => <MetricCard key={kind} label={kindMeta[kind].label} value={quality?.counts[kind] ?? 0} />)}
+          <ScoreCard score={quality?.score ?? 100} loading={loading || quality === null} />
+          {(Object.keys(kindMeta) as QualityKind[]).map((kind) => <MetricCard key={kind} label={kindMeta[kind].label} value={quality?.counts[kind] ?? null} />)}
         </section>
 
         <section className="mt-9">
-          <div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text={"Review queue"} /></p><h2 className="mt-2 text-base font-semibold"><UiText text={"待处理问题"} /></h2></div><span className="text-xs text-app-muted">{loading ? <UiText text={"读取中…"} /> : translateUi("{count} 项").replace("{count}", String(quality?.openIssueCount ?? 0))}</span></div>
+          <div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text={"Review queue"} /></p><h2 className="mt-2 text-base font-semibold"><UiText text={"待处理问题"} /></h2></div><span className="text-xs text-app-muted">{loading ? <UiText text={"读取中…"} /> : quality === null ? "—" : translateUi("{count} 项").replace("{count}", String(quality.openIssueCount))}</span></div>
           <div className="space-y-4">
-            {!loading && (quality?.issues.filter((issue) => issue.status === "open").length ?? 0) === 0 ? <div className="rounded-panel border border-dashed border-app-border bg-app-surface px-6 py-16 text-center"><p className="text-base font-semibold text-app-text"><UiText text={"当前没有待处理质量问题"} /></p><p className="mt-2 text-sm text-app-muted"><UiText text={"新资料进入或条目更新后，可再次运行检查。"} /></p></div> : null}
+            {!loading && quality !== null && quality.issues.filter((issue) => issue.status === "open").length === 0 ? <div className="rounded-panel border border-dashed border-app-border bg-app-surface px-6 py-16 text-center"><p className="text-base font-semibold text-app-text"><UiText text={"当前没有待处理质量问题"} /></p><p className="mt-2 text-sm text-app-muted"><UiText text={"新资料进入或条目更新后，可再次运行检查。"} /></p></div> : null}
             {quality?.issues.filter((issue) => issue.status === "open").map((issue) => <IssueCard key={issue.id} projectId={projectId} issue={issue} onChanged={reload} />)}
           </div>
         </section>
@@ -130,9 +130,9 @@ function ScoreCard({ score, loading }: { score: number; loading: boolean }) {
   return <article className="rounded-panel border border-app-border bg-app-surface p-5 sm:col-span-2 lg:col-span-1 app-panel"><p className="text-xs font-semibold text-app-muted"><UiText text={"质量分"} /></p><strong className={`mt-3 block text-4xl ${tone}`}>{loading ? "—" : score}</strong><p className="mt-2 text-[12px] text-app-muted"><UiText text={"确定性治理评分"} /></p></article>;
 }
 
-function MetricCard({ label, value }: { label: string; value: number }) {
+function MetricCard({ label, value }: { label: string; value: number | null }) {
   const translateUi = useTranslate();
-  return <article className="rounded-panel border border-app-border bg-app-surface p-5 app-panel"><p className="text-xs font-semibold text-app-muted">{translateUi(label)}</p><strong className="mt-3 block text-3xl text-app-text">{value}</strong><p className="mt-2 text-[12px] text-app-muted"><UiText text={"待人工处置"} /></p></article>;
+  return <article className="rounded-panel border border-app-border bg-app-surface p-5 app-panel"><p className="text-xs font-semibold text-app-muted">{translateUi(label)}</p><strong className="mt-3 block text-3xl text-app-text">{value ?? "—"}</strong><p className="mt-2 text-[12px] text-app-muted"><UiText text={"待人工处置"} /></p></article>;
 }
 
 function IssueCard({ projectId, issue, onChanged }: { projectId: string; issue: QualityIssue; onChanged: () => Promise<void> }) {

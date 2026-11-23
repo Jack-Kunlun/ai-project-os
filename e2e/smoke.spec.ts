@@ -1,3 +1,4 @@
+import { expectProviderDefaults } from "./support/provider-defaults";
 import { createHash, randomUUID } from "node:crypto";
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
@@ -977,6 +978,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.getByRole("button", { name: "添加连接", exact: true }).click();
   await expect(page.getByText("生成模型或向量模型至少配置一项。", { exact: true })).toBeVisible();
 
+  await expectProviderDefaults(page.getByRole("dialog", { name: "添加个人模型连接" }), true);
   const smokeConnectionName = "Browser smoke personal model";
   const smokeConnectionNameUpdated = "Browser smoke personal model updated";
   const smokeKey = "smoke-local-key-2026";

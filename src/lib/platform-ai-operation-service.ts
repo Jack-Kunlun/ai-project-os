@@ -191,8 +191,6 @@ async function admittedProvider(providerId: string, input: OperationProbeInput, 
       if (!equalDigest(existing.requestFingerprint, digestValue)) fail("PLATFORM_PROVIDER_PROBE_IDEMPOTENCY_CONFLICT");
       return { attemptId: existing.id, provider, terminal: true as const, deadlineAt: now };
     }
-    await lockBudget(tx);
-    const budget = await tx.platformProviderProbeBudget.findFirst({ where: { status: "active", startsAt: { lte: now }, expiresAt: { gt: now } }, orderBy: { version: "desc" } });
     const base = {
       subject: "routeOperation" as const,
       providerConnectionId: provider.id,
@@ -212,35 +210,21 @@ async function admittedProvider(providerId: string, input: OperationProbeInput, 
       requestFingerprint: digestValue,
     };
     if (provider.credential.secretFingerprint === null) fail("PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE");
-    if (budget === null) {
-      const attempt = await tx.platformProviderProbeAttempt.create({ data: { ...base, budgetId: null, status: "rejected", safeErrorCode: "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED", plannedUnits: 0, leaseExpiresAt: now, terminalAt: now }, select: { id: true } });
-      await tx.platformProviderProbeLedger.create({ data: { budgetId: null, attemptId: attempt.id, actorId: currentActor.id, ordinal: 0, event: "rejected", capability: null, units: 0, safeErrorCode: "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED" } });
-      return { attemptId: attempt.id, provider, terminal: true as const, deadlineAt: now };
-    }
-    const available = budget.unitLimit - budget.reservedUnits - budget.settledUnits - budget.heldUnits;
-    if (available < 1) {
-      const attempt = await tx.platformProviderProbeAttempt.create({ data: { ...base, budgetId: budget.id, status: "rejected", safeErrorCode: "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED", plannedUnits: 0, leaseExpiresAt: now, terminalAt: now }, select: { id: true } });
-      await tx.platformProviderProbeLedger.create({ data: { budgetId: budget.id, attemptId: attempt.id, actorId: currentActor.id, ordinal: 0, event: "rejected", capability: null, units: 0, safeErrorCode: "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED" } });
-      return { attemptId: attempt.id, provider, terminal: true as const, deadlineAt: now };
-    }
-    const attempt = await tx.platformProviderProbeAttempt.create({ data: { ...base, budgetId: budget.id, status: "reserved", safeErrorCode: null, plannedUnits: 1, leaseExpiresAt: new Date(now.getTime() + PROVIDER_REQUEST_TIMEOUT_MS + 15_000) }, select: { id: true } });
-    await tx.platformProviderProbeBudget.update({ where: { id: budget.id }, data: { reservedUnits: { increment: 1 } } });
+    const attempt = await tx.platformProviderProbeAttempt.create({ data: { ...base, budgetId: null, status: "reserved", safeErrorCode: null, plannedUnits: 1, leaseExpiresAt: new Date(now.getTime() + PROVIDER_REQUEST_TIMEOUT_MS + 15_000) }, select: { id: true } });
     const capability: PlatformProviderProbeCapability = input.operation === "embedding" ? "embedding" : input.operation === "visionExtract" ? "vision" : "generation";
-    await tx.platformProviderProbeLedger.create({ data: { budgetId: budget.id, attemptId: attempt.id, actorId: currentActor.id, ordinal: 1, event: "reserved", capability, units: 1 } });
+    await tx.platformProviderProbeLedger.create({ data: { budgetId: null, attemptId: attempt.id, actorId: currentActor.id, ordinal: 1, event: "reserved", capability, units: 1 } });
     return { attemptId: attempt.id, provider, terminal: false as const, deadlineAt: new Date(now.getTime() + PLATFORM_PROVIDER_PROBE_LEASE_MS) };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 10_000, maxWait: 10_000 });
 }
 
 async function verifyFence(attemptId: string, expectedProviderId: string, expectedVersion: number, expectedFingerprint: string, db: PrismaClient): Promise<boolean> {
   const attempt = await db.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { actorId: true, actorAccountAccessVersion: true, providerConnectionId: true, providerConfigurationVersion: true, credentialSecretFingerprint: true, budgetId: true, subject: true, status: true } });
-  if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId !== expectedProviderId || attempt.providerConfigurationVersion !== expectedVersion || attempt.credentialSecretFingerprint !== expectedFingerprint || attempt.budgetId === null || !["reserved", "running"].includes(attempt.status)) return false;
+  if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId !== expectedProviderId || attempt.providerConfigurationVersion !== expectedVersion || attempt.credentialSecretFingerprint !== expectedFingerprint || !["reserved", "running"].includes(attempt.status)) return false;
   const actor = await db.appUser.findUnique({ where: { id: attempt.actorId }, select: { role: true, disabledAt: true, accountAccessVersion: true } });
   if (actor === null || actor.role !== "admin" || actor.disabledAt !== null || actor.accountAccessVersion !== attempt.actorAccountAccessVersion) return false;
   const provider = await db.aiProviderConnection.findUnique({ where: { id: expectedProviderId }, select: { configurationVersion: true, status: true, disabledAt: true, credential: { select: { secretFingerprint: true } } } });
   if (provider === null || provider.configurationVersion !== expectedVersion || provider.status !== "verified" || provider.disabledAt !== null || provider.credential.secretFingerprint !== expectedFingerprint) return false;
-  const budget = await db.platformProviderProbeBudget.findUnique({ where: { id: attempt.budgetId }, select: { status: true, startsAt: true, expiresAt: true } });
-  const now = new Date();
-  return budget?.status === "active" && budget.startsAt <= now && budget.expiresAt > now;
+  return true;
 }
 
 async function markDispatched(attemptId: string, providerId: string, ordinal: number, capability: PlatformProviderProbeCapability, db: PrismaClient): Promise<boolean> {
@@ -248,15 +232,12 @@ async function markDispatched(attemptId: string, providerId: string, ordinal: nu
     return await db.$transaction(async (tx) => {
       await mutationContext(tx);
       const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { actorId: true, actorAccountAccessVersion: true, providerConnectionId: true, budgetId: true, subject: true, status: true } });
-      if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId !== providerId || attempt.budgetId === null || !["reserved", "running"].includes(attempt.status)) return false;
+      if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId !== providerId || !["reserved", "running"].includes(attempt.status)) return false;
       await lockMembershipUser(tx, attempt.actorId);
       await lockProviderConfiguration(tx, providerId);
-      await lockBudget(tx);
+      if (attempt.budgetId !== null) await lockBudget(tx);
       const actor = await tx.appUser.findUnique({ where: { id: attempt.actorId }, select: { role: true, disabledAt: true, accountAccessVersion: true } });
       if (actor === null || actor.role !== "admin" || actor.disabledAt !== null || actor.accountAccessVersion !== attempt.actorAccountAccessVersion) return false;
-      const budget = await tx.platformProviderProbeBudget.findUnique({ where: { id: attempt.budgetId }, select: { status: true, startsAt: true, expiresAt: true } });
-      const now = new Date();
-      if (budget?.status !== "active" || budget.startsAt > now || budget.expiresAt <= now) return false;
       const existing = await tx.platformProviderProbeLedger.findUnique({ where: { attemptId_ordinal_event: { attemptId, ordinal, event: "dispatched" } }, select: { id: true } });
       if (existing !== null) return true;
       await tx.platformProviderProbeLedger.create({ data: { attemptId, budgetId: attempt.budgetId, actorId: attempt.actorId, ordinal, event: "dispatched", capability, units: 1 } });
@@ -273,17 +254,17 @@ async function settle(attemptId: string, errorCode: PlatformProviderProbeService
   await db.$transaction(async (tx) => {
     await mutationContext(tx);
     const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { actorId: true, providerConnectionId: true, budgetId: true, subject: true, status: true } });
-    if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId === null || attempt.budgetId === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
+    if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
     await lockMembershipUser(tx, attempt.actorId);
     await lockProviderConfiguration(tx, attempt.providerConnectionId);
-    await lockBudget(tx);
+    if (attempt.budgetId !== null) await lockBudget(tx);
     const terminal = await tx.platformProviderProbeLedger.findFirst({ where: { attemptId, ordinal: 1, event: { in: ["settled", "released", "held"] } }, select: { id: true } });
     if (terminal !== null) return;
     const dispatch = await tx.platformProviderProbeLedger.findFirst({ where: { attemptId, ordinal: 1, event: "dispatched" }, select: { capability: true } });
     if (dispatch === null) return;
     await tx.platformProviderProbeLedger.create({ data: { attemptId, budgetId: attempt.budgetId, actorId: attempt.actorId, ordinal: 1, event: "settled", capability: dispatch.capability ?? "generation", units: 1, safeErrorCode: errorCode, dimensions } });
     await tx.platformProviderProbeAttempt.update({ where: { id: attemptId }, data: { settledUnits: 1, ...(errorCode === null ? {} : { safeErrorCode: errorCode }) } });
-    await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: { reservedUnits: { decrement: 1 }, settledUnits: { increment: 1 } } });
+    if (attempt.budgetId !== null) await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: { reservedUnits: { decrement: 1 }, settledUnits: { increment: 1 } } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 8_000, maxWait: 8_000 });
 }
 
@@ -291,10 +272,10 @@ async function terminal(attemptId: string, event: "released" | "held", errorCode
   await db.$transaction(async (tx) => {
     await mutationContext(tx);
     const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { actorId: true, providerConnectionId: true, budgetId: true, subject: true, status: true } });
-    if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId === null || attempt.budgetId === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
+    if (attempt === null || attempt.subject !== "routeOperation" || attempt.providerConnectionId === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
     await lockMembershipUser(tx, attempt.actorId);
     await lockProviderConfiguration(tx, attempt.providerConnectionId);
-    await lockBudget(tx);
+    if (attempt.budgetId !== null) await lockBudget(tx);
     const existing = await tx.platformProviderProbeLedger.findFirst({ where: { attemptId, ordinal: 1, event: { in: ["settled", "released", "held"] } }, select: { id: true } });
     if (existing !== null) return;
     const dispatch = await tx.platformProviderProbeLedger.findFirst({ where: { attemptId, ordinal: 1, event: "dispatched" }, select: { capability: true } });
@@ -302,7 +283,7 @@ async function terminal(attemptId: string, event: "released" | "held", errorCode
     if (event === "released" && dispatch !== null) return;
     await tx.platformProviderProbeLedger.create({ data: { attemptId, budgetId: attempt.budgetId, actorId: attempt.actorId, ordinal: 1, event, capability: dispatch?.capability ?? reserved?.capability ?? "generation", units: 1, safeErrorCode: errorCode } });
     await tx.platformProviderProbeAttempt.update({ where: { id: attemptId }, data: event === "held" ? { heldUnits: 1, safeErrorCode: errorCode } : { releasedUnits: 1, safeErrorCode: errorCode } });
-    await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: event === "held" ? { reservedUnits: { decrement: 1 }, heldUnits: { increment: 1 } } : { reservedUnits: { decrement: 1 } } });
+    if (attempt.budgetId !== null) await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: event === "held" ? { reservedUnits: { decrement: 1 }, heldUnits: { increment: 1 } } : { reservedUnits: { decrement: 1 } } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 8_000, maxWait: 8_000 });
 }
 
@@ -310,14 +291,14 @@ async function finalize(attemptId: string, db: PrismaClient): Promise<void> {
   await db.$transaction(async (tx) => {
     await mutationContext(tx);
     const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { actorId: true, budgetId: true, status: true, settledUnits: true, releasedUnits: true, heldUnits: true, safeErrorCode: true } });
-    if (attempt === null || attempt.budgetId === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
+    if (attempt === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
     await lockMembershipUser(tx, attempt.actorId);
-    await lockBudget(tx);
+    if (attempt.budgetId !== null) await lockBudget(tx);
     const events = await tx.platformProviderProbeLedger.findMany({ where: { attemptId }, select: { event: true, capability: true } });
     if (!events.some((event) => ["settled", "released", "held"].includes(event.event))) {
       await tx.platformProviderProbeLedger.create({ data: { attemptId, budgetId: attempt.budgetId, actorId: attempt.actorId, ordinal: 1, event: "released", capability: events.find((event) => event.event === "reserved")?.capability ?? "generation", units: 1, safeErrorCode: "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH" } });
       await tx.platformProviderProbeAttempt.update({ where: { id: attemptId }, data: { releasedUnits: 1, safeErrorCode: "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH" } });
-      await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: { reservedUnits: { decrement: 1 } } });
+      if (attempt.budgetId !== null) await tx.platformProviderProbeBudget.update({ where: { id: attempt.budgetId }, data: { reservedUnits: { decrement: 1 } } });
     }
     const final = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { settledUnits: true, releasedUnits: true, heldUnits: true, safeErrorCode: true } });
     const status = (final?.heldUnits ?? 0) > 0 ? "held" : (final?.settledUnits ?? 0) > 0 ? "settled" : "released";

@@ -4,16 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { UiText, useAppearance } from "@/components/appearance-provider";
 import { UiFeedbackText } from "@/components/ui-error-text";
 import { OperationPanel } from "@/components/operation-panel";
-import { PlatformProbeBudgetClient, type ProbeBudgetSummary } from "@/app/admin/operations/probes/platform-probe-budget-client";
 import { safeErrorPresentation, safeResponseError } from "@/lib/safe-error-presentation";
 import { rememberSafeUiError } from "@/lib/safe-ui-error-cache";
-import { PLATFORM_OPERATIONS, batchBudgetProblem, candidateKey, probeHttpFailureStatus, proofUsable, runOperationBatch, type BatchMode, type OperationCandidate, type OperationResult, type OperationTarget, type PlatformOperation, type ProbeOutcome } from "./platform-operation-batch";
+import { PLATFORM_OPERATIONS, candidateKey, probeHttpFailureStatus, proofUsable, runOperationBatch, type BatchMode, type OperationCandidate, type OperationResult, type OperationTarget, type PlatformOperation, type ProbeOutcome } from "./platform-operation-batch";
 
 type OperationView = { candidates: Record<PlatformOperation, {
   active: { providerConnectionId: string; modelId: string; embeddingDimensions: number | null } | null;
   candidates: OperationCandidate[];
 }> };
-type Plan = { mode: BatchMode; targets: readonly OperationTarget[]; embeddingImpact: boolean; available: number };
+type Plan = { mode: BatchMode; targets: readonly OperationTarget[]; embeddingImpact: boolean };
 const labels: Record<PlatformOperation, string> = {
   embedding: "向量检索", visionExtract: "图片识别", autoExtract: "资料整理", sourceSummary: "资料摘要", projectAnalysis: "项目分析", generateWithContext: "带资料问答",
 };
@@ -34,9 +33,6 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
   const [choices, setChoices] = useState<Partial<Record<PlatformOperation, string>>>({});
   const [selected, setSelected] = useState<PlatformOperation[]>([]);
   const [results, setResults] = useState<Partial<Record<PlatformOperation, OperationResult>>>({});
-  const [budget, setBudget] = useState<ProbeBudgetSummary | null>(null);
-  const [budgetOpen, setBudgetOpen] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [bulkModel, setBulkModel] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -131,15 +127,6 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
     changeBusy(true);
     setMessage(null);
     try {
-      let currentBudget = budget;
-      if (mode !== "apply") {
-        const response = await fetch("/api/admin/platform-provider-probe/budget", { cache: "no-store" });
-        if (!response.ok) throw new Error((await safeResponseError(response, "测试额度读取失败")).message);
-        currentBudget = (await response.json() as { budget: ProbeBudgetSummary | null }).budget;
-        setBudget(currentBudget);
-        const problem = batchBudgetProblem(currentBudget, operations.length);
-        if (problem) { setMessage(problem); changeBusy(false); setBudgetOpen(true); return; }
-      }
       let embeddingImpact = false;
       const targets = operations.map((operation): OperationTarget => {
         const picked = candidate(operation)!;
@@ -148,12 +135,12 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
         embeddingImpact ||= changed;
         return Object.freeze({ operation, candidate: Object.freeze({ ...picked }), proof: mode === "apply" ? results[operation]?.proof : undefined, confirmEmbeddingImpact: changed });
       });
-      setPlan({ mode, targets: Object.freeze(targets), embeddingImpact, available: currentBudget?.availableUnits ?? 0 });
+      setPlan({ mode, targets: Object.freeze(targets), embeddingImpact });
       setEmbeddingAck(false);
       setPhase("confirm");
       setPanelOpen(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "测试额度读取失败"); changeBusy(false);
+      setMessage(error instanceof Error ? error.message : "能力配置加载失败"); changeBusy(false);
     }
   }
 
@@ -209,7 +196,6 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
     } finally {
       executing.current = false;
       stop.current = false;
-      setRefreshKey((current) => current + 1);
       setPhase("done");
       changeBusy(false);
     }
@@ -233,8 +219,6 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
   }, { success: 0, failed: 0, unknown: 0 });
 
   return <section className="mt-6 space-y-4" aria-labelledby="platform-operation-cards-title">
-    <PlatformProbeBudgetClient compact disabled={busy} open={budgetOpen} onOpenChange={setBudgetOpen} onBudgetChanged={setBudget} refreshKey={refreshKey} />
-    {budget && budget.heldUnits > 0 ? <p className="text-xs leading-5 text-app-warning-ink"><UiText text="当前额度周期有待核对请求，再次测试前请先核对供应商记录。逐项测试结果仅保留在当前页面，刷新后不会恢复。" /></p> : null}
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 id="platform-operation-cards-title" className="text-xl font-semibold text-app-text"><UiText text="能力分配" /></h2><p className="mt-2 max-w-3xl text-xs leading-5 text-app-muted"><UiText text="选择模型后可批量测试并启用。候选来自已验证连接；测试只检查连通性，不代表业务输出质量。" /></p></div>
       <button type="button" onClick={() => { if (!lock.current) void load().catch((error: Error) => setMessage(error.message)); }} disabled={busy} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="刷新能力" /></button>
@@ -242,7 +226,7 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
     <div className="flex flex-wrap items-center gap-3 text-xs">
       <button type="button" disabled={busy || !view} onClick={() => setSelected(PLATFORM_OPERATIONS.filter((operation) => candidate(operation) && !isUncertain(results[operation])))} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="全选" /></button>
       <button type="button" disabled={busy || !selected.length} onClick={() => setSelected([])} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="清空" /></button>
-      <span aria-live="polite">{t("已选")} {selected.length} {t("项能力，本批最多使用")} {selected.length} {t("次测试额度")}</span>
+      <span aria-live="polite">{t("已选")} {selected.length} {t("项能力")}</span>
     </div>
     {textOperations.length > 0 ? <div className="flex flex-wrap items-end gap-2 border-y border-app-border py-3">
       <label className="w-full max-w-sm text-xs text-app-muted"><UiText text="统一设置所选文字能力模型" /><select value={bulkModel} disabled={busy} onChange={(event) => setBulkModel(event.target.value)} className={["app-field", (`mt-2 ${selectClass}`)].filter(Boolean).join(' ')}><option value="">{t("选择文字模型")}</option>{sharedModels.map((item) => <option key={candidateKey(item)} value={candidateKey(item)}>{item.providerName} · {item.modelId}</option>)}</select></label>
@@ -268,7 +252,7 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
     </div>
     {message ? <p role="status" className="text-xs leading-5 text-app-warning-ink app-feedback-warning"><UiFeedbackText text={message} /></p> : null}
     <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-app-border bg-app-surface py-4">
-      <p className="max-w-xl text-xs leading-5 text-app-muted"><UiText text="本批每项最多 1 次测试额度，再次手动测试另计；通过后立即启用，失败保留原配置。结果未知时暂停后续项，不自动重试。" /></p>
+      <p className="max-w-xl text-xs leading-5 text-app-muted"><UiText text="测试通过后启用所选能力，失败时保留原配置。结果未知时暂停后续项，不自动重试。" /></p>
       <div className="flex flex-wrap gap-2">
         {passed.length > 0 ? <button type="button" disabled={busy} onClick={() => void prepare("apply")} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="启用已通过项" /> ({passed.length})</button> : null}
         <button type="button" disabled={busy || !selected.length || selected.some((operation) => isUncertain(results[operation]))} onClick={() => void prepare("test")} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="仅测试" /></button>
@@ -280,9 +264,8 @@ export function PlatformOperationAssignments({ providers, onBusyChange }: { prov
       <div className="flex flex-wrap gap-2">{phase === "confirm" ? <><button type="button" onClick={() => closePanel(false)} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="取消" /></button><button type="button" disabled={plan?.embeddingImpact && !embeddingAck} onClick={() => void execute()} className={["app-button-primary", (primaryClass)].filter(Boolean).join(' ')}><UiText text={plan?.mode === "apply" ? "确认启用通过项" : plan?.mode === "test" ? "确认仅测试" : "确认测试并启用"} /></button></> : phase === "running" ? <button type="button" disabled={stopRequested} onClick={() => { stop.current = true; setStopRequested(true); }} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text={stopRequested ? "已请求停止后续项" : "停止后续项"} /></button> : <button type="button" onClick={() => closePanel(false)} className={["app-button-secondary", (buttonClass)].filter(Boolean).join(' ')}><UiText text="完成" /></button>}</div>
     </div>}>
       {plan ? <div className="space-y-4">
-        <p className="text-sm leading-6 text-app-muted"><UiText text={plan.mode === "apply" ? "仅启用已有通过结果，不会再次测试或新增测试次数。启用结果未知时使用原凭据核对，不重复测试。" : "逐项向所选供应商发送固定测试样例，不包含项目资料。仅检查连通性；供应商可能另收 Token 费用。"} /></p>
-        {plan.mode !== "apply" && budget && budget.heldUnits > 0 ? <p className="text-xs leading-5 text-app-warning-ink"><UiText text="当前额度周期有待核对请求，再次测试前请先核对供应商记录。逐项测试结果仅保留在当前页面，刷新后不会恢复。" /></p> : null}
-        {phase === "confirm" ? <p className="text-xs text-app-muted">{t("本批能力")} {plan.targets.length} · {t("最多使用测试次数")} {plan.mode === "apply" ? 0 : plan.targets.length} · {t("当前可用")} {plan.available}</p> : <p role="status" className="text-xs text-app-muted">{t("成功")} {batchCounts?.success} · {t("失败")} {batchCounts?.failed} · {t("待核对")} {batchCounts?.unknown}</p>}
+        <p className="text-sm leading-6 text-app-muted"><UiText text={plan.mode === "apply" ? "仅启用已有通过结果，不会再次测试。启用结果未知时使用原凭据核对，不重复测试。" : "逐项向所选供应商发送固定测试样例，不包含项目资料。仅检查连通性；供应商可能另收 Token 费用。"} /></p>
+        {phase === "confirm" ? <p className="text-xs text-app-muted">{t("本批能力")} {plan.targets.length}</p> : <p role="status" className="text-xs text-app-muted">{t("成功")} {batchCounts?.success} · {t("失败")} {batchCounts?.failed} · {t("待核对")} {batchCounts?.unknown}</p>}
         <ul className="divide-y divide-app-border">{plan.targets.map((target) => <li key={target.operation} className="flex flex-wrap justify-between gap-3 py-3 text-xs leading-5"><div><strong>{t(labels[target.operation])}</strong><p className="break-all text-app-muted">{target.candidate.providerName} · {target.candidate.modelId}</p></div>{phase !== "confirm" ? <span>{resultText(target.operation)}</span> : null}</li>)}</ul>
         {phase === "confirm" && plan.embeddingImpact ? <label className="flex items-start gap-3 text-xs leading-5 text-app-warning-ink"><input type="checkbox" checked={embeddingAck} onChange={(event) => setEmbeddingAck(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><UiText text="我已确认更换向量模型或维度可能需要重建现有资料索引。" /></label> : null}
         {phase === "confirm" && plan.mode === "testAndApply" ? <p className="text-xs leading-5 text-app-muted"><UiText text="每项测试通过后立即启用；部分失败时保留已成功项，失败项的原配置不变。" /></p> : null}

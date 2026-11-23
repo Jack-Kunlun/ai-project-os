@@ -64,12 +64,12 @@ test("project pages use persistent navigation and keep management and materials 
   assert.doesNotMatch(materials, /返回项目概览|打开 AI 工作台/u);
 });
 
-test("platform provider form keeps GLM embedding-only defaults optional", async () => {
+test("platform provider form loads defaults from the catalog and supports embedding-only connections", async () => {
   const settings = await readFile("src/app/settings/settings-client.tsx", "utf8");
 
-  assert.match(settings, /const \[generationModelId, setGenerationModelId\] = useState\("deepseek-flash"\)/u);
-  assert.match(settings, /setGenerationModelId\(nextKind === "glm" \? "" : next\.generationModelSuggestions\[0\] \?\? ""\)/u);
-  assert.match(settings, /setVisionModelId\(nextKind === "glm" \? "" : next\.visionModelSuggestions\[0\] \?\? ""\)/u);
+  assert.match(settings, /const \[generationModelId, setGenerationModelId\] = useState\(initial\?\.generationModelSuggestions\[0\] \?\? ""\)/u);
+  assert.match(settings, /setGenerationModelId\(next\.generationModelSuggestions\[0\] \?\? ""\)/u);
+  assert.match(settings, /setVisionModelId\(next\.visionModelSuggestions\[0\] \?\? ""\)/u);
   assert.match(settings, /generationModelId: generationModelId \|\| null/u);
   assert.match(settings, /visionModelId: definition\?\.supportsVision && visionModelId \? visionModelId : null/u);
   assert.match(settings, /label="图片识别模型（可选）"/u);
@@ -205,6 +205,6 @@ test("project source lists stay compact while detail and notification opens keep
   assert.match(notificationService, /SELECT CURRENT_TIMESTAMP AS "now"/u);
   assert.match(openRoute, /export async function POST/u);
   assert.match(openRoute, /assertSameOrigin\(request\)/u);
-  assert.match(transport, /input\.connection\.kind === "glm"/u);
+  assert.match(transport, /const sendsDimensions = input\.connection\.kind !== "qwen"/u);
   assert.match(transport, /dimensions: input\.expectedDimensions/u);
 });

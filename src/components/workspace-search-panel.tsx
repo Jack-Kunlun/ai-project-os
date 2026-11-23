@@ -29,6 +29,7 @@ export function WorkspaceSearchPanel({
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const searchController = useRef<AbortController | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => searchController.current?.abort(), []);
 
@@ -62,6 +63,7 @@ export function WorkspaceSearchPanel({
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    searchInput.current?.focus();
     setSearchCursor(null);
     setSearchResults([]);
     setSearchSubmitted(false);
@@ -80,6 +82,7 @@ export function WorkspaceSearchPanel({
         <form onSubmit={handleSearchSubmit} className="space-y-3">
           <label className="block text-sm font-medium text-app-text">{t("搜索工作区名称")}
             <input
+              ref={searchInput}
               aria-label={t("搜索工作区名称")}
               value={searchQuery}
               onChange={(event) => {

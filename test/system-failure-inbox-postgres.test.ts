@@ -8,7 +8,7 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
-import { createAndActivatePlatformProviderProbeBudget, runPlatformProviderProbe } from "../src/lib/platform-provider-probe-service";
+import { runPlatformProviderProbe } from "../src/lib/platform-provider-probe-service";
 import { assertSystemFailureInboxAdmin, listSystemFailureInbox } from "../src/lib/system-failure-inbox";
 import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
@@ -105,12 +105,6 @@ test(
         embeddingModelId: null,
         embeddingDimensions: null,
         visionModelId: null,
-      }, { id: ADMIN_ID, role: "admin", accountAccessVersion: 1 }, db);
-      await createAndActivatePlatformProviderProbeBudget({
-        unitLimit: 5,
-        alertThresholdUnits: 1,
-        startsAt: new Date(NOW.getTime() - 60_000).toISOString(),
-        expiresAt: new Date(NOW.getTime() + 600_000).toISOString(),
       }, { id: ADMIN_ID, role: "admin", accountAccessVersion: 1 }, db);
       globalThis.fetch = async () => { throw new Error("injected transport failure"); };
       const held = await runPlatformProviderProbe(provider.id, { id: ADMIN_ID, role: "admin", accountAccessVersion: 1 }, { clientRequestKey: randomUUID(), expectedConfigurationVersion: provider.configurationVersion }, db);

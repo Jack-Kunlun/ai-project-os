@@ -251,8 +251,8 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
         <section className={ui.heading}>
           <div><h1>{world?.project.name ? <>{world.project.name} · <UiText text="状态治理" /></> : <UiText text="项目状态治理" />}</h1><p><UiText text="这里仅处理事实关系、替代链和不可变状态快照等高级管理操作；日常状态、风险与计划信号已经汇总到项目概览。" /></p></div>
           <div className={ui.panel}>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${meta.tone}`}>{translateUi(meta.label)}</span>
-            <p>{translateUi(meta.detail)}</p>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${meta.tone}`}>{world === null ? "—" : translateUi(meta.label)}</span>
+            <p>{world === null ? "—" : translateUi(meta.detail)}</p>
             <button type="button" onClick={() => void mutate({ operation: "captureState" }, "capture", "当前项目状态已固化；相同输入不会重复创建快照。")} disabled={!canEdit || pending !== null} className={`${ui.button} mt-4`}>{pending === "capture" ? <UiText text="固化中…" /> : <UiText text="固化当前状态" />}</button>
           </div>
         </section></> : <div className="mb-5 flex items-center justify-between gap-4"><p className="text-xs text-app-muted"><UiText text={"当前项目状态与完整审计记录"} /></p><button type="button" onClick={() => void mutate({ operation: "captureState" }, "capture", "当前项目状态已固化。")} disabled={!canEdit || pending !== null} className="rounded-control border border-app-border px-3 py-2 text-xs"><UiText text={"固化状态快照"} /></button></div>}
@@ -262,19 +262,19 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
         {message ? <div role="status" className="mt-5 rounded-field border border-app-success-border bg-app-success-soft px-5 py-4 text-sm text-app-success-ink app-feedback-success"><UiFeedbackText text={message} /></div> : null}
 
         <section className={`mt-6 grid gap-4 ${embedded ? "grid-cols-2 sm:grid-cols-3" : "sm:grid-cols-2 lg:grid-cols-6"}`} aria-label={translateUi("项目状态指标")}>
-          <Metric embedded={embedded} label={translateUi("当前事实")} value={world?.state.counts.activeFacts ?? 0} detail={translateUi("关联工作项 {count}").replace("{count}", String(world?.state.counts.linkedWorkItems ?? 0))} loading={loading} />
-          <Metric embedded={embedded} label={translateUi("决策")} value={world?.state.counts.decisions ?? 0} detail="当前有效" loading={loading} />
-          <Metric embedded={embedded} label={translateUi("问题与风险")} value={(world?.state.counts.issues ?? 0) + (world?.state.counts.risks ?? 0)} detail={translateUi("问题 {issues} · 风险 {risks}").replace("{issues}", String(world?.state.counts.issues ?? 0)).replace("{risks}", String(world?.state.counts.risks ?? 0))} loading={loading} />
-          <Metric embedded={embedded} label={translateUi("事实关系")} value={world?.state.counts.activeRelations ?? 0} detail={translateUi("陈旧 {count}").replace("{count}", String(world?.state.counts.staleRelations ?? 0))} loading={loading} />
-          <Metric embedded={embedded} label={translateUi("当前冲突")} value={world?.state.counts.activeConflicts ?? 0} detail={translateUi("质量问题 {count}").replace("{count}", String(world?.state.counts.openQualityIssues ?? 0))} loading={loading} />
-          <Metric embedded={embedded} label={translateUi("状态快照")} value={world?.snapshots.length ?? 0} detail="不可变历史" loading={loading} />
+          <Metric embedded={embedded} label={translateUi("当前事实")} value={world?.state.counts.activeFacts ?? null} detail={world === null ? "—" : translateUi("关联工作项 {count}").replace("{count}", String(world.state.counts.linkedWorkItems))} loading={loading} />
+          <Metric embedded={embedded} label={translateUi("决策")} value={world?.state.counts.decisions ?? null} detail={world === null ? "—" : "当前有效"} loading={loading} />
+          <Metric embedded={embedded} label={translateUi("问题与风险")} value={world === null ? null : world.state.counts.issues + world.state.counts.risks} detail={world === null ? "—" : translateUi("问题 {issues} · 风险 {risks}").replace("{issues}", String(world.state.counts.issues)).replace("{risks}", String(world.state.counts.risks))} loading={loading} />
+          <Metric embedded={embedded} label={translateUi("事实关系")} value={world?.state.counts.activeRelations ?? null} detail={world === null ? "—" : translateUi("陈旧 {count}").replace("{count}", String(world.state.counts.staleRelations))} loading={loading} />
+          <Metric embedded={embedded} label={translateUi("当前冲突")} value={world?.state.counts.activeConflicts ?? null} detail={world === null ? "—" : translateUi("质量问题 {count}").replace("{count}", String(world.state.counts.openQualityIssues))} loading={loading} />
+          <Metric embedded={embedded} label={translateUi("状态快照")} value={world?.snapshots.length ?? null} detail={world === null ? "—" : "不可变历史"} loading={loading} />
         </section>
 
         <section className={`mt-8 grid min-w-0 gap-6 ${embedded ? "grid-cols-1" : "xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]"}`}>
           <div className="min-w-0">
             <SectionHeading embedded={embedded} eyebrow="Current facts" title={translateUi("当前项目事实")} detail="仅当前有效事实参与状态判断；尚未生效、已过期、被替代和来源退役的事实保留在历史中。" />
             <div className={`mt-4 grid min-w-0 gap-4 ${embedded ? "grid-cols-1" : "lg:grid-cols-2"}`}>
-              {!loading && activeFacts.length === 0 ? <Empty embedded={embedded} title={translateUi("尚无当前有效事实")} detail="先在“资料与条目”中新增或确认带证据的项目事实。" href={`/projects/${projectId}`} action="管理项目事实" /> : activeFacts.map((fact) => <FactCard embedded={embedded} key={fact.id} fact={fact} />)}
+              {!loading && world !== null && activeFacts.length === 0 ? <Empty embedded={embedded} title={translateUi("尚无当前有效事实")} detail="先在“资料与条目”中新增或确认带证据的项目事实。" href={`/projects/${projectId}`} action="管理项目事实" /> : activeFacts.map((fact) => <FactCard embedded={embedded} key={fact.id} fact={fact} />)}
             </div>
           </div>
           <aside className="space-y-6">
@@ -284,7 +284,7 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
             </section>
             <section className={[embedded ? "" : "app-panel", (embedded ? "border-t border-app-border pt-4" : "rounded-panel border border-app-border bg-app-surface p-6")].filter(Boolean).join(' ')}>
               <SectionHeading embedded={embedded} eyebrow="Plan health" title={translateUi("计划联动")} detail="状态与项目计划使用同一套确定性健康度。" compact />
-              <div className="mt-5 grid grid-cols-2 gap-3 text-center text-xs"><SmallMetric embedded={embedded} label={translateUi("逾期")} value={world?.state.planHealth.counts.overdue ?? 0} /><SmallMetric embedded={embedded} label={translateUi("受阻")} value={world?.state.planHealth.counts.blocked ?? 0} /><SmallMetric embedded={embedded} label={translateUi("即将到期")} value={world?.state.planHealth.counts.dueSoon ?? 0} /><SmallMetric embedded={embedded} label={translateUi("未分配")} value={world?.state.planHealth.counts.unassigned ?? 0} /></div>
+              <div className="mt-5 grid grid-cols-2 gap-3 text-center text-xs"><SmallMetric embedded={embedded} label={translateUi("逾期")} value={world?.state.planHealth.counts.overdue ?? null} /><SmallMetric embedded={embedded} label={translateUi("受阻")} value={world?.state.planHealth.counts.blocked ?? null} /><SmallMetric embedded={embedded} label={translateUi("即将到期")} value={world?.state.planHealth.counts.dueSoon ?? null} /><SmallMetric embedded={embedded} label={translateUi("未分配")} value={world?.state.planHealth.counts.unassigned ?? null} /></div>
               <Link href={`/projects/${projectId}/plan`} className="mt-5 flex min-h-11 items-center justify-center rounded-control border px-4 py-2.5 text-sm font-semibold app-button-primary"><UiText text={"打开项目计划"} /></Link>
             </section>
           </aside>
@@ -315,14 +315,14 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
         <section className="mt-10">
           <SectionHeading embedded={embedded} eyebrow="Typed relations" title={translateUi("事实关系")} detail="陈旧关系不会进入当前状态，但仍保留原始端点版本和审计记录。" />
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            {!loading && (world?.relations.length ?? 0) === 0 ? <Empty embedded={embedded} title={translateUi("尚未建立事实关系")} detail="在上方“建立事实关系”操作中选择两条当前事实，建立可追溯关系。" /> : world?.relations.map((relation) => <RelationCard embedded={embedded} key={relation.id} relation={relation} sourceTitle={factById.get(relation.sourceItemId)?.title ?? relation.sourceItemId} targetTitle={factById.get(relation.targetItemId)?.title ?? relation.targetItemId} canEdit={canEdit} pending={pending} error={error} onErrorDismiss={() => setError(null)} onRetire={retireRelation} />)}
+            {!loading && world !== null && world.relations.length === 0 ? <Empty embedded={embedded} title={translateUi("尚未建立事实关系")} detail="在上方“建立事实关系”操作中选择两条当前事实，建立可追溯关系。" /> : world?.relations.map((relation) => <RelationCard embedded={embedded} key={relation.id} relation={relation} sourceTitle={factById.get(relation.sourceItemId)?.title ?? relation.sourceItemId} targetTitle={factById.get(relation.targetItemId)?.title ?? relation.targetItemId} canEdit={canEdit} pending={pending} error={error} onErrorDismiss={() => setError(null)} onRetire={retireRelation} />)}
           </div>
         </section>
 
         <section className="mt-10 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
           <div>
             <SectionHeading embedded={embedded} eyebrow="Open conflicts" title={translateUi("当前冲突")} detail="这里只展示同时指向当前有效事实的开放冲突；处置仍在记忆质量页面完成。" />
-            <div className="mt-4 space-y-3">{(world?.qualityIssues.filter((issue) => issue.kind === "conflict") ?? []).length === 0 ? <Empty embedded={embedded} title={translateUi("没有当前事实冲突")} detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-panel border app-panel-danger bg-app-surface p-5 app-panel"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-app-danger-ink"><UiText text={"冲突强度"} />{" "}{Math.round(issue.score * 100)}%</span><span className="text-[12px] text-app-muted">{formatDate(issue.detectedAt, language)}</span></div><p className="mt-3 text-sm leading-6 text-app-muted">{issue.explanation}</p></article>)}</div>
+            <div className="mt-4 space-y-3">{world !== null && world.qualityIssues.filter((issue) => issue.kind === "conflict").length === 0 ? <Empty embedded={embedded} title={translateUi("没有当前事实冲突")} detail="状态计算未发现需要人工判断的有效事实冲突。" /> : world?.qualityIssues.filter((issue) => issue.kind === "conflict").map((issue) => <article key={issue.id} className="rounded-panel border app-panel-danger bg-app-surface p-5 app-panel"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-app-danger-ink"><UiText text={"冲突强度"} />{" "}{Math.round(issue.score * 100)}%</span><span className="text-[12px] text-app-muted">{formatDate(issue.detectedAt, language)}</span></div><p className="mt-3 text-sm leading-6 text-app-muted">{issue.explanation}</p></article>)}</div>
             <Link href={`/projects/${projectId}/memory-quality`} className="mt-4 flex min-h-11 items-center justify-center rounded-control border px-4 py-2.5 text-sm font-semibold app-button-secondary"><UiText text={"进入记忆质量处置"} /></Link>
           </div>
           <div>
@@ -343,8 +343,8 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin, embedde
   );
 }
 
-function Metric({ label, value, detail, loading, embedded = false }: { label: string; value: number; detail: string; loading: boolean; embedded?: boolean }) {
-  return <article className={[embedded ? "" : "app-panel", (embedded ? "min-w-0" : "rounded-panel border border-app-border bg-app-surface p-5")].filter(Boolean).join(' ')}><p className="text-xs font-semibold text-app-muted">{label}</p>{loading ? <div className="mt-3 h-8 w-14 animate-pulse rounded-control bg-app-surface-soft" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>}<p className="mt-3 text-xs text-app-muted"><UiText text={detail} /></p></article>;
+function Metric({ label, value, detail, loading, embedded = false }: { label: string; value: number | null; detail: string; loading: boolean; embedded?: boolean }) {
+  return <article className={[embedded ? "" : "app-panel", (embedded ? "min-w-0" : "rounded-panel border border-app-border bg-app-surface p-5")].filter(Boolean).join(' ')}><p className="text-xs font-semibold text-app-muted">{label}</p>{loading ? <div className="mt-3 h-8 w-14 animate-pulse rounded-control bg-app-surface-soft" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value ?? "—"}</p>}<p className="mt-3 text-xs text-app-muted"><UiText text={detail} /></p></article>;
 }
 
 function SectionHeading({ eyebrow, title, detail, compact = false, embedded = false }: { eyebrow: string; title: string; detail: string; compact?: boolean; embedded?: boolean }) {
@@ -400,8 +400,8 @@ function FingerprintRow({ label, value }: { label: string; value?: string }) {
   return <div><dt className="text-app-muted">{label}</dt><dd className="mt-1 break-all font-mono text-[12px] font-medium text-app-text" title={value}>{value ? shortFingerprint(value) : "—"}</dd></div>;
 }
 
-function SmallMetric({ label, value, embedded = false }: { label: string; value: number; embedded?: boolean }) {
-  return <div className={embedded ? "min-w-0" : "rounded-panel bg-app-surface-soft p-3"}><strong className="block text-xl text-app-text">{value}</strong><span className="mt-1 block text-app-muted">{label}</span></div>;
+function SmallMetric({ label, value, embedded = false }: { label: string; value: number | null; embedded?: boolean }) {
+  return <div className={embedded ? "min-w-0" : "rounded-panel bg-app-surface-soft p-3"}><strong className="block text-xl text-app-text">{value ?? "—"}</strong><span className="mt-1 block text-app-muted">{label}</span></div>;
 }
 
 function HistoryPanel({ title, children, embedded = false }: { title: string; children: React.ReactNode; embedded?: boolean }) {

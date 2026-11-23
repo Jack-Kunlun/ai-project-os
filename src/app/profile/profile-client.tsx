@@ -143,7 +143,7 @@ export function ProfileClient({
               <p className={profileStyles.profileMeta}>{profile?.email ?? headerUsername}{profile?.emailVerifiedAt ? <> · <UiText text="已验证" /></> : profile?.email ? <> · <UiText text="未验证" /></> : null}</p>
             </div>
             <OperationPanel title="编辑个人资料" triggerLabel="编辑资料" description="修改显示名称或邮箱；更改邮箱后需要重新验证。" disabled={profile === null} variant="drawer" open={openOperation === "profile"} onOpenChange={(open) => setOpenOperation(open ? "profile" : null)}>
-              <ProfileDetailsForm key={`${profile?.displayName ?? ""}:${profile?.email ?? ""}:${profile?.emailVerifiedAt ?? ""}`} profile={profile} onUpdated={(details) => { setProfile((current) => current ? { ...current, ...details } : current); setOpenOperation(null); setOperationMessage("个人资料已更新。"); }} />
+              <ProfileDetailsForm key={`${profile?.displayName ?? ""}:${profile?.email ?? ""}:${profile?.emailVerifiedAt ?? ""}`} profile={profile} onUpdated={(details) => { setProfile((current) => current ? { ...current, ...details } : current); setOpenOperation((current) => current === "profile" ? null : current); setOperationMessage("个人资料已更新。"); }} />
             </OperationPanel>
           </div>
         </section>
@@ -176,14 +176,14 @@ export function ProfileClient({
                 <div>
                   {profile?.email ? <p className="mb-4 text-sm text-app-muted">{profile.email}{profile.emailVerifiedAt ? <> · <UiText text="已验证" /></> : null}</p> : <p className="mb-4 text-sm text-app-muted"><UiText text="尚未设置邮箱；请先编辑个人资料添加邮箱。" /></p>}
                   {profile?.email && !profile.emailVerifiedAt && profile.emailAuthStatus === "disabled" ? <p className="mb-4 text-sm text-app-warning-ink"><UiText text="邮箱验证服务当前未启用。" /></p> : null}
-                  {profile?.email ? <EmailVerificationSection key={`${profile.email}:${profile.emailVerifiedAt ?? ""}`} email={profile.email} emailVerifiedAt={profile.emailVerifiedAt} availability={profile.emailAuthStatus} onVerified={(verifiedAt) => { setProfile((current) => current ? { ...current, emailVerifiedAt: verifiedAt } : current); setOpenOperation(null); }} /> : null}
+                  {profile?.email ? <EmailVerificationSection key={`${profile.email}:${profile.emailVerifiedAt ?? ""}`} email={profile.email} emailVerifiedAt={profile.emailVerifiedAt} availability={profile.emailAuthStatus} onVerified={(verifiedAt) => { setProfile((current) => current ? { ...current, emailVerifiedAt: verifiedAt } : current); setOpenOperation((current) => current === "email" ? null : current); }} /> : null}
                 </div>
               </AccountSettingRow>
               <AccountSettingRow title="手机号" summary={profile?.phoneE164 ? maskPhone(profile.phoneE164) : <UiText text={profile ? "尚未绑定" : "读取中…"} />} description="绑定后可用于登录和找回密码。" disabled={!profile} open={openOperation === "phone"} onOpenChange={(open) => setOpenOperation(open ? "phone" : null)}>
                 {profile ? <AccountPhonePanel embedded hasLocalPassword={profile.hasLocalPassword} phoneE164={profile.phoneE164} phoneAuthStatus={profile.phoneAuthStatus} /> : null}
               </AccountSettingRow>
               <AccountSettingRow title="登录名" summary={profile?.username ?? t("读取中…")} description="用于登录当前本地部署，修改后下次登录生效。" disabled={!profile} open={openOperation === "username"} onOpenChange={(open) => setOpenOperation(open ? "username" : null)}>
-                <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); setOpenOperation(null); setOperationMessage("登录名已更新，下次请使用新登录名。"); }} />
+                <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); setOpenOperation((current) => current === "username" ? null : current); setOperationMessage("登录名已更新，下次请使用新登录名。"); }} />
               </AccountSettingRow>
               <AccountSettingRow title="登录密码" summary={profile ? <UiText text={profile.hasLocalPassword ? "已设置" : "未设置"} /> : <UiText text="读取中…" />} description="更新密码后会撤销全部登录会话，并要求重新登录。" disabled={!profile} open={openOperation === "password"} onOpenChange={(open) => setOpenOperation(open ? "password" : null)}>
                 <PasswordForm key={`${profile?.email ?? ""}:${profile?.emailVerifiedAt ?? ""}:${profile?.emailAuthStatus ?? "disabled"}`} hasLocalPassword={profile?.hasLocalPassword ?? true} email={profile?.email ?? null} emailVerifiedAt={profile?.emailVerifiedAt ?? null} emailAuthStatus={profile?.emailAuthStatus ?? "disabled"} />

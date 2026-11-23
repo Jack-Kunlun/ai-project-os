@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { AiProviderKind, PrismaClient } from "@prisma/client";
 import { createProviderConnection, type PlatformProviderActor } from "../src/lib/ai-providers/service";
 import { runPlatformProviderDraftProbe } from "../src/lib/platform-provider-draft-probe-service";
-import { createAndActivatePlatformProviderProbeBudget } from "../src/lib/platform-provider-probe-service";
 
 type ProviderFixtureInput = Readonly<{
   name: string;
@@ -70,16 +69,6 @@ export async function createVerifiedProviderFixture(
   db: PrismaClient,
 ) {
   const createRequestKey = randomUUID();
-  const now = new Date();
-  const activeBudget = await db.platformProviderProbeBudget.findFirst({ where: { status: "active", startsAt: { lte: now }, expiresAt: { gt: now } }, select: { id: true } });
-  if (activeBudget === null) {
-    await createAndActivatePlatformProviderProbeBudget({
-      unitLimit: 100,
-      alertThresholdUnits: 1,
-      startsAt: new Date(now.getTime() - 1_000).toISOString(),
-      expiresAt: new Date(now.getTime() + 600_000).toISOString(),
-    }, actor, db);
-  }
   const draft = await withDraftProbeFetch(() => runPlatformProviderDraftProbe({ ...input, clientRequestKey: createRequestKey }, actor, db));
   if (draft.draftProbeId === null) throw new Error(`provider fixture draft probe failed: ${draft.attempt.safeErrorCode ?? "unknown"}`);
   return createProviderConnection({ ...input, draftProbeId: draft.draftProbeId, createRequestKey }, actor, db);

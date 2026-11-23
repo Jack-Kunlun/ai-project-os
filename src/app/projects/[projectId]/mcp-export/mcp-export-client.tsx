@@ -5,7 +5,7 @@ import { UiFeedbackText } from "@/components/ui-error-text";
 
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { OperationPanel } from "@/components/operation-panel";
 import { safeResponseError } from "@/lib/safe-error-presentation";
@@ -44,7 +44,9 @@ async function requestError(response: Response, fallback: string): Promise<Error
 export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId: string; legacyBearerEnabled: boolean }) {
   const translateUi = useTranslate();
   const [grants, setGrants] = useState<readonly Grant[]>([]);
+  const [grantsLoaded, setGrantsLoaded] = useState(false);
   const [audits, setAudits] = useState<readonly DispatchAudit[]>([]);
+  const [auditsLoaded, setAuditsLoaded] = useState(false);
   const [label, setLabel] = useState("");
   const [lifetimeDays, setLifetimeDays] = useState(7);
   const [provider, setProvider] = useState("");
@@ -55,26 +57,43 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
   const [operationGrantId, setOperationGrantId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadRequestVersion = useRef(0);
   const { confirm, dialog } = useAppConfirmDialog();
 
   const load = useCallback(async () => {
-    const [grantResponse, auditResponse] = await Promise.all([
-      fetch("/api/me/mcp-export-grants", { cache: "no-store" }),
-      fetch(`/api/me/mcp-export-audits?projectId=${encodeURIComponent(projectId)}`, { cache: "no-store" }),
-    ]);
-    if (!grantResponse.ok) throw await requestError(grantResponse, "MCP 输出凭证加载失败");
-    if (!auditResponse.ok) throw await requestError(auditResponse, "MCP 外发记录加载失败");
-    const [grantPayload, auditPayload] = await Promise.all([
-      grantResponse.json() as Promise<{ grants: Grant[] }>,
-      auditResponse.json() as Promise<{ audits: DispatchAudit[] }>,
-    ]);
-    setGrants(grantPayload.grants.filter((grant) => grant.projectId === projectId));
-    setAudits(auditPayload.audits);
+    const version = ++loadRequestVersion.current;
+    const readGrants = async () => {
+      const response = await fetch("/api/me/mcp-export-grants", { cache: "no-store" });
+      if (!response.ok) throw await requestError(response, "MCP 输出凭证加载失败");
+      return await response.json() as { grants: Grant[] };
+    };
+    const readAudits = async () => {
+      const response = await fetch(`/api/me/mcp-export-audits?projectId=${encodeURIComponent(projectId)}`, { cache: "no-store" });
+      if (!response.ok) throw await requestError(response, "MCP 外发记录加载失败");
+      return await response.json() as { audits: DispatchAudit[] };
+    };
+    const [grantResult, auditResult] = await Promise.allSettled([readGrants(), readAudits()]);
+    if (loadRequestVersion.current !== version) return;
+    const errors: string[] = [];
+    if (grantResult.status === "fulfilled") {
+      setGrants(grantResult.value.grants.filter((grant) => grant.projectId === projectId));
+      setGrantsLoaded(true);
+    } else {
+      errors.push(grantResult.reason instanceof Error ? grantResult.reason.message : "MCP 输出凭证加载失败");
+    }
+    if (auditResult.status === "fulfilled") {
+      setAudits(auditResult.value.audits);
+      setAuditsLoaded(true);
+    } else {
+      errors.push(auditResult.reason instanceof Error ? auditResult.reason.message : "MCP 外发记录加载失败");
+    }
+    setLoadError(errors.length > 0 ? errors.join("；") : null);
   }, [projectId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "MCP 输出凭证加载失败"));
+      void load();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
@@ -176,6 +195,7 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
       <p className="mt-3 text-sm leading-6 text-app-muted"><UiText text={"当前提供项目摘要、最多 10 条最近已确认事实与来源，以及最多 10 项最近目标和工作项。OAuth 授权绑定客户端标识、项目和只读范围；访问令牌仍是可转移的 Bearer 密钥。每次工具读取还需要项目 Owner 单独确认，批准 5 分钟内只能用一次。"} /></p>
       <p className="mt-2 text-xs text-app-muted"><UiText text={"服务地址：当前站点的"} />{" "}<code>/api/mcp</code></p>
       {message ? <p role="status" className="mt-4 rounded-field bg-app-surface-soft px-3 py-2 text-xs leading-5 text-app-text app-feedback-info"><UiFeedbackText text={message} /></p> : null}
+      {loadError ? <p role="alert" className="mt-4 rounded-field bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink app-feedback-error"><UiFeedbackText text={loadError} /></p> : null}
       {legacyBearerEnabled ? <div className="mt-5"><p className="mb-3 text-xs leading-5 text-app-warning-ink"><UiText text={"本地兼容模式：可创建旧式可转移 Bearer 凭证；此方式在生产环境始终关闭。"} /></p><OperationPanel title={translateUi("创建 MCP 输出凭证")} triggerLabel="创建兼容凭证" open={issueOpen} onOpenChange={(open) => { setIssueOpen(open); if (open) setMessage(null); }} disabled={busy} description="凭证只显示一次。创建后请立即复制并妥善保存。">
         {message ? <p role="status" className="mb-3 rounded-field bg-app-danger-soft px-3 py-2 text-xs text-app-danger-ink app-feedback-error"><UiFeedbackText text={message} /></p> : null}
         <DialogForm onSubmit={(event) => void issue(event)} className="space-y-4">
@@ -192,7 +212,7 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
     <section className="rounded-panel border border-app-border bg-app-surface p-6 app-panel">
       <h2 className="text-lg font-semibold"><UiText text={"本项目凭证"} /></h2>
       <p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"批准前填写接收方声明的外部服务和模型。平台记录这些信息用于审计，无法核验第三方实际使用情况。"} /></p>
-      <div className="mt-4 space-y-3">{grants.length === 0 ? <p className="text-sm text-app-muted"><UiText text={"暂无凭证。"} /></p> : grants.map((grant) => <div key={grant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-app-border p-4">
+      <div className="mt-4 space-y-3">{grants.length === 0 ? <p className="text-sm text-app-muted"><UiText text={grantsLoaded ? "暂无凭证。" : loadError ? "凭证列表暂不可用。" : "正在读取凭证…"} /></p> : grants.map((grant) => <div key={grant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-app-border p-4">
         <div><p className="break-words font-medium">{grant.oauthClientName ?? grant.label}</p><p className="mt-1 break-all text-xs text-app-muted">{grant.grantType === "oauth" ? `OAuth 客户端 ID：${grant.oauthClientId ?? "客户端标识不可用"}` : <UiText text={"旧式 Bearer 凭证"} />}</p><p className="mt-1 text-xs text-app-muted"><UiText text={"到期："} />{new Date(grant.expiresAt).toISOString()} · {grant.revokedAt ? <UiText text={"已撤销"} /> : <UiText text={"未撤销"} />}</p></div>
         {!grant.revokedAt && <div className="flex flex-wrap gap-2"><OperationPanel title={translateUi("准备单次读取授权")} triggerLabel="批准下一次读取" open={operationGrantId === grant.id} onOpenChange={(open) => { setOperationGrantId(open ? grant.id : null); if (open) setMessage(null); }} disabled={busy} description="填写接收方声明的外部服务、模型和读取内容。确认前会展示本次外发内容，并要求再次输入确认语。">
           {message ? <p role="status" className="mb-3 rounded-field bg-app-danger-soft px-3 py-2 text-xs text-app-danger-ink app-feedback-error"><UiFeedbackText text={message} /></p> : null}
@@ -209,9 +229,9 @@ export function McpExportClient({ projectId, legacyBearerEnabled }: { projectId:
       </div>)}</div>
     </section>
     <section className="rounded-panel border border-app-border bg-app-surface p-6 app-panel">
-      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-semibold"><UiText text={"最近外发记录"} /></h2><button type="button" disabled={busy} onClick={() => void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "MCP 外发记录加载失败"))} className="min-h-10 rounded-control border border-app-border px-3 text-sm disabled:opacity-50"><UiText text={"刷新记录"} /></button></div>
+      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-semibold"><UiText text={"最近外发记录"} /></h2><button type="button" disabled={busy} onClick={() => void load()} className="min-h-10 rounded-control border border-app-border px-3 text-sm disabled:opacity-50"><UiText text={"刷新记录"} /></button></div>
       <p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"记录服务端已准备的响应，不代表第三方已收到内容。仅显示最近 50 条。"} /></p>
-      <div className="mt-4 space-y-3">{audits.length === 0 ? <p className="text-sm text-app-muted"><UiText text={"暂无外发记录。"} /></p> : audits.map((audit) => <div key={audit.id} className="rounded-panel border border-app-border p-4 text-sm">
+      <div className="mt-4 space-y-3">{audits.length === 0 ? <p className="text-sm text-app-muted"><UiText text={auditsLoaded ? "暂无外发记录。" : loadError ? "外发记录暂不可用。" : "正在读取外发记录…"} /></p> : audits.map((audit) => <div key={audit.id} className="rounded-panel border border-app-border p-4 text-sm">
         <p className="font-medium">{audit.recipientLabel} · {audit.operation}</p>
         {audit.oauthClientName !== null && <p className="mt-1 break-words text-xs text-app-muted"><UiText text={"OAuth 客户端："} />{audit.oauthClientName}</p>}
         {audit.oauthClientId !== null && <p className="mt-1 break-all text-xs text-app-muted"><UiText text={"OAuth 客户端 ID："} />{audit.oauthClientId}</p>}

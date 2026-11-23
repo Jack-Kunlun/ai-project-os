@@ -152,12 +152,12 @@ export function PersonalModelsClient({ membership }: { membership: Membership })
               <p className="mt-1 text-xs leading-5 text-app-muted"><UiText text={"密钥只显示末尾掩码；固定官方端点不可修改。"} /></p>
             </div>
             <div className="flex items-center gap-3">
-              <span className="rounded-full bg-app-surface-soft px-3 py-1 text-xs font-semibold text-app-muted">{providers.length}{t(" 个连接")}</span>
+              <span className="rounded-full bg-app-surface-soft px-3 py-1 text-xs font-semibold text-app-muted">{loadError ? t("暂不可用") : `${providers.length}${t(" 个连接")}`}</span>
 
             </div>
           </div>
           {canConfigure && catalog.length === 0 ? <div className="mt-5"><CreateProviderPlaceholder loading={loading} loadError={loadError} onRetry={load} /></div> : null}
-          {loading && providers.length === 0 ? <div className="mt-5 space-y-3" aria-label={t("正在加载连接")}><div className="h-28 animate-pulse rounded-control bg-app-surface-soft" /><div className="h-28 animate-pulse rounded-control bg-app-surface-soft" /></div> : providers.length === 0 ? <EmptyState canConfigure={canConfigure} /> : <div className="mt-5 space-y-4">{providers.map((provider) => <ProviderCard key={provider.id} provider={provider} catalog={catalog} membership={membership} canConfigure={canConfigure} canMaintain={canMaintain} onChanged={(next) => setProviders((current) => current.map((item) => item.id === next.id ? next : item))} onRemoved={(id) => { setProviders((current) => current.filter((item) => item.id !== id)); setMessage({ tone: "success", text: "连接已删除。" }); }} onMessage={setMessage} onReload={load} />)}</div>}
+          {loading && providers.length === 0 ? <div className="mt-5 space-y-3" aria-label={t("正在加载连接")}><div className="h-28 animate-pulse rounded-control bg-app-surface-soft" /><div className="h-28 animate-pulse rounded-control bg-app-surface-soft" /></div> : loadError ? null : providers.length === 0 ? <EmptyState canConfigure={canConfigure} /> : <div className="mt-5 space-y-4">{providers.map((provider) => <ProviderCard key={provider.id} provider={provider} catalog={catalog} membership={membership} canConfigure={canConfigure} canMaintain={canMaintain} onChanged={(next) => setProviders((current) => current.map((item) => item.id === next.id ? next : item))} onRemoved={(id) => { setProviders((current) => current.filter((item) => item.id !== id)); setMessage({ tone: "success", text: "连接已删除。" }); }} onMessage={setMessage} onReload={load} />)}</div>}
       </section>
 
     </div>
@@ -197,7 +197,7 @@ function CreateProviderForm({ catalog, onCreated }: { catalog: readonly CatalogE
       const next = getCatalogEntry(catalog, nextKind);
       if (next === undefined) return current;
       const defaults = createDefaultPersonalModelDraft([next], current.name);
-      return defaults === null ? current : { ...defaults, apiKey: current.apiKey };
+      return defaults ?? current;
     });
   }
 

@@ -202,7 +202,7 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.match(workspaceCss, /\.workspace :global\(a:focus-visible\)/u);
   assert.doesNotMatch(shell, /\/admin\/models\/routes/u);
   assert.match(navigation, /\/admin\/credits/u);
-  assert.match(navigation, /\/admin\/operations\/probes/u);
+  assert.doesNotMatch(navigation, /\/admin\/operations\/probes/u);
   assert.match(navigation, /\/admin\/operations\/backups/u);
   assert.doesNotMatch(header, /label: "模型设置"/u);
   assert.doesNotMatch(header, /label: "连接器"/u);
@@ -615,10 +615,9 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(adminDocs, /平台管理员不代替用户持有或配置凭据/u);
   assert.match(userDocs, /自动化、写入\/提交和旧版 PAT 路径保持关闭/u);
   assert.match(readme, /只读仓库内容/u);
-  assert.match(adminGuide, /AdminPageHeader title="管理员操作指南" description="按当前控制面流程完成预算、供应商连接、能力模型和用户治理/u);
-  assert.match(adminGuide, /<GuideCard title="1\. 先了解模型测试额度" summary=/u);
-  assert.match(adminGuide, /<GuideCard title="2\. 新增供应商：先测试后保存" summary=/u);
-  assert.match(adminGuide, /<GuideCard title="3\. 六项能力：选择、测试、启用" summary=/u);
+  assert.match(adminGuide, /AdminPageHeader title="管理员操作指南" description="按当前控制面流程完成供应商连接、能力模型和用户治理/u);
+  assert.match(adminGuide, /<GuideCard title="1\. 新增供应商：先测试后保存" summary=/u);
+  assert.match(adminGuide, /<GuideCard title="2\. 六项能力：选择、测试、启用" summary=/u);
   assert.match(adminGuide, /成功条件：/u);
   assert.match(adminGuide, /常见阻塞：/u);
   assert.match(readme, /管理员指南\]\(docs\/admin-operation-guide\.md/u);

@@ -3,7 +3,7 @@ import { UiErrorText } from "@/components/ui-error-text";
 
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { useAppearance } from "@/components/appearance-provider";
 import {
@@ -50,6 +50,7 @@ export function AdminFailureInboxClient() {
   const [data, setData] = useState<SystemFailureInboxList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const pageTransitionLock = useRef(false);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -63,6 +64,7 @@ export function AdminFailureInboxClient() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      pageTransitionLock.current = true;
       setLoading(true);
       try {
         const response = await fetch(`/api/admin/operations/failures?${queryString}`, { cache: "no-store" });
@@ -75,7 +77,10 @@ export function AdminFailureInboxClient() {
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "失败收件箱加载失败");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          pageTransitionLock.current = false;
+          setLoading(false);
+        }
       }
     };
     const timer = window.setTimeout(() => void load(), 0);
@@ -96,14 +101,18 @@ export function AdminFailureInboxClient() {
   }
 
   function goNext() {
+    if (pageTransitionLock.current || loading) return;
     if (data?.nextCursor === null || data?.nextCursor === undefined) return;
+    pageTransitionLock.current = true;
     setHistory((items) => [...items, cursor ?? ""]);
     setCursor(data.nextCursor);
   }
 
   function goPrevious() {
+    if (pageTransitionLock.current || loading) return;
     const previous = history.at(-1);
     if (previous === undefined) return;
+    pageTransitionLock.current = true;
     setHistory((items) => items.slice(0, -1));
     setCursor(previous === "" ? null : previous);
   }

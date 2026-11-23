@@ -283,6 +283,16 @@ function usageCounts(payload: Record<string, unknown>, outputRequired = true): R
   });
 }
 
+function chatModelParameters(connection: RuntimeConnection, modelId: string, maxOutputTokens: number, temperature: number, disableThinking?: boolean) {
+  if (connection.kind === "openai" && /^gpt-6\.2-(sol|astra)(?:$|-)/u.test(modelId)) {
+    return { max_completion_tokens: maxOutputTokens, reasoning_effort: "low" };
+  }
+  if (connection.kind === "qwen" && /^(?:qwen4-max|qwen3\.8-(?:max|flash))(?:$|-)/u.test(modelId)) {
+    return { max_tokens: maxOutputTokens, temperature, ...(disableThinking ? { enable_thinking: false } : { preserve_thinking: false }) };
+  }
+  return { max_tokens: maxOutputTokens, temperature };
+}
+
 export async function invokeChatCompletion(input: Readonly<{
   connection: RuntimeConnection;
   operation: Exclude<AiOperation, "embedding">;
@@ -299,8 +309,7 @@ export async function invokeChatCompletion(input: Readonly<{
   const { payload, requestId } = await providerPost(input.connection, "/chat/completions", {
     model: input.modelId,
     messages: input.messages,
-    max_tokens: input.maxOutputTokens,
-    temperature: input.temperature ?? 0,
+    ...chatModelParameters(input.connection, input.modelId, input.maxOutputTokens, input.temperature ?? 0, input.disableThinking),
     stream: false,
     ...(input.connection.kind === "deepseek" && input.disableThinking ? { thinking: { type: "disabled" } } : {}),
     ...(input.connection.kind === "deepseek" && input.jsonOutput ? { response_format: { type: "json_object" } } : {}),
@@ -409,8 +418,7 @@ export async function invokeVisionCompletion(input: Readonly<{
         { type: "text", text: input.prompt },
       ],
     }],
-    max_tokens: input.maxOutputTokens,
-    temperature: 0,
+    ...chatModelParameters(input.connection, input.modelId, input.maxOutputTokens, 0, input.disableThinking),
     stream: false,
   }, input.absoluteDeadlineAt, input.onUsage);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
@@ -450,10 +458,11 @@ export async function invokeEmbeddings(input: Readonly<{
   ) {
     return fail("AI_PROVIDER_REJECTED", 400);
   }
+  const sendsDimensions = input.connection.kind !== "qwen" || /^(?:qwen3\.7-text-embedding(?:-flash)?|text-embedding-v[34])$/u.test(input.modelId);
   const { payload, requestId } = await providerPost(input.connection, "/embeddings", {
     model: input.modelId,
     input: input.texts,
-    ...((input.connection.kind === "openai" || input.connection.kind === "glm") && input.expectedDimensions
+    ...(sendsDimensions && input.expectedDimensions
       ? { dimensions: input.expectedDimensions }
       : {}),
   }, input.absoluteDeadlineAt);

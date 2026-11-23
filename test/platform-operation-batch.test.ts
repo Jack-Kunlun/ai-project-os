@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PLATFORM_OPERATIONS, batchBudgetProblem, candidateKey, probeHttpFailureStatus, proofUsable, runOperationBatch, type OperationResult, type OperationTarget, type ProbeOutcome } from "../src/app/settings/platform-operation-batch";
+import { PLATFORM_OPERATIONS, candidateKey, probeHttpFailureStatus, proofUsable, runOperationBatch, type OperationResult, type OperationTarget, type ProbeOutcome } from "../src/app/settings/platform-operation-batch";
 
 const now = Date.parse("2026-10-27T10:00:00Z");
 const expiresAt = new Date(now + 300_000).toISOString();
@@ -109,16 +109,6 @@ test("expired test evidence is not applied and missing evidence cannot enable", 
   assert.equal(calls.length, 0);
   await runOperationBatch(targets.slice(0, 1), "apply", dependencies);
   assert.equal(results.at(-1)?.status, "expired");
-});
-
-test("allowance preflight accounts for missing, inactive, expired, insufficient and valid periods", () => {
-  const budget = { status: "active", availableUnits: 6, startsAt: new Date(now - 1).toISOString(), expiresAt };
-  assert.equal(batchBudgetProblem(budget, 6, now), null);
-  assert.ok(batchBudgetProblem(null, 6, now));
-  assert.ok(batchBudgetProblem({ ...budget, availableUnits: 5 }, 6, now));
-  assert.ok(batchBudgetProblem({ ...budget, status: "scheduled" }, 6, now));
-  assert.ok(batchBudgetProblem({ ...budget, expiresAt: new Date(now).toISOString() }, 6, now));
-  assert.ok(batchBudgetProblem({ ...budget, expiresAt: "invalid" }, 6, now));
 });
 
 test("model, provider, dimensions and output settings all bind a selection to its proof", () => {

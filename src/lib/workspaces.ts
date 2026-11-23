@@ -472,7 +472,36 @@ export async function createWorkspaceInvitation(workspaceIdInput: unknown, input
 }
 
 export async function listWorkspaceInvitations(workspaceIdInput: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
+  return (await listWorkspaceInvitationPage(workspaceIdInput, actor, null, db)).invitations;
+}
+
+function encodeWorkspaceInvitationCursor(invitation: { id: string; createdAt: Date }): string {
+  return Buffer.from(JSON.stringify({ id: invitation.id, createdAt: invitation.createdAt.toISOString() }), "utf8").toString("base64url");
+}
+
+function decodeWorkspaceInvitationCursor(value: unknown): { id: string; createdAt: Date } | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || value.length > 256 || !/^[A-Za-z0-9_-]+$/u.test(value)) return fail("WORKSPACE_INVALID_INPUT");
+  try {
+    const decoded = Buffer.from(value, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded) as { id?: unknown; createdAt?: unknown };
+    if (typeof parsed.id !== "string" || !UUID_PATTERN.test(parsed.id) || typeof parsed.createdAt !== "string") return fail("WORKSPACE_INVALID_INPUT");
+    const createdAt = new Date(parsed.createdAt);
+    if (!Number.isFinite(createdAt.getTime()) || createdAt.toISOString() !== parsed.createdAt) return fail("WORKSPACE_INVALID_INPUT");
+    return { id: parsed.id, createdAt };
+  } catch {
+    return fail("WORKSPACE_INVALID_INPUT");
+  }
+}
+
+export async function listWorkspaceInvitationPage(
+  workspaceIdInput: unknown,
+  actor: AccessUser,
+  cursorInput: unknown,
+  db: PrismaClient = getDb(),
+) {
   const workspaceId = uuid(workspaceIdInput);
+  const cursor = decodeWorkspaceInvitationCursor(cursorInput);
   return db.$transaction(async (tx) => {
     // Listing is read-only but still needs the current confirmed admin check
     // inside the workspace lock, otherwise a concurrent downgrade could race
@@ -480,12 +509,24 @@ export async function listWorkspaceInvitations(workspaceIdInput: unknown, actor:
     await lockActorsAccess(tx, [actor.id]);
     await lockWorkspaceAccess(tx, workspaceId);
     await assertWorkspaceAdmin(actor, workspaceId, tx);
-    return tx.workspaceInvitation.findMany({
-      where: { workspaceId },
-      orderBy: { createdAt: "desc" },
-      take: 100,
+    const rows = await tx.workspaceInvitation.findMany({
+      where: {
+        workspaceId,
+        ...(cursor === null ? {} : {
+          OR: [
+            { createdAt: { lt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+          ],
+        }),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 101,
       select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, acceptedAt: true, revokedAt: true, version: true, createdAt: true, project: { select: { name: true } }, invitedBy: { select: { username: true } } },
     });
+    const hasMore = rows.length > 100;
+    const invitations = hasMore ? rows.slice(0, 100) : rows;
+    const last = invitations.at(-1);
+    return { invitations, nextCursor: hasMore && last !== undefined ? encodeWorkspaceInvitationCursor(last) : null };
   });
 }
 

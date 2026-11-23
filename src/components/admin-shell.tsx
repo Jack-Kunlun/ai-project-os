@@ -25,7 +25,6 @@ const navigationIcons: Record<string, ShellIconName> = {
   "/admin/audit": "file",
   "/admin/operations/backups": "archive",
   "/admin/operations/failures": "alert",
-  "/admin/operations/probes": "chart",
   "/admin/account": "person",
   "/admin/guide": "book",
 };

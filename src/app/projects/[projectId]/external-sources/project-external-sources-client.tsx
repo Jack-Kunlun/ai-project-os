@@ -6,7 +6,7 @@ import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 
 import { UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
-import { useCallback, useDeferredValue, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { ListPagination } from "@/components/list-pagination";
 import { OperationPanel } from "@/components/operation-panel";
@@ -56,12 +56,15 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
   const [status, setStatus] = useState<"all" | WebSource["status"]>("all");
   const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
+  const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canManageCredentials, setCanManageCredentials] = useState(false);
   const [canReview, setCanReview] = useState(false);
   const [browserEnabled, setBrowserEnabled] = useState(false);
+  const requestVersion = useRef(0);
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    const version = ++requestVersion.current;
     if (showLoading) setLoading(true);
     try {
       const query = new URLSearchParams({
@@ -79,16 +82,18 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
         canReview: boolean;
         browserEnabled: boolean;
       };
+      if (requestVersion.current !== version) return;
       setSources(payload.sources);
+      setSourcesLoaded(true);
       setPagination(payload.pagination);
       setCanManageCredentials(payload.canManageCredentials);
       setCanReview(payload.canReview);
       setBrowserEnabled(payload.browserEnabled);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "外部资料加载失败");
+      if (requestVersion.current === version) setError(cause instanceof Error ? cause.message : "外部资料加载失败");
     } finally {
-      if (showLoading) setLoading(false);
+      if (showLoading && requestVersion.current === version) setLoading(false);
     }
   }, [deferredSearch, page, projectId, status]);
 
@@ -131,7 +136,7 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text={"Web sources"} /></p>
                 <h2 className="mt-2 text-2xl font-semibold"><UiText text={"网页资料"} /></h2>
               </div>
-              <span className="text-xs text-app-muted">{loading ? <UiText text={"读取中…"} /> : translateUi("{count} 个").replace("{count}", String(pagination.total))}</span>
+              <span className="text-xs text-app-muted">{loading ? <UiText text={"读取中…"} /> : error && !sourcesLoaded ? "—" : translateUi("{count} 个").replace("{count}", String(pagination.total))}</span>
             </div>
             <div className="mb-4 grid gap-3 rounded-panel border border-app-border bg-app-surface p-4 sm:grid-cols-[1fr_auto] app-panel">
               <label>
@@ -149,7 +154,7 @@ export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmi
               </label>
             </div>
             <div className="space-y-4">
-              {!loading && sources.length === 0 ? (
+              {!loading && sourcesLoaded && sources.length === 0 ? (
                 <div className="rounded-panel border border-dashed border-app-border bg-app-surface px-6 py-16 text-center text-sm text-app-muted">
                   {search.trim() || status !== "all" ? <UiText text={"没有匹配的网页资料。"} /> : <UiText text={"还没有网页来源。公开静态网页添加后会抓取；认证及浏览器来源需手动抓取和审核。"} />}
                 </div>

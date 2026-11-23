@@ -49,8 +49,8 @@ test("admin navigation exposes the prototype destinations once and keeps aliases
     read("src/components/admin-shell.tsx"), read("src/app/admin/admin-workspace.module.css"), read("src/components/workspace-dialog.tsx"),
   ]);
   assert.equal(adminNavigationGroups.length, 5);
-  assert.equal(adminNavigationItems.length, 13);
-  assert.equal(new Set(adminNavigationItems.map(item => item.href)).size, 13);
+  assert.equal(adminNavigationItems.length, 12);
+  assert.equal(new Set(adminNavigationItems.map(item => item.href)).size, 12);
   for (const item of adminNavigationItems) {
     assert.deepEqual(getAdminNavigationState(item.href).currentLinks, [item.href]);
     assert.ok(item.label.length > 0);
@@ -101,7 +101,7 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(support, /path: "\/admin\/models", heading: "模型与能力"/u);
   assert.match(support, /path: "\/admin\/models\/routes", heading: "模型与能力"/u);
   assert.match(support, /path: "\/admin\/credits", heading: "平台额度"/u);
-  assert.match(support, /path: "\/admin\/operations\/probes", heading: "模型测试额度"/u);
+  assert.doesNotMatch(support, /path: "\/admin\/operations\/probes", heading: "模型测试额度"/u);
   assert.match(support, /path: "\/admin\/users", heading: "用户运营"/u);
   assert.match(support, /path: "\/admin\/users\/memberships", heading: "会员资格管理"/u);
   assert.match(support, /path: "\/admin\/account", heading: "管理员账户"/u);

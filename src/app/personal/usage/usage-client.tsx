@@ -146,6 +146,14 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
   const [requestVersion, setRequestVersion] = useState(0);
   const [selected, setSelected] = useState<UsageEntry | null>(null);
   const requestVersionRef = useRef(0);
+  const moreControllerRef = useRef<AbortController | null>(null);
+
+  const invalidatePendingLoadMore = () => {
+    requestVersionRef.current += 1;
+    moreControllerRef.current?.abort();
+    moreControllerRef.current = null;
+    setLoadingMore(false);
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -188,6 +196,8 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
   }, [projectSearch, requestVersion, t]);
 
   const loadFirstPage = useCallback(async (signal: AbortSignal) => {
+    moreControllerRef.current?.abort();
+    moreControllerRef.current = null;
     const version = ++requestVersionRef.current;
     setLoading(true);
     setLoadingMore(false);
@@ -226,6 +236,7 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
     if (projectId) params.set("projectId", projectId);
     const version = requestVersionRef.current;
     const controller = new AbortController();
+    moreControllerRef.current = controller;
     try {
       const payload = await readPayload<{ usage: UsagePage }>(
         await fetch(`/api/personal/usage?${params.toString()}`, { cache: "no-store", signal: controller.signal }),
@@ -236,13 +247,17 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
       setEntries((current) => [...current, ...payload.usage.entries]);
       setUsage(payload.usage);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("用量记录暂不可用"));
+      if (!controller.signal.aborted && requestVersionRef.current === version) {
+        setError(cause instanceof Error ? cause.message : t("用量记录暂不可用"));
+      }
     } finally {
+      if (moreControllerRef.current === controller) moreControllerRef.current = null;
       if (!controller.signal.aborted && requestVersionRef.current === version) setLoadingMore(false);
     }
   }, [from, kind, loadingMore, projectId, status, t, to, usage]);
 
   const selectProject = (nextProjectId: string) => {
+    invalidatePendingLoadMore();
     const params = new URLSearchParams(searchParams.toString());
     params.delete("projectId");
     if (nextProjectId) params.set("projectId", nextProjectId);
@@ -266,7 +281,7 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
           <p className={styles.loadError}><UiErrorText text={error} /><br />{t("读取失败时不会用旧数据替代。")}</p>
           <div className={styles.loadMore}>
             <span>{t("用量记录暂不可用")}</span>
-            <button type="button" className={styles.retryButton} onClick={() => setRequestVersion((value) => value + 1)}>{t("重试")}</button>
+          <button type="button" className={styles.retryButton} onClick={() => { invalidatePendingLoadMore(); setRequestVersion((value) => value + 1); }}>{t("重试")}</button>
           </div>
         </div>
       ) : null}
@@ -282,10 +297,10 @@ export function UsageClient({ initialFrom, initialTo }: Readonly<{ initialFrom: 
       <section className={`${styles.card}  ${styles.filterCard}`} aria-labelledby="usage-filter-heading">
         <h2 id="usage-filter-heading" className={styles.sectionHeading}>{t("统计周期")}</h2>
         <div className={styles.filters}>
-          <label className={styles.filterLabel}>{t("开始日期")}<input type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)}  className="app-field"/></label>
-          <label className={styles.filterLabel}>{t("结束日期")}<input type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)}  className="app-field"/></label>
-          <label className={styles.filterLabel}>{t("调用类型")}<select value={kind} onChange={(event) => setKind(event.target.value as UsageKind)} className="app-field">{kindOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
-          <label className={styles.filterLabel}>{t("调用状态")}<select value={status} onChange={(event) => setStatus(event.target.value as UsageStatus)} className="app-field">{statusOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
+          <label className={styles.filterLabel}>{t("开始日期")}<input type="date" value={from} max={to} onChange={(event) => { invalidatePendingLoadMore(); setFrom(event.target.value); }}  className="app-field"/></label>
+          <label className={styles.filterLabel}>{t("结束日期")}<input type="date" value={to} min={from} onChange={(event) => { invalidatePendingLoadMore(); setTo(event.target.value); }}  className="app-field"/></label>
+          <label className={styles.filterLabel}>{t("调用类型")}<select value={kind} onChange={(event) => { invalidatePendingLoadMore(); setKind(event.target.value as UsageKind); }} className="app-field">{kindOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
+          <label className={styles.filterLabel}>{t("调用状态")}<select value={status} onChange={(event) => { invalidatePendingLoadMore(); setStatus(event.target.value as UsageStatus); }} className="app-field">{statusOptions.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
           <label className={styles.filterLabel}>{t("项目筛选")}
             <select value={projectId} onChange={(event) => selectProject(event.target.value)} disabled={projectsLoading || projectsError} className="app-field">
               <option value="">{t("全部项目")}</option>

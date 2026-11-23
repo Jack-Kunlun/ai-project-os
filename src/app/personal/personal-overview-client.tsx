@@ -334,8 +334,8 @@ export function PersonalOverviewClient(): React.JSX.Element {
       {state.partialFailures.length > 0 ? <p role="status" className="mt-6 rounded-field border border-app-warning-border bg-app-warning-soft px-5 py-4 text-sm text-app-warning-ink app-feedback-warning"><UiText text={"部分统计暂不可用："} />{state.partialFailures.map((label) => translateUi(label)).join(", ")}<UiText text={"。项目和其他已加载内容仍可继续使用。"} /></p> : null}
 
       <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label={translateUi("我的空间统计")}>
-        <MetricCard label={translateUi("进行中项目")} value={state.loading ? "…" : String(state.activeProjects)} href="/personal/projects" />
-        <MetricCard label={translateUi("已归档项目")} value={state.loading ? "…" : String(state.archivedProjects)} href="/personal/projects" />
+        <MetricCard label={translateUi("进行中项目")} value={state.loading ? "…" : state.error ? translateUi("暂不可用") : String(state.activeProjects)} href="/personal/projects" />
+        <MetricCard label={translateUi("已归档项目")} value={state.loading ? "…" : state.error ? translateUi("暂不可用") : String(state.archivedProjects)} href="/personal/projects" />
         <MetricCard label={translateUi("知识文档")} value={state.loading ? "…" : countLabel(state.knowledgeCount)} href="/personal/knowledge" />
         <MetricCard label={translateUi("模型连接")} value={state.loading ? "…" : countLabel(state.modelCount)} href="/personal/models" />
         <MetricCard label={translateUi("Git 连接")} value={state.loading ? "…" : countLabel(state.gitCount)} href="/personal/connections/git" />
@@ -353,7 +353,7 @@ export function PersonalOverviewClient(): React.JSX.Element {
           <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link"><UiText text={"Accessible projects"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"最近访问范围内的项目"} /></h2><p className="mt-2 text-sm text-app-muted"><UiText text={"这里只展示当前账号有权读取的最近 8 个进行中项目。"} /></p></div>
           <Link href="/personal/projects" className="text-sm font-semibold text-app-link underline decoration-app-accent-border underline-offset-4"><UiText text={"查看全部项目 →"} /></Link>
         </div>
-        {state.loading ? <div className="mt-6 grid gap-4 md:grid-cols-2"><div className="h-36 animate-pulse rounded-control bg-app-surface-soft" /><div className="h-36 animate-pulse rounded-control bg-app-surface-soft" /></div> : state.projects.length === 0 ? <div className="mt-6 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-5 py-10 text-center"><p className="text-sm font-semibold text-app-text"><UiText text={"当前没有可访问的进行中项目"} /></p><p className="mt-2 text-xs text-app-muted"><UiText text={"个人知识库和个人连接仍可独立使用；获得项目权限后会显示在这里。"} /></p></div> : <div className="mt-6 grid gap-4 md:grid-cols-2">{state.projects.map((project) => <ProjectCard key={project.id} project={project} />)}</div>}
+        {state.loading ? <div className="mt-6 grid gap-4 md:grid-cols-2"><div className="h-36 animate-pulse rounded-control bg-app-surface-soft" /><div className="h-36 animate-pulse rounded-control bg-app-surface-soft" /></div> : state.error ? null : state.projects.length === 0 ? <div className="mt-6 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-5 py-10 text-center"><p className="text-sm font-semibold text-app-text"><UiText text={"当前没有可访问的进行中项目"} /></p><p className="mt-2 text-xs text-app-muted"><UiText text={"个人知识库和个人连接仍可独立使用；获得项目权限后会显示在这里。"} /></p></div> : <div className="mt-6 grid gap-4 md:grid-cols-2">{state.projects.map((project) => <ProjectCard key={project.id} project={project} />)}</div>}
       </section>
 
       <section className="mt-7 border-t border-app-border pt-5 text-sm leading-7 text-app-muted">

@@ -162,25 +162,34 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
   const [grantState, setGrantState] = useState<GrantPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const pendingKeyRef = useRef<string | null>(null);
+  const loadRequestVersion = useRef(0);
   const { confirm, dialog } = useAppConfirmDialog();
 
   const load = useCallback(async ({ showLoading = true }: { showLoading?: boolean } = {}) => {
+    const requestVersion = ++loadRequestVersion.current;
     if (showLoading) setLoading(true);
     try {
-      const [delegations, grants] = await Promise.all([
+      const [delegationsResult, grantsResult] = await Promise.allSettled([
         requestJson<DelegationPayload>(`/api/projects/${projectId}/mcp-connection-delegations`),
         requestJson<GrantPayload>(`/api/projects/${projectId}/mcp-tool-grants`),
       ]);
-      setDelegationState(delegations);
-      setGrantState(grants);
-      setLoadError(null);
-    } catch (error) {
-      setLoadError(connectionErrorText(error, "项目 MCP 控制面加载失败"));
+      if (loadRequestVersion.current !== requestVersion) return;
+      const errors: string[] = [];
+      if (delegationsResult.status === "fulfilled") {
+        setDelegationState(delegationsResult.value);
+        setConnectionsLoaded(true);
+      } else {
+        errors.push(connectionErrorText(delegationsResult.reason, "项目连接委托加载失败"));
+      }
+      if (grantsResult.status === "fulfilled") setGrantState(grantsResult.value);
+      else errors.push(connectionErrorText(grantsResult.reason, "项目工具授权加载失败"));
+      setLoadError(errors.length > 0 ? errors.join("；") : null);
     } finally {
-      if (showLoading) setLoading(false);
+      if (showLoading && loadRequestVersion.current === requestVersion) setLoading(false);
     }
   }, [projectId]);
 
@@ -330,8 +339,8 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
         {loading ? <LoadingState /> : (
           <>
             <div className="mt-7 space-y-6">
-              <ProposalPanel enabled={delegationState?.capabilities.canPropose === true && grantState?.archived !== true} connections={delegationState?.connections ?? []} pending={pendingKey === "proposal"} operationError={message?.tone === "error" ? message.text : null} onErrorDismiss={() => setMessage(null)} onSubmit={propose} />
-              <DelegationList delegations={delegationState?.delegations ?? []} pendingKey={pendingKey} onConfirm={confirmDelegation} onTerminal={terminal} />
+              <ProposalPanel enabled={delegationState === null || grantState === null ? null : delegationState.capabilities.canPropose && !grantState.archived} connections={delegationState?.connections ?? []} connectionsLoaded={connectionsLoaded} pending={pendingKey === "proposal"} operationError={message?.tone === "error" ? message.text : null} onErrorDismiss={() => setMessage(null)} onSubmit={propose} />
+              <DelegationList delegations={delegationState?.delegations ?? null} pendingKey={pendingKey} onConfirm={confirmDelegation} onTerminal={terminal} />
             </div>
             <GrantPanel state={grantState} pendingKey={pendingKey} onCreate={createGrant} onRevoke={revokeGrant} />
           </>
@@ -341,7 +350,7 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin, mcpExpo
   );
 }
 
-function ProposalPanel({ enabled, connections, pending, operationError, onErrorDismiss, onSubmit }: { enabled: boolean; connections: readonly ConnectionOption[]; pending: boolean; operationError: string | null; onErrorDismiss: () => void; onSubmit: (connectionId: string, expiresAt: string) => Promise<boolean> }) {
+function ProposalPanel({ enabled, connections, connectionsLoaded, pending, operationError, onErrorDismiss, onSubmit }: { enabled: boolean | null; connections: readonly ConnectionOption[]; connectionsLoaded: boolean; pending: boolean; operationError: string | null; onErrorDismiss: () => void; onSubmit: (connectionId: string, expiresAt: string) => Promise<boolean> }) {
   const translateUi = useTranslate();
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
   const [expiresAt, setExpiresAt] = useState(defaultExpiry);
@@ -353,6 +362,8 @@ function ProposalPanel({ enabled, connections, pending, operationError, onErrorD
     if (selectedConnectionId !== "" && expiresAt !== "") void onSubmit(selectedConnectionId, expiresAt).then((created) => { if (created) setOpen(false); });
   }
 
+  if (!connectionsLoaded) return <p className="rounded-panel border border-app-border bg-app-surface px-4 py-3 text-xs leading-5 text-app-muted"><UiText text={"连接和委托信息尚未成功读取；请检查上方错误并重试。"} /></p>;
+  if (enabled === null) return <p className="rounded-panel border border-app-border bg-app-surface px-4 py-3 text-xs leading-5 text-app-muted"><UiText text={"项目授权状态尚未成功读取，暂时不能提交委托提案。"} /></p>;
   if (!enabled) return <p className="rounded-panel border border-app-border bg-app-surface px-4 py-3 text-xs leading-5 text-app-muted"><UiText text={"当前账户没有创建权限，或项目已归档。连接所有者确认和项目 Owner 确认仍由各自权限控制。"} /></p>;
   return <OperationPanel title={translateUi("提案只读 MCP 委托")} triggerLabel="提案只读 MCP 委托" open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (nextOpen) onErrorDismiss(); }} disabled={pending} description="只能选择当前账户已验证的个人连接。提交后仍需连接所有者和项目 Owner 独立确认。">
     {operationError ? <p role="alert" className="mb-3 rounded-field bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink app-feedback-error"><UiErrorText text={operationError} /></p> : null}
@@ -360,8 +371,8 @@ function ProposalPanel({ enabled, connections, pending, operationError, onErrorD
   </OperationPanel>;
 }
 
-function DelegationList({ delegations, pendingKey, onConfirm, onTerminal }: { delegations: readonly Delegation[]; pendingKey: string | null; onConfirm: (delegation: Delegation, kind: "owner" | "project") => Promise<void>; onTerminal: (delegation: Delegation, action: "rejection" | "revocation") => Promise<void> }) {
-  return <section className="min-w-0 rounded-panel border border-app-border bg-app-surface p-5 sm:p-6 app-panel"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link"><UiText text={"Connection delegations"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"连接委托"} /></h2><p className="mt-1 text-sm leading-6 text-app-muted"><UiText text={"状态由服务端基于当前成员资格、连接证据和有效期计算；不展示地址、凭据或原始指纹。"} /></p></div><span className="rounded-full bg-app-surface-soft px-3 py-1 text-xs font-semibold text-app-muted">{delegations.length} {" "}<UiText text={"条"} /></span></div>{delegations.length === 0 ? <div className="mt-6 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-5 py-10 text-center"><p className="text-sm font-semibold text-app-text"><UiText text={"还没有连接委托"} /></p><p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"提交左侧提案后，等待连接所有者和项目 Owner 双确认。"} /></p></div> : <div className="mt-6 space-y-4">{delegations.map((delegation) => <DelegationCard key={delegation.id} delegation={delegation} pending={pendingKey?.includes(delegation.id) === true} onConfirm={onConfirm} onTerminal={onTerminal} />)}</div>}</section>;
+function DelegationList({ delegations, pendingKey, onConfirm, onTerminal }: { delegations: readonly Delegation[] | null; pendingKey: string | null; onConfirm: (delegation: Delegation, kind: "owner" | "project") => Promise<void>; onTerminal: (delegation: Delegation, action: "rejection" | "revocation") => Promise<void> }) {
+  return <section className="min-w-0 rounded-panel border border-app-border bg-app-surface p-5 sm:p-6 app-panel"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link"><UiText text={"Connection delegations"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"连接委托"} /></h2><p className="mt-1 text-sm leading-6 text-app-muted"><UiText text={"状态由服务端基于当前成员资格、连接证据和有效期计算；不展示地址、凭据或原始指纹。"} /></p></div><span className="rounded-full bg-app-surface-soft px-3 py-1 text-xs font-semibold text-app-muted">{delegations?.length ?? "—"} {" "}<UiText text={"条"} /></span></div>{delegations === null ? <p className="mt-6 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-5 py-10 text-center text-sm text-app-muted"><UiText text={"连接委托暂不可用，请检查上方错误并重试。"} /></p> : delegations.length === 0 ? <div className="mt-6 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-5 py-10 text-center"><p className="text-sm font-semibold text-app-text"><UiText text={"还没有连接委托"} /></p><p className="mt-2 text-xs leading-5 text-app-muted"><UiText text={"提交左侧提案后，等待连接所有者和项目 Owner 双确认。"} /></p></div> : <div className="mt-6 space-y-4">{delegations.map((delegation) => <DelegationCard key={delegation.id} delegation={delegation} pending={pendingKey?.includes(delegation.id) === true} onConfirm={onConfirm} onTerminal={onTerminal} />)}</div>}</section>;
 }
 
 function DelegationCard({ delegation, pending, onConfirm, onTerminal }: { delegation: Delegation; pending: boolean; onConfirm: (delegation: Delegation, kind: "owner" | "project") => Promise<void>; onTerminal: (delegation: Delegation, action: "rejection" | "revocation") => Promise<void> }) {
@@ -376,7 +387,7 @@ function GrantPanel({ state, pendingKey, onCreate, onRevoke }: { state: GrantPay
   const activeGrants = state?.grants.filter((grant) => grant.status === "active" && grant.effective) ?? [];
   const ineffectiveActiveGrants = state?.grants.filter((grant) => grant.status === "active" && !grant.effective) ?? [];
   const historicalGrants = state?.grants.filter((grant) => grant.status !== "active") ?? [];
-  return <section className="mt-7 min-w-0 rounded-panel border border-app-border bg-app-surface p-5 sm:p-6 app-panel"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link"><UiText text={"Read-only tool grants"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"V2 只读工具授权"} /></h2><p className="mt-1 max-w-3xl text-sm leading-6 text-app-muted"><UiText text={"这里只列出当前有效连接委托和 V2 审核候选。远端 schema 与 annotations 是不可信远端声明，仅供审核，不代表平台授权。"} /></p></div><span className="rounded-full bg-app-surface-soft px-3 py-1 text-xs font-semibold text-app-muted">{activeGrants.length} {" "}<UiText text={"个有效授权"} /></span></div>{state?.archived ? <p className="mt-5 rounded-panel bg-app-warning-soft px-4 py-3 text-xs leading-5 text-app-warning-ink"><UiText text={"项目已归档，不能创建新的工具授权。"} /></p> : null}<div className="mt-6 grid min-w-0 gap-6 lg:grid-cols-2"><div><h3 className="text-sm font-semibold text-app-text"><UiText text={"可授权工具"} /></h3>{state === null ? <p className="mt-4 rounded-panel bg-app-surface-soft px-4 py-6 text-center text-xs text-app-muted"><UiText text={"正在读取工具候选…"} /></p> : state.candidates.length === 0 ? <p className="mt-4 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-4 py-6 text-center text-xs text-app-muted"><UiText text={"当前没有可授权的 V2 工具。"} /></p> : <div className="mt-4 space-y-3">{state.candidates.map((candidate) => <CandidateCard key={`${candidate.delegationId}:${candidate.toolDefinitionId}`} candidate={candidate} pending={pendingKey?.includes(candidate.toolDefinitionId) === true} onCreate={onCreate} />)}</div>}</div><div><h3 className="text-sm font-semibold text-app-text"><UiText text={"当前与历史授权"} /></h3>{activeGrants.length === 0 && ineffectiveActiveGrants.length === 0 && historicalGrants.length === 0 ? <p className="mt-4 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-4 py-6 text-center text-xs text-app-muted"><UiText text={"还没有工具授权。"} /></p> : <div className="mt-4 space-y-3">{[...activeGrants, ...ineffectiveActiveGrants, ...historicalGrants].map((grant) => <GrantCard key={grant.id} grant={grant} pending={pendingKey?.includes(grant.id) === true} onRevoke={onRevoke} />)}</div>}</div></div><p className="mt-6 rounded-panel bg-app-surface-soft px-4 py-3 text-xs leading-5 text-app-muted"><UiText text={"本页只管理连接委托和只读工具授权；动作入口状态以上方说明为准，自动化与结果导入仍关闭。"} /></p></section>;
+  return <section className="mt-7 min-w-0 rounded-panel border border-app-border bg-app-surface p-5 sm:p-6 app-panel"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-link"><UiText text={"Read-only tool grants"} /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"V2 只读工具授权"} /></h2><p className="mt-1 max-w-3xl text-sm leading-6 text-app-muted"><UiText text={"这里只列出当前有效连接委托和 V2 审核候选。远端 schema 与 annotations 是不可信远端声明，仅供审核，不代表平台授权。"} /></p></div><span className="rounded-full bg-app-surface-soft px-3 py-1 text-xs font-semibold text-app-muted">{state === null ? "—" : activeGrants.length} {" "}<UiText text={"个有效授权"} /></span></div>{state?.archived ? <p className="mt-5 rounded-panel bg-app-warning-soft px-4 py-3 text-xs leading-5 text-app-warning-ink"><UiText text={"项目已归档，不能创建新的工具授权。"} /></p> : null}<div className="mt-6 grid min-w-0 gap-6 lg:grid-cols-2"><div><h3 className="text-sm font-semibold text-app-text"><UiText text={"可授权工具"} /></h3>{state === null ? <p className="mt-4 rounded-panel bg-app-surface-soft px-4 py-6 text-center text-xs text-app-muted"><UiText text={"工具候选暂不可用，请检查上方错误并重试。"} /></p> : state.candidates.length === 0 ? <p className="mt-4 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-4 py-6 text-center text-xs text-app-muted"><UiText text={"当前没有可授权的 V2 工具。"} /></p> : <div className="mt-4 space-y-3">{state.candidates.map((candidate) => <CandidateCard key={`${candidate.delegationId}:${candidate.toolDefinitionId}`} candidate={candidate} pending={pendingKey?.includes(candidate.toolDefinitionId) === true} onCreate={onCreate} />)}</div>}</div><div><h3 className="text-sm font-semibold text-app-text"><UiText text={"当前与历史授权"} /></h3>{state === null ? <p className="mt-4 rounded-panel bg-app-surface-soft px-4 py-6 text-center text-xs text-app-muted"><UiText text={"工具授权暂不可用，请检查上方错误并重试。"} /></p> : activeGrants.length === 0 && ineffectiveActiveGrants.length === 0 && historicalGrants.length === 0 ? <p className="mt-4 rounded-panel border border-dashed border-app-border bg-app-surface-soft px-4 py-6 text-center text-xs text-app-muted"><UiText text={"还没有工具授权。"} /></p> : <div className="mt-4 space-y-3">{[...activeGrants, ...ineffectiveActiveGrants, ...historicalGrants].map((grant) => <GrantCard key={grant.id} grant={grant} pending={pendingKey?.includes(grant.id) === true} onRevoke={onRevoke} />)}</div>}</div></div><p className="mt-6 rounded-panel bg-app-surface-soft px-4 py-3 text-xs leading-5 text-app-muted"><UiText text={"本页只管理连接委托和只读工具授权；动作入口状态以上方说明为准，自动化与结果导入仍关闭。"} /></p></section>;
 }
 
 function CandidateCard({ candidate, pending, onCreate }: { candidate: Candidate; pending: boolean; onCreate: (candidate: Candidate) => Promise<void> }) {

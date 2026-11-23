@@ -3,17 +3,20 @@
 import Link from "next/link";
 import { ShellIcon } from "./shell-icon";
 import { useTranslate } from "./appearance-provider";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function NotificationBell({ active,compact=false }: { active: boolean;compact?:boolean }) {
   const t=useTranslate();
   const [unreadCount, setUnreadCount] = useState(0);
+  const requestSequence = useRef(0);
 
   const reload = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     try {
       const response = await fetch("/api/notifications", { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json() as { unreadCount?: number };
+      if (sequence !== requestSequence.current) return;
       setUnreadCount(Number.isSafeInteger(payload.unreadCount) ? Math.max(0, payload.unreadCount ?? 0) : 0);
     } catch {
       // Navigation remains available when the count cannot be refreshed.

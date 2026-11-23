@@ -1131,7 +1131,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             </div>
 
             {listError ? <div role="alert" className={["app-feedback-error", (`${styles.feedback}  ${styles.feedbackError}`)].filter(Boolean).join(' ')}><p><UiErrorText text={listError} /></p><button type="button" onClick={() => void loadDocuments()} className="mt-2 font-semibold underline"><UiText text="重新加载" /></button></div> : null}
-            {listLoading ? <p className="py-5 text-sm text-app-muted app-feedback-info" role="status" aria-live="polite"><UiText text="正在加载知识…" /></p> : documents.length === 0 ? <EmptyList searchQuery={searchQuery} filter={knowledgeFilter} onCreate={startCreate} /> : <div className={styles.list}>
+            {listLoading ? <p className="py-5 text-sm text-app-muted app-feedback-info" role="status" aria-live="polite"><UiText text="正在加载知识…" /></p> : listError ? null : documents.length === 0 ? <EmptyList searchQuery={searchQuery} filter={knowledgeFilter} onCreate={startCreate} /> : <div className={styles.list}>
               {documents.map((item) => <button key={item.id} type="button" aria-haspopup="dialog" aria-current={item.id === selectedId ? "true" : undefined} onClick={() => selectDocument(item.id)} className={`${styles.row}  ${item.id === selectedId ? styles.selectedRow : ""}`}>
                 <span className={styles.rowBody}>
                   <span className={styles.rowTitle}>{item.title}</span>
@@ -1145,7 +1145,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
               </button>)}
             </div>}
 
-            {documents.length > 0 ? <nav className={styles.pager} aria-label={t("个人知识分页")}><span>{language === "en" ? `Page ${pageNumber}` : `第 ${pageNumber} 页`}</span><div className={styles.rowActions}><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className="app-button-secondary"><UiText text="上一页" /></button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className="app-button-secondary"><UiText text="下一页" /></button></div></nav> : null}
+            {!listError && documents.length > 0 ? <nav className={styles.pager} aria-label={t("个人知识分页")}><span>{language === "en" ? `Page ${pageNumber}` : `第 ${pageNumber} 页`}</span><div className={styles.rowActions}><button type="button" onClick={goPrevious} disabled={cursorStack.length === 0 || listLoading} className="app-button-secondary"><UiText text="上一页" /></button><button type="button" onClick={goNext} disabled={!nextCursor || listLoading} className="app-button-secondary"><UiText text="下一页" /></button></div></nav> : null}
           </section>
         </> : null}
 

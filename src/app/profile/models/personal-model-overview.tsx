@@ -51,11 +51,11 @@ export function PersonalModelOverview({children}:{children:ReactNode}) {
     return()=>controller.abort();
   },[]);
   const number=(value:number)=>new Intl.NumberFormat(language==='en'?'en-US':'zh-CN').format(value);
-  const used=summary&&summary.totalCredits>0?Math.min(100,Math.max(0,summary.usedCredits/summary.totalCredits*100)):0;
+  const available=summary&&summary.totalCredits>0?Math.min(100,Math.max(0,summary.availableCredits/summary.totalCredits*100)):0;
   return <div className={styles.overview} aria-busy={loading} data-model-overview>
     <section className={styles.banner}><span className={styles.symbol} aria-hidden="true"><ShellIcon name="spark" className="app-icon--feature"/></span><div><h2><UiText text="平台默认模型"/></h2><p><UiText text="无需填写 API Key。每次调用仍需核对模型、输入范围与额度。"/></p></div></section>
     <div className={styles.capabilities}>{kinds.map(([label,kind])=><section key={kind}><h3>{t(label)}</h3><p><ShellIcon name={models[kind]?'checkcircle':'circle'} className="app-icon--compact"/><span>{loading?t('读取中…'):models[kind]?`${models[kind]!.name} · ${models[kind]!.modelId??models[kind]!.defaultEmbeddingModelId??''}`:t(kind in models?'未配置':'暂时无法读取')}</span></p></section>)}</div>
     {errors.map(error=><p key={error} className={["app-feedback-error", (ui.error)].filter(Boolean).join(' ')} role="alert"><UiErrorText text={error}/></p>)}
-    <div className={styles.columns}><section className={styles.quota}><header><h2><UiText text="我的平台额度"/></h2><Link href="/personal/usage" className={ui.link}><UiText text="使用记录"/><ShellIcon name="arrow" className="app-icon--compact"/></Link></header><strong>{summary?number(summary.availableCredits):'—'}<small><UiText text="平台额度"/></small></strong><div className={styles.track} aria-hidden="true"><span style={{width:`${100-used}%`}}/></div><p>{summary?<>{t('已使用')} {number(summary.usedCredits)} · {t('累计发放')} {number(summary.totalCredits)}</>:t(loading?'读取中…':'暂时无法读取')}</p></section><section className={styles.personal}>{children}</section></div>
+    <div className={styles.columns}><section className={styles.quota}><header><h2><UiText text="我的平台额度"/></h2><Link href="/personal/usage" className={ui.link}><UiText text="使用记录"/><ShellIcon name="arrow" className="app-icon--compact"/></Link></header><strong>{summary?number(summary.availableCredits):'—'}<small><UiText text="平台额度"/></small></strong>{summary?<div className={styles.track} aria-hidden="true"><span style={{width:`${available}%`}}/></div>:null}<p>{summary?<>{t('已使用')} {number(summary.usedCredits)} · {t('累计发放')} {number(summary.totalCredits)}</>:t(loading?'读取中…':'暂时无法读取')}</p></section><section className={styles.personal}>{children}</section></div>
   </div>;
 }

@@ -144,7 +144,7 @@ test("all application pages retain the new style during loading, failed reads an
             const dialog = page.getByRole("dialog").last();
             await expect(dialog).toBeVisible();
             await settleVisualState(page);
-            if (pattern === "/admin/account" || pattern === "/admin/operations/probes") {
+            if (pattern === "/admin/account") {
               for (const action of await dialog.locator('[data-operation-footer] button[type="submit"]').all()) {
                 await expect(action, `${pattern}: portaled submit needs explicit shared primary styling`).toHaveClass(/\bapp-button-primary\b/u);
               }

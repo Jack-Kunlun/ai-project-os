@@ -94,7 +94,7 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
   assert.match(await readFile("src/app/admin/users/memberships/page.tsx", "utf8"), /export default/u);
   assert.doesNotMatch(docs["docs/admin-operation-guide.md"], /\| `\/system\/account-access`/u);
   assert.match(docs["docs/admin-operation-guide.md"], /受守卫的退场跳转/u);
-  assert.match(docs["src/app/admin/guide/page.tsx"], /按当前控制面流程完成预算、供应商连接、能力模型和用户治理/u);
+  assert.match(docs["src/app/admin/guide/page.tsx"], /按当前控制面流程完成供应商连接、能力模型和用户治理/u);
   assert.match(docs["src/app/admin/guide/page.tsx"], /用户、会员与额度/u);
   assert.match(docs["src/app/admin/guide/page.tsx"], /成功条件：/u);
   assert.match(docs["src/app/admin/guide/page.tsx"], /常见阻塞：/u);

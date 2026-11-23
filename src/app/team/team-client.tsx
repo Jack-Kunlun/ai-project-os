@@ -82,6 +82,7 @@ type TeamProjectView = { id: string; name: string; slug: string; description: st
 type TeamOverviewPayload = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; counts: { memberships: number; projects: number }; members: Array<{ userId: string; role: WorkspaceRole; username: string; displayName: string | null }>; projects: TeamProjectView[] };
 type TeamPermissionsPayload = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; projects: Array<{ project: { id: string; name: string; slug: string }; permission: ProjectRole; source: "workspace-role" | "project-grant" }> };
 type TeamActivityPayload = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; activity: Array<{ id: string; kind: "membership" | "invitation" | "role"; label: string; createdAt: string; project: { id: string; name: string } | null }> };
+type InvitationPagePayload = { invitations: Invitation[]; nextCursor: string | null };
 
 export function WorkspaceTeamClient({ username, currentUserId, isSystemAdmin, workspaceId }: { username: string; currentUserId: string; isSystemAdmin: boolean; workspaceId: string }) {
   const { t } = useAppearance();
@@ -95,47 +96,128 @@ export function WorkspaceTeamClient({ username, currentUserId, isSystemAdmin, wo
   const [activity, setActivity] = useState<TeamActivityPayload | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [invitationCursor, setInvitationCursor] = useState<string | null>(null);
+  const [nextInvitationCursor, setNextInvitationCursor] = useState<string | null>(null);
+  const [invitationHistory, setInvitationHistory] = useState<string[]>([]);
+  const [invitationLoading, setInvitationLoading] = useState(false);
+  const [invitationError, setInvitationError] = useState<string | null>(null);
+  const [permissionsError, setPermissionsError] = useState<string | null>(null);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [providersError, setProvidersError] = useState<string | null>(null);
   const [providers, setProviders] = useState<OidcProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const invitationLoadingRef = useRef(false);
+  const invitationCursorRef = useRef<string | null>(null);
+  const invitationReadVersionRef = useRef(0);
+  const reloadVersionRef = useRef(0);
   const router = useRouter();
 
-  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
-    if (showLoading) setLoading(true);
+  const loadInvitationPage = useCallback(async (cursor: string | null, { force = false, resetHistory = false }: { force?: boolean; resetHistory?: boolean } = {}): Promise<boolean> => {
+    if (invitationLoadingRef.current && !force) return false;
+    const requestVersion = ++invitationReadVersionRef.current;
+    invitationLoadingRef.current = true;
+    setInvitationLoading(true);
+    setInvitationError(null);
     try {
-      const overviewResponse = await fetch(`/api/teams/${workspaceId}/overview`, { cache: "no-store" });
-      if (!overviewResponse.ok) throw new Error(await responseError(overviewResponse, "团队加载失败"));
-      const nextOverview = (await overviewResponse.json() as { overview: TeamOverviewPayload }).overview;
-      const [permissionsResponse, activityResponse] = await Promise.all([
-        fetch(`/api/teams/${workspaceId}/permissions`, { cache: "no-store" }),
-        fetch(`/api/teams/${workspaceId}/activity`, { cache: "no-store" }),
-      ]);
-      const failedProjection = [permissionsResponse, activityResponse].find((response) => !response.ok);
-      if (failedProjection) throw new Error(await responseError(failedProjection, "团队信息加载失败"));
-      setOverview(nextOverview);
-      setPermissions((await permissionsResponse.json() as { permissions: TeamPermissionsPayload }).permissions);
-      setActivity((await activityResponse.json() as { activity: TeamActivityPayload }).activity);
-      if (nextOverview.role === "owner" || nextOverview.role === "admin") {
-        const [memberResponse, invitationResponse, oidcResponse] = await Promise.all([
-          fetch(`/api/workspaces/${workspaceId}/members`, { cache: "no-store" }),
-          fetch(`/api/workspaces/${workspaceId}/invitations`, { cache: "no-store" }),
-          fetch(`/api/workspaces/${workspaceId}/oidc-providers`, { cache: "no-store" }),
-        ]);
-        const failedAdmin = [memberResponse, invitationResponse, oidcResponse].find((response) => !response.ok);
-        if (failedAdmin) throw new Error(await responseError(failedAdmin, "团队配置加载失败"));
-        setMembers((await memberResponse.json() as { members: Member[] }).members);
-        setInvitations((await invitationResponse.json() as { invitations: Invitation[] }).invitations);
-        setProviders((await oidcResponse.json() as { providers: OidcProvider[] }).providers);
-      } else {
-        setMembers([]); setInvitations([]); setProviders([]);
-      }
-      setError(null);
+      const query = cursor === null ? "" : `?cursor=${encodeURIComponent(cursor)}`;
+      const response = await fetch(`/api/workspaces/${workspaceId}/invitations${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await responseError(response, "邀请列表加载失败"));
+      const page = await response.json() as InvitationPagePayload;
+      if (requestVersion !== invitationReadVersionRef.current) return false;
+      setInvitations(page.invitations);
+      invitationCursorRef.current = cursor;
+      setInvitationCursor(cursor);
+      setNextInvitationCursor(page.nextCursor);
+      if (resetHistory) setInvitationHistory([]);
+      return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "团队加载失败");
+      if (requestVersion === invitationReadVersionRef.current) setInvitationError(cause instanceof Error ? cause.message : "邀请列表加载失败");
+      return false;
     } finally {
-      if (showLoading) setLoading(false);
+      if (requestVersion === invitationReadVersionRef.current) {
+        invitationLoadingRef.current = false;
+        setInvitationLoading(false);
+      }
     }
   }, [workspaceId]);
+
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    const reloadVersion = ++reloadVersionRef.current;
+    if (showLoading) setLoading(true);
+    const isCurrent = () => reloadVersion === reloadVersionRef.current;
+    const overviewTask = (async () => {
+      try {
+        const response = await fetch(`/api/teams/${workspaceId}/overview`, { cache: "no-store" });
+        if (!response.ok) throw new Error(await responseError(response, "团队总览加载失败"));
+        const nextOverview = (await response.json() as { overview: TeamOverviewPayload }).overview;
+        if (!isCurrent()) return;
+        setOverview(nextOverview);
+        setError(null);
+        setLoading(false);
+        if (nextOverview.role === "owner" || nextOverview.role === "admin") {
+          const [membersResult, providersResult] = await Promise.allSettled([
+            (async () => {
+              const memberResponse = await fetch(`/api/workspaces/${workspaceId}/members`, { cache: "no-store" });
+              if (!memberResponse.ok) throw new Error(await responseError(memberResponse, "团队成员加载失败"));
+              return (await memberResponse.json() as { members: Member[] }).members;
+            })(),
+            (async () => {
+              const providerResponse = await fetch(`/api/workspaces/${workspaceId}/oidc-providers`, { cache: "no-store" });
+              if (!providerResponse.ok) throw new Error(await responseError(providerResponse, "团队身份源加载失败"));
+              return (await providerResponse.json() as { providers: OidcProvider[] }).providers;
+            })(),
+          ]);
+          if (!isCurrent()) return;
+          if (membersResult.status === "fulfilled") { setMembers(membersResult.value); setMembersError(null); }
+          else setMembersError(membersResult.reason instanceof Error ? membersResult.reason.message : "团队成员加载失败");
+          if (providersResult.status === "fulfilled") { setProviders(providersResult.value); setProvidersError(null); }
+          else setProvidersError(providersResult.reason instanceof Error ? providersResult.reason.message : "团队身份源加载失败");
+          await loadInvitationPage(null, { force: true, resetHistory: true });
+        } else {
+          invitationReadVersionRef.current += 1;
+          invitationLoadingRef.current = false;
+          setInvitationLoading(false);
+          setMembers([]); setInvitations([]); setProviders([]);
+          invitationCursorRef.current = null;
+          setInvitationCursor(null); setNextInvitationCursor(null); setInvitationHistory([]);
+          setMembersError(null); setInvitationError(null); setProvidersError(null);
+        }
+      } catch (cause) {
+        if (!isCurrent()) return;
+        setError(cause instanceof Error ? cause.message : "团队总览加载失败");
+        setLoading(false);
+      }
+    })();
+    const permissionsTask = (async () => {
+      try {
+        const response = await fetch(`/api/teams/${workspaceId}/permissions`, { cache: "no-store" });
+        if (!response.ok) throw new Error(await responseError(response, "团队权限加载失败"));
+        const nextPermissions = (await response.json() as { permissions: TeamPermissionsPayload }).permissions;
+        if (!isCurrent()) return;
+        setPermissions(nextPermissions);
+        setPermissionsError(null);
+      } catch (cause) {
+        if (!isCurrent()) return;
+        setPermissionsError(cause instanceof Error ? cause.message : "团队权限加载失败");
+      }
+    })();
+    const activityTask = (async () => {
+      try {
+        const response = await fetch(`/api/teams/${workspaceId}/activity`, { cache: "no-store" });
+        if (!response.ok) throw new Error(await responseError(response, "团队活动加载失败"));
+        const nextActivity = (await response.json() as { activity: TeamActivityPayload }).activity;
+        if (!isCurrent()) return;
+        setActivity(nextActivity);
+        setActivityError(null);
+      } catch (cause) {
+        if (!isCurrent()) return;
+        setActivityError(cause instanceof Error ? cause.message : "团队活动加载失败");
+      }
+    })();
+    await Promise.all([overviewTask, permissionsTask, activityTask]);
+  }, [loadInvitationPage, workspaceId]);
 
   useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
 
@@ -151,7 +233,78 @@ export function WorkspaceTeamClient({ username, currentUserId, isSystemAdmin, wo
   const navigation: Array<[WorkspaceTeamView, string]> = [["overview", "团队总览"], ["members", "成员与创建账号"], ["permissions", "我的权限"], ["activity", "活动记录"]];
   if (canAdmin) navigation.push(["invitations", "邀请成员"], ["settings", "团队设置"]);
 
-  return <main className={styles.page}><AppHeader username={username} active="team" isSystemAdmin={isSystemAdmin} /><div data-page-content className={styles.content}><section className={styles.pageHeader}><div className="min-w-0 max-w-full"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-app-link"><UiText text="团队空间" /></p><h1 className={`${styles.pageTitle} mt-2 break-words`}>{overview?.workspace.name ?? t("团队空间")}</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted"><UiText text={"查看团队成员、项目访问权限和已记录的团队活动。"} /></p></div>{overview ? <div className="text-right"><p className="text-xs text-app-link"><UiText text={"当前角色"} /></p><strong className="mt-1 block text-lg text-app-text"><UiText text={workspaceRoleLabel(overview.role)} /></strong></div> : null}{canAdmin ? <button type="button" onClick={() => selectView("settings")} className="min-h-10 rounded-control px-4 py-2 text-sm font-semibold app-button-primary"><UiText text={"团队管理"} /></button> : null}</section>{error ? <div role="alert" className="mt-6 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></div> : null}{overview ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><Metric label="已确认成员" value={overview.counts.memberships} /><Metric label="可访问项目" value={overview.counts.projects} /></section> : null}<nav className="mt-6 flex gap-2 overflow-x-auto rounded-panel bg-app-surface-soft p-1" aria-label={t("团队功能")}>{navigation.map(([key, label]) => <button type="button" key={key} onClick={() => selectView(key)} className={`shrink-0 rounded-control px-4 py-2 text-sm font-semibold ${view === key || view === "oidc" && key === "settings" ? "bg-app-surface text-app-text" : "text-app-muted"}`}><UiText text={label} /></button>)}</nav>{loading ? <div className="mt-6 h-72 animate-pulse rounded-control bg-app-surface-soft" /> : overview ? <div className="mt-6">{view === "overview" ? <TeamOverviewView overview={overview} /> : view === "members" ? canAdmin ? <MembersView workspaceId={workspaceId} members={members} projects={projectOptions} onReload={reload} /> : <TeamMemberDirectory members={overview.members} total={overview.counts.memberships} /> : view === "permissions" ? <TeamPermissionsView permissions={permissions} /> : view === "activity" ? <TeamActivityView activity={activity} /> : canAdmin && view === "invitations" ? <InvitationsGovernanceView workspaceId={workspaceId} invitations={invitations} projects={projectOptions} onReload={reload} /> : canAdmin && view === "oidc" ? <OidcView workspaceId={workspaceId} providers={providers} onReload={reload} /> : canAdmin ? <TeamSettingsView onSelect={selectView} /> : <TeamOverviewView overview={overview} />}</div> : null}</div></main>;
+  async function showOlderInvitations() {
+    if (nextInvitationCursor === null || invitationLoading) return;
+    const previousCursor = invitationCursor ?? "";
+    if (await loadInvitationPage(nextInvitationCursor)) setInvitationHistory((items) => [...items, previousCursor]);
+  }
+
+  async function showNewerInvitations() {
+    const previousCursor = invitationHistory.at(-1);
+    if (previousCursor === undefined || invitationLoading) return;
+    if (await loadInvitationPage(previousCursor === "" ? null : previousCursor)) setInvitationHistory((items) => items.slice(0, -1));
+  }
+
+  const viewError = view === "permissions" ? permissionsError
+    : view === "activity" ? activityError
+      : view === "members" && canAdmin ? membersError
+        : view === "oidc" && canAdmin ? providersError
+          : null;
+
+  return (
+    <main className={styles.page}>
+      <AppHeader username={username} active="team" isSystemAdmin={isSystemAdmin} />
+      <div data-page-content className={styles.content}>
+        <section className={styles.pageHeader}>
+          <div className="min-w-0 max-w-full">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-app-link"><UiText text="团队空间" /></p>
+            <h1 className={`${styles.pageTitle} mt-2 break-words`}>{overview?.workspace.name ?? t("团队空间")}</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-app-muted"><UiText text={"查看团队成员、项目访问权限和已记录的团队活动。"} /></p>
+          </div>
+          {overview ? <div className="text-right"><p className="text-xs text-app-link"><UiText text={"当前角色"} /></p><strong className="mt-1 block text-lg text-app-text"><UiText text={workspaceRoleLabel(overview.role)} /></strong></div> : null}
+          {canAdmin ? <button type="button" onClick={() => selectView("settings")} className="min-h-10 rounded-control px-4 py-2 text-sm font-semibold app-button-primary"><UiText text={"团队管理"} /></button> : null}
+        </section>
+
+        {error ? <TeamRetryNotice title="团队总览加载失败" message={error} onRetry={() => void reload({ showLoading: true })} /> : null}
+        {activityError && view !== "activity" ? <TeamRetryNotice title="团队活动加载失败" message={activityError} onRetry={() => void reload()} /> : null}
+        {overview ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><Metric label="已确认成员" value={overview.counts.memberships} /><Metric label="可访问项目" value={overview.counts.projects} /></section> : null}
+        <nav className="mt-6 flex gap-2 overflow-x-auto rounded-panel bg-app-surface-soft p-1" aria-label={t("团队功能")}>
+          {navigation.map(([key, label]) => <button type="button" key={key} onClick={() => selectView(key)} className={`shrink-0 rounded-control px-4 py-2 text-sm font-semibold ${view === key || view === "oidc" && key === "settings" ? "bg-app-surface text-app-text" : "text-app-muted"}`}><UiText text={label} /></button>)}
+        </nav>
+
+        {loading ? <div className="mt-6 h-72 animate-pulse rounded-control bg-app-surface-soft" /> : overview ? (
+          <div className="mt-6">
+            {viewError ? <TeamRetryNotice title={view === "permissions" ? "团队权限加载失败" : view === "activity" ? "团队活动加载失败" : view === "members" ? "团队成员加载失败" : "团队身份源加载失败"} message={viewError} onRetry={() => void reload()} /> : null}
+            {view === "invitations" && canAdmin ? <>
+              {invitationError ? <TeamRetryNotice title="邀请列表加载失败" message={invitationError} onRetry={() => void loadInvitationPage(invitationCursor)} /> : null}
+              <InvitationsGovernanceView
+                workspaceId={workspaceId}
+                invitations={invitations}
+                projects={projectOptions}
+                pageNumber={invitationHistory.length + 1}
+                hasPrevious={invitationHistory.length > 0}
+                hasNext={nextInvitationCursor !== null}
+                loading={invitationLoading}
+                hasError={invitationError !== null}
+                onPrevious={() => void showNewerInvitations()}
+                onNext={() => void showOlderInvitations()}
+                onReload={reload}
+              />
+            </> : view === "overview" ? <TeamOverviewView overview={overview} />
+              : view === "members" ? canAdmin ? membersError ? null : <MembersView workspaceId={workspaceId} members={members} projects={projectOptions} onReload={reload} /> : <TeamMemberDirectory members={overview.members} total={overview.counts.memberships} />
+                : view === "permissions" ? permissions ? <TeamPermissionsView permissions={permissions} /> : null
+                  : view === "activity" ? activity ? <TeamActivityView activity={activity} /> : null
+                    : canAdmin && view === "oidc" ? providersError ? null : <OidcView workspaceId={workspaceId} providers={providers} onReload={reload} />
+                      : canAdmin ? <TeamSettingsView onSelect={selectView} /> : <TeamOverviewView overview={overview} />}
+          </div>
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
+function TeamRetryNotice({ title, message, onRetry }: { title: string; message: string; onRetry: () => void }) {
+  return <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-field border border-app-danger-border bg-app-danger-soft px-5 py-4 text-sm text-app-danger-ink app-feedback-error"><div><p className="font-semibold"><UiText text={title} /></p><p className="mt-1"><UiErrorText text={message} /></p></div><button type="button" onClick={onRetry} className="rounded-control px-3 py-2 text-xs font-semibold app-button-secondary"><UiText text="重试" /></button></div>;
 }
 
 function TeamOverviewView({ overview }: { overview: TeamOverviewPayload }) {
@@ -369,7 +522,7 @@ function MemberCard({ workspaceId, member, onReload }: { workspaceId: string; me
   </article>;
 }
 
-function InvitationsGovernanceView({ workspaceId, invitations, projects, onReload }: { workspaceId: string; invitations: Invitation[]; projects: Project[]; onReload: () => Promise<void> }) {
+function InvitationsGovernanceView({ workspaceId, invitations, projects, pageNumber, hasPrevious, hasNext, loading, hasError, onPrevious, onNext, onReload }: { workspaceId: string; invitations: Invitation[]; projects: Project[]; pageNumber: number; hasPrevious: boolean; hasNext: boolean; loading: boolean; hasError: boolean; onPrevious: () => void; onNext: () => void; onReload: () => Promise<void> }) {
   const { confirm, dialog } = useAppConfirmDialog();
   const { language, t } = useAppearance();
   const [createOpen, setCreateOpen] = useState(false);
@@ -436,7 +589,71 @@ function InvitationsGovernanceView({ workspaceId, invitations, projects, onReloa
     finally { setPendingRevokeId(null); }
   }
 
-  return <>{dialog}<div className="space-y-7"><div className="flex justify-end"><OperationPanel title="创建邀请链接" triggerLabel="创建邀请" open={createOpen} onOpenChange={setCreateOpen} inquiryEnabled={false} description="设置邀请邮箱、工作区角色和可选项目授权。新生成的邀请链接只在本次创建后显示，请在此面板中复制。"><DialogForm onSubmit={(event) => void create(event)} className="w-full"><p className="mt-3 text-sm leading-6 text-app-muted"><UiText text={"邀请必须绑定到邮箱。新邀请仅支持工作区 Member/Viewer，以及项目 Editor/Viewer；Owner/Admin 变更需走治理流程。"} /></p><Input label="邮箱（必填）" value={email} onChange={setEmail} type="email" required /><Select label="工作区角色" value={role} onChange={(value) => setRole(value as typeof role)} options={[['member','成员'],['viewer','查看者']]} /><Select label="同时授权项目（可选）" value={projectId} onChange={setProjectId} options={[["","无"], ...projects.map((project) => [project.id, project.name])]} /><DialogActions><button type="button" onClick={() => setCreateOpen(false)} disabled={pending} className="app-button-secondary rounded-control border font-semibold disabled:cursor-not-allowed disabled:opacity-50"><UiText text="取消" /></button><DialogSubmit disabled={pending} className="app-button-primary rounded-control font-semibold disabled:cursor-not-allowed disabled:opacity-50"><UiText text={pending ? "创建中…" : "生成 7 天邀请"} /></DialogSubmit></DialogActions>{link ? <div className="mt-4 rounded-panel bg-app-surface-soft p-3"><code className="break-all text-xs text-app-muted">{link}</code><button type="button" onClick={() => void navigator.clipboard.writeText(link)} className="mt-3 block text-xs font-semibold text-app-link"><UiText text={"复制链接"} /></button></div> : null}{message ? <p role="status" className="mt-3 text-xs text-app-muted"><UiFeedbackText text={message} /></p> : null}</DialogForm></OperationPanel></div><section><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text="邀请管理" /></p><h2 className="mt-2 text-2xl font-semibold"><UiText text={"邀请记录"} /></h2></div><span className="text-xs text-app-muted">{invitations.length} <UiText text={"条"} /></span></div><div className="mt-4 space-y-3">{invitations.length === 0 ? <div className="rounded-panel border border-dashed border-app-border bg-app-surface p-12 text-center text-sm text-app-muted"><UiText text={"还没有邀请记录。"} /></div> : invitations.map((invitation) => { const invitationStatus = status(invitation); return <div key={invitation.id} className="rounded-panel border border-app-border bg-app-surface p-5 app-panel"><div className="flex flex-wrap justify-between gap-4"><div><p className="font-semibold">{invitation.email ?? <UiText text="历史未绑定邮箱邀请" />}</p><p className="mt-1 text-xs text-app-muted"><UiText text={"工作区"} /> <UiText text={workspaceRoleLabel(invitation.workspaceRole)} />{invitation.project ? <> · <UiText text="项目" /> {invitation.project.name} / <UiText text={workspaceRoleLabel(invitation.projectRole ?? "viewer")} /></> : ""}</p><p className="mt-1 text-xs text-app-muted"><UiText text={"创建者 @"} />{invitation.invitedBy.username} <UiText text={"· 版本"} /> {invitation.version}</p></div><div className="flex items-start gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${invitationStatus === "pending" ? "bg-app-warning-soft text-app-warning-ink" : invitationStatus === "accepted" ? "bg-app-success-soft text-app-success-ink" : "bg-app-surface-soft text-app-muted"}`}><UiText text={invitationStatus === "pending" ? "待使用" : invitationStatus === "accepted" ? "已接受" : invitationStatus === "revoked" ? "已撤销" : "已过期"} /></span>{invitationStatus === "pending" ? <button type="button" onClick={() => void revoke(invitation)} disabled={pendingRevokeId !== null} className="rounded-control border px-3 py-2 text-xs font-semibold disabled:opacity-50 app-button-danger"><UiText text={pendingRevokeId === invitation.id ? "处理中…" : "撤销"} /></button> : null}</div></div><p className="mt-3 text-xs text-app-muted">{new Date(invitation.expiresAt).toLocaleDateString(language === "en" ? "en-US" : "zh-CN")} <UiText text={"到期"} /></p></div>; })}</div></section></div></>;
+  return (
+    <>
+      {dialog}
+      <div className="space-y-7">
+        <div className="flex justify-end">
+          <OperationPanel title="创建邀请链接" triggerLabel="创建邀请" open={createOpen} onOpenChange={setCreateOpen} inquiryEnabled={false} description="设置邀请邮箱、工作区角色和可选项目授权。新生成的邀请链接只在本次创建后显示，请在此面板中复制。">
+            <DialogForm onSubmit={(event) => void create(event)} className="w-full">
+              <p className="mt-3 text-sm leading-6 text-app-muted"><UiText text={"邀请必须绑定到邮箱。新邀请仅支持工作区 Member/Viewer，以及项目 Editor/Viewer；Owner/Admin 变更需走治理流程。"} /></p>
+              <Input label="邮箱（必填）" value={email} onChange={setEmail} type="email" required />
+              <Select label="工作区角色" value={role} onChange={(value) => setRole(value as typeof role)} options={[["member", "成员"], ["viewer", "查看者"]]} />
+              <Select label="同时授权项目（可选）" value={projectId} onChange={setProjectId} options={[["", "无"], ...projects.map((project) => [project.id, project.name])]} />
+              <DialogActions>
+                <button type="button" onClick={() => setCreateOpen(false)} disabled={pending} className="app-button-secondary rounded-control border font-semibold disabled:cursor-not-allowed disabled:opacity-50"><UiText text="取消" /></button>
+                <DialogSubmit disabled={pending} className="app-button-primary rounded-control font-semibold disabled:cursor-not-allowed disabled:opacity-50"><UiText text={pending ? "创建中…" : "生成 7 天邀请"} /></DialogSubmit>
+              </DialogActions>
+              {link ? <div className="mt-4 rounded-panel bg-app-surface-soft p-3"><code className="break-all text-xs text-app-muted">{link}</code><button type="button" onClick={() => void navigator.clipboard.writeText(link)} className="mt-3 block text-xs font-semibold text-app-link"><UiText text={"复制链接"} /></button></div> : null}
+              {message ? <p role="status" className="mt-3 text-xs text-app-muted"><UiFeedbackText text={message} /></p> : null}
+            </DialogForm>
+          </OperationPanel>
+        </div>
+
+        <section>
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-app-muted"><UiText text="邀请管理" /></p>
+              <h2 className="mt-2 text-2xl font-semibold"><UiText text={"邀请记录"} /></h2>
+            </div>
+            <span className="text-xs text-app-muted">{invitations.length} <UiText text={"条"} /></span>
+          </div>
+          <div className="mt-4 space-y-3">
+            {loading && invitations.length === 0 ? <p role="status" className="py-8 text-center text-sm text-app-muted"><UiText text="正在加载邀请…" /></p> : null}
+            {!loading && !hasError && invitations.length === 0 ? <div className="rounded-panel border border-dashed border-app-border bg-app-surface p-12 text-center text-sm text-app-muted"><UiText text={"还没有邀请记录。"} /></div> : null}
+            {invitations.map((invitation) => {
+              const invitationStatus = status(invitation);
+              return (
+                <div key={invitation.id} className="rounded-panel border border-app-border bg-app-surface p-5 app-panel">
+                  <div className="flex flex-wrap justify-between gap-4">
+                    <div>
+                      <p className="font-semibold">{invitation.email ?? <UiText text="历史未绑定邮箱邀请" />}</p>
+                      <p className="mt-1 text-xs text-app-muted"><UiText text={"工作区"} /> <UiText text={workspaceRoleLabel(invitation.workspaceRole)} />{invitation.project ? <> · <UiText text="项目" /> {invitation.project.name} / <UiText text={workspaceRoleLabel(invitation.projectRole ?? "viewer")} /></> : ""}</p>
+                      <p className="mt-1 text-xs text-app-muted"><UiText text={"创建者 @"} />{invitation.invitedBy.username} <UiText text={"· 版本"} /> {invitation.version}</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${invitationStatus === "pending" ? "bg-app-warning-soft text-app-warning-ink" : invitationStatus === "accepted" ? "bg-app-success-soft text-app-success-ink" : "bg-app-surface-soft text-app-muted"}`}>
+                        <UiText text={invitationStatus === "pending" ? "待使用" : invitationStatus === "accepted" ? "已接受" : invitationStatus === "revoked" ? "已撤销" : "已过期"} />
+                      </span>
+                      {invitationStatus === "pending" ? <button type="button" onClick={() => void revoke(invitation)} disabled={pendingRevokeId !== null} className="rounded-control border px-3 py-2 text-xs font-semibold disabled:opacity-50 app-button-danger"><UiText text={pendingRevokeId === invitation.id ? "处理中…" : "撤销"} /></button> : null}
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-app-muted">{new Date(invitation.expiresAt).toLocaleDateString(language === "en" ? "en-US" : "zh-CN")} <UiText text={"到期"} /></p>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-app-border pt-4 text-xs text-app-muted">
+            <span><UiText text={language === "en" ? "Page" : "邀请记录第"} /> {pageNumber}{language === "en" ? null : <UiText text="页" />}</span>
+            <div className="flex gap-2">
+              <button type="button" onClick={onPrevious} disabled={!hasPrevious || loading} className="app-button-secondary app-button-compact rounded-control border px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-40"><UiText text="上一页" /></button>
+              <button type="button" onClick={onNext} disabled={!hasNext || loading} className="app-button-secondary app-button-compact rounded-control border px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-40"><UiText text="下一页" /></button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </>
+  );
 }
 
 function OidcView({ workspaceId, providers, onReload }: { workspaceId: string; providers: OidcProvider[]; onReload: () => Promise<void> }) {

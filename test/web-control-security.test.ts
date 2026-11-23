@@ -84,10 +84,10 @@ test("provider registry exposes only fixed first-party endpoints and capability 
   assert.equal(canonicalProviderBaseUrl("qwen"), "https://dashscope.aliyuncs.com/compatible-mode/v1");
   assert.equal(getProviderDefinition("deepseek").supportsEmbeddings, false);
   assert.equal(getProviderDefinition("deepseek").supportsVision, true);
-  assert.deepEqual(getProviderDefinition("deepseek").generationModelSuggestions, ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"]);
-  assert.deepEqual(getProviderDefinition("deepseek").visionModelSuggestions, ["deepseek-flash", "deepseek-v4-flash-vision-exp"]);
-  assert.equal(getProviderDefinition("qwen").visionModelSuggestions.includes("qwen3-vl-plus"), true);
-  assert.equal(getProviderDefinition("glm").visionModelSuggestions.includes("glm-5v-turbo"), true);
+  assert.deepEqual(getProviderDefinition("deepseek").generationModelSuggestions, ["deepseek-flash", "deepseek-v4-pro"]);
+  assert.deepEqual(getProviderDefinition("deepseek").visionModelSuggestions, ["deepseek-flash"]);
+  assert.equal(getProviderDefinition("qwen").visionModelSuggestions.includes("qwen4-max"), true);
+  assert.equal(getProviderDefinition("glm").visionModelSuggestions.includes("glm-5.3-flash"), true);
   assert.equal(getProviderDefinition("glm").supportsEmbeddings, true);
   assert.equal(isSafeModelId("qwen-plus"), true);
   assert.equal(isSafeModelId("https://attacker.example/model"), false);

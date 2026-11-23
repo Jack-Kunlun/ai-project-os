@@ -51,7 +51,7 @@ export function ConversationRail(props: {
       <input className={["app-field", (ui.search)].filter(Boolean).join(' ')} aria-label={t("搜索历史会话")} placeholder={t("搜索会话")} value={props.query} onChange={e => props.setQuery(e.target.value)}/>
       <div className={styles.railList} aria-busy={props.loading}>
         {props.error ? <p className={["app-feedback-error", (ui.error)].filter(Boolean).join(' ')} role="alert"><UiErrorText text={props.error} /><button className={ui.link} onClick={props.refresh}><UiText text="重新加载"/></button></p> : null}
-        {props.loading && !props.items.length ? <p role="status"><UiText text="正在查找会话…"/></p> : props.items.length ? props.items.map(item => <div className={styles.railItem} key={item.id} data-current={props.currentId === item.id}>
+        {props.error ? null : props.loading && !props.items.length ? <p role="status"><UiText text="正在查找会话…"/></p> : props.items.length ? props.items.map(item => <div className={styles.railItem} key={item.id} data-current={props.currentId === item.id}>
           <button className={styles.railMain} disabled={props.busy} aria-current={props.currentId === item.id ? "true" : undefined} onClick={() => props.open(item.id)}>
             <span className={styles.railTitle}>{item.pinned ? <ShellIcon name="flag" className={styles.iconSmall}/> : null}{item.title}</span>
             <small>{language === "en" ? `${item.turnCount} ${item.turnCount === 1 ? "turn" : "turns"}` : `${item.turnCount} 轮问答`}</small>

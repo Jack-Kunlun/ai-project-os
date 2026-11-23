@@ -37,13 +37,6 @@ export function proofUsable(proof: OperationProof | undefined, now = Date.now())
   return proof !== undefined && Number.isFinite(Date.parse(proof.expiresAt)) && Date.parse(proof.expiresAt) > now;
 }
 
-export function batchBudgetProblem(budget: { status: string; availableUnits: number; startsAt: string; expiresAt: string } | null, count: number, now = Date.now()): string | null {
-  if (budget === null) return "先设置模型测试额度，再开始测试。";
-  if (budget.status !== "active" || !Number.isFinite(Date.parse(budget.startsAt)) || Date.parse(budget.startsAt) > now || !(Date.parse(budget.expiresAt) > now)) return "当前测试额度尚未生效或已过期，请设置新的有效周期。";
-  if (budget.availableUnits < count) return "可用测试次数不足，请减少所选能力或设置新的测试额度。";
-  return null;
-}
-
 /** One request per operation. Finish the current item before observing stop; never replay an uncertain probe. */
 export async function runOperationBatch(targets: readonly OperationTarget[], mode: BatchMode, dependencies: {
   probe: (target: OperationTarget, clientRequestKey: string) => Promise<ProbeOutcome>;

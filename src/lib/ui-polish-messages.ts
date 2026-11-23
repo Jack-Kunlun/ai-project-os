@@ -1,5 +1,8 @@
 /** System UI only; document bodies, model output and user-provided titles stay verbatim. */
 export const uiPolishMessages: Readonly<Record<string,string>> = {
+  "会员信息暂时无法读取，请重试。": "Membership information is temporarily unavailable. Please retry.",
+  "来源版本读取失败，请重试。": "Could not read the source version. Please retry.",
+  "重新读取来源": "Reload source",
   "已跳过不支持或超出数量上限的文件，请核对待上传列表。": "Unsupported files or files over the selection limit were skipped. Review the files selected for upload.",
   "导入项目文件": "Import project files",
   "个文件待上传": "files ready to upload",

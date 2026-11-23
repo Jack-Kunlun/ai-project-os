@@ -2,13 +2,18 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { createWorkspaceInvitation, listWorkspaceInvitations } from "@/lib/workspaces";
+import { createWorkspaceInvitation, listWorkspaceInvitationPage } from "@/lib/workspaces";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
 
 export async function GET(request: Request, context: { params: Promise<{ workspaceId: string }> }) {
-  try { const actor = await requireApiSession(request); return NextResponse.json({ invitations: await listWorkspaceInvitations(idSchema.parse((await context.params).workspaceId), actor) }); }
+  try {
+    const actor = await requireApiSession(request);
+    const workspaceId = idSchema.parse((await context.params).workspaceId);
+    const cursor = new URL(request.url).searchParams.get("cursor");
+    return NextResponse.json(await listWorkspaceInvitationPage(workspaceId, actor, cursor));
+  }
   catch (error) { return handleApiError(error); }
 }
 

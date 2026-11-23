@@ -1,6 +1,7 @@
+import { getProviderDefinition } from "../src/lib/ai-providers/registry";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { invokeChatCompletion, ProviderTransportError } from "../src/lib/ai-providers/transport";
+import { invokeChatCompletion, invokeEmbeddings, invokeVisionCompletion, ProviderTransportError } from "../src/lib/ai-providers/transport";
 
 const deepseekConnection = {
   id: "deepseek-test-connection",
@@ -141,6 +142,51 @@ test("explicit DeepSeek-only request options are omitted for other providers", a
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.response_format, undefined);
     assert.equal(requests[0]?.thinking, undefined);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("the default OpenAI text and vision models use the supported reasoning and output parameters", async () => {
+  const definition = getProviderDefinition("openai");
+  const connection = { ...deepseekConnection, kind: definition.kind, baseUrl: definition.baseUrl };
+  const requests: Array<Record<string, unknown>> = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return response("OK", "stop");
+  };
+  try {
+    await invokeChatCompletion({ connection, operation: "sourceSummary", modelId: definition.generationModelSuggestions[0], messages: [{ role: "user", content: "OK?" }], maxOutputTokens: 1024 });
+    await invokeVisionCompletion({ connection, modelId: definition.visionModelSuggestions[0], prompt: "OK?", image: Buffer.from([0]), mimeType: "image/png", maxOutputTokens: 1024 });
+    assert.equal(requests.length, 2);
+    for (const request of requests) {
+      assert.equal(request.max_completion_tokens, 1024);
+      assert.equal(request.reasoning_effort, "low");
+      assert.equal(request.temperature, undefined);
+      assert.equal(request.max_tokens, undefined);
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("each supported default embedding model requests and checks its configured dimension", async () => {
+  const previousFetch = globalThis.fetch;
+  try {
+    for (const kind of ["openai", "qwen", "glm"] as const) {
+      const definition = getProviderDefinition(kind);
+      const model = definition.embeddingModelSuggestions[0];
+      globalThis.fetch = async (url, init) => {
+        assert.equal(String(url), definition.baseUrl + "/embeddings");
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.model, model.id);
+        assert.equal(body.dimensions, model.dimensions);
+        return Response.json({ data: [{ index: 0, embedding: Array(model.dimensions).fill(0.1) }] });
+      };
+      const result = await invokeEmbeddings({ connection: { ...deepseekConnection, kind, baseUrl: definition.baseUrl }, modelId: model.id, texts: ["test"], expectedDimensions: model.dimensions });
+      assert.equal(result.dimensions, model.dimensions);
+    }
   } finally {
     globalThis.fetch = previousFetch;
   }

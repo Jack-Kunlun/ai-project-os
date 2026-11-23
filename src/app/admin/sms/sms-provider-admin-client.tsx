@@ -10,6 +10,7 @@ import dynamic from "next/dynamic";
 import type { GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
 const GraphicCaptchaDialog = dynamic(() => import("@/components/graphic-captcha-dialog").then(module => module.GraphicCaptchaDialog));
 import { modalFooterClassName, modalHeaderClassName, modalNativeBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
+import { normalizeMainlandPhoneInput } from "@/components/sms-code-input";
 
 type SmsProvider = "aliyun-pnvs" | "aliyun-sms" | "tencent-sms";
 type TemplateParams = readonly ["code"] | readonly ["code", "minutes"] | readonly ["minutes", "code"];
@@ -519,7 +520,7 @@ export function SmsProviderAdminClient() {
 
         {candidate.provider === "aliyun-pnvs" ? <p className="rounded-panel bg-app-surface-soft px-3 py-2 text-xs leading-5 text-app-muted sm:col-span-2"><UiText text={"用途名称和模板参数由系统生成，验证码为 6 位数字，有效期 5 分钟。"} /><br /><code className="break-all">{'{"code":"##code##","min":"5"}'}</code></p> : null}
         <div className="mt-2 flex items-center gap-3 sm:col-span-2"><span className="text-xs font-semibold text-app-text"><UiText text={"测试短信"} /></span><span className="h-px flex-1 bg-app-surface-soft" /></div>
-        <label className="text-xs font-semibold text-app-muted"><UiText text={"测试手机号（中国大陆 +86）"} /><input autoComplete="tel" inputMode="tel" maxLength={14} placeholder="13800138000" value={phone} onChange={(event) => { if (captchaRequest) closeCaptcha(captchaRequest.sequence); setPhone(event.target.value); setProbeId(null); setVerified(false); setCode(""); }} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
+        <label className="text-xs font-semibold text-app-muted"><UiText text={"测试手机号（中国大陆 +86）"} /><input autoComplete="tel" inputMode="tel" placeholder="13800138000" value={phone} onChange={(event) => { if (captchaRequest) closeCaptcha(captchaRequest.sequence); setPhone(normalizeMainlandPhoneInput(event.target.value)); setProbeId(null); setVerified(false); setCode(""); }} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
       <p className="-mt-1 text-xs leading-5 text-app-muted sm:col-span-2"><UiText text={"此操作会真实发送短信并消耗服务商短信额度；请使用你本人可接收的手机号。"} /></p>
       </form>
 

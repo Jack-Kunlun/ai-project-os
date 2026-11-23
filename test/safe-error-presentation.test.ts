@@ -61,8 +61,8 @@ test("provider probe failures explain each reviewed cause without exposing provi
   for (const [suffix, reason] of [
     ["INVALID_INPUT", /配置未通过校验/u],
     ["CONFIGURATION_CONFLICT", /证明已变化或过期.*不能保存/u],
-    ["BUDGET_REQUIRED", /没有生效.*已过期/u],
-    ["BUDGET_EXHAUSTED", /额度不足/u],
+    ["BUDGET_REQUIRED", /历史测试.*未配置有效额度/u],
+    ["BUDGET_EXHAUSTED", /历史测试.*次数上限/u],
     ["PROVIDER_AUTH_FAILED", /凭据无效或权限不足/u],
     ["PROVIDER_RATE_LIMITED", /限流或配额不足/u],
     ["PROVIDER_REJECTED", /拒绝/u],

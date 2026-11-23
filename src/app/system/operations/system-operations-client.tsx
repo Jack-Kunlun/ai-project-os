@@ -4,7 +4,7 @@ import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AppHeader } from "@/components/app-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { AdminPageHeader } from "@/components/admin-page-header";
@@ -115,18 +115,23 @@ export function SystemOperationsClient({
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshVersionRef = useRef(0);
 
   const refresh = useCallback(async (showProgress = true) => {
-    if (showProgress) setRefreshing(true);
+    const requestVersion = ++refreshVersionRef.current;
+    setRefreshing(showProgress);
     try {
       const response = await fetch("/api/system/operations/backups", { cache: "no-store" });
       if (!response.ok) throw new Error((await safeResponseError(response, "生产备份状态读取失败")).message);
-      setSnapshot(await response.json() as BackupOperationsSnapshot);
+      const nextSnapshot = await response.json() as BackupOperationsSnapshot;
+      if (requestVersion !== refreshVersionRef.current) return;
+      setSnapshot(nextSnapshot);
       setError(null);
     } catch (cause) {
+      if (requestVersion !== refreshVersionRef.current) return;
       setError(cause instanceof Error ? cause.message : "生产备份状态读取失败");
     } finally {
-      if (showProgress) setRefreshing(false);
+      if (requestVersion === refreshVersionRef.current) setRefreshing(false);
     }
   }, []);
 

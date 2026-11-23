@@ -4,7 +4,8 @@
   --admin-line: var(--app-border);
   --admin-blue: var(--app-link);
   --admin-blue-soft: var(--app-accent-soft);
-  height: 100dvh;
+  position: fixed;
+  inset: 0;
   min-height: 0;
   overflow: hidden;
   color: var(--admin-ink);

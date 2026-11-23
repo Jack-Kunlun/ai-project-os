@@ -56,7 +56,7 @@ for (const appearance of cases) {
       for (const pending of route.pendingTexts ?? []) await expect(page.getByText(tr(pending), { exact: true })).toHaveCount(0);
       await expect(page.locator('.animate-pulse, [role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
       const nav = page.getByRole("navigation", { name: tr("管理工作台导航"), exact: true });
-      await expect(nav.getByRole("link")).toHaveCount(13);
+      await expect(nav.getByRole("link")).toHaveCount(12);
       await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
       for (const item of adminNavigationItems) await expect(nav.getByRole("link", { name: tr(item.label), exact: true })).toHaveAttribute("href", item.href);
       await expectR02NoHorizontalOverflow(page, surface);
@@ -144,17 +144,17 @@ for (const appearance of cases) {
     await searchButton.click();
     const searchDialog = page.getByRole("dialog", { name: tr("搜索功能页面"), exact: true });
     await expect(searchDialog).toBeVisible();
-    await searchDialog.getByRole("searchbox").fill(tr("模型测试额度"));
+    await searchDialog.getByRole("searchbox").fill(tr("失败收件箱"));
     await expect(searchDialog.getByRole("link")).toHaveCount(1);
-    await searchDialog.getByRole("link", { name: tr("模型测试额度"), exact: true }).click();
-    await expect(page).toHaveURL(/\/admin\/operations\/probes$/u);
+    await searchDialog.getByRole("link", { name: tr("失败收件箱"), exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/operations\/failures$/u);
     await expect(searchDialog).toBeHidden();
-    await expect(page.getByRole("heading", { name: tr("模型测试额度"), exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: tr("失败与待对账收件箱"), exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: tr("账户菜单"), exact: true }).click();
     await expect(page.getByRole("link", { name: tr("账户设置"), exact: true })).toHaveAttribute("href", "/admin/account");
     await expect(page.getByRole("button", { name: tr("退出"), exact: true })).toBeVisible();
-    await page.getByRole("heading", { name: tr("模型测试额度"), exact: true }).click();
+    await page.getByRole("heading", { name: tr("失败与待对账收件箱"), exact: true }).click();
     await expect(page.locator(".header-account-popover")).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -162,7 +162,7 @@ for (const appearance of cases) {
     await page.getByRole("button", { name: tr("打开导航"), exact: true }).click();
     const drawer = page.getByRole("dialog", { name: tr("管理工作台导航"), exact: true });
     await expect(drawer).toBeVisible();
-    await expect(drawer.getByRole("link")).toHaveCount(13);
+    await expect(drawer.getByRole("link")).toHaveCount(12);
     await expectR02NoAccessibilityViolations(page, `admin navigation drawer ${appearance.language}/${appearance.theme}`);
     await page.screenshot({ path: `test-results/admin-appearance/${appearance.language}-${appearance.theme}-mobile-navigation.png` });
     await drawer.getByRole("link", { name: tr("管理员账户"), exact: true }).click();

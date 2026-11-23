@@ -4,7 +4,7 @@ import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 import {  UiText, useAppearance, useTranslate } from "@/components/appearance-provider";
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { CursorPagination } from "@/components/list-pagination";
 import { ParentPageLink } from "@/components/parent-page-link";
@@ -208,6 +208,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
   const [billingPending, setBillingPending] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!embedded);
+  const operationsRequestVersion = useRef(0);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -231,6 +232,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
   }, [projectId]);
 
   const fetchOperations = useCallback(async () => {
+    const requestVersion = ++operationsRequestVersion.current;
     setOperationsLoading(true);
     setOperationsError(null);
     const query = new URLSearchParams({ limit: "20" });
@@ -240,13 +242,16 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
     if (operationStatus !== "all") query.set("status", operationStatus);
     try {
       const page = await readJson<Page<Operation>>(await fetch(`/api/projects/${projectId}/governance/operations?${query}`, { cache: "no-store" }));
+      if (operationsRequestVersion.current !== requestVersion) return;
       setOperations(page.items);
       setOperationNextCursor(page.nextCursor);
     } catch (loadError) {
-      const message = loadError instanceof Error ? loadError.message : "任务记录加载失败";
-      setOperationsError(message);
+      if (operationsRequestVersion.current === requestVersion) {
+        const message = loadError instanceof Error ? loadError.message : "任务记录加载失败";
+        setOperationsError(message);
+      }
     } finally {
-      setOperationsLoading(false);
+      if (operationsRequestVersion.current === requestVersion) setOperationsLoading(false);
     }
   }, [deferredOperationSearch, operationCursor, operationKind, operationStatus, projectId]);
 

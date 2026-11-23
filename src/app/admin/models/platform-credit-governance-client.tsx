@@ -1,5 +1,5 @@
 "use client";
-import { UiFeedbackText } from "@/components/ui-error-text";
+import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
@@ -102,6 +102,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [reason, setReason] = useState("");
   const [confirmationUsername, setConfirmationUsername] = useState("");
@@ -139,9 +140,10 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
         ? current
         : payload.users.find((user) => !user.disabled)?.id ?? ""));
       setMessage(null);
+      setLoadError(null);
     } catch (error) {
       if (controller.signal.aborted || requestVersionRef.current !== requestVersion) return;
-      setMessage(error instanceof Error ? error.message : "平台额度读取失败");
+      setLoadError(error instanceof Error ? error.message : "平台额度读取失败");
     } finally {
       if (requestVersionRef.current === requestVersion) {
         requestControllerRef.current = null;
@@ -267,6 +269,8 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
         <span className="rounded-full bg-app-surface-soft px-3 py-1 text-xs font-semibold text-app-muted">{loading ? t("读取中…") : <>{grants.length.toLocaleString(language)} {t("条记录")}</>}</span>
       </div>
 
+      {loadError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-field border border-app-danger-border bg-app-danger-soft px-4 py-3 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={loadError} /><button type="button" onClick={() => void load()} disabled={loading} className="app-button-secondary rounded-control border px-3 py-2 text-xs font-semibold disabled:opacity-50"><UiText text={"重试读取"} /></button></div> : null}
+
       {focusUserId === undefined ? <div className="mt-6 flex flex-wrap items-end gap-3">
         <label className="min-w-56 flex-1 text-xs font-medium text-app-muted"><UiText text={"搜索用户"} /><input value={search} onChange={(event) => { setSearch(event.target.value); setGrantPage(1); setUserPage(1); }} placeholder={t("用户名或显示名")} maxLength={160} className={["app-field", (adminInputClass)].filter(Boolean).join(' ')} /></label>
         <button type="button" onClick={() => void load()} disabled={pending} className="app-button-secondary rounded-control border px-4 py-3 text-xs font-semibold disabled:opacity-50"><UiText text={"刷新"} /></button>
@@ -286,7 +290,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
               <td className="whitespace-nowrap px-4 py-3 text-app-muted">{user.activeGrantCount} <UiText text={"活动 /"} />{" "}{user.grantCount} <UiText text={"总计"} /></td>
               <td className="whitespace-nowrap px-4 py-3 text-app-muted">{user.availableTokens.toLocaleString()} / {user.reservedTokens.toLocaleString()}</td>
             </tr>)}
-            {!loading && users.length === 0 ? <tr><td colSpan={4} className="px-4 py-6 text-center text-app-muted"><UiText text={"暂无匹配用户。"} /></td></tr> : null}
+            {!loading && !loadError && users.length === 0 ? <tr><td colSpan={4} className="px-4 py-6 text-center text-app-muted"><UiText text={"暂无匹配用户。"} /></td></tr> : null}
           </tbody>
         </table>
         <div className="flex items-center justify-between border-t border-app-border bg-app-surface px-4 py-3 text-xs text-app-muted">
@@ -312,7 +316,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
                 <td className="whitespace-nowrap px-4 py-3">{grant.kind === "manual" && grant.status !== "revoked" ? <button type="button" disabled={pending} onClick={() => { setPreview(null); setSelectedRevokeGrant(grant); setOperationOpen(true); setMessage(null); }} className="app-button-danger app-button-compact rounded-control border px-3 py-2 font-semibold disabled:opacity-50"><UiText text={"管理撤销"} /></button> : <span className="text-app-muted"><UiText text={"不可撤销"} /></span>}</td>
               </tr>
             ))}
-            {!loading && grants.length === 0 ? <tr><td colSpan={5} className="px-4 py-6 text-center text-app-muted"><UiText text={"暂无平台额度记录。"} /></td></tr> : null}
+            {!loading && !loadError && grants.length === 0 ? <tr><td colSpan={5} className="px-4 py-6 text-center text-app-muted"><UiText text={"暂无平台额度记录。"} /></td></tr> : null}
           </tbody>
         </table>
         <div className="flex items-center justify-between border-t border-app-border bg-app-surface px-4 py-3 text-xs text-app-muted">

@@ -38,7 +38,7 @@ test("R-07 notification subject contract keeps durable state and server-owned na
   assert.match(automation, /subjectKind: "automationRun"/u);
   assert.match(actionEngine, /subjectKind: "projectAction"/u);
   assert.match(workflow, /subjectKind: "backgroundJob"/u);
-  assert.match(probe, /subjectKind: "legacy"/u);
+  assert.doesNotMatch(probe, /createThresholdNotifications|persistNotification/u, "retired allowances never generate new notifications");
   assert.match(route, /z\.enum\(\["all", "unread", "pending", "system"\]\)/u);
   assert.match(client, /opened\.destination/u);
   assert.doesNotMatch(client, /typeof opened\.actionHref/u);

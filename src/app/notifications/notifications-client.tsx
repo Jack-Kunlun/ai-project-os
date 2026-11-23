@@ -92,7 +92,7 @@ export function NotificationsClient({ username, isSystemAdmin = false }: { usern
   const requestSequence = useRef(0);
   const activeController = useRef<AbortController | null>(null);
   const notificationCursorByIdRef = useRef<ReadonlyMap<string, string | null>>(new Map());
-  const nextCursorRef = useRef<string | null>(null);
+  const hasAppendedPage = useRef(false);
   const openingIdRef = useRef<string | null>(null);
 
   const reload = useCallback(async (options: Readonly<{ append?: boolean; cursorOverride?: string | null }> = {}) => {
@@ -102,8 +102,8 @@ export function NotificationsClient({ username, isSystemAdmin = false }: { usern
     activeController.current?.abort();
     const controller = new AbortController();
     activeController.current = controller;
-    if (append) setLoadingMore(true);
-    else setLoading(true);
+    setLoadingMore(append);
+    setLoading(!append);
     try {
       const query = new URLSearchParams({ filter, limit: "20" });
       if (requestCursor !== null) query.set("cursor", requestCursor);
@@ -117,7 +117,7 @@ export function NotificationsClient({ username, isSystemAdmin = false }: { usern
         payload.notifications,
         requestCursor,
       );
-      nextCursorRef.current = payload.nextCursor;
+      hasAppendedPage.current = append;
       setNextCursor(payload.nextCursor);
       setUnreadCount(Number.isSafeInteger(payload.unreadCount) ? Math.max(0, payload.unreadCount) : 0);
       setPendingCount(Number.isSafeInteger(payload.pendingCount) ? Math.max(0, payload.pendingCount) : 0);
@@ -127,8 +127,9 @@ export function NotificationsClient({ username, isSystemAdmin = false }: { usern
       setError(t(cause instanceof Error ? cause.message : "通知加载失败"));
     } finally {
       if (sequence === requestSequence.current) {
-        if (append) setLoadingMore(false);
-        else setLoading(false);
+        activeController.current = null;
+        setLoadingMore(false);
+        setLoading(false);
       }
     }
   }, [cursor, filter, t]);
@@ -138,7 +139,7 @@ export function NotificationsClient({ username, isSystemAdmin = false }: { usern
     const interval = window.setInterval(() => {
       // Poll only the first page and never replace a paginated view or an
       // item currently being acknowledged.
-      if (cursor === null && nextCursorRef.current === null && openingIdRef.current === null) void reload();
+      if (cursor === null && !hasAppendedPage.current && activeController.current === null && openingIdRef.current === null) void reload();
     }, 15_000);
     return () => {
       window.clearTimeout(initial);
@@ -165,10 +166,12 @@ export function NotificationsClient({ username, isSystemAdmin = false }: { usern
   }, [focusId, notifications]);
 
   function changeFilter(next: NotificationFilter): void {
+    if (next === filter) return;
     setFilter(next);
     setCursor(null);
     notificationCursorByIdRef.current = new Map();
-    nextCursorRef.current = null;
+    hasAppendedPage.current = false;
+    setLoading(true);
     setNextCursor(null);
     setNotifications([]);
     setError(null);

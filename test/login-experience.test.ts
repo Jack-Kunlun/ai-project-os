@@ -28,7 +28,8 @@ test("login page aligns with the workspace and preserves configured auth choices
   assert.match(await readFile("src/components/brand-mark.tsx", "utf8"), /ai-project-os-admin-crisp\.png/u);
   assert.doesNotMatch(form, />OS<\/span>/u);
   assert.doesNotMatch(form, /记住我/u);
-  assert.match(form, /href="\/register"[\s\S]*创建账号/u);
+  assert.ok(form.includes('href={returnTo === "/dashboard" ? "/register" : `/register?returnTo=${encodeURIComponent(returnTo)}`}'));
+  assert.match(form, /创建账号/u);
   assert.match(form, /href="\/recover"[\s\S]*忘记账号或密码/u);
   assert.match(form, /使用 GitHub 登录/u);
   assert.match(form, /首次使用 GitHub 登录会自动创建普通用户账号/u);

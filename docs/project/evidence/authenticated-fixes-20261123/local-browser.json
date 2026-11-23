@@ -1,0 +1,55 @@
+{
+  "source": "Isolated PostgreSQL and Chromium using compiled Next.js. Counts are copied from the completed Playwright run reports.",
+  "preReleaseRouteMatrix": {
+    "discoveredPageCount": 77,
+    "matrixModeCount": 7,
+    "actualRouteVisits": 539,
+    "successfulRouteVisits": 539,
+    "failedRouteVisits": 0,
+    "parentNavigationCount": 175,
+    "parentNavigationSuccesses": 175,
+    "parentNavigationFailures": 0
+  },
+  "preReleaseStyleStates": {
+    "entries": 584,
+    "errors": 0,
+    "loading": 104,
+    "failedRead": 104
+  },
+  "supplementaryInputValidation": {
+    "before": "edd57ce31035ea6d2e0ccad51445e85da97b68f5",
+    "beforeReproduced": 3,
+    "verifiedFields": [
+      "SMS template code",
+      "profile username",
+      "signup grant policy version"
+    ],
+    "afterPassed": 3
+  },
+  "externalCalls": "No live SMS, email or model credentials were used.",
+  "channelEnabledAcceptance": {
+    "passed": 4,
+    "failed": 0,
+    "flows": [
+      "SMS login",
+      "email registration",
+      "SMS registration",
+      "SMS recovery"
+    ],
+    "scope": "Same pre-release 3216 build, independent fixture database, intercepted provider endpoints."
+  },
+  "authenticatedBrowserBuild": {
+    "revision": "fda150fe4bbb1e542ae9cc8bd01d8a4832551f25",
+    "passed": 30,
+    "failed": 0,
+    "skipped": 0,
+    "specs": [
+      "e2e/admin-model-list-layout.spec.ts",
+      "e2e/admin-overlay-consistency.spec.ts",
+      "e2e/bug-audit-20261123-team-admin.spec.ts",
+      "e2e/project-read-state-regressions.spec.ts",
+      "e2e/smoke.spec.ts",
+      "e2e/t051-personal-regressions.spec.ts"
+    ]
+  }
+}

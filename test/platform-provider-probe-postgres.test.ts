@@ -376,6 +376,11 @@ test(
         startsAt: new Date(now.getTime() - 1_000).toISOString(),
         expiresAt: new Date(now.getTime() + 600_000).toISOString(),
       }, actor, db);
+      const readBudgetHolds = () => db.platformProviderProbeBudget.findMany({
+        select: { id: true, heldUnits: true },
+        orderBy: { id: "asc" },
+      });
+      const budgetHoldsBefore = await readBudgetHolds();
       globalThis.fetch = async () => {
         fetches += 1;
         throw new Error("probe dispatch must be injected by this fixture only");
@@ -417,7 +422,7 @@ test(
       const heldAfterRotation = await db.platformProviderProbeAttempt.findUniqueOrThrow({ where: { id: attempt.id }, select: { status: true, heldUnits: true, providerConfigurationVersion: true } });
       assert.deepEqual(heldAfterRotation, { status: "held", heldUnits: 1, providerConfigurationVersion: attempt.providerConfigurationVersion });
       assert.equal(await db.platformProviderProbeLedger.count({ where: { attemptId: attempt.id, event: "held" } }), heldLedgerCount);
-      assert.equal(await db.platformProviderProbeBudget.count({ where: { heldUnits: { gt: 0 } } }), 0);
+      assert.deepEqual(await readBudgetHolds(), budgetHoldsBefore);
     } finally {
       globalThis.fetch = previousFetch;
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

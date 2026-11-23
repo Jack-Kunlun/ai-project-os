@@ -503,7 +503,7 @@ export function SmsProviderAdminClient() {
           <label className="text-xs font-semibold text-app-muted">AccessKey ID<input autoComplete="off" maxLength={128} value={candidate.accessKeyId} onChange={(event) => updateCandidate("accessKeyId", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
           <label className="text-xs font-semibold text-app-muted">AccessKey Secret<input type="password" autoComplete="new-password" maxLength={512} value={candidate.accessKeySecret} onChange={(event) => updateCandidate("accessKeySecret", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
           {renderCandidateInput("短信签名", "signName", candidate.signName, { maxLength: 100 })}
-          {renderCandidateInput("短信模板 Code", "templateCode", candidate.templateCode, { maxLength: 128, pattern: "SMS_[A-Za-z0-9_-]{1,124}", placeholder: "SMS_..." })}
+          {renderCandidateInput("短信模板 Code", "templateCode", candidate.templateCode, { maxLength: 128, pattern: "SMS_(?:[A-Za-z0-9_]|-){1,124}", placeholder: "SMS_..." })}
           {renderCandidateInput("验证码变量名", "codeParamName", candidate.codeParamName, { maxLength: 32, pattern: "[A-Za-z][A-Za-z0-9_]*" })}
           {renderCandidateInput("有效期变量名（可选）", "validityParamName", candidate.validityParamName, { maxLength: 32, pattern: "[A-Za-z][A-Za-z0-9_]*", required: false })}
         </> : null}

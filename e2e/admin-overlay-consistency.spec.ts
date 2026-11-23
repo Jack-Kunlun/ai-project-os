@@ -516,6 +516,11 @@ test("English credit operation footer actions stay single-line at 390px without 
 
   let operation = await openOperation(page, "新建策略版本", "创建新注册赠送策略草稿");
   await expectSingleLineFooterAction(operation.dialog, operation.dialog.locator("[data-operation-content] form"), translated("创建策略草稿"));
+  const version = operation.dialog.getByLabel(translated("策略版本"), { exact: true });
+  await version.fill("offer-1.2");
+  expect(await version.evaluate((input: HTMLInputElement) => input.checkValidity())).toBe(true);
+  await version.fill("invalid version");
+  expect(await version.evaluate((input: HTMLInputElement) => input.validity.patternMismatch)).toBe(true);
   await expectR02NoHorizontalOverflow(page, "admin signup policy modal at 390px English dark");
   await closeOperation(operation.trigger, operation.dialog);
 

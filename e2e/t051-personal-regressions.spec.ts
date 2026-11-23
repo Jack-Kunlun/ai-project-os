@@ -140,6 +140,10 @@ test("T-056 completing a profile write leaves a newly opened username dialog and
 
   await expect(usernameDialog).toBeVisible();
   await expect(usernameDialog.getByLabel("登录名", { exact: true })).toHaveValue(draft);
+  const username = usernameDialog.getByLabel("登录名", { exact: true });
+  expect(await username.evaluate((input: HTMLInputElement) => input.checkValidity())).toBe(true);
+  await username.fill("invalid name");
+  expect(await username.evaluate((input: HTMLInputElement) => input.validity.patternMismatch)).toBe(true);
 });
 
 test("T-057 personal model allowance bars show available balance and omit unknown balance", async ({ page }) => {

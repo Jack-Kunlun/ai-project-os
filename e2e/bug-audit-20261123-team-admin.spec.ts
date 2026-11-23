@@ -277,6 +277,12 @@ test("T-062: SMS test phone accepts country-code and spaced clipboard formats wi
     await phone.fill(value);
     await expect(phone).toHaveValue("13800138000");
   }
+  await page.getByRole("combobox", { name: "短信供应商", exact: true }).selectOption("aliyun-sms");
+  const template = page.getByLabel("短信模板 Code", { exact: true });
+  await template.fill("SMS_valid-123");
+  expect(await template.evaluate((input: HTMLInputElement) => input.checkValidity())).toBe(true);
+  await template.fill("wrong");
+  expect(await template.evaluate((input: HTMLInputElement) => input.validity.patternMismatch)).toBe(true);
   expect(writes).toEqual([]);
   await page.getByRole("button", { name: "关闭配置弹窗", exact: true }).click();
 });

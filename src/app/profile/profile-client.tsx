@@ -327,7 +327,7 @@ function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null
       <DialogForm onSubmit={submit}>
         <label htmlFor="profile-username" className="sr-only"><UiText text={"登录名"} /></label>
         <div className="flex flex-col gap-3 sm:flex-row">
-          <input id="profile-username" value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,63}" required disabled={loading || !profile} className="min-w-0 flex-1 rounded-field border border-app-border px-4 py-3 text-sm outline-none transition focus:border-app-accent-border focus:ring-4 focus:ring-app-accent-border disabled:bg-app-surface-soft app-field" />
+          <input id="profile-username" value={username} onChange={(event) => setUsername(event.target.value)} minLength={3} maxLength={64} pattern="[A-Za-z0-9](?:[A-Za-z0-9._]|-){2,63}" required disabled={loading || !profile} className="min-w-0 flex-1 rounded-field border border-app-border px-4 py-3 text-sm outline-none transition focus:border-app-accent-border focus:ring-4 focus:ring-app-accent-border disabled:bg-app-surface-soft app-field" />
           <DialogActions><DialogSubmit disabled={pending || loading || !profile || username === profile.username} className="rounded-control px-5 py-3 text-sm font-semibold transition disabled:opacity-40 app-button-primary"><UiText text={pending ? "保存中…" : "保存"} /></DialogSubmit></DialogActions>
         </div>
         <p className="mt-2 text-xs text-app-muted"><UiText text={"3–64 位，可使用字母、数字、点、下划线和连字符。"} /></p>

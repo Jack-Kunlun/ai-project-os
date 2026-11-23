@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { normalizeMainlandPhoneInput } from "../src/components/sms-code-input";
+import { normalizeMainlandPhoneInput } from "../src/lib/normalize-mainland-phone-input";
 
 test("mainland phone input normalization accepts formatted clipboard values", () => {
   for (const value of ["13800138000", "+8613800138000", "138 0013 8000", "0086 138 0013 8000"]) {

@@ -3,9 +3,7 @@
 import { UiFeedbackText } from "@/components/ui-error-text";
 
 import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import dynamic from "next/dynamic";
-import type { GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
-const GraphicCaptchaDialog = dynamic(() => import("@/components/graphic-captcha-dialog").then(module => module.GraphicCaptchaDialog));
+import { LazyGraphicCaptchaDialog as GraphicCaptchaDialog, type GraphicCaptchaProof } from "@/components/lazy-graphic-captcha-dialog";
 import { useTranslate } from "@/components/appearance-provider";
 import { readSmsSendResponse } from "@/lib/sms-send-response";
 

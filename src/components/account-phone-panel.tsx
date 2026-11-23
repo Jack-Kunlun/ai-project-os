@@ -6,7 +6,8 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { UiText, useAppearance } from "@/components/appearance-provider";
 import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
-import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
+import { SmsCodeInput } from "@/components/sms-code-input";
+import { normalizeMainlandPhoneInput } from "@/lib/normalize-mainland-phone-input";
 
 export function AccountPhonePanel({ phoneE164, hasLocalPassword, phoneAuthStatus, embedded = false, onPendingChange }: {
   phoneE164: string | null; hasLocalPassword: boolean; phoneAuthStatus: "disabled" | "unavailable" | "available";

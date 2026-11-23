@@ -3,21 +3,12 @@
 import { UiFeedbackText } from "@/components/ui-error-text";
 
 import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import dynamic from "next/dynamic";
-import type { GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
-const GraphicCaptchaDialog = dynamic(() => import("@/components/graphic-captcha-dialog").then(module => module.GraphicCaptchaDialog));
+import { LazyGraphicCaptchaDialog as GraphicCaptchaDialog, type GraphicCaptchaProof } from "@/components/lazy-graphic-captcha-dialog";
 import { useTranslate } from "@/components/appearance-provider";
 import { readSmsSendResponse } from "@/lib/sms-send-response";
 
 type SmsPurpose = "register" | "login" | "close" | "recover" | "bind" | "change-old" | "change-new";
 type SmsAvailability = "unavailable" | "available";
-
-export function normalizeMainlandPhoneInput(value: string): string {
-  let digits = value.replace(/\D/gu, "");
-  if (digits.startsWith("0086") && digits.length === 15) digits = digits.slice(4);
-  else if (digits.startsWith("86") && digits.length === 13) digits = digits.slice(2);
-  return digits.slice(0, 11);
-}
 
 type SmsCodeInputProps = {
   id: string;

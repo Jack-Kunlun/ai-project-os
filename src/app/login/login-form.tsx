@@ -7,7 +7,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslate } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
-import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
+import { SmsCodeInput } from "@/components/sms-code-input";
+import { normalizeMainlandPhoneInput } from "@/lib/normalize-mainland-phone-input";
 import styles from "@/components/auth-page.module.css";
 
 type PhoneAuthStatus = "disabled" | "unavailable" | "available";

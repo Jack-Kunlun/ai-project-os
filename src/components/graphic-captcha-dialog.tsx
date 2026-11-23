@@ -12,7 +12,7 @@ export type GraphicCaptchaPurpose = "register" | "login" | "close" | "test" | "r
 export type GraphicCaptchaProof = Readonly<{ challengeId: string; answer: string }>;
 export type GraphicCaptchaChannel = "sms" | "email";
 
-type GraphicCaptchaDialogProps = {
+export type GraphicCaptchaDialogProps = {
   open: boolean;
   phone?: string;
   email?: string;

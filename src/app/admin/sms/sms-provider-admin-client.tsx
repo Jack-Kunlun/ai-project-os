@@ -5,12 +5,10 @@ import { UiFeedbackText, UiErrorText } from "@/components/ui-error-text";
 import { UiText, useAppearance } from "@/components/appearance-provider";
 import { ShellIcon } from "@/components/shell-icon";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import dynamic from "next/dynamic";
-import type { GraphicCaptchaProof } from "@/components/graphic-captcha-dialog";
-const GraphicCaptchaDialog = dynamic(() => import("@/components/graphic-captcha-dialog").then(module => module.GraphicCaptchaDialog));
+import { useEffect, useRef, useState, type FormEvent, type InputHTMLAttributes } from "react";
+import { LazyGraphicCaptchaDialog as GraphicCaptchaDialog, type GraphicCaptchaProof } from "@/components/lazy-graphic-captcha-dialog";
 import { modalFooterClassName, modalHeaderClassName, modalNativeBackdropClassName, modalSurfaceClassName } from "@/components/modal-styles";
-import { normalizeMainlandPhoneInput } from "@/components/sms-code-input";
+import { normalizeMainlandPhoneInput } from "@/lib/normalize-mainland-phone-input";
 
 type SmsProvider = "aliyun-pnvs" | "aliyun-sms" | "tencent-sms";
 type TemplateParams = readonly ["code"] | readonly ["code", "minutes"] | readonly ["minutes", "code"];
@@ -41,7 +39,7 @@ type CandidateField = "accessKeyId" | "accessKeySecret" | "signName" | "template
 type TestRequest = Readonly<{ phone: string; candidate: Candidate; expectedVersion: number; sequence: number }>;
 type ApiFailure = Readonly<{ code: string | null; message: string }>;
 
-const inputClass = "mt-2 block min-h-11 w-full rounded-panel border border-app-border bg-app-surface px-4 py-2.5 text-sm outline-none transition focus:border-app-accent-border focus:ring-2 focus:ring-app-accent-border";
+const inputClass = "app-field mt-2 block min-h-11 w-full rounded-panel border border-app-border bg-app-surface px-4 py-2.5 text-sm outline-none transition focus:border-app-accent-border focus:ring-2 focus:ring-app-accent-border";
 const auditLabels: Record<string, string> = { configured: "完成供应商配置", enabled: "启用短信服务", disabled: "停用短信服务" };
 const providerLabels: Record<SmsProvider, string> = {
   "aliyun-pnvs": "阿里云号码认证服务（PNVS）",
@@ -151,14 +149,6 @@ function safeFailureMessage(message: string, candidate: Candidate, hiddenLabel: 
   return credentials.reduce((safe, credential) => credential.trim().length > 1
     ? safe.split(credential).join(hiddenLabel)
     : safe, message).slice(0, 240);
-}
-
-function snapshotCandidate(value: Candidate): Candidate {
-  if (value.provider !== "tencent-sms") return { ...value };
-  const templateParams: TemplateParams = value.templateParams.length === 1
-    ? ["code"]
-    : value.templateParams[0] === "code" ? ["code", "minutes"] : ["minutes", "code"];
-  return { ...value, templateParams };
 }
 
 export function SmsProviderAdminClient() {
@@ -303,7 +293,7 @@ export function SmsProviderAdminClient() {
     setFormError(null); setNotice(null); setProbeId(null); setVerified(false); setCode("");
     setCaptchaRequest({
       phone,
-      candidate: snapshotCandidate(candidate),
+      candidate: structuredClone(candidate),
       expectedVersion: state.config.version,
       sequence,
     });
@@ -414,6 +404,27 @@ export function SmsProviderAdminClient() {
     ? "模板变量顺序必须与已审核模板一致。"
     : candidate.provider === "aliyun-sms" ? "模板变量名必须与已审核模板一致。" : "请填写已审核的 PNVS 模板信息。";
 
+  function renderCandidateInput(
+    label: string,
+    field: CandidateField,
+    value: string,
+    attributes: Pick<InputHTMLAttributes<HTMLInputElement>, "maxLength" | "pattern" | "placeholder" | "autoComplete" | "type" | "inputMode" | "required">,
+  ) {
+    return (
+      <label className="text-xs font-semibold text-app-muted">
+        <UiText text={label} />
+        <input
+          required
+          {...attributes}
+          value={value}
+          onChange={(event) => updateCandidate(field, event.target.value)}
+          disabled={candidateFieldsDisabled}
+          className={inputClass}
+        />
+      </label>
+    );
+  }
+
   return <>
   <div className="mt-5 space-y-4">
     <section className="min-w-0 overflow-hidden rounded-panel border border-app-border bg-app-surface app-panel" aria-labelledby="sms-provider-list-title">
@@ -472,7 +483,7 @@ export function SmsProviderAdminClient() {
       <header data-dialog-header className={`flex min-h-[72px] shrink-0 items-center justify-between gap-4 px-6 py-5 ${modalHeaderClassName}`}><div><h2 id="sms-provider-editor-title" className="text-base font-semibold text-app-text">{state?.config.configured ? t("编辑或更换供应商") : t("新增短信供应商")}</h2><p className="mt-2 text-sm leading-6 text-app-muted"><UiText text={"配置供应商 → 验证测试短信 → 保存启用"} /></p></div><button type="button" aria-label={t("关闭配置弹窗")} onClick={() => closeEditor()} disabled={pending} className="app-icon-button"><ShellIcon name="close" className="app-icon--control" /></button></header>
 <div data-dialog-body className="app-dialog-content min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
       <form id="sms-provider-test-form" onSubmit={requestTest} className="mt-5 grid gap-4 border-t border-app-border pt-5 sm:grid-cols-2">
-        <label className="text-xs font-semibold text-app-muted sm:col-span-2"><UiText text={"短信供应商"} /><select value={candidate.provider} onChange={(event) => updateProvider(event.target.value as SmsProvider)} disabled={candidateFieldsDisabled} className={["app-field", (inputClass)].filter(Boolean).join(' ')}>
+        <label className="text-xs font-semibold text-app-muted sm:col-span-2"><UiText text={"短信供应商"} /><select value={candidate.provider} onChange={(event) => updateProvider(event.target.value as SmsProvider)} disabled={candidateFieldsDisabled} className={inputClass}>
             <option value="aliyun-pnvs">{t("阿里云号码认证服务（PNVS）")}</option>
             <option value="aliyun-sms">{t("阿里云短信服务（SendSms）")}</option>
             <option value="tencent-sms">{t("腾讯云短信服务（SendSms）")}</option>
@@ -482,34 +493,34 @@ export function SmsProviderAdminClient() {
         <p className="-mt-1 text-xs leading-5 text-app-muted sm:col-span-2">{providerLabel(candidate.provider, t)} {t(providerDescription(candidate.provider))} {t(providerTemplateInstruction)}</p>
         <div className="mt-1 flex items-center gap-3 sm:col-span-2"><span className="text-xs font-semibold text-app-text"><UiText text={"供应商凭据与模板"} /></span><span className="h-px flex-1 bg-app-surface-soft" /><span className="text-xs text-app-muted"><UiText text={"凭据加密保存，不会回显"} /></span></div>
         {candidate.provider === "aliyun-pnvs" ? <>
-          <label className="text-xs font-semibold text-app-muted">AccessKey ID<input autoComplete="off" maxLength={128} value={candidate.accessKeyId} onChange={(event) => updateCandidate("accessKeyId", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted">AccessKey Secret<input type="password" autoComplete="new-password" maxLength={256} value={candidate.accessKeySecret} onChange={(event) => updateCandidate("accessKeySecret", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"短信签名"} /><input maxLength={64} value={candidate.signName} onChange={(event) => updateCandidate("signName", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"验证码模板 Code"} /><input maxLength={128} value={candidate.templateCode} onChange={(event) => updateCandidate("templateCode", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
+          <label className="text-xs font-semibold text-app-muted">AccessKey ID<input autoComplete="off" maxLength={128} value={candidate.accessKeyId} onChange={(event) => updateCandidate("accessKeyId", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
+          <label className="text-xs font-semibold text-app-muted">AccessKey Secret<input type="password" autoComplete="new-password" maxLength={256} value={candidate.accessKeySecret} onChange={(event) => updateCandidate("accessKeySecret", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
+          {renderCandidateInput("短信签名", "signName", candidate.signName, { maxLength: 64 })}
+          {renderCandidateInput("验证码模板 Code", "templateCode", candidate.templateCode, { maxLength: 128 })}
         </> : null}
 
         {candidate.provider === "aliyun-sms" ? <>
-          <label className="text-xs font-semibold text-app-muted">AccessKey ID<input autoComplete="off" maxLength={128} value={candidate.accessKeyId} onChange={(event) => updateCandidate("accessKeyId", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted">AccessKey Secret<input type="password" autoComplete="new-password" maxLength={512} value={candidate.accessKeySecret} onChange={(event) => updateCandidate("accessKeySecret", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"短信签名"} /><input maxLength={100} value={candidate.signName} onChange={(event) => updateCandidate("signName", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"短信模板 Code"} /><input maxLength={128} pattern="SMS_[A-Za-z0-9_-]{1,124}" placeholder="SMS_..." value={candidate.templateCode} onChange={(event) => updateCandidate("templateCode", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"验证码变量名"} /><input maxLength={32} pattern="[A-Za-z][A-Za-z0-9_]*" value={candidate.codeParamName} onChange={(event) => updateCandidate("codeParamName", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"有效期变量名（可选）"} /><input maxLength={32} pattern="[A-Za-z][A-Za-z0-9_]*" value={candidate.validityParamName} onChange={(event) => updateCandidate("validityParamName", event.target.value)} disabled={candidateFieldsDisabled} className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
+          <label className="text-xs font-semibold text-app-muted">AccessKey ID<input autoComplete="off" maxLength={128} value={candidate.accessKeyId} onChange={(event) => updateCandidate("accessKeyId", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
+          <label className="text-xs font-semibold text-app-muted">AccessKey Secret<input type="password" autoComplete="new-password" maxLength={512} value={candidate.accessKeySecret} onChange={(event) => updateCandidate("accessKeySecret", event.target.value)} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
+          {renderCandidateInput("短信签名", "signName", candidate.signName, { maxLength: 100 })}
+          {renderCandidateInput("短信模板 Code", "templateCode", candidate.templateCode, { maxLength: 128, pattern: "SMS_[A-Za-z0-9_-]{1,124}", placeholder: "SMS_..." })}
+          {renderCandidateInput("验证码变量名", "codeParamName", candidate.codeParamName, { maxLength: 32, pattern: "[A-Za-z][A-Za-z0-9_]*" })}
+          {renderCandidateInput("有效期变量名（可选）", "validityParamName", candidate.validityParamName, { maxLength: 32, pattern: "[A-Za-z][A-Za-z0-9_]*", required: false })}
         </> : null}
 
         {candidate.provider === "tencent-sms" ? <>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"腾讯云 SecretId"} /><input autoComplete="off" maxLength={128} value={candidate.secretId} onChange={(event) => updateCandidate("secretId", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"腾讯云 SecretKey"} /><input type="password" autoComplete="new-password" maxLength={512} value={candidate.secretKey} onChange={(event) => updateCandidate("secretKey", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"短信应用 ID"} /><input inputMode="numeric" maxLength={32} value={candidate.smsSdkAppId} onChange={(event) => updateCandidate("smsSdkAppId", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"短信签名"} /><input maxLength={100} value={candidate.signName} onChange={(event) => updateCandidate("signName", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"短信模板 ID"} /><input inputMode="numeric" maxLength={32} value={candidate.templateId} onChange={(event) => updateCandidate("templateId", event.target.value)} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"地域"} /><select value={candidate.region} onChange={(event) => updateCandidate("region", event.target.value)} disabled={candidateFieldsDisabled} className={["app-field", (inputClass)].filter(Boolean).join(' ')}>
+          {renderCandidateInput("腾讯云 SecretId", "secretId", candidate.secretId, { autoComplete: "off", maxLength: 128 })}
+          {renderCandidateInput("腾讯云 SecretKey", "secretKey", candidate.secretKey, { type: "password", autoComplete: "new-password", maxLength: 512 })}
+          {renderCandidateInput("短信应用 ID", "smsSdkAppId", candidate.smsSdkAppId, { inputMode: "numeric", maxLength: 32 })}
+          {renderCandidateInput("短信签名", "signName", candidate.signName, { maxLength: 100 })}
+          {renderCandidateInput("短信模板 ID", "templateId", candidate.templateId, { inputMode: "numeric", maxLength: 32 })}
+          <label className="text-xs font-semibold text-app-muted"><UiText text={"地域"} /><select value={candidate.region} onChange={(event) => updateCandidate("region", event.target.value)} disabled={candidateFieldsDisabled} className={inputClass}>
               <option value="ap-beijing">ap-beijing</option>
               <option value="ap-guangzhou">ap-guangzhou</option>
               <option value="ap-nanjing">ap-nanjing</option>
             </select>
           </label>
-          <label className="text-xs font-semibold text-app-muted"><UiText text={"模板变量顺序"} /><select value={candidate.templateParams.join(",")} onChange={(event) => updateTemplateParams(event.target.value)} disabled={candidateFieldsDisabled} className={["app-field", (inputClass)].filter(Boolean).join(' ')}>
+          <label className="text-xs font-semibold text-app-muted"><UiText text={"模板变量顺序"} /><select value={candidate.templateParams.join(",")} onChange={(event) => updateTemplateParams(event.target.value)} disabled={candidateFieldsDisabled} className={inputClass}>
               <option value="code">code</option>
               <option value="code,minutes">code → minutes</option>
               <option value="minutes,code">minutes → code</option>
@@ -520,11 +531,11 @@ export function SmsProviderAdminClient() {
 
         {candidate.provider === "aliyun-pnvs" ? <p className="rounded-panel bg-app-surface-soft px-3 py-2 text-xs leading-5 text-app-muted sm:col-span-2"><UiText text={"用途名称和模板参数由系统生成，验证码为 6 位数字，有效期 5 分钟。"} /><br /><code className="break-all">{'{"code":"##code##","min":"5"}'}</code></p> : null}
         <div className="mt-2 flex items-center gap-3 sm:col-span-2"><span className="text-xs font-semibold text-app-text"><UiText text={"测试短信"} /></span><span className="h-px flex-1 bg-app-surface-soft" /></div>
-        <label className="text-xs font-semibold text-app-muted"><UiText text={"测试手机号（中国大陆 +86）"} /><input autoComplete="tel" inputMode="tel" placeholder="13800138000" value={phone} onChange={(event) => { if (captchaRequest) closeCaptcha(captchaRequest.sequence); setPhone(normalizeMainlandPhoneInput(event.target.value)); setProbeId(null); setVerified(false); setCode(""); }} disabled={candidateFieldsDisabled} required className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label>
+        <label className="text-xs font-semibold text-app-muted"><UiText text={"测试手机号（中国大陆 +86）"} /><input autoComplete="tel" inputMode="tel" placeholder="13800138000" value={phone} onChange={(event) => { if (captchaRequest) closeCaptcha(captchaRequest.sequence); setPhone(normalizeMainlandPhoneInput(event.target.value)); setProbeId(null); setVerified(false); setCode(""); }} disabled={candidateFieldsDisabled} required className={inputClass} /></label>
       <p className="-mt-1 text-xs leading-5 text-app-muted sm:col-span-2"><UiText text={"此操作会真实发送短信并消耗服务商短信额度；请使用你本人可接收的手机号。"} /></p>
       </form>
 
-      {probeId ? <form id="sms-provider-verify-form" onSubmit={verifyTest} className="mt-5 border-t border-app-border pt-4 sm:flex sm:items-end sm:gap-3"><label className="block flex-1 text-xs font-semibold text-app-muted"><UiText text={"短信验证码"} /><input id="sms-provider-test-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required disabled={pending || verified} className={["app-field", (inputClass)].filter(Boolean).join(' ')} /></label></form> : null}
+      {probeId ? <form id="sms-provider-verify-form" onSubmit={verifyTest} className="mt-5 border-t border-app-border pt-4 sm:flex sm:items-end sm:gap-3"><label className="block flex-1 text-xs font-semibold text-app-muted"><UiText text={"短信验证码"} /><input id="sms-provider-test-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required disabled={pending || verified} className={inputClass} /></label></form> : null}
 
       {formError ? <p role="alert" className="mt-4 rounded-field bg-app-danger-soft p-3 text-sm text-app-danger-ink app-feedback-error"><UiErrorText text={formError} /></p> : null}
       {notice ? <p role="status" className="mt-4 rounded-field bg-app-success-soft p-3 text-sm leading-6 text-app-success-ink app-feedback-success"><UiFeedbackText text={notice} /></p> : null}

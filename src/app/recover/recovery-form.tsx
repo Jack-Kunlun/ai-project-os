@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { UiErrorText } from "@/components/ui-error-text";
 import { useTranslate } from "@/components/appearance-provider";
-import { normalizeMainlandPhoneInput, SmsCodeInput } from "@/components/sms-code-input";
+import { SmsCodeInput } from "@/components/sms-code-input";
+import { normalizeMainlandPhoneInput } from "@/lib/normalize-mainland-phone-input";
 import { ShellIcon } from "@/components/shell-icon";
 import styles from "@/components/auth-page.module.css";
 

@@ -3,7 +3,7 @@ import "../app/user-workspace.css";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppearanceControls } from "./appearance-controls";
 import { HeaderAccount } from "./header-account";
 import { SidebarSelect, WorkspacePicker,selectWorkspace,useWorkspaceSelection } from "./workspace-scope";
@@ -24,6 +24,8 @@ import {
 } from "@/lib/user-navigation";
 import styles from "./user-shell.module.css";
 
+const UserShellSearchDialog = lazy(() => import("./user-shell-search-dialog").then((module) => ({ default: module.UserShellSearchDialog })));
+
 const PROJECT_LIST_PAGE_SIZE = 50;
 const LAST_PROJECT_STORAGE_KEY = "ai-project-os:user-shell:project-id";
 const EMPTY_PROJECTS: readonly ProjectOption[] = [];
@@ -33,7 +35,6 @@ type ProjectListState =
   | Readonly<{ status: "loading" }>
   | Readonly<{ status: "error" }>
   | Readonly<{ status: "ready"; projects: readonly ProjectOption[] }>;
-type SearchDestination = Readonly<{ label: string; detail: string; href: string }>;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -110,10 +111,8 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
   const [projectRefreshToken, setProjectRefreshToken] = useState(0);
   const [mobileNavigationPath, setMobileNavigationPath] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const [workspaceName,setWorkspaceName]=useState("");
   const searchButtonRef = useRef<HTMLButtonElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const mobileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const searchReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -159,14 +158,9 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
   }, [accessibleProjects, projectList.status, routeContext]);
 
   useEffect(() => {
-    if (searchOpen) {
-      searchInputRef.current?.focus();
-      return () => {
-        const target = searchReturnFocusRef.current;
-        if (target?.isConnected) target.focus();
-      };
-    }
-    return undefined;
+    if (searchOpen) return;
+    const target = searchReturnFocusRef.current;
+    if (target?.isConnected) target.focus();
   }, [searchOpen]);
 
   useEffect(() => {
@@ -177,7 +171,6 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
 
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
-    setSearchQuery("");
   }, []);
 
   const openSearch = useCallback(() => {
@@ -243,33 +236,6 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
     if (workspaceId !== routeProject.workspaceId) selectWorkspace(username, routeProject.workspaceId);
   }, [routeContext, routeProject, username, workspaceId]);
 
-  const searchDestinations = useMemo<SearchDestination[]>(() => {
-    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
-    const globalDestinations = USER_GLOBAL_NAVIGATION.map((item) => ({
-      label: t(item.label),
-      detail: t("全局页面"),
-      href: item.href,
-    }));
-    const projectDestinations = accessibleProjects.flatMap((project) => USER_PROJECT_NAVIGATION.map((item) => ({
-      label: t(item.label),
-      detail: project.name,
-      href: getProjectNavigationHref(project.id, item.key),
-      projectId: project.id,
-      searchableText: `${project.name} ${t(item.label)}`.toLocaleLowerCase(),
-    })));
-
-    if (!normalizedQuery) {
-      const currentProjectDestinations = selectedProject
-        ? projectDestinations.filter((destination) => destination.projectId === selectedProject.id)
-        : [];
-      return [...globalDestinations, ...currentProjectDestinations].slice(0, 12).map(({ label, detail, href }) => ({ label, detail, href }));
-    }
-
-    const matchingGlobal = globalDestinations.filter((destination) => `${destination.label} ${destination.detail}`.toLocaleLowerCase().includes(normalizedQuery));
-    const matchingProjects = projectDestinations.filter((destination) => destination.searchableText.includes(normalizedQuery));
-    return [...matchingGlobal, ...matchingProjects].slice(0, 30);
-  }, [accessibleProjects, searchQuery, selectedProject,t]);
-
   function selectProject(projectId: string): void {
     const project = accessibleProjects.find((candidate) => candidate.id === projectId);
     if (!project) return;
@@ -290,33 +256,6 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
   function retryProjectList(): void {
     setProjectList({ status: "loading" });
     setProjectRefreshToken((previous) => previous + 1);
-  }
-
-  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeSearch();
-      return;
-    }
-    if (event.key !== "Tab") return;
-
-    const focusableElements = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), a[href]'),
-    ).filter((element) => element.offsetParent !== null);
-    if (focusableElements.length === 0) {
-      event.preventDefault();
-      searchInputRef.current?.focus();
-      return;
-    }
-    const first = focusableElements[0];
-    const last = focusableElements[focusableElements.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
   }
 
   const projectSelectLabel = projectList.status === "loading"
@@ -456,50 +395,12 @@ export function UserShell({ username,isSystemAdmin=false }: Readonly<{ username:
       </header>
       <div className={styles.contentSpacer} aria-hidden="true" />
 
-      {searchOpen ? (
-        <div className={styles.searchOverlay} onMouseDown={(event) => { if (event.target === event.currentTarget) closeSearch(); }}>
-          <div data-inquiry-disabled className={`app-dialog-surface app-dialog-surface--modal ${styles.searchDialog}`} role="dialog" aria-modal="true" aria-labelledby="user-shell-search-title" onKeyDown={handleSearchKeyDown}>
-            <div data-dialog-header className={`app-dialog-header ${styles.searchDialogHeader}`}>
-              <div>
-                <h2 id="user-shell-search-title"><UiText text="搜索与跳转"/></h2>
-                <p><UiText text="按页面名称或你有权访问的项目查找路由。"/></p>
-              </div>
-              <button type="button" className={styles.iconButton} onClick={closeSearch} aria-label={t("关闭搜索")}><ShellIcon className={styles.icon} name="close" /></button>
-            </div>
-            <div data-dialog-body className={`app-dialog-content ${styles.searchDialogBody}`}>
-            <label className={`app-field app-field-group ${styles.searchInputWrap}`}>
-              <ShellIcon className={styles.icon} name="search" />
-              <input
-                ref={searchInputRef}
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.currentTarget.value)}
-                placeholder={t("搜索入口或项目名称")}
-                aria-label={t("搜索页面入口和项目")}
-              />
-              <kbd>ESC</kbd>
-            </label>
-            <p className={styles.searchScopeNote}><UiText text="仅搜索页面入口和项目名称，不搜索正文内容。"/></p>
-            <div className={styles.searchResults}>
-              {searchDestinations.length > 0 ? (
-                <ul aria-label={t("可访问页面")}>
-                  {searchDestinations.map((destination) => (
-                    <li key={`${destination.href}-${destination.detail}`}>
-                      <Link href={destination.href} onClick={() => { closeSearch(); setMobileNavigationPath(null); }}>
-                        <span>{destination.label}</span>
-                        <small>{destination.detail}</small>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.searchEmpty} role="status"><UiText text="没有匹配的可访问页面或项目。"/></p>
-              )}
-            </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {searchOpen ? <Suspense fallback={null}><UserShellSearchDialog
+        projects={accessibleProjects}
+        selectedProjectId={selectedProject?.id ?? null}
+        onClose={closeSearch}
+        onNavigate={() => { closeSearch(); setMobileNavigationPath(null); }}
+      /></Suspense> : null}
     </div>
   );
 }

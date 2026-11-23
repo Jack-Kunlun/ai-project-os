@@ -95,6 +95,7 @@ const ROUTE_DESTINATIONS: Readonly<Record<string, Readonly<Partial<Record<Matrix
   "/admin/connectors/git": { admin: "/admin", user: "/dashboard", anonymous: "/login" },
   "/admin/models/routes": { admin: "/admin/models", user: "/dashboard", anonymous: "/login" },
   "/admin/models/governance": { admin: "/admin/models", user: "/dashboard", anonymous: "/login" },
+  "/admin/operations/probes": { admin: "/admin/models", user: "/dashboard", anonymous: "/login" },
 };
 
 function discoverAppPageRoutes(): MatrixRoute[] {
@@ -515,6 +516,8 @@ test("all page routes remain consistent across Chinese light and English dark de
       { page: adminPage, path: "/settings", expectedPath: "/admin/models" },
       { page: userPage, path: "/settings", expectedPath: "/dashboard" },
       { page: anonymousPage, path: "/settings", expectedPath: "/login" },
+      { page: anonymousPage, path: "/admin/operations/probes", expectedPath: "/login" },
+      { page: userPage, path: "/admin/operations/probes", expectedPath: "/dashboard" },
       { page: anonymousPage, path: "/dashboard", expectedPath: "/login" },
       { page: anonymousPage, path: "/projects", expectedPath: "/login" },
       { page: adminPage, path: "/projects", expectedPath: "/admin" },

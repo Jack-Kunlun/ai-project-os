@@ -44,3 +44,7 @@ T-073 在短信表单验收时发现。旧构建的阿里云短信模板、个�
 ## 带历史额度的在途测试升级
 
 在独立数据库用 v1.2.27 的 150 个迁移建立两条绑定旧额度的在途连接测试，一条已预留且未发送，一条由旧服务进入已派发状态。应用第 151 个迁移后，现有服务将第一条释放、第二条标为待核对，两条记录及追加账本均保留原额度 ID。旧额度的预留数从 2 变为 0，待核对数从 0 变为 1，已结算数保持 2。二次处理返回 0，无新增账本行，也没有向供应商重新发请求。[升级前记录](evidence/authenticated-fixes-20261123/upgrade-before.json) · [升级后记录](evidence/authenticated-fixes-20261123/upgrade-after.json)
+
+## 发布结果
+
+[候选 CI 45144942167](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45144942167) 源码测试 1588 项通过、175 项按配置跳过、零失败。PostgreSQL 业务门禁 91/91 通过。同镜像 Chromium 115 项执行通过、7 项按配置跳过。[发布 45150854281](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45150854281) 已将 d6fdf0a 切换至生产，STABLE_DEPLOY_OK 确认 151 条迁移，公网应用、数据库和 Worker 健康。 [E-029 发布回执](evidence/authenticated-fixes-20261123/release.json)

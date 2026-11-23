@@ -162,3 +162,7 @@ T-051，2026-11-23。正常导航 77/77 最终文档 200，54 个登录后页面
 ## E-028 / 登录后缺陷与模型设置候选验收
 
 [按原复现步骤逐项记录](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)覆盖 T-052～T-071，包含登录身份、17 项行为、模型默认值、页面截图与外部调用边界。精确镜像 CI、正式发布与公网回执另行登记。
+
+## E-029 / v1.2.28 精确候选与生产回执
+
+[候选 CI 45144942167](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45144942167) 源码测试 1588 项通过、175 项按配置跳过、零失败。PostgreSQL 业务门禁 91/91 通过。同镜像 Chromium 115 项执行通过、7 项按配置跳过。[发布 45150854281](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45150854281) 已将 d6fdf0a 切换至生产，STABLE_DEPLOY_OK 确认 151 条迁移，公网应用、数据库和 Worker 健康。 带历史额度的在途测试升级已在独立数据库核验。登录后页面使用隔离账号，供应商请求使用受控响应。[17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) · [E-029 发布回执](evidence/authenticated-fixes-20261123/release.json)

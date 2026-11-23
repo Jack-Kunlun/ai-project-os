@@ -57,28 +57,28 @@
 | T-049 | 缺陷 | 四个公开页的英文标签页标题仍是中文 | T-037 / E-025 | 已验收 | P3 | 研发 / 主代理 | [复验场景](BUG-AUDIT-20261123.md) | v1.2.27 已上线，见 E-026 |
 | T-050 | 发布 | 12 项修复的集成验收与 v1.2.27 发布 | C-018 | 已验收 | P1 | 主代理 / 主代理 | T-038～T-049 | v1.2.27 已上线，见 E-026 |
 | T-051 | 缺陷调查 | v1.2.27 登录后全系统页面、弹窗与异常状态复查 | C-019 / E-027 | 已验收 | P1 | 主代理 / 主代理 | T-050 | [逐项复现报告](BUG-AUDIT-AUTHENTICATED-20261123.md) |
-| T-052 | 缺陷 | 团队邀请超过 100 条后，旧的有效邀请失去撤销入口 | T-051 / E-027 | 待验收 | P1 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-053 | 缺陷 | 自动化确认会提交修改前的规则名 | T-051 / E-027 | 待验收 | P1 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-054 | 缺陷 | 问答回收站加载失败后仍可操作正常会话 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-055 | 缺陷 | 团队活动请求失败会清空团队总览和权限页 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-056 | 缺陷 | 保存个人资料的旧响应会关闭新打开的登录名弹窗 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-057 | 缺陷 | 平台额度为 0 或未知时，额度条显示满格 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-058 | 缺陷 | 通知中心已全读，顶栏重新出现未读角标 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-059 | 缺陷 | 用量旧分页失败覆盖新筛选的成功结果 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-060 | 缺陷 | 项目网页来源切换筛选后出现过期错误 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-061 | 缺陷 | 单次手动刷新碰上后台轮询，旧备份状态覆盖新状态 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-062 | 缺陷 | 短信供应商测试框截掉粘贴号码的最后一位 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-063 | 缺陷 | 失败收件箱双击下一页后，一次上一页回不到原页 | T-051 / E-027 | 待验收 | P3 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-064 | 缺陷 | 多处列表读取失败时仍断言没有业务记录 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-065 | 缺陷 | 移动端搜索工作区后，Esc 关闭了底层侧栏 | T-051 / E-027 | 待验收 | P3 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-066 | 缺陷 | 知识图谱详情读取失败却提示整页图谱加载失败 | T-051 / E-027 | 待验收 | P3 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-067 | 缺陷 | 项目任务读取失败会覆盖后来选中的“已完成”筛选 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-068 | 缺陷 | 项目 MCP 输出凭证读取失败会隐藏已加载的外发历史，恢复后仍报错 | T-051 / E-027 | 待验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | 候选已复验，[E-028](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) |
-| T-069 | 交互 | 供应商测试状态、弹窗底栏及后台滚动 | C-020 | 待验收 | P2 | 研发 / 主代理 | L-003、L-005、L-006 | 截图一与三及相关页面 |
-| T-070 | 模型 | 更新新连接预设与实际供应商协议适配 | C-020 | 待验收 | P2 | 研发 / 主代理 | F-010 | 生成、视觉、向量建议及兼容 |
-| T-071 | 产品变更 | 取消平台模型测试次数上限 | C-020 | 待验收 | P1 | 研发 / 主代理 | F-008、F-010、F-011 | 全部平台测试入口、历史账本与运维入口 |
-| T-072 | 发布 | 登录后缺陷及模型设置变更集成验收和发布 | C-020 | 进行中 | P1 | 主代理 / 主代理 | T-052～T-071 | 精确候选 CI、正式发布与生产健康 |
-| T-073 | 缺陷 | 浏览器忽略短信模板、登录名和赠送策略版本的格式校验 | T-072 页面验收 / C-020 | 待验收 | P2 | 研发 / 主代理 | L-004，三处原生输入校验 | 合法及非法输入在浏览器实测 |
+| T-052 | 缺陷 | 团队邀请超过 100 条后，旧的有效邀请失去撤销入口 | T-051 / E-027 | 已验收 | P1 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-053 | 缺陷 | 自动化确认会提交修改前的规则名 | T-051 / E-027 | 已验收 | P1 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-054 | 缺陷 | 问答回收站加载失败后仍可操作正常会话 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-055 | 缺陷 | 团队活动请求失败会清空团队总览和权限页 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-056 | 缺陷 | 保存个人资料的旧响应会关闭新打开的登录名弹窗 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-057 | 缺陷 | 平台额度为 0 或未知时，额度条显示满格 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-058 | 缺陷 | 通知中心已全读，顶栏重新出现未读角标 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-059 | 缺陷 | 用量旧分页失败覆盖新筛选的成功结果 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-060 | 缺陷 | 项目网页来源切换筛选后出现过期错误 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-061 | 缺陷 | 单次手动刷新碰上后台轮询，旧备份状态覆盖新状态 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-062 | 缺陷 | 短信供应商测试框截掉粘贴号码的最后一位 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-063 | 缺陷 | 失败收件箱双击下一页后，一次上一页回不到原页 | T-051 / E-027 | 已验收 | P3 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-064 | 缺陷 | 多处列表读取失败时仍断言没有业务记录 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-065 | 缺陷 | 移动端搜索工作区后，Esc 关闭了底层侧栏 | T-051 / E-027 | 已验收 | P3 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-066 | 缺陷 | 知识图谱详情读取失败却提示整页图谱加载失败 | T-051 / E-027 | 已验收 | P3 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-067 | 缺陷 | 项目任务读取失败会覆盖后来选中的“已完成”筛选 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-068 | 缺陷 | 项目 MCP 输出凭证读取失败会隐藏已加载的外发历史，恢复后仍报错 | T-051 / E-027 | 已验收 | P2 | 研发 / 主代理 | [复现场景](BUG-AUDIT-AUTHENTICATED-20261123.md) | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-069 | 交互 | 供应商测试状态、弹窗底栏及后台滚动 | C-020 | 已验收 | P2 | 研发 / 主代理 | L-003、L-005、L-006 | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-070 | 模型 | 更新新连接预设与实际供应商协议适配 | C-020 | 已验收 | P2 | 研发 / 主代理 | F-010 | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-071 | 产品变更 | 取消平台模型测试次数上限 | C-020 | 已验收 | P1 | 研发 / 主代理 | F-008、F-010、F-011 | [17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md)，[E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-072 | 发布 | 登录后缺陷及模型设置变更集成验收和发布 | C-020 | 已验收 | P1 | 主代理 / 主代理 | T-052～T-071 | [E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
+| T-073 | 缺陷 | 浏览器忽略短信模板、登录名和赠送策略版本的格式校验 | T-072 页面验收 / C-020 | 已验收 | P2 | 研发 / 主代理 | L-004，三处原生输入校验 | [E-029 发布回执](evidence/authenticated-fixes-20261123/release.json) |
 
 本表包含工作任务与问题报告，两类用“类型”区分。T-020～T-026 是现有反馈的逐项跟踪入口，归属既有整改工作；不重复计工作量。“待澄清”表示具体复现/范围待主动核实，不表示等待用户补充才能记录。状态变化见 [ACTIVITY](ACTIVITY.md)。
 
@@ -504,3 +504,5 @@ T-051 调查已验收。T-052～T-068 的角色、触发条件、实际结果、
 ### T-072 登录后缺陷与模型配置集成
 
 S4 / high。研发向主代理交付邀请、项目状态、个人与后台页面、模型探测合同，沿用服务端身份和实际探测结果为权威。按 E-027 原步骤做浏览器复验。截图核对成功标签、失效及滚动几何。模型用供应商官方协议和隔离 transport 合同验证。测试次数取消覆盖全部入口和历史在途状态。预算为按模块定向检查、一轮独立审查、精确候选 CI 和生产发布健康。仅因新失败扩展。
+
+T-052～T-073 已接收。原操作及异常状态在隔离账号的浏览器中复验通过，v1.2.28 已发布。[17 项实际页面验收](ACCEPTANCE-AUTHENTICATED-FIXES-20261123.md) · [E-029 发布回执](evidence/authenticated-fixes-20261123/release.json)

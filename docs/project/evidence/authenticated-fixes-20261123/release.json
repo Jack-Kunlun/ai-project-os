@@ -1,0 +1,124 @@
+{
+  "version": "v1.2.28",
+  "date": "2026-11-23",
+  "sourceRevision": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+  "candidateRevision": "d6fdf0ac1c7af3429b58a735c82e3bba3f40dd8c",
+  "ci": {
+    "id": 45144942167,
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45144942167",
+    "conclusion": "success",
+    "risk": "high",
+    "unit": {
+      "schemaVersion": 1,
+      "kind": "unit",
+      "base": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+      "target": "d6fdf0ac1c7af3429b58a735c82e3bba3f40dd8c",
+      "releaseEligible": true,
+      "planFingerprint": "bafa7c1ab592126dc475afe72810b873a680202534a7e837f8e4029ab824bd71",
+      "mode": "full",
+      "status": "passed",
+      "fingerprint": "f2e60e9ea801535ae43b453e4fb205cb0d0453fcd0204faba25545d7b19d1c72"
+    },
+    "browser": {
+      "schemaVersion": 1,
+      "kind": "browser",
+      "base": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+      "target": "d6fdf0ac1c7af3429b58a735c82e3bba3f40dd8c",
+      "releaseEligible": true,
+      "planFingerprint": "bafa7c1ab592126dc475afe72810b873a680202534a7e837f8e4029ab824bd71",
+      "mode": "full",
+      "status": "passed",
+      "testCount": 122,
+      "executedCount": 115,
+      "skippedCount": 7,
+      "fingerprint": "dd7bea2df33332460111166408d2bf40a8fc1d4fd79479f7908c548695548bed"
+    },
+    "unitCounts": {
+      "tests": 1763,
+      "pass": 1588,
+      "fail": 0,
+      "skipped": 175
+    },
+    "postgresGates": {
+      "passed": 91,
+      "total": 91
+    },
+    "sameImageCandidate": {
+      "version": "1.2.28",
+      "revision": "d6fdf0ac1c7af3429b58a735c82e3bba3f40dd8c",
+      "releaseEligible": true,
+      "migrations": 151,
+      "health": "ok",
+      "restartPersistence": "ok",
+      "businessDataPersistence": "ok",
+      "workerRestart": "ok",
+      "cleanup": "verified"
+    },
+    "performanceKiB": {
+      "all static client assets": [
+        871.8,
+        875.0
+      ],
+      "route /guide": [
+        155.1,
+        156.0
+      ],
+      "route /admin/sms": [
+        160.3,
+        161.0
+      ]
+    }
+  },
+  "workflow": {
+    "id": 45150854281,
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45150854281",
+    "conclusion": "success"
+  },
+  "publishedAt": "2026-11-23T10:03:32Z",
+  "githubRelease": "https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.28",
+  "annotatedTag": "89066dd9ef4cfe63ffc88bfb632e52caa6e7fd84",
+  "migrationCount": 151,
+  "migrationDelta": 1,
+  "receipt": "STABLE_DEPLOY_OK tag=v1.2.28 revision=d6fdf0ac1c7af3429b58a735c82e3bba3f40dd8c migration_count=151 backup=not-required restore=not-required",
+  "receiptLogSha256": "7c0ee1bc3b0333a8390d137449af07e1e7751b76aacce41630dc4f757ecd1f5a",
+  "health": {
+    "checkedAt": "2026-11-23T10:04:25.364921+00:00",
+    "status": "ok",
+    "version": "1.2.28",
+    "database": "up",
+    "worker": "up"
+  },
+  "coverage": "Authenticated pre-release checks used isolated accounts and controlled failures. No live model credentials or SMS messages were used.",
+  "verifiedImages": {
+    "app": {
+      "ref": "ghcr.io/jack-kunlun/ai-project-os-app@sha256:5f7c42faf6ef55f770bc532d5fba1e0abd112bbcedd8e3590528b3294e7b9ab3",
+      "id": "sha256:f3d1e5dd5b237ee22e019ad5bf45f0b66ef977d8f257007de1dcac13727517f1"
+    },
+    "worker": {
+      "ref": "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:97a6c8461959edf16ec0250df899f46fa2ea58739911e9b8d0d4b99080a94851",
+      "id": "sha256:529357a11855e756a3ae91ffe2f02154e629dfcb7b69efe2e840fe812e826146"
+    },
+    "migrate": {
+      "ref": "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:55917b24a742b97f07c4ee8beab5f0b7d43c1f822b6e5979087d578ca0a41afe",
+      "id": "sha256:7534fbb3071c4ca133c04156fa9b84acc686cd92e6bb1dd32afd991af7c5ab02"
+    }
+  },
+  "publicAnonymousBrowser": {
+    "390 /admin/models": "/login",
+    "390 /admin/operations/probes": "/login",
+    "390 /personal/models": "/login",
+    "1440 /admin/models": "/login",
+    "1440 /admin/operations/probes": "/login",
+    "1440 /personal/models": "/login"
+  },
+  "priorCandidateChecks": [
+    {
+      "id": 45133445200,
+      "finding": "The guide and SMS administration first-load budgets failed."
+    },
+    {
+      "id": 45141078345,
+      "finding": "The reconciliation test assumed the database contained no historical held budget. The complete provider probe gate now verifies each budget balance against its pre-probe value."
+    }
+  ]
+}

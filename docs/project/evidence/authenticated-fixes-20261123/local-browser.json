@@ -51,5 +51,11 @@
       "e2e/smoke.spec.ts",
       "e2e/t051-personal-regressions.spec.ts"
     ]
+  },
+  "relatedRouteRegressions": {
+    "applicationRevision": "fda150fe4bbb1e542ae9cc8bd01d8a4832551f25",
+    "passed": 31,
+    "failed": 0,
+    "skipped": 0
   }
 }

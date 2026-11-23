@@ -29,6 +29,9 @@ import {
 
 const idSchema = z.string().uuid();
 const titleSchema = z.string().trim().min(1).max(160);
+const evidenceSearchSchema = z.string().trim().max(100);
+const evidenceCursorSchema = z.object({ timestamp: z.string().datetime({ offset: true }), id: idSchema }).strict();
+const PLAN_EVIDENCE_PAGE_SIZE = 50;
 const descriptionSchema = z.string().trim().max(20_000).nullable().optional();
 const acceptanceCriteriaSchema = z.string().trim().max(20_000).nullable().optional();
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable().optional();
@@ -122,6 +125,105 @@ export class ProjectPlanError extends Error {
     super(code);
     this.name = "ProjectPlanError";
   }
+}
+
+type EvidenceSearchCursor = z.infer<typeof evidenceCursorSchema>;
+
+function encodeEvidenceSearchCursor(cursor: EvidenceSearchCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function parseEvidenceSearchCursor(value: unknown): EvidenceSearchCursor | "done" | null {
+  if (value === undefined || value === null) return null;
+  if (value === "done") return "done";
+  if (typeof value !== "string" || value.length > 512) return fail("PROJECT_PLAN_INVALID_INPUT");
+  try {
+    const parsed = evidenceCursorSchema.safeParse(JSON.parse(Buffer.from(value, "base64url").toString("utf8")));
+    if (!parsed.success) return fail("PROJECT_PLAN_INVALID_INPUT");
+    return parsed.data;
+  } catch {
+    return fail("PROJECT_PLAN_INVALID_INPUT");
+  }
+}
+
+export async function searchProjectPlanEvidence(
+  projectIdInput: unknown,
+  queryInput: unknown,
+  cursorsInput: Readonly<{ projectItems?: unknown; projectSources?: unknown }>,
+  actor: AccessUser,
+  db: PrismaClient = getDb(),
+) {
+  const parsedProjectId = idSchema.safeParse(projectIdInput);
+  const parsedQuery = evidenceSearchSchema.safeParse(queryInput);
+  if (!parsedProjectId.success || !parsedQuery.success) return fail("PROJECT_PLAN_INVALID_INPUT");
+  const projectId = parsedProjectId.data;
+  const query = parsedQuery.data;
+  await assertProjectAccess(actor, projectId, "view", db);
+  const itemCursor = parseEvidenceSearchCursor(cursorsInput.projectItems);
+  const sourceCursor = parseEvidenceSearchCursor(cursorsInput.projectSources);
+
+  const [evidenceItems, evidenceSources] = await Promise.all([
+    itemCursor === "done" ? Promise.resolve([]) : db.projectItem.findMany({
+      where: {
+        AND: [
+          { projectId, reviewStatus: "confirmed", ...nonLegacyMcpProjectItemWhere },
+          ...(query ? [{ OR: [
+            { title: { contains: query, mode: "insensitive" as const } },
+            { content: { contains: query, mode: "insensitive" as const } },
+          ] }] : []),
+          ...(itemCursor === null ? [] : [{
+            OR: [
+              { updatedAt: { lt: new Date(itemCursor.timestamp) } },
+              { updatedAt: new Date(itemCursor.timestamp), id: { lt: itemCursor.id } },
+            ],
+          }]),
+        ],
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: PLAN_EVIDENCE_PAGE_SIZE + 1,
+      select: { id: true, title: true, type: true, updatedAt: true },
+    }),
+    sourceCursor === "done" ? Promise.resolve([]) : db.projectSource.findMany({
+      where: {
+        AND: [
+          { projectId, ...nonLegacyMcpProjectSourceWhere },
+          ...(query ? [{ OR: [
+            { externalRef: { contains: query, mode: "insensitive" as const } },
+            { contentText: { contains: query, mode: "insensitive" as const } },
+          ] }] : []),
+          ...(sourceCursor === null ? [] : [{
+            OR: [
+              { ingestedAt: { lt: new Date(sourceCursor.timestamp) } },
+              { ingestedAt: new Date(sourceCursor.timestamp), id: { lt: sourceCursor.id } },
+            ],
+          }]),
+        ],
+      },
+      orderBy: [{ ingestedAt: "desc" }, { id: "desc" }],
+      take: PLAN_EVIDENCE_PAGE_SIZE + 1,
+      select: { id: true, kind: true, externalRef: true, contentText: true, contentHash: true, ingestedAt: true },
+    }),
+  ]);
+
+  const hasMoreItems = evidenceItems.length > PLAN_EVIDENCE_PAGE_SIZE;
+  const hasMoreSources = evidenceSources.length > PLAN_EVIDENCE_PAGE_SIZE;
+  const itemPage = hasMoreItems ? evidenceItems.slice(0, PLAN_EVIDENCE_PAGE_SIZE) : evidenceItems;
+  const sourcePage = hasMoreSources ? evidenceSources.slice(0, PLAN_EVIDENCE_PAGE_SIZE) : evidenceSources;
+  const lastItem = itemPage.at(-1);
+  const lastSource = sourcePage.at(-1);
+  return Object.freeze({
+    projectItems: itemPage.map((item) => ({ id: item.id, kind: "projectItem" as const, label: item.title, detail: `${item.type} · 更新于 ${item.updatedAt.toISOString()}` })),
+    projectSources: sourcePage.map((source) => ({
+      id: source.id,
+      kind: "projectSource" as const,
+      label: (source.externalRef ?? source.contentText.trim().replace(/\s+/gu, " ").slice(0, 120)) || "项目资料来源",
+      detail: `${source.kind} · ${source.contentHash.slice(0, 12)}… · 纳入于 ${source.ingestedAt.toISOString()}`,
+    })),
+    nextCursors: {
+      projectItems: hasMoreItems && lastItem ? encodeEvidenceSearchCursor({ timestamp: lastItem.updatedAt.toISOString(), id: lastItem.id }) : null,
+      projectSources: hasMoreSources && lastSource ? encodeEvidenceSearchCursor({ timestamp: lastSource.ingestedAt.toISOString(), id: lastSource.id }) : null,
+    },
+  });
 }
 
 function fail(code: ProjectPlanErrorCode): never {

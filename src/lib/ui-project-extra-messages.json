@@ -529,5 +529,17 @@
   "项目仍有上传请求或文件解析租约，请稍后再删除": "This project still has uploads or file parsing in progress. Try deleting it again later.",
   "项目删除依赖正在变化或仍有受保护引用，请刷新后重试": "Project dependencies are changing or still have protected references. Reload before trying again.",
   "项目仍有未完成的 MCP 授权留痕，请先撤销授权并完成审计记录": "This project still has incomplete MCP grant records. Revoke the grants and complete the audit records first.",
-  "项目仍有待审批或已批准的 MCP 动作，请先取消或完成处理": "This project still has MCP actions awaiting approval or execution. Cancel or complete them first."
+  "项目仍有待审批或已批准的 MCP 动作，请先取消或完成处理": "This project still has MCP actions awaiting approval or execution. Cancel or complete them first.",
+  "工作区暂不可用": "Workspace temporarily unavailable",
+  "查找其他工作区": "Find another workspace",
+  "搜索工作区名称": "Search by workspace name",
+  "工作区搜索失败，请重试": "Could not search workspaces. Try again.",
+  "没有匹配的工作区": "No matching workspaces",
+  "工作区搜索结果": "Workspace search results",
+  "按标题或内容查找证据": "Find evidence by title or content",
+  "留空搜索可浏览全部活动证据": "Leave the search blank to browse all available evidence.",
+  "搜索证据": "Search evidence",
+  "证据搜索失败，请重试": "Could not search evidence. Try again.",
+  "没有匹配的证据": "No matching evidence",
+  "证据关联已移除，原始记录和审计保留。": "Evidence link removed. The original record and audit history are retained."
 }

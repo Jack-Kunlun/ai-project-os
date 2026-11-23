@@ -13,6 +13,7 @@ import { OperationPanel } from "@/components/operation-panel";
 import { ParentPageLink } from "@/components/parent-page-link";
 import { buildProjectHref, parseProjectPageState, PROJECT_PLAN_STATUS_VALUES } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
+import { formatProjectPlanDate } from "@/lib/project-plan-date";
 import {
   ProjectOperationsSummary,
   WorkItemOperations,
@@ -58,7 +59,7 @@ function userLabel(user: User): string {
 }
 
 function dateLabel(value: string | null, language: string, t: (text: string) => string): string {
-  return value ? new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", { dateStyle: "medium" }).format(new Date(value)) : t("未设置");
+  return formatProjectPlanDate(value, language, t("未设置"));
 }
 
 function statusTone(status: ObjectiveStatus | WorkItemStatus): string {
@@ -337,7 +338,7 @@ function ProjectPlanContent({ username, projectId, isSystemAdmin }: { username: 
 
         {selectedWorkItem ? <OperationPanel title={selectedWorkItem.title} triggerLabel={t("打开工作项详情")} open={detailOpen} onOpenChange={setDetailOpen} className={styles.hiddenOperationTrigger} description={t("查看范围、负责人、期限、依赖和关联证据；计划变更会经过服务器状态与证据校验。")}>
           <WorkItemDetail item={selectedWorkItem} objective={objectiveById.get(selectedWorkItem.objectiveId ?? "")} dependencies={currentPlan.dependencies.filter((entry) => entry.workItemId === selectedWorkItem.id).map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} evidenceLinks={currentPlan.evidenceLinks.filter((link) => link.workItemId === selectedWorkItem.id)} />
-          <WorkItemOperations key={`${selectedWorkItem.id}:${selectedWorkItem.updatedAt}`} item={selectedWorkItem} objectives={currentPlan.objectives} members={currentPlan.members} evidenceLinks={currentPlan.evidenceLinks.filter((link) => link.workItemId === selectedWorkItem.id)} evidenceCandidates={[...currentPlan.evidenceCandidates.projectItems, ...currentPlan.evidenceCandidates.projectSources]} dependencies={currentPlan.dependencies.filter((entry) => entry.workItemId === selectedWorkItem.id).map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} dependencyCandidates={activeWorkItems.filter((candidate) => candidate.id !== selectedWorkItem.id && !currentPlan.dependencies.some((dependency) => dependency.workItemId === selectedWorkItem.id && dependency.dependsOnId === candidate.id))} canEdit={currentPlan.canEdit} pending={pending} error={error} request={request} />
+          <WorkItemOperations key={`${selectedWorkItem.id}:${selectedWorkItem.updatedAt}`} projectId={projectId} item={selectedWorkItem} objectives={currentPlan.objectives} members={currentPlan.members} evidenceLinks={currentPlan.evidenceLinks.filter((link) => link.workItemId === selectedWorkItem.id)} evidenceCandidates={[...currentPlan.evidenceCandidates.projectItems, ...currentPlan.evidenceCandidates.projectSources]} dependencies={currentPlan.dependencies.filter((entry) => entry.workItemId === selectedWorkItem.id).map((dependency) => ({ ...dependency, title: workItemById.get(dependency.dependsOnId)?.title ?? "未知工作项" }))} dependencyCandidates={activeWorkItems.filter((candidate) => candidate.id !== selectedWorkItem.id && !currentPlan.dependencies.some((dependency) => dependency.workItemId === selectedWorkItem.id && dependency.dependsOnId === candidate.id))} canEdit={currentPlan.canEdit} pending={pending} error={error} request={request} />
           <DialogActions className={styles.detailActions}>{workItemTransitions[selectedWorkItem.status].map((status) => <button className="app-button-secondary" key={status} type="button" onClick={() => void request({ entity: "workItem", id: selectedWorkItem.id, expectedUpdatedAt: selectedWorkItem.updatedAt, status }, "PATCH", `work-item:${selectedWorkItem.id}:${status}`, t("工作项已更新为“{status}”。").replace("{status}", t(workItemStatusLabels[status])))} disabled={!currentPlan.canEdit || pending !== null}>{pending === `work-item:${selectedWorkItem.id}:${status}` ? t("更新中…") : t(workItemStatusLabels[status])}</button>)}</DialogActions>
         </OperationPanel> : null}
       </> : null}

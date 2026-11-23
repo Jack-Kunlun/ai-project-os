@@ -5,7 +5,7 @@ import { UiErrorText } from "@/components/ui-error-text";
 
 
 import { UiText, useTranslate } from "@/components/appearance-provider";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { OperationPanel } from "@/components/operation-panel";
 import { ShellIcon } from "@/components/shell-icon";
 
@@ -38,6 +38,11 @@ export type PlanEvidenceLink = {
   createdBy: PlanUser;
 };
 export type PlanEvidenceCandidate = { id: string; kind: "projectItem" | "projectSource"; label: string; detail: string };
+type EvidenceSearchResponse = {
+  projectItems: PlanEvidenceCandidate[];
+  projectSources: PlanEvidenceCandidate[];
+  nextCursors: { projectItems: string | null; projectSources: string | null };
+};
 export type PlanImpact = {
   id: string;
   repositorySyncRunId: string;
@@ -122,7 +127,8 @@ export function ProjectOperationsSummary({ health, impacts, workItems, canEdit, 
   </>;
 }
 
-export function WorkItemOperations({ item, objectives, members, evidenceLinks, evidenceCandidates, dependencies, dependencyCandidates, canEdit, pending, error, request }: {
+export function WorkItemOperations({ projectId, item, objectives, members, evidenceLinks, evidenceCandidates, dependencies, dependencyCandidates, canEdit, pending, error, request }: {
+  projectId: string;
   item: PlanWorkItem;
   objectives: PlanObjective[];
   members: PlanUser[];
@@ -138,11 +144,23 @@ export function WorkItemOperations({ item, objectives, members, evidenceLinks, e
   const t = useTranslate();
   const [draft, setDraft] = useState({ description: item.description ?? "", acceptanceCriteria: item.acceptanceCriteria ?? "", objectiveId: item.objectiveId ?? "", assigneeId: item.assigneeId ?? "", priority: item.priority, targetDate: dateInput(item.targetDate) });
   const [evidenceChoice, setEvidenceChoice] = useState("");
+  const [selectedEvidenceCandidate, setSelectedEvidenceCandidate] = useState<PlanEvidenceCandidate | null>(null);
+  const [evidenceSearchTerm, setEvidenceSearchTerm] = useState("");
+  const [evidenceSearchResults, setEvidenceSearchResults] = useState<PlanEvidenceCandidate[]>([]);
+  const [evidenceSearchCursors, setEvidenceSearchCursors] = useState<EvidenceSearchResponse["nextCursors"] | null>(null);
+  const [evidenceSearchSubmitted, setEvidenceSearchSubmitted] = useState(false);
+  const [evidenceSearchLoading, setEvidenceSearchLoading] = useState(false);
+  const [evidenceSearchError, setEvidenceSearchError] = useState(false);
   const [dependencyChoice, setDependencyChoice] = useState("");
   const [open, setOpen] = useState(false);
+  const evidenceSearchController = useRef<AbortController | null>(null);
   const terminal = item.status === "completed" || item.status === "cancelled";
   const linkedKeys = useMemo(() => new Set(evidenceLinks.flatMap((link) => link.kind === "repositorySync" ? [] : [`${link.kind}:${link.kind === "projectItem" ? link.projectItemId ?? "" : link.projectSourceId ?? ""}`])), [evidenceLinks]);
   const candidates = evidenceCandidates.filter((candidate) => !linkedKeys.has(`${candidate.kind}:${candidate.id}`));
+  const searchedCandidates = evidenceSearchResults.filter((candidate) => !linkedKeys.has(`${candidate.kind}:${candidate.id}`));
+  const candidateOptions = [...new Map([...candidates, ...searchedCandidates].map((candidate) => [`${candidate.kind}:${candidate.id}`, candidate])).values()];
+  const candidateKeys = new Set(candidateOptions.map((candidate) => `${candidate.kind}:${candidate.id}`));
+  if (selectedEvidenceCandidate && !linkedKeys.has(`${selectedEvidenceCandidate.kind}:${selectedEvidenceCandidate.id}`) && !candidateKeys.has(`${selectedEvidenceCandidate.kind}:${selectedEvidenceCandidate.id}`)) candidateOptions.push(selectedEvidenceCandidate);
 
   async function save(): Promise<boolean> {
     return request({ entity: "workItem", id: item.id, expectedUpdatedAt: item.updatedAt, description: draft.description || null, acceptanceCriteria: draft.acceptanceCriteria || null, objectiveId: draft.objectiveId || null, assigneeId: draft.assigneeId || null, priority: draft.priority, targetDate: draft.targetDate || null }, "PATCH", `save-operations:${item.id}`, "工作项运营信息已更新。");
@@ -152,6 +170,47 @@ export function WorkItemOperations({ item, objectives, members, evidenceLinks, e
     const [evidenceKind, evidenceId] = evidenceChoice.split(":", 2);
     if ((evidenceKind !== "projectItem" && evidenceKind !== "projectSource") || !evidenceId) return;
     if (await request({ operation: "linkEvidence", workItemId: item.id, evidenceKind, evidenceId, expectedUpdatedAt: item.updatedAt }, "POST", `link-evidence:${item.id}`, "证据已关联并固定快照。")) setOpen(false);
+  }
+
+  async function searchEvidence(cursors: EvidenceSearchResponse["nextCursors"] | null = null) {
+    evidenceSearchController.current?.abort();
+    const controller = new AbortController();
+    evidenceSearchController.current = controller;
+    setEvidenceSearchLoading(true);
+    setEvidenceSearchError(false);
+    try {
+      const params = new URLSearchParams({ evidenceSearch: evidenceSearchTerm.trim() });
+      if (cursors) {
+        params.set("itemsCursor", cursors.projectItems ?? "done");
+        params.set("sourcesCursor", cursors.projectSources ?? "done");
+      }
+      const response = await fetch(`/api/projects/${projectId}/plan?${params.toString()}`, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw Error();
+      const result = await response.json() as EvidenceSearchResponse;
+      if (controller.signal.aborted) return;
+      const next = [...result.projectItems, ...result.projectSources];
+      setEvidenceSearchResults((current) => {
+        const combined = cursors ? [...current, ...next] : next;
+        return combined.filter((candidate, index) => combined.findIndex((entry) => entry.kind === candidate.kind && entry.id === candidate.id) === index);
+      });
+      setEvidenceSearchCursors(result.nextCursors);
+      setEvidenceSearchSubmitted(true);
+    } catch {
+      if (!controller.signal.aborted) setEvidenceSearchError(true);
+    } finally {
+      if (!controller.signal.aborted) setEvidenceSearchLoading(false);
+    }
+  }
+
+  function handleEvidenceSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    evidenceSearchController.current?.abort();
+    setEvidenceSearchResults([]);
+    setEvidenceSearchCursors(null);
+    setEvidenceSearchSubmitted(false);
+    setEvidenceSearchError(false);
+    setEvidenceSearchLoading(false);
+    void searchEvidence();
   }
 
   async function addDependency() {
@@ -166,7 +225,29 @@ export function WorkItemOperations({ item, objectives, members, evidenceLinks, e
       {error ? <p role="alert" className="mb-4 rounded-field bg-app-danger-soft px-3 py-2 text-xs leading-5 text-app-danger-ink app-feedback-error"><UiErrorText text={error} /></p> : null}
       <div className="space-y-5">
         <section className="max-w-4xl border-t border-app-border pt-4 first:border-t-0 first:pt-0"><h3 className="text-sm font-semibold text-app-text"><UiText text={"工作项信息"} /></h3><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4"><label className="text-xs font-medium text-app-muted"><UiText text={"负责人"} /><select aria-label={t("负责人")} value={draft.assigneeId} onChange={(event) => setDraft((current) => ({ ...current, assigneeId: event.target.value }))} className="mt-1 min-h-10 w-full rounded-field border border-app-border bg-app-surface px-3 app-field"><option value=""><UiText text={"未分配负责人"} /></option>{members.map((member) => <option key={member.id} value={member.id}>{userLabel(member)}</option>)}</select></label><label className="text-xs font-medium text-app-muted"><UiText text={"所属目标"} /><select aria-label={t("所属目标")} value={draft.objectiveId} onChange={(event) => setDraft((current) => ({ ...current, objectiveId: event.target.value }))} className="mt-1 min-h-10 w-full rounded-field border border-app-border bg-app-surface px-3 app-field"><option value=""><UiText text={"不关联目标"} /></option>{objectives.filter((objective) => objective.status !== "completed" && objective.status !== "cancelled").map((objective) => <option key={objective.id} value={objective.id}>{objective.title}</option>)}</select></label><label className="text-xs font-medium text-app-muted"><UiText text={"优先级"} /><select aria-label={t("优先级")} value={draft.priority} onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as PlanWorkItem["priority"] }))} className="mt-1 min-h-10 w-full rounded-field border border-app-border bg-app-surface px-3 app-field">{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{t(label)} {t("优先级")}</option>)}</select></label><label className="text-xs font-medium text-app-muted"><UiText text={"目标日期"} /><input aria-label={t("目标日期")} type="date" value={draft.targetDate} onChange={(event) => setDraft((current) => ({ ...current, targetDate: event.target.value }))} className="mt-1 min-h-10 w-full rounded-field border border-app-border bg-app-surface px-3 app-field" /></label></div><div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-xs font-medium text-app-muted"><UiText text={"工作说明"} /><textarea aria-label={t("工作说明")} rows={3} maxLength={20_000} value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder={t("范围与背景")} className="mt-1 w-full rounded-field border border-app-border bg-app-surface px-3 py-2.5 app-field" /></label><label className="text-xs font-medium text-app-muted"><UiText text={"验收标准"} /><textarea aria-label={t("验收标准")} rows={3} maxLength={20_000} value={draft.acceptanceCriteria} onChange={(event) => setDraft((current) => ({ ...current, acceptanceCriteria: event.target.value }))} placeholder={t("填写可验证的验收标准")} className="mt-1 w-full rounded-field border border-app-border bg-app-surface px-3 py-2.5 app-field" /></label></div><DialogActions><button type="button" onClick={async () => { if (await save()) setOpen(false); }} disabled={!canEdit || pending !== null} className="app-button-primary mt-4 rounded-control font-semibold disabled:opacity-40">{pending === `save-operations:${item.id}` ? t("保存中…") : t("保存工作项")}</button></DialogActions></section>
-        <section className="max-w-4xl border-t border-app-border pt-4 first:border-t-0 first:pt-0"><h3 className="text-sm font-semibold text-app-text"><UiText text={"完成证据"} /></h3><div className="mt-4 flex flex-wrap gap-2">{evidenceLinks.map((link) => <span key={link.id} className={`inline-flex min-h-9 items-center gap-2 rounded-control px-3 py-1.5 text-xs ${link.stale ? "bg-app-danger-soft text-app-danger-ink" : "bg-app-surface-soft text-app-text"}`} title={t("证据指纹 {fingerprint}").replace("{fingerprint}", link.evidenceFingerprint)}><span className="font-semibold">{t(evidenceKindLabels[link.kind])}</span><span className="max-w-52 truncate">{link.label}</span>{link.stale ? <span><UiText text={"需复核"} /></span> : null}<button type="button" aria-label={t("移除证据 {label}").replace("{label}", link.label)} onClick={async () => { if (await request({ operation: "removeEvidence", evidenceLinkId: link.id, expectedUpdatedAt: item.updatedAt }, "POST", `remove-evidence:${link.id}`, "证据关联已移除，原始记录和审计保留。")) setOpen(false); }} disabled={pending !== null} className="app-icon-button app-icon-button--compact"><ShellIcon name="close" className="app-icon--compact" /></button></span>)}{evidenceLinks.length === 0 ? <span className="text-xs text-app-muted"><UiText text={"尚未关联完成证据"} /></span> : null}</div><div className="mt-3 flex flex-wrap gap-2"><select aria-label={t("选择计划证据")} value={evidenceChoice} onChange={(event) => setEvidenceChoice(event.target.value)} className="min-h-10 min-w-56 flex-1 rounded-field border border-app-border bg-app-surface px-3 text-xs app-field"><option value=""><UiText text={"选择已确认事实或活动来源"} /></option>{candidates.map((candidate) => <option key={`${candidate.kind}:${candidate.id}`} value={`${candidate.kind}:${candidate.id}`}>{t(candidate.kind === "projectItem" ? "事实" : "来源")} · {candidate.label}</option>)}</select><button type="button" onClick={() => void addEvidence()} disabled={pending !== null || evidenceChoice.length === 0} className="app-button-primary rounded-control font-semibold disabled:opacity-40"><UiText text={"关联证据"} /></button></div></section>
+        <section className="max-w-4xl border-t border-app-border pt-4 first:border-t-0 first:pt-0"><h3 className="text-sm font-semibold text-app-text"><UiText text={"完成证据"} /></h3><div className="mt-4 flex flex-wrap gap-2">{evidenceLinks.map((link) => <span key={link.id} className={`inline-flex min-h-9 items-center gap-2 rounded-control px-3 py-1.5 text-xs ${link.stale ? "bg-app-danger-soft text-app-danger-ink" : "bg-app-surface-soft text-app-text"}`} title={t("证据指纹 {fingerprint}").replace("{fingerprint}", link.evidenceFingerprint)}><span className="font-semibold">{t(evidenceKindLabels[link.kind])}</span><span className="max-w-52 truncate">{link.label}</span>{link.stale ? <span><UiText text={"需复核"} /></span> : null}<button type="button" aria-label={t("移除证据 {label}").replace("{label}", link.label)} onClick={async () => { if (await request({ operation: "removeEvidence", evidenceLinkId: link.id, expectedUpdatedAt: item.updatedAt }, "POST", `remove-evidence:${link.id}`, "证据关联已移除，原始记录和审计保留。")) setOpen(false); }} disabled={pending !== null} className="app-icon-button app-icon-button--compact"><ShellIcon name="close" className="app-icon--compact" /></button></span>)}{evidenceLinks.length === 0 ? <span className="text-xs text-app-muted"><UiText text={"尚未关联完成证据"} /></span> : null}</div>
+        <form onSubmit={handleEvidenceSearch} className="mt-3 rounded-panel border border-app-border bg-app-surface-soft p-3">
+          <label className="block text-xs font-medium text-app-text">{t("按标题或内容查找证据")}
+            <input aria-label={t("按标题或内容查找证据")} value={evidenceSearchTerm} onChange={(event) => {
+              setEvidenceSearchTerm(event.target.value);
+              setEvidenceSearchResults([]);
+              setEvidenceSearchCursors(null);
+              setEvidenceSearchSubmitted(false);
+              setEvidenceSearchError(false);
+              setEvidenceSearchLoading(false);
+              evidenceSearchController.current?.abort();
+            }} maxLength={100} className="app-field mt-2 min-h-10 w-full rounded-field border border-app-border bg-app-surface px-3 text-xs" />
+          </label>
+          <p className="mt-2 text-xs text-app-muted">{t("留空搜索可浏览全部活动证据")}</p>
+          <button type="submit" disabled={evidenceSearchLoading} className="app-button-secondary mt-3 rounded-control px-3 py-2 text-xs font-semibold disabled:opacity-50">{evidenceSearchLoading ? t("搜索中…") : t("搜索证据")}</button>
+          {evidenceSearchError ? <p role="alert" className="mt-3 text-xs text-app-danger-ink">{t("证据搜索失败，请重试")}</p> : null}
+          {evidenceSearchSubmitted && evidenceSearchResults.length === 0 && !evidenceSearchLoading ? <p className="mt-3 text-xs text-app-muted">{t("没有匹配的证据")}</p> : null}
+          {evidenceSearchCursors && (evidenceSearchCursors.projectItems !== null || evidenceSearchCursors.projectSources !== null) ? <button type="button" onClick={() => void searchEvidence(evidenceSearchCursors)} disabled={evidenceSearchLoading} className="app-button-secondary mt-3 rounded-control px-3 py-2 text-xs font-semibold disabled:opacity-50">{t("加载更多")}</button> : null}
+        </form>
+        <div className="mt-3 flex flex-wrap gap-2"><select aria-label={t("选择计划证据")} value={evidenceChoice} onChange={(event) => {
+          setEvidenceChoice(event.target.value);
+          setSelectedEvidenceCandidate(candidateOptions.find((candidate) => `${candidate.kind}:${candidate.id}` === event.target.value) ?? null);
+        }} className="min-h-10 min-w-56 flex-1 rounded-field border border-app-border bg-app-surface px-3 text-xs app-field"><option value=""><UiText text={"选择已确认事实或活动来源"} /></option>{candidateOptions.map((candidate) => <option key={`${candidate.kind}:${candidate.id}`} value={`${candidate.kind}:${candidate.id}`}>{t(candidate.kind === "projectItem" ? "事实" : "来源")} · {candidate.label}</option>)}</select><button type="button" onClick={() => void addEvidence()} disabled={pending !== null || evidenceChoice.length === 0} className="app-button-primary rounded-control font-semibold disabled:opacity-40"><UiText text={"关联证据"} /></button></div></section>
         <section className="max-w-4xl border-t border-app-border pt-4 first:border-t-0 first:pt-0"><h3 className="text-sm font-semibold text-app-text"><UiText text={"前置依赖"} /></h3><div className="mt-4 flex flex-wrap gap-2">{dependencies.map((dependency) => <span key={dependency.id} className="inline-flex min-h-9 items-center gap-2 rounded-control bg-app-surface-soft px-3 py-1.5 text-xs text-app-text">{dependency.title}<button type="button" aria-label={t("移除依赖")} onClick={async () => { if (await request({ operation: "removeDependency", dependencyId: dependency.id, expectedUpdatedAt: item.updatedAt }, "POST", `remove-dependency:${dependency.id}`, "工作项依赖已移除，审计记录保留。")) setOpen(false); }} disabled={pending !== null} className="app-icon-button app-icon-button--compact"><ShellIcon name="close" className="app-icon--compact" /></button></span>)}{dependencies.length === 0 ? <span className="text-xs text-app-muted"><UiText text={"无前置依赖"} /></span> : null}</div>{dependencyCandidates.length > 0 ? <div className="mt-3 flex flex-wrap gap-2"><select aria-label={t("选择前置依赖")} value={dependencyChoice} onChange={(event) => setDependencyChoice(event.target.value)} className="min-h-10 min-w-56 flex-1 rounded-field border border-app-border bg-app-surface px-3 text-xs app-field"><option value=""><UiText text={"选择前置工作项"} /></option>{dependencyCandidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}</select><button type="button" onClick={() => void addDependency()} disabled={pending !== null || !dependencyChoice} className="app-button-primary rounded-control font-semibold disabled:opacity-40"><UiText text={"添加依赖"} /></button></div> : null}</section>
       </div>
     </OperationPanel></div> : null}

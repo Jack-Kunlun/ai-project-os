@@ -1,0 +1,214 @@
+{
+  "schema": 1,
+  "date": "2026-11-23",
+  "timezone": "Asia/Shanghai",
+  "tasks": [
+    "T-038",
+    "T-039",
+    "T-040",
+    "T-041",
+    "T-042",
+    "T-043",
+    "T-044",
+    "T-045",
+    "T-046",
+    "T-047",
+    "T-048",
+    "T-049",
+    "T-050"
+  ],
+  "version": "1.2.27",
+  "tag": "v1.2.27",
+  "tagType": "annotated",
+  "revision": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+  "sourceRevision": "b3d30d1539066fcc36193d7ef9aae66d7fcd9e58",
+  "sourceVersion": "1.2.26",
+  "ci": {
+    "runId": 45100453477,
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45100453477",
+    "conclusion": "success",
+    "risk": "high",
+    "planFingerprint": "4ecea5ea8523ccbb7a910f76fc8f0e70cfbc87c93ebac9fd10687903929f4675",
+    "unit": {
+      "schemaVersion": 1,
+      "kind": "unit",
+      "base": "b3d30d1539066fcc36193d7ef9aae66d7fcd9e58",
+      "target": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+      "releaseEligible": true,
+      "planFingerprint": "4ecea5ea8523ccbb7a910f76fc8f0e70cfbc87c93ebac9fd10687903929f4675",
+      "mode": "full",
+      "status": "passed",
+      "fingerprint": "8b7bae1d65ecbf262ea8c77be94712844e0d321b21c5509a9f5d9427f08ce530"
+    },
+    "browser": {
+      "schemaVersion": 1,
+      "kind": "browser",
+      "base": "b3d30d1539066fcc36193d7ef9aae66d7fcd9e58",
+      "target": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+      "releaseEligible": true,
+      "planFingerprint": "4ecea5ea8523ccbb7a910f76fc8f0e70cfbc87c93ebac9fd10687903929f4675",
+      "mode": "full",
+      "status": "passed",
+      "testCount": 101,
+      "executedCount": 94,
+      "skippedCount": 7,
+      "fingerprint": "29cb8e4fbcdb46d5be2ef41fbc39e121b3e2e6bac84c7da2580839f18e59bc94"
+    },
+    "unitCounts": {
+      "tests": 1756,
+      "passed": 1582,
+      "skipped": 174,
+      "failed": 0
+    },
+    "postgresGates": {
+      "passed": 91,
+      "total": 91
+    },
+    "verifiedSteps": [
+      "Check performance budget from the exported build output",
+      "Run production browser and accessibility checks on the built images",
+      "Run isolated release candidate with the same image IDs",
+      "Publish immutable images for manual release workflow",
+      "Run phone authentication gate when affected",
+      "Run PostgreSQL 18 OID10 gate when affected",
+      "Run static checks"
+    ],
+    "sameImageCandidate": {
+      "version": "1.2.27",
+      "revision": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+      "releaseEligible": true,
+      "migrations": 150,
+      "health": "ok",
+      "restartPersistence": "ok",
+      "businessDataPersistence": "ok",
+      "workerRestart": "ok",
+      "cleanup": "verified"
+    },
+    "browserCounts": {
+      "tests": 101,
+      "passed": 94,
+      "skipped": 7,
+      "failed": 0,
+      "flaky": 0
+    },
+    "performanceKiB": {
+      "all static client assets": {
+        "actual": 873.7,
+        "limit": 875.0
+      },
+      "route /dashboard": {
+        "actual": 161.2,
+        "limit": 165.0
+      },
+      "route /personal/projects": {
+        "actual": 161.2,
+        "limit": 166.0
+      },
+      "route /guide": {
+        "actual": 155.9,
+        "limit": 156.0
+      }
+    }
+  },
+  "release": {
+    "runId": 45103763521,
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45103763521",
+    "conclusion": "success",
+    "isDraft": false,
+    "isPrerelease": false,
+    "publishedAt": "2026-11-23T03:14:53Z",
+    "releaseUrl": "https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.27",
+    "images": {
+      "schema": 1,
+      "revision": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+      "version": "1.2.27",
+      "runId": 45100453477,
+      "images": {
+        "app": {
+          "ref": "ghcr.io/jack-kunlun/ai-project-os-app@sha256:4b88f486debc7bd7edf8d1421f4dca836b2a488d7850677d1695ca7a2c221095",
+          "id": "sha256:2048ef41dfedf064e5c9cc2725451b60328feea816f908c463916c8c47b8bb3c"
+        },
+        "worker": {
+          "ref": "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:ad85167eb8c128feeba632062ab5915b82bf97883820eda88c0d2a4801a31274",
+          "id": "sha256:a5829a47ef90a5e815143abc918f25fc238c98d249c7cf1f117469e08a3ecda5"
+        },
+        "migrate": {
+          "ref": "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:ade16584b3240aa2547566b90a6a958af7d1e4ac7e1606629980fd848edf9087",
+          "id": "sha256:006d4779fddf5a6e48edef1a2a1df1e8bc73b1cd3f1278f0713838b7de4f2511"
+        }
+      }
+    },
+    "receipt": "STABLE_DEPLOY_OK tag=v1.2.27 revision=fd9b92c3ca53558a7545eeb48492aa1ad5e48337 migration_count=150 backup=not-required restore=not-required",
+    "receiptSha256": "22fe2be2621ab014641d78e5dc0fa0f8cbc92e52a4c4fc6e8977605b9b134e0c",
+    "migrationCount": 150,
+    "migrationDelta": "none",
+    "backup": "not-required",
+    "restore": "not-required",
+    "receiptArtifactId": 14786374481,
+    "receiptArtifactZipSha256": "0ada7f51811b60ba8ab9861661083937c7acfe08d65c6d186560b4ab2fe1dc00",
+    "verifiedProductionImageDigests": [
+      "sha256:4b88f486debc7bd7edf8d1421f4dca836b2a488d7850677d1695ca7a2c221095",
+      "sha256:ad85167eb8c128feeba632062ab5915b82bf97883820eda88c0d2a4801a31274",
+      "sha256:ade16584b3240aa2547566b90a6a958af7d1e4ac7e1606629980fd848edf9087"
+    ]
+  },
+  "publicHealth": {
+    "status": "ok",
+    "version": "1.2.27",
+    "database": "up",
+    "worker": {
+      "status": "up",
+      "heartbeatAgeMs": 1256,
+      "consecutiveFailures": 0
+    },
+    "latencyMs": 2,
+    "timestamp": "2026-11-23T03:15:32.507Z"
+  },
+  "publicMobileBrowser": {
+    "/helpGuide": "/login",
+    "/contactGuide": "/login",
+    "registerReturn": true,
+    "validPhonePasteForms": 3,
+    "titles": {
+      "/help": "Help documentation · AI Project OS",
+      "/contact": "Contact · AI Project OS",
+      "/privacy": "Privacy policy · AI Project OS",
+      "/terms": "Terms of service · AI Project OS"
+    }
+  },
+  "coverageNotes": [
+    "Authenticated workflows used isolated PostgreSQL.",
+    "The production public browser used same-origin read requests. No production SMS, account, credit or external provider operation was submitted."
+  ],
+  "priorCandidates": [
+    {
+      "runId": 45094175155,
+      "issue": "Route performance budget and old registration href contract; superseded."
+    },
+    {
+      "runId": 45095949408,
+      "issue": "Six browser failures, including selector and write-completion assumptions; revised acceptance cases on the final candidate."
+    }
+  ],
+  "maintenance": {
+    "cacheBudget": {
+      "status": "met",
+      "targetMet": true,
+      "targetBytes": 2000000000,
+      "protectionVerified": true,
+      "measuredAt": "2026-11-23T03:14:31.226Z"
+    },
+    "imageCleanup": {
+      "status": "OK",
+      "removedCount": 3,
+      "protectionVerified": true,
+      "retainedCurrentAndPrevious": true,
+      "unconfirmedAttemptCount": 0
+    }
+  },
+  "localBrowserVerification": {
+    "loginStyle": "passed",
+    "workspaceAndActionDialogs": "passed",
+    "fullStyleMatrix": "local 384 MiB Node heap limit reached; full browser suite passed in CI"
+  }
+}

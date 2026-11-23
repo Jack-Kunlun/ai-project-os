@@ -138,3 +138,11 @@ C-017 / T-011、T-012、T-036，2026-11-20。发布前公开健康为 v1.2.25，
 最终接收：[发布证据 JSON](evidence/release-20261120/release.json)绑定 annotated v1.2.26 / b3d30d1539066fcc36193d7ef9aae66d7fcd9e58、成功的 [CI 44686520602](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/44686520602) 和 [发布 44690973958](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/44690973958)。独立 review 无阻断项；源码 1579 通过/174 配置跳过，PostgreSQL 91/91 门禁通过，实际浏览器 85 通过/6 配置跳过/0 失败/0 flaky，同镜像重启与业务持久化检查通过。服务端预检识别说明格式遗漏后的定向 4 项复验通过，原失败详见 A-043。
 
 生产 STABLE_DEPLOY_OK 回执、实际镜像摘要与 CI 清单完全一致；150 条账本、无新增迁移，backup/restore=not-required。2026-11-20 15:02:09（Asia/Shanghai）公网 v1.2.26 / 应用、数据库及 Worker 健康 / 连续失败 0。旧镜像保护与清理成功，缓存预算 met。正式 [GitHub Release](https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.26) 已发布，非草稿/预发布。真实外部模型、Git、OIDC、短信和第三方 MCP 未联调，不将隔离 CI 当其现场证明。
+
+## E-025 / v1.2.26 发布后缺陷抽查
+
+2026-11-23，T-037。[逐项复现、证据和修复验收条件](BUG-AUDIT-20261123.md)记录 T-038～T-049。匿名线上 Chromium 验证公开导航、剪贴板输入及英语标题。实际 React 组件在隔离 Chromium 中使用受控请求验证搜索竞争、额度预览、通知与分页列表；另核对源函数、接口与数据库查询边界。生产标签 v1.2.26，工作树基线 e616d60，公网健康正常；未使用真实生产账户或执行交易。
+
+## E-026 / v1.2.27 缺陷修复与发布验收
+
+T-038～T-050 对照 E-025 复验。本地独立 PostgreSQL 与 Next 应用中，真实普通账号进入通知中心，20 项首页在轮询时刷新；加载末页后保持 21 项，重复点击当前筛选保持结果，切换筛选恢复轮询。隔离接口分别返回 51 个活跃与 51 个归档项目，个人知识页均可选择第 51 项并发起限定范围搜索。对应浏览器用例各通过 1 项。上传说明逐项对照 DEFAULT_UPLOAD_POLICY 与 MAX_IMAGE_PIXELS，上传策略测试 5 项通过。

@@ -118,35 +118,42 @@ test("T-052: a late older-page response cannot replace the first page refreshed 
 
   let releaseOlderPage!: () => void;
   let markOlderPageStarted!: () => void;
+  let markOlderPageFulfilled!: () => void;
   const olderPageGate = new Promise<void>((resolve) => { releaseOlderPage = resolve; });
   const olderPageStarted = new Promise<void>((resolve) => { markOlderPageStarted = resolve; });
+  const olderPageFulfilled = new Promise<void>((resolve) => { markOlderPageFulfilled = resolve; });
   let olderPageRequestCount = 0;
   let firstPageRefreshCount = 0;
   let olderPageWasRequested = false;
   await page.route(`**/api/workspaces/${fixture.workspaceId}/invitations*`, async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     const cursor = new URL(route.request().url()).searchParams.get("cursor");
-    const response = await route.fetch();
-    const payload = await response.json() as { invitations: unknown[]; nextCursor: string | null };
-    const status = response.status();
     if (cursor !== null) {
       olderPageWasRequested = true;
       olderPageRequestCount += 1;
-      if (olderPageRequestCount === 1) {
-        markOlderPageStarted();
-        await olderPageGate;
-      }
     } else if (olderPageWasRequested) {
       firstPageRefreshCount += 1;
     }
-    return route.fulfill({ status, contentType: "application/json", json: payload });
+    const response = await route.fetch();
+    const payload = await response.json() as { invitations: unknown[]; nextCursor: string | null };
+    const status = response.status();
+    if (cursor !== null && olderPageRequestCount === 1) {
+      markOlderPageStarted();
+      await olderPageGate;
+    }
+    await route.fulfill({ status, contentType: "application/json", json: payload });
+    if (cursor !== null && olderPageRequestCount === 1) markOlderPageFulfilled();
   });
 
   try {
     await page.goto(`/team/${fixture.workspaceId}?view=invitations`);
     await expect(page.getByRole("button", { name: "下一页", exact: true })).toBeEnabled();
-    await page.getByRole("button", { name: "下一页", exact: true }).click();
+    await page.getByRole("button", { name: "下一页", exact: true }).evaluate((button) => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     await olderPageStarted;
+    expect(olderPageRequestCount).toBe(1);
 
     const newEmail = `fresh-page-${randomUUID().slice(0, 8)}@example.test`;
     await page.getByRole("button", { name: "创建邀请", exact: true }).click();
@@ -158,7 +165,14 @@ test("T-052: a late older-page response cannot replace the first page refreshed 
     await expect(page.getByText(newEmail, { exact: true })).toBeVisible();
     await expect(page.getByText(/邀请记录第\s*1页/u)).toBeVisible();
 
+    const olderPageResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === `/api/workspaces/${fixture.workspaceId}/invitations` && url.searchParams.has("cursor");
+    });
     releaseOlderPage();
+    await olderPageResponse;
+    await olderPageFulfilled;
+    expect(olderPageRequestCount).toBe(1);
     await expect(page.getByText(newEmail, { exact: true })).toBeVisible();
     await expect(page.getByText(oldestInvitation.email!, { exact: true })).toHaveCount(0);
     await expect(page.getByText(/邀请记录第\s*1页/u)).toBeVisible();
@@ -214,6 +228,10 @@ test("T-055: an activity 503 leaves independent team overview and permission pro
 
 test("T-061: a delayed manual backup response cannot replace the 30-second poll result", async ({ page }) => {
   await signInR02Admin(page);
+  const origin = new URL(page.url()).origin;
+  const templateResponse = await page.request.get(new URL("/api/system/operations/backups", origin).toString());
+  expect(templateResponse.status()).toBe(200);
+  const snapshotTemplate = await templateResponse.json() as { sourceStatus: "ready" | "not_configured" | "invalid"; recoveryDrillSourceStatus: "ready" | "not_configured" | "invalid" } & Record<string, unknown>;
   await page.clock.install({ time: new Date("2026-11-23T03:00:00.000Z") });
   let requestCount = 0;
   let releaseOldRequest!: () => void;
@@ -222,14 +240,12 @@ test("T-061: a delayed manual backup response cannot replace the 30-second poll 
   const oldRequestStarted = new Promise<void>((resolve) => { markOldRequestStarted = resolve; });
   await page.route("**/api/system/operations/backups", async (route) => {
     requestCount += 1;
-    const response = await route.fetch();
-    const snapshot = JSON.parse((await response.body()).toString("utf8")) as { sourceStatus: "ready" | "not_configured" | "invalid"; recoveryDrillSourceStatus: "ready" | "not_configured" | "invalid" } & Record<string, unknown>;
     if (requestCount === 1) {
       markOldRequestStarted();
       await oldRequestGate;
-      return route.fulfill({ status: response.status(), contentType: "application/json", json: { ...snapshot, sourceStatus: "invalid", recoveryDrillSourceStatus: "invalid" } });
+      return route.fulfill({ status: 200, contentType: "application/json", json: { ...snapshotTemplate, sourceStatus: "invalid", recoveryDrillSourceStatus: "invalid" } });
     }
-    return route.fulfill({ status: response.status(), contentType: "application/json", json: { ...snapshot, sourceStatus: "not_configured", recoveryDrillSourceStatus: "not_configured" } });
+    return route.fulfill({ status: 200, contentType: "application/json", json: { ...snapshotTemplate, sourceStatus: "not_configured", recoveryDrillSourceStatus: "not_configured" } });
   });
 
   try {

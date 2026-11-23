@@ -30,7 +30,7 @@
 | UI-012 | `/admin/models/routes` | /admin/models | 重定向 | 通过（本地 C7） | [E-022](UI-REMEDIATION-20261115.md) / [逐入口结果](evidence/ui-remediation-20261115/route-coverage.json) |
 | UI-013 | `/admin/operations/backups` | 资源与备份 | 页面 | 通过（本地 C7） | [E-022](UI-REMEDIATION-20261115.md) / [逐入口结果](evidence/ui-remediation-20261115/route-coverage.json) |
 | UI-014 | `/admin/operations/failures` | 失败收件箱 | 页面 | 通过（本地 C7） | [E-022](UI-REMEDIATION-20261115.md) / [逐入口结果](evidence/ui-remediation-20261115/route-coverage.json) |
-| UI-015 | `/admin/operations/probes` | 探测预算 | 页面 | 通过（本地 C7） | [E-022](UI-REMEDIATION-20261115.md) / [逐入口结果](evidence/ui-remediation-20261115/route-coverage.json) |
+| UI-015 | `/admin/operations/probes` | 模型与能力 | 旧额度页登录后跳转 | T-071 | 见本轮验收 |
 | UI-016 | `/admin/sms` | 短信配置 | 页面 | 通过（本地 C7） | [E-022](UI-REMEDIATION-20261115.md) / [逐入口结果](evidence/ui-remediation-20261115/route-coverage.json) |
 | UI-017 | `/admin/users` | 用户列表 | 页面 | 通过（本地 C7） | [E-022](UI-REMEDIATION-20261115.md) / [逐入口结果](evidence/ui-remediation-20261115/route-coverage.json) |
 | UI-018 | `/admin/users/[userId]` | 用户详情 | 页面 | 通过（本地 C7） | [E-022](UI-REMEDIATION-20261115.md) / [逐入口结果](evidence/ui-remediation-20261115/route-coverage.json) |

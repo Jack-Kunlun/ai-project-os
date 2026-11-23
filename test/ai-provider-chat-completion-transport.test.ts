@@ -191,3 +191,28 @@ test("each supported default embedding model requests and checks its configured 
     globalThis.fetch = previousFetch;
   }
 });
+
+
+test("Qwen connectivity checks disable thinking on each recommended generation and vision model", async () => {
+  const definition = getProviderDefinition("qwen");
+  const connection = { ...deepseekConnection, kind: definition.kind, baseUrl: definition.baseUrl };
+  const previousFetch = globalThis.fetch;
+  const sent: string[] = [];
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.enable_thinking, false);
+    sent.push(body.model);
+    return response("OK", "stop");
+  };
+  try {
+    for (const modelId of definition.generationModelSuggestions) {
+      await invokeChatCompletion({ connection, modelId, operation: "sourceSummary", messages: [{ role: "user", content: "Reply OK" }], maxOutputTokens: 1024, disableThinking: true });
+    }
+    for (const modelId of definition.visionModelSuggestions) {
+      await invokeVisionCompletion({ connection, modelId, image: Buffer.from([0]), mimeType: "image/png", prompt: "OK?", maxOutputTokens: 1024, disableThinking: true });
+    }
+    assert.deepEqual(sent, [...definition.generationModelSuggestions, ...definition.visionModelSuggestions]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

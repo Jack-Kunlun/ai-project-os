@@ -287,8 +287,13 @@ function chatModelParameters(connection: RuntimeConnection, modelId: string, max
   if (connection.kind === "openai" && /^gpt-6\.2-(sol|astra)(?:$|-)/u.test(modelId)) {
     return { max_completion_tokens: maxOutputTokens, reasoning_effort: "low" };
   }
-  if (connection.kind === "qwen" && /^(?:qwen4-max|qwen3\.8-(?:max|flash))(?:$|-)/u.test(modelId)) {
-    return { max_tokens: maxOutputTokens, temperature, ...(disableThinking ? { enable_thinking: false } : { preserve_thinking: false }) };
+  if (connection.kind === "qwen") {
+    if (disableThinking && /^(?:qwen4-max|qwen3\.8-(?:max|flash)|qwen3\.7-plus)(?:$|-)/u.test(modelId)) {
+      return { max_tokens: maxOutputTokens, temperature, enable_thinking: false };
+    }
+    if (/^(?:qwen4-max|qwen3\.8-(?:max|flash))(?:$|-)/u.test(modelId)) {
+      return { max_tokens: maxOutputTokens, temperature, preserve_thinking: false };
+    }
   }
   return { max_tokens: maxOutputTokens, temperature };
 }

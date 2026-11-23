@@ -95,7 +95,7 @@ async function verifyListRace(page: Page, kind: "users" | "credits"): Promise<vo
   oldInitial.release.resolve();
   await oldInitial.completed.promise;
   const panel = page.locator(kind === "users" ? "section[aria-labelledby='admin-users-list-title']" : "section[aria-labelledby='platform-credit-governance-title']");
-  await expect(panel.getByText("alice", { exact: true })).toBeVisible();
+  await expect(panel.getByText("alice", { exact: true }).first()).toBeVisible();
   await expect(panel.getByText("old-default-user", { exact: true })).toHaveCount(0);
 
   await search.fill("bob");
@@ -106,7 +106,7 @@ async function verifyListRace(page: Page, kind: "users" | "credits"): Promise<vo
   await oldSearchError.completed.promise;
   if (kind === "users") {
     await expect(page.locator("section[aria-labelledby='admin-users-list-title']").getByText("读取中…", { exact: true })).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(panel.getByRole("alert")).toHaveCount(0);
   } else {
     await expect(panel.locator(":scope > div").first().getByText("读取中…", { exact: true })).toBeVisible();
     await expect(panel.getByRole("status")).toHaveCount(0);
@@ -114,7 +114,7 @@ async function verifyListRace(page: Page, kind: "users" | "credits"): Promise<vo
 
   latestSearch.release.resolve();
   await latestSearch.completed.promise;
-  await expect(panel.getByText("carol", { exact: true })).toBeVisible();
+  await expect(panel.getByText("carol", { exact: true }).first()).toBeVisible();
   await expect(panel.getByText("stale request error", { exact: true })).toHaveCount(0);
   if (kind === "users") {
     await expect(panel.getByText("读取中…", { exact: true })).toHaveCount(0);
@@ -128,7 +128,9 @@ async function installCreditPreviewRoutes(page: Page, captured: { expiresAt: str
   await page.route("**/api/admin/credits/grants?*", (route) => fulfillJson(route, creditsPayload("fixture-user")));
   await page.route("**/api/admin/credits/grants/preview", async (route) => {
     captured.push(route.request().postDataJSON() as { expiresAt: string });
-    await fulfillJson(route, { error: { message: "隔离预览已捕获" } }, 422);
+    await fulfillJson(route, {
+      error: { code: "PLATFORM_CREDIT_GOVERNANCE_INVALID_INPUT", message: "平台额度治理请求无效" },
+    }, 400);
   });
 }
 
@@ -159,7 +161,9 @@ async function verifyCreditExpiry(page: Page, scenario: {
   await expect.poll(() => captured.length).toBe(capturedFrom + 2);
   expect(captured[capturedFrom + 1]!.expiresAt).toBe(scenario.manualIso);
   await expect(expiry).toHaveValue("2026-12-24T11:45");
-  await expect(page.getByText("隔离预览已捕获", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "关闭窗口", exact: true }).click();
+  await expect(page.locator("section[aria-labelledby='platform-credit-governance-title']").getByRole("status"))
+    .toHaveText("请核对当前状态，必要时联系管理员。");
 }
 
 test("admin user list keeps current search after old success and error responses", async ({ page }) => {

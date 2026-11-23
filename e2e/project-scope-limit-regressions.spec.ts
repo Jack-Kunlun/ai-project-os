@@ -37,7 +37,7 @@ test.describe("project scope limits", () => {
     }, { timeout: 120_000 });
 
     const storageKey = `ai-project-os:workspace:${user.username}`;
-    const picker = page.locator("#user-shell-workspace-picker");
+    const picker = page.getByRole("combobox", { name: "切换工作空间", exact: true });
     await page.evaluate((key) => localStorage.removeItem(key), storageKey);
     await page.reload();
     await expect(picker).toBeEnabled({ timeout: 15_000 });
@@ -63,11 +63,15 @@ test.describe("project scope limits", () => {
     await page.getByRole("button", { name: "查找其他工作区", exact: true }).click();
     const browseDialog = page.getByRole("dialog", { name: "查找其他工作区", exact: true });
     await browseDialog.getByRole("button", { name: "搜索工作区名称", exact: true }).click();
+    const browseResults = browseDialog.getByRole("list", { name: "工作区搜索结果", exact: true });
+    await expect(browseResults.getByRole("button").first()).toBeVisible();
     const browsedTarget = browseDialog.getByRole("button", { name: targetName, exact: true });
-    for (let pageIndex = 0; pageIndex < 6 && !(await browsedTarget.isVisible().catch(() => false)); pageIndex += 1) {
+    while (!(await browsedTarget.isVisible().catch(() => false))) {
       const next = browseDialog.getByRole("button", { name: "下一页", exact: true });
-      if (!(await next.isVisible().catch(() => false))) break;
+      if (!(await next.isVisible().catch(() => false)) || !(await next.isEnabled().catch(() => false))) break;
+      const previousCount = await browseResults.getByRole("button").count();
       await next.click();
+      await expect.poll(() => browseResults.getByRole("button").count()).toBeGreaterThan(previousCount);
     }
     await expect(browsedTarget).toBeVisible();
   });
@@ -94,6 +98,8 @@ test.describe("project scope limits", () => {
       data: { operation: "createObjective", title: `Date target ${suffix}`, targetDate: "2026-11-23" },
     });
     expect(objectiveResponse.status()).toBe(201);
+    const { objective } = await objectiveResponse.json() as { objective: { id: string; targetDate: string | null } };
+    expect(objective.targetDate).toBe("2026-11-23T00:00:00.000Z");
     const workItemResponse = await page.request.post(planUrl, {
       headers: { origin, "content-type": "application/json" },
       data: { operation: "createWorkItem", title: `Evidence target ${suffix}` },
@@ -160,7 +166,9 @@ test.describe("project scope limits", () => {
     await expect(page.getByRole("heading", { name: `Scope evidence ${suffix}`, exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("button", { name: `查看工作项：Evidence target ${suffix}`, exact: true })).toBeVisible();
     await page.locator("#objectives").locator("summary").click();
-    await expect(page.locator("#objectives").getByText("2026年11月23日", { exact: true })).toBeVisible();
+    const dateObjective = page.locator("#objectives article").filter({ hasText: `Date target ${suffix}` });
+    await expect(dateObjective).toHaveCount(1);
+    await expect(dateObjective).toContainText("2026年11月23日");
 
     await page.getByRole("button", { name: `查看工作项：Evidence target ${suffix}`, exact: true }).click();
     await page.getByRole("button", { name: "编辑与管理", exact: true }).click();
@@ -182,10 +190,19 @@ test.describe("project scope limits", () => {
     await expect(evidenceSelect.locator(`option[value="projectSource:${targetSourceId}"]`)).toHaveCount(1);
 
     await evidenceSelect.selectOption(`projectItem:${targetItemId}`);
+    const itemLinkResponsePromise = page.waitForResponse((response) =>
+      response.url().endsWith(planUrl) && response.request().method() === "POST",
+    );
     await managementDialog.getByRole("button", { name: "关联证据", exact: true }).click();
+    const itemLinkResponse = await itemLinkResponsePromise;
+    const itemLinkPayload = await itemLinkResponse.json().catch(() => null);
+    expect(itemLinkResponse.ok(), `Project item evidence link failed: ${itemLinkResponse.status()} ${JSON.stringify(itemLinkPayload)}`).toBe(true);
     await expect(page.getByRole("dialog", { name: `Evidence target ${suffix}`, exact: true })).toBeVisible();
-    let savedPlan = await page.request.get(planUrl).then((response) => response.json()) as { evidenceLinks: Array<{ projectItemId: string | null; projectSourceId: string | null }> };
-    expect(savedPlan.evidenceLinks.some((link) => link.projectItemId === targetItemId)).toBe(true);
+    type SavedPlan = { evidenceLinks: Array<{ projectItemId: string | null; projectSourceId: string | null }> };
+    await expect.poll(async () => {
+      const savedPlan = await page.request.get(planUrl).then((response) => response.json()) as SavedPlan;
+      return savedPlan.evidenceLinks.some((link) => link.projectItemId === targetItemId);
+    }).toBe(true);
 
     await page.getByRole("button", { name: "编辑与管理", exact: true }).click();
     const sourceManagementDialog = page.getByRole("dialog", { name: `管理工作项“Evidence target ${suffix}”`, exact: true });
@@ -194,8 +211,16 @@ test.describe("project scope limits", () => {
     await sourceManagementDialog.getByRole("button", { name: "搜索证据", exact: true }).click();
     const sourceEvidenceSelect = sourceManagementDialog.getByLabel("选择计划证据", { exact: true });
     await sourceEvidenceSelect.selectOption(`projectSource:${targetSourceId}`);
+    const sourceLinkResponsePromise = page.waitForResponse((response) =>
+      response.url().endsWith(planUrl) && response.request().method() === "POST",
+    );
     await sourceManagementDialog.getByRole("button", { name: "关联证据", exact: true }).click();
-    savedPlan = await page.request.get(planUrl).then((response) => response.json()) as typeof savedPlan;
-    expect(savedPlan.evidenceLinks.some((link) => link.projectSourceId === targetSourceId)).toBe(true);
+    const sourceLinkResponse = await sourceLinkResponsePromise;
+    const sourceLinkPayload = await sourceLinkResponse.json().catch(() => null);
+    expect(sourceLinkResponse.ok(), `Source evidence link failed: ${sourceLinkResponse.status()} ${JSON.stringify(sourceLinkPayload)}`).toBe(true);
+    await expect.poll(async () => {
+      const savedPlan = await page.request.get(planUrl).then((response) => response.json()) as SavedPlan;
+      return savedPlan.evidenceLinks.some((link) => link.projectSourceId === targetSourceId);
+    }).toBe(true);
   });
 });

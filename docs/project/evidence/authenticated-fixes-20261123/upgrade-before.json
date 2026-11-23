@@ -1,0 +1,69 @@
+{
+  "database": "aios_probe_150_151_20261123_074900_56252",
+  "sourceRelease": "v1.2.27",
+  "sourceCommit": "fd9b92c",
+  "appliedMigrationCount": 150,
+  "seedMethod": {
+    "running": "legacy service with global fetch replaced by never-resolving local stub",
+    "reserved": "fixture SQL through Prisma inside guarded transaction"
+  },
+  "externalProviderRequests": 0,
+  "interceptedLocalFetchCalls": 1,
+  "budget": {
+    "id": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+    "version": 1,
+    "unitLimit": 150,
+    "reservedUnits": 2,
+    "settledUnits": 2,
+    "heldUnits": 0
+  },
+  "attempts": [
+    {
+      "id": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "subject": "savedConnection",
+      "status": "running",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "plannedUnits": 1,
+      "dispatchedUnits": 1,
+      "settledUnits": 0,
+      "releasedUnits": 0,
+      "heldUnits": 0,
+      "leaseExpiresAt": "2026-11-23T07:53:19.414Z"
+    },
+    {
+      "id": "f2c4cba2-d993-4870-a07f-b0a4e833f8d7",
+      "subject": "savedConnection",
+      "status": "reserved",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "plannedUnits": 1,
+      "dispatchedUnits": 0,
+      "settledUnits": 0,
+      "releasedUnits": 0,
+      "heldUnits": 0,
+      "leaseExpiresAt": "2026-11-23T07:53:19.385Z"
+    }
+  ],
+  "ledger": [
+    {
+      "attemptId": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "reserved",
+      "units": 1
+    },
+    {
+      "attemptId": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "dispatched",
+      "units": 1
+    },
+    {
+      "attemptId": "f2c4cba2-d993-4870-a07f-b0a4e833f8d7",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "reserved",
+      "units": 1
+    }
+  ]
+}

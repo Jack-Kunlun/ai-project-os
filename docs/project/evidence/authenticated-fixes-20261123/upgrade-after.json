@@ -1,0 +1,146 @@
+{
+  "database": "aios_probe_150_151_20261123_074900_56252",
+  "sourceRelease": "v1.2.27",
+  "sourceCommit": "fd9b92c",
+  "appliedMigrationCount": 151,
+  "migratedThrough": "20261123010000_remove_platform_probe_count_limit",
+  "reconcileImplementationCommit": "0bedc8b8973a5f20f5544abfd6e64c9187424b1e",
+  "legacyRowsBefore": [
+    {
+      "id": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "status": "running",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "plannedUnits": 1,
+      "dispatchedUnits": 1,
+      "settledUnits": 0,
+      "releasedUnits": 0,
+      "heldUnits": 0,
+      "leaseExpiresAt": "2026-11-23T07:53:19.414Z"
+    },
+    {
+      "id": "f2c4cba2-d993-4870-a07f-b0a4e833f8d7",
+      "status": "reserved",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "plannedUnits": 1,
+      "dispatchedUnits": 0,
+      "settledUnits": 0,
+      "releasedUnits": 0,
+      "heldUnits": 0,
+      "leaseExpiresAt": "2026-11-23T07:53:19.385Z"
+    }
+  ],
+  "legacyLedgerBefore": [
+    {
+      "id": "488aabbf-9796-4253-a451-06620030e8ea",
+      "attemptId": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "reserved",
+      "units": 1
+    },
+    {
+      "id": "0663b358-1f99-48dc-a32b-83f26f784dca",
+      "attemptId": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "dispatched",
+      "units": 1
+    },
+    {
+      "id": "ebe9aaab-8fa3-418c-a476-58d71e98a794",
+      "attemptId": "f2c4cba2-d993-4870-a07f-b0a4e833f8d7",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "reserved",
+      "units": 1
+    }
+  ],
+  "budgetBefore": {
+    "reservedUnits": 2,
+    "settledUnits": 2,
+    "heldUnits": 0,
+    "unitLimit": 150
+  },
+  "firstReconcileCount": 2,
+  "attemptsAfter": [
+    {
+      "id": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "status": "held",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "plannedUnits": 1,
+      "dispatchedUnits": 1,
+      "settledUnits": 0,
+      "releasedUnits": 0,
+      "heldUnits": 1,
+      "safeErrorCode": "PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD"
+    },
+    {
+      "id": "f2c4cba2-d993-4870-a07f-b0a4e833f8d7",
+      "status": "released",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "plannedUnits": 1,
+      "dispatchedUnits": 0,
+      "settledUnits": 0,
+      "releasedUnits": 1,
+      "heldUnits": 0,
+      "safeErrorCode": "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH"
+    }
+  ],
+  "ledgerAfter": [
+    {
+      "id": "488aabbf-9796-4253-a451-06620030e8ea",
+      "attemptId": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "reserved",
+      "units": 1
+    },
+    {
+      "id": "0663b358-1f99-48dc-a32b-83f26f784dca",
+      "attemptId": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "dispatched",
+      "units": 1
+    },
+    {
+      "id": "1588f0e3-b57b-4547-928c-53f0decaf17a",
+      "attemptId": "8626512c-f450-4fe5-8217-7d3885324e2a",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "held",
+      "units": 1
+    },
+    {
+      "id": "ebe9aaab-8fa3-418c-a476-58d71e98a794",
+      "attemptId": "f2c4cba2-d993-4870-a07f-b0a4e833f8d7",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "reserved",
+      "units": 1
+    },
+    {
+      "id": "7f780a6d-582e-4ded-ba00-3d482880c552",
+      "attemptId": "f2c4cba2-d993-4870-a07f-b0a4e833f8d7",
+      "budgetId": "56a2498b-1a87-435a-bdc8-b0bf6ba856b0",
+      "ordinal": 1,
+      "event": "released",
+      "units": 1
+    }
+  ],
+  "budgetAfter": {
+    "reservedUnits": 0,
+    "settledUnits": 2,
+    "heldUnits": 1,
+    "unitLimit": 150
+  },
+  "secondReconcileCount": 0,
+  "ledgerRowsAfterRepeat": 5,
+  "budgetAfterRepeat": {
+    "reservedUnits": 0,
+    "settledUnits": 2,
+    "heldUnits": 1
+  },
+  "redispatchFetchCalls": 0,
+  "result": "passed"
+}

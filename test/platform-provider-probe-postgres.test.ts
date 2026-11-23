@@ -53,7 +53,7 @@ async function insertProbeLedger(
     attemptId: string;
     actorId: string;
     ordinal: number;
-    event: "held" | "reserved";
+    event: "dispatched" | "held" | "reserved";
     capability: "generation" | "vision";
   }>,
 ): Promise<void> {
@@ -73,9 +73,183 @@ async function insertProbeLedger(
   `);
 }
 
+async function seedBoundInFlightAttempt(
+  db: PrismaClient,
+  input: Readonly<{
+    budgetId: string;
+    providerId: string;
+    actorId: string;
+    providerConfigurationVersion: number;
+    credentialSecretFingerprint: string;
+    status: "reserved" | "running";
+    now: Date;
+  }>,
+) {
+  const id = randomUUID();
+  const hash = () => randomUUID().replaceAll("-", "").repeat(2);
+  await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('ai_project_os.platform_provider_probe_mutation', 'service-v1', true)`;
+    const attempt = await tx.platformProviderProbeAttempt.create({
+      data: {
+        id,
+        budgetId: input.budgetId,
+        providerConnectionId: input.providerId,
+        actorId: input.actorId,
+        actorAccountAccessVersion: 1,
+        providerConfigurationVersion: input.providerConfigurationVersion,
+        credentialSecretFingerprint: input.credentialSecretFingerprint,
+        clientRequestKeyHash: hash(),
+        requestFingerprint: hash(),
+        status: input.status,
+        plannedUnits: 1,
+        dispatchedUnits: input.status === "running" ? 1 : 0,
+        startedAt: input.status === "running" ? input.now : null,
+        leaseExpiresAt: new Date(input.now.getTime() - 1_000),
+      },
+      select: { id: true, status: true, budgetId: true, plannedUnits: true, dispatchedUnits: true, settledUnits: true, releasedUnits: true, heldUnits: true },
+    });
+    await insertProbeLedger(tx, { budgetId: input.budgetId, attemptId: id, actorId: input.actorId, ordinal: 1, event: "reserved", capability: "generation" });
+    if (input.status === "running") {
+      await insertProbeLedger(tx, { budgetId: input.budgetId, attemptId: id, actorId: input.actorId, ordinal: 1, event: "dispatched", capability: "generation" });
+    }
+    await tx.platformProviderProbeBudget.update({ where: { id: input.budgetId }, data: { reservedUnits: { increment: 1 } } });
+    return attempt;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  return await db.platformProviderProbeAttempt.findUniqueOrThrow({
+    where: { id },
+    select: { id: true, status: true, budgetId: true, plannedUnits: true, dispatchedUnits: true, settledUnits: true, releasedUnits: true, heldUnits: true },
+  });
+}
+
 after(async () => {
   if (shouldRun) await getDb().$disconnect();
 });
+
+test(
+  "legacy budget bindings survive current reconciliation and remain idempotent",
+  { skip: !shouldRun ? "PLATFORM_PROVIDER_PROBE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const db = getDb();
+    const suffix = randomUUID().slice(0, 8);
+    const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-platform-probe-legacy-budget-"));
+    const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+    process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
+    const adminId = "00000000-0000-4000-8000-000000000010";
+    const actor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
+    const previousFetch = globalThis.fetch;
+    let fetches = 0;
+    try {
+      globalThis.fetch = async () => {
+        fetches += 1;
+        throw new Error("legacy reconciliation fixture must not access a provider");
+      };
+      const reservedProvider = await createVerifiedProviderFixture({
+        name: `Legacy reserved binding ${suffix}`,
+        kind: "deepseek",
+        apiKey: "legacy-reserved-binding-key",
+        generationModelId: "deepseek-chat",
+        embeddingModelId: null,
+        embeddingDimensions: null,
+        visionModelId: null,
+      }, actor, db);
+      const runningProvider = await createVerifiedProviderFixture({
+        name: `Legacy running binding ${suffix}`,
+        kind: "deepseek",
+        apiKey: "legacy-running-binding-key",
+        generationModelId: "deepseek-chat",
+        embeddingModelId: null,
+        embeddingDimensions: null,
+        visionModelId: null,
+      }, actor, db);
+      const now = new Date();
+      await seedLegacyProbeBudget({
+        unitLimit: 5,
+        alertThresholdUnits: 1,
+        startsAt: new Date(now.getTime() - 1_000).toISOString(),
+        expiresAt: new Date(now.getTime() + 600_000).toISOString(),
+      }, actor, db);
+      const budget = await db.platformProviderProbeBudget.findFirstOrThrow({ where: { status: "active" }, orderBy: { version: "desc" }, select: { id: true } });
+      const [reservedConnection, runningConnection] = await Promise.all([
+        db.aiProviderConnection.findUniqueOrThrow({ where: { id: reservedProvider.id }, select: { id: true, configurationVersion: true, credentialId: true } }),
+        db.aiProviderConnection.findUniqueOrThrow({ where: { id: runningProvider.id }, select: { id: true, configurationVersion: true, credentialId: true } }),
+      ]);
+      const [reservedCredential, runningCredential] = await Promise.all([
+        db.externalCredential.findUniqueOrThrow({ where: { id: reservedConnection.credentialId }, select: { secretFingerprint: true } }),
+        db.externalCredential.findUniqueOrThrow({ where: { id: runningConnection.credentialId }, select: { secretFingerprint: true } }),
+      ]);
+      const reservedAttempt = await seedBoundInFlightAttempt(db, {
+        budgetId: budget.id,
+        providerId: reservedConnection.id,
+        actorId: adminId,
+        providerConfigurationVersion: reservedConnection.configurationVersion,
+        credentialSecretFingerprint: reservedCredential.secretFingerprint,
+        status: "reserved",
+        now,
+      });
+      const runningAttempt = await seedBoundInFlightAttempt(db, {
+        budgetId: budget.id,
+        providerId: runningConnection.id,
+        actorId: adminId,
+        providerConfigurationVersion: runningConnection.configurationVersion,
+        credentialSecretFingerprint: runningCredential.secretFingerprint,
+        status: "running",
+        now,
+      });
+      const attemptIds = [reservedAttempt.id, runningAttempt.id];
+      const ledgerBefore = await db.platformProviderProbeLedger.findMany({ where: { attemptId: { in: attemptIds } }, select: { id: true, attemptId: true, budgetId: true, event: true } });
+      const budgetBefore = await db.platformProviderProbeBudget.findUniqueOrThrow({ where: { id: budget.id }, select: { reservedUnits: true, settledUnits: true, heldUnits: true } });
+      assert.equal(budgetBefore.reservedUnits, 2);
+      assert.equal(ledgerBefore.filter((entry) => entry.event === "reserved").length, 2);
+      assert.equal(ledgerBefore.filter((entry) => entry.event === "dispatched").length, 1);
+      assert.ok(ledgerBefore.every((entry) => entry.budgetId === budget.id));
+
+      assert.equal(await reconcilePlatformProviderProbeAttempts(db, new Date(now.getTime() + 1_000)), 2);
+      const reconciled = await db.platformProviderProbeAttempt.findMany({
+        where: { id: { in: attemptIds } },
+        select: { id: true, status: true, budgetId: true, dispatchedUnits: true, releasedUnits: true, heldUnits: true, safeErrorCode: true },
+      });
+      const reservedAfter = reconciled.find((attempt) => attempt.id === reservedAttempt.id);
+      const runningAfter = reconciled.find((attempt) => attempt.id === runningAttempt.id);
+      assert.deepEqual(reservedAfter, {
+        id: reservedAttempt.id,
+        status: "released",
+        budgetId: budget.id,
+        dispatchedUnits: 0,
+        releasedUnits: 1,
+        heldUnits: 0,
+        safeErrorCode: "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH",
+      });
+      assert.deepEqual(runningAfter, {
+        id: runningAttempt.id,
+        status: "held",
+        budgetId: budget.id,
+        dispatchedUnits: 1,
+        releasedUnits: 0,
+        heldUnits: 1,
+        safeErrorCode: "PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD",
+      });
+      const ledgerAfter = await db.platformProviderProbeLedger.findMany({ where: { attemptId: { in: attemptIds } }, select: { id: true, attemptId: true, budgetId: true, event: true } });
+      assert.equal(ledgerAfter.length, ledgerBefore.length + 2);
+      assert.equal(ledgerAfter.filter((entry) => entry.event === "released").length, 1);
+      assert.equal(ledgerAfter.filter((entry) => entry.event === "held").length, 1);
+      assert.ok(ledgerAfter.every((entry) => entry.budgetId === budget.id));
+      const budgetAfter = await db.platformProviderProbeBudget.findUniqueOrThrow({ where: { id: budget.id }, select: { reservedUnits: true, settledUnits: true, heldUnits: true } });
+      assert.deepEqual(budgetAfter, { reservedUnits: 0, settledUnits: 0, heldUnits: 1 });
+
+      assert.equal(await reconcilePlatformProviderProbeAttempts(db, new Date(now.getTime() + 2_000)), 0);
+      const ledgerAfterReplay = await db.platformProviderProbeLedger.findMany({ where: { attemptId: { in: attemptIds } }, select: { id: true } });
+      const budgetAfterReplay = await db.platformProviderProbeBudget.findUniqueOrThrow({ where: { id: budget.id }, select: { reservedUnits: true, settledUnits: true, heldUnits: true } });
+      assert.equal(ledgerAfterReplay.length, ledgerAfter.length);
+      assert.deepEqual(budgetAfterReplay, budgetAfter);
+      assert.equal(fetches, 0);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+      else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
+      await rm(keyDirectory, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   "platform provider probes run without an allowance, marked before fetch, idempotent, and fail closed",

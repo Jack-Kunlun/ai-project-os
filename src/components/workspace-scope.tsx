@@ -96,23 +96,30 @@ export function WorkspacePicker({ username, onNameChange }: { username: string; 
         if (saved && !unique.some((space) => space.id === saved)) {
           try {
             const selectedResponse = await fetch(`/api/workspaces/current?workspaceId=${encodeURIComponent(saved)}`, { cache: "no-store", signal: controller.signal });
-            if (!selectedResponse.ok) throw Error();
-            const selectedBody = await selectedResponse.json();
-            if (controller.signal.aborted) return;
-            const selectedWorkspace = selectedBody.selectedWorkspace as Space | null;
-            if (selectedWorkspace && typeof selectedWorkspace.id === "string" && typeof selectedWorkspace.name === "string") unique.push(selectedWorkspace);
-            else selectWorkspace(username, home.id);
+            if (selectedResponse.status === 400) {
+              selectWorkspace(username, home.id);
+            } else if (!selectedResponse.ok) {
+              throw Error();
+            } else {
+              const selectedBody = await selectedResponse.json();
+              if (controller.signal.aborted) return;
+              const selectedWorkspace = selectedBody.selectedWorkspace as Space | null;
+              if (selectedWorkspace && typeof selectedWorkspace.id === "string" && typeof selectedWorkspace.name === "string") unique.push(selectedWorkspace);
+              else selectWorkspace(username, home.id);
+            }
           } catch {
             if (controller.signal.aborted) return;
             unique.push({ id: saved, name: t("工作区暂不可用"), unavailable: true });
+            setSpaces(unique);
             setFailed(true);
+            return;
           }
         } else if (!saved) {
           selectWorkspace(username, home.id);
         }
         if (controller.signal.aborted) return;
         setSpaces(unique);
-        if (!saved || unique.some((space) => space.id === saved && !space.unavailable)) setFailed(false);
+        setFailed(false);
       } catch {
         if (!controller.signal.aborted) setFailed(true);
       }

@@ -1,5 +1,7 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { createWorkspaceInvitation } from "@/lib/workspaces";
+import { getDb } from "@/lib/db";
 import { installBrowserPhoneAuthConfigFixture } from "./support/browser-phone-auth-config-fixture";
 import { expectR02NoHorizontalOverflow, signInR02Admin, signOutR02User } from "./support/r02-admin-navigation";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
@@ -34,8 +36,16 @@ test("public page titles follow the active language before and after switching",
 });
 
 test("invitation return target survives login and registration without auto-accepting", async ({ page }) => {
-  const token = randomBytes(32).toString("base64url");
-  const invitationPath = `/accept-invitation?token=${token}`;
+  test.skip(process.env.PHONE_AUTH_ENABLED === "true" || process.env.AI_PROJECT_OS_EMAIL_AUTH_ENABLED === "true", "Username registration requires the password-only test configuration.");
+  await signInR02Admin(page);
+  await signOutR02User(page);
+  const suffix = randomUUID().slice(0, 8);
+  const owner = await seedBrowserPersonalUser(`invite-owner-${suffix}`, "BrowserInviteOwner2026!");
+  const invitation = await createWorkspaceInvitation(owner.workspaceId, {
+    email: `invite-${suffix}@example.test`, workspaceRole: "member", requestKey: randomUUID(),
+  }, { id: owner.id, role: "user", accountAccessVersion: 1 });
+  const { token, acceptPath: invitationPath } = invitation;
+  if (!token || !invitationPath) throw new Error("Expected a freshly issued invitation");
   const acceptanceRequests: string[] = [];
   page.on("request", request => {
     if (request.url().endsWith("/api/workspace-invitations/accept")) acceptanceRequests.push(request.method());
@@ -64,6 +74,10 @@ test("invitation return target survives login and registration without auto-acce
   await expect(page.getByRole("heading", { name: "加入工作区", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "接受邀请", exact: true })).toBeVisible();
   expect(acceptanceRequests).toEqual([]);
+  const stored = await getDb().workspaceInvitation.findUniqueOrThrow({
+    where: { id: invitation.invitation.id }, select: { acceptedAt: true, acceptedById: true },
+  });
+  expect(stored).toEqual({ acceptedAt: null, acceptedById: null });
 });
 
 test("help and contact guide links preserve anonymous return and remain direct when signed in", async ({ page }) => {

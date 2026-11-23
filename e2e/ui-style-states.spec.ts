@@ -14,6 +14,12 @@ const modes = [
   { id: "zh-dark-mobile", language: "zh-CN", theme: "dark", width: 390 },
 ] as const;
 type Entry = { route: string; mode: string; state: string; requests?: string[]; text?: string; screenshot?: string };
+const workspaceDialogModes = [
+  { id: "en-light-desktop", language: "en", theme: "light", width: 1440 },
+  { id: "en-dark-mobile", language: "en", theme: "dark", width: 390 },
+  { id: "zh-light-desktop", language: "zh-CN", theme: "light", width: 1440 },
+  { id: "zh-dark-mobile", language: "zh-CN", theme: "dark", width: 390 },
+] as const;
 
 test("all application pages retain the new style during loading, failed reads and operation dialogs", async ({ browser }, testInfo) => {
   test.setTimeout(720_000);
@@ -122,7 +128,14 @@ test("all application pages retain the new style during loading, failed reads an
             }
             await save("enabled-mcp-entry");
           }
-          const triggers = page.locator("[data-operation-trigger]:visible:not(:disabled)");
+          const triggers = page.locator('main [data-operation-trigger]:visible:not(:disabled)');
+          const actionCreationTrigger = page.locator("main").getByRole("button", { name: /^(New action|新建动作)$/u });
+          let actionCatalogVerified = false;
+          if (pattern === "/projects/[projectId]/actions") {
+            await expect(actionCreationTrigger, "the project action creation control must be present in the page content").toHaveCount(1);
+            await expect(actionCreationTrigger).toBeVisible();
+            await expect(actionCreationTrigger).toBeEnabled();
+          }
           const count = await triggers.count();
           for (let index = 0; index < count; index += 1) {
             const trigger = triggers.nth(index);
@@ -142,10 +155,11 @@ test("all application pages retain the new style during loading, failed reads an
                 expect((await input.boundingBox())?.height, 'profile fields must not stretch with adjacent copy').toBeLessThanOrEqual(48);
               }
             }
-            if (pattern === '/projects/[projectId]/actions' && index === 0) {
+            if (pattern === '/projects/[projectId]/actions' && /^(New action|新建动作)$/u.test(label)) {
               const actions = dialog.locator('article button');
               await expect(actions).toHaveCount(3);
               await expect(dialog.locator('[data-operation-footer] button').filter({ hasText: /创建并|Create and/u })).toHaveCount(0);
+              actionCatalogVerified = true;
             }
             if (pattern === "/admin/account" && index === 0 && mode.theme === "light") {
               const primary = dialog.locator('[data-operation-footer] button[type="submit"]').first();
@@ -163,6 +177,45 @@ test("all application pages retain the new style during loading, failed reads an
             entries.push({ route: pattern, mode: mode.id, state: "dialog-label", text: label });
             await page.keyboard.press("Escape");
             await expect(dialog).toBeHidden();
+          }
+          if (pattern === "/projects/[projectId]/actions") {
+            expect(actionCatalogVerified, "the named project action dialog must complete its three-button acceptance").toBe(true);
+          }
+          if (pattern === "/dashboard" && mode.id === modes[0].id) {
+            const workspaceTrigger = page.locator(".workspace-more [data-operation-trigger]:visible:not(:disabled)");
+            for (const workspaceMode of workspaceDialogModes) {
+              await page.setViewportSize({ width: workspaceMode.width, height: 900 });
+              await page.context().addCookies([
+                { name: "aipos-language", value: workspaceMode.language, url: new URL(page.url()).origin },
+                { name: "aipos-theme", value: workspaceMode.theme, url: new URL(page.url()).origin },
+              ]);
+              await page.goto(path, { waitUntil: "networkidle" });
+              if (workspaceMode.width <= 760) {
+                const openNavigation = page.getByRole("button", { name: /^(打开导航|Open navigation)$/u });
+                await expect(openNavigation).toBeVisible();
+                await openNavigation.click();
+                await expect(page.locator("#user-shell-navigation")).toBeVisible();
+              }
+              await expect(workspaceTrigger).toHaveCount(1);
+              await workspaceTrigger.click();
+              const dialog = page.getByRole("dialog").last();
+              await expect(dialog).toBeVisible();
+              await settleVisualState(page);
+              await expectR02NoHorizontalOverflow(page, `${path} workspace dialog ${workspaceMode.id}`);
+              await expectUiStyleContract(page, `${path} workspace dialog ${workspaceMode.id}`);
+              await expectDialogStyleContract(dialog, `workspace search: ${workspaceMode.id}`);
+              const screenshot = `states/workspace-search-${workspaceMode.id}.png`;
+              await dialog.screenshot({ path: testInfo.outputPath(screenshot), animations: "disabled" });
+              entries.push({ route: pattern, mode: workspaceMode.id, state: "workspace-search-dialog", screenshot });
+              await page.keyboard.press("Escape");
+              await expect(dialog).toBeHidden();
+            }
+            await page.setViewportSize({ width: mode.width, height: 900 });
+            await page.context().addCookies([
+              { name: "aipos-language", value: mode.language, url: new URL(page.url()).origin },
+              { name: "aipos-theme", value: mode.theme, url: new URL(page.url()).origin },
+            ]);
+            await page.goto(path, { waitUntil: "networkidle" });
           }
         } catch (cause) {
           errors.push(`${pattern}@${mode.id} operation: ${String(cause)}`);

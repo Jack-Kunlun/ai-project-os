@@ -31,7 +31,7 @@ async function expectLoginFieldAndActionSpacing(page: Page, language: "zh-CN" | 
     const submitRect = submit?.getBoundingClientRect();
     const nextAction = submit?.parentElement?.firstElementChild;
     const nextRect = nextAction?.getBoundingClientRect();
-    const register = form.querySelector<HTMLAnchorElement>('a[href="/register"]');
+    const register = form.querySelector<HTMLAnchorElement>('a[href^="/register"]');
     const registerRect = register?.parentElement?.getBoundingClientRect();
     const divider = Array.from(form.querySelectorAll("div")).find((element) => element.textContent?.trim() === otherMethodsLabel);
     const dividerRect = divider?.getBoundingClientRect();
@@ -77,7 +77,13 @@ async function checkErrorStateLayout(page: Page, language: "zh-CN" | "en", theme
     await expect(page.locator("main h1")).toHaveCount(1);
     await expect(page.locator("main h1")).toHaveText(loginText("登录 AI Project OS", language));
     await expect(page.locator("main h1")).toBeVisible();
-    await expect(page.getByRole("link", { name: loginText("创建账号", language), exact: true })).toHaveAttribute("href", "/register");
+    const createAccountLink = page.getByRole("link", { name: loginText("创建账号", language), exact: true });
+    const registerHref = await createAccountLink.getAttribute("href");
+    expect(registerHref).not.toBeNull();
+    if (registerHref === null) return;
+    const registerUrl = new URL(registerHref, page.url());
+    expect(registerUrl.pathname).toBe("/register");
+    expect(registerUrl.searchParams.getAll("returnTo")).toEqual(["/personal/knowledge"]);
     await expect(page.getByRole("link", { name: loginText("忘记账号或密码？", language), exact: true })).toHaveAttribute("href", "/recover");
     await expectLoginFieldAndActionSpacing(page, language);
     await page.screenshot({ path: `test-results/v110/login-${languageName}-${theme}-${width}.png`, fullPage: true });

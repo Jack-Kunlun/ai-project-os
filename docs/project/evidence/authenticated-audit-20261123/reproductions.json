@@ -1,0 +1,972 @@
+{
+  "version": "v1.2.27",
+  "environment": "本地生产构建与隔离 PostgreSQL，时间、返回顺序、模拟失败和样本的区别见报告。",
+  "findings": {
+    "T-052": [
+      {
+        "issuedForThisTest": 101,
+        "currentAPIList": 100,
+        "oldShownBefore": true,
+        "oldFoundAfter": false,
+        "oldStillActive": true,
+        "newestFound": true,
+        "pagingButtons": 0,
+        "revocationControls": 100
+      },
+      {
+        "issuedForThisTest": 102,
+        "currentAPIList": 100,
+        "oldShownBefore": true,
+        "oldFoundAfter": false,
+        "oldStillActive": true,
+        "newestFound": true,
+        "pagingButtons": 0,
+        "revocationControls": 100
+      }
+    ],
+    "T-053": [
+      {
+        "round": 1,
+        "fieldValue": "T051 automation preview after 1",
+        "previewRequestName": "T051 automation preview before 1",
+        "confirmName": "T051 automation preview before 1",
+        "oldNameInPreview": false,
+        "newNameInPreview": false
+      },
+      {
+        "round": 2,
+        "fieldValue": "T051 automation preview after 2",
+        "previewRequestName": "T051 automation preview before 2",
+        "confirmName": "T051 automation preview before 2",
+        "oldNameInPreview": false,
+        "newNameInPreview": false
+      }
+    ],
+    "T-054": [
+      {
+        "previousActiveRowStillVisible": true,
+        "selectedView": "deleted",
+        "incorrectAction": "移至回收站",
+        "genuineDeletedCount": 0,
+        "activeRowFixture": false,
+        "retryRemovedActiveRecord": true
+      },
+      {
+        "previousActiveRowStillVisible": true,
+        "selectedView": "deleted",
+        "incorrectAction": "移至回收站",
+        "genuineDeletedCount": 0,
+        "activeRowFixture": false,
+        "retryRemovedActiveRecord": true
+      }
+    ],
+    "T-055": [
+      {
+        "overviewStatus": 200,
+        "permissionsStatus": 200,
+        "activityStatus": 503,
+        "overviewOmitted": true,
+        "permissionSectionHeadingsBeforeRetry": [],
+        "retryButtons": 0,
+        "overviewRestoredOnBrowserReload": true
+      },
+      {
+        "overviewStatus": 200,
+        "permissionsStatus": 200,
+        "activityStatus": 503,
+        "overviewOmitted": true,
+        "permissionSectionHeadingsBeforeRetry": [],
+        "retryButtons": 0,
+        "overviewRestoredOnBrowserReload": true
+      }
+    ],
+    "T-056": [
+      {
+        "oldProfileWriteStatus": 200,
+        "opened": "登录名",
+        "thenClosedByOldSuccess": true,
+        "secondDraftRetainedWhenReopened": true
+      },
+      {
+        "oldProfileWriteStatus": 200,
+        "opened": "登录名",
+        "thenClosedByOldSuccess": true,
+        "secondDraftRetainedWhenReopened": true
+      }
+    ],
+    "T-057": [
+      [
+        {
+          "fixture": "real",
+          "http": 200,
+          "value": "0\n平台额度",
+          "caption": "已使用 0 · 累计发放 0",
+          "filled": "100%"
+        },
+        {
+          "fixture": "reserved",
+          "http": 200,
+          "value": "0\n平台额度",
+          "caption": "已使用 0 · 累计发放 100",
+          "filled": "100%"
+        },
+        {
+          "fixture": "fail",
+          "http": 503,
+          "value": "—\n平台额度",
+          "caption": "暂时无法读取",
+          "filled": "100%"
+        },
+        {
+          "fixture": "half",
+          "http": 200,
+          "value": "50\n平台额度",
+          "caption": "已使用 50 · 累计发放 100",
+          "filled": "50%"
+        }
+      ],
+      [
+        {
+          "fixture": "real",
+          "http": 200,
+          "value": "0\n平台额度",
+          "caption": "已使用 0 · 累计发放 0",
+          "filled": "100%"
+        },
+        {
+          "fixture": "reserved",
+          "http": 200,
+          "value": "0\n平台额度",
+          "caption": "已使用 0 · 累计发放 100",
+          "filled": "100%"
+        },
+        {
+          "fixture": "fail",
+          "http": 503,
+          "value": "—\n平台额度",
+          "caption": "暂时无法读取",
+          "filled": "100%"
+        },
+        {
+          "fixture": "half",
+          "http": 200,
+          "value": "50\n平台额度",
+          "caption": "已使用 50 · 累计发放 100",
+          "filled": "50%"
+        }
+      ]
+    ],
+    "T-058": [
+      {
+        "isolatedServerBefore": 1,
+        "markAllStatus": 200,
+        "isolatedServerAfter": 0,
+        "headerAfterLateResponse": "通知中心 · 1",
+        "markAllButtonDisabled": true
+      },
+      {
+        "isolatedServerBefore": 1,
+        "markAllStatus": 200,
+        "isolatedServerAfter": 0,
+        "headerAfterLateResponse": "通知中心 · 1",
+        "markAllButtonDisabled": true
+      }
+    ],
+    "T-059": [
+      {
+        "events": [
+          "old-page-pending",
+          "new-filter-200",
+          "old-503",
+          "new-filter-200"
+        ],
+        "selected": "succeeded",
+        "newFilterFalseError": true,
+        "retryClearedError": true,
+        "fixture": "genuine first-page envelope with nextCursor; prior page 503"
+      },
+      {
+        "events": [
+          "old-page-pending",
+          "new-filter-200",
+          "old-503",
+          "new-filter-200"
+        ],
+        "selected": "succeeded",
+        "newFilterFalseError": true,
+        "retryClearedError": true,
+        "fixture": "genuine first-page envelope with nextCursor; prior page 503"
+      }
+    ],
+    "T-060": [
+      {
+        "case": "web-sources-filter-error-race",
+        "round": 1,
+        "selected": "disabled",
+        "alertsBefore": [],
+        "alertsAfter": [
+          "操作需要核对。请查看当前状态，必要时联系管理员。"
+        ]
+      },
+      {
+        "case": "web-sources-filter-error-race",
+        "round": 2,
+        "selected": "disabled",
+        "alertsBefore": [],
+        "alertsAfter": [
+          "操作需要核对。请查看当前状态，必要时联系管理员。"
+        ]
+      }
+    ],
+    "T-061": [
+      {
+        "repetition": 1,
+        "calls": 2,
+        "newerNotice": true,
+        "staleNotice": true,
+        "refreshing": 0
+      },
+      {
+        "repetition": 2,
+        "calls": 2,
+        "newerNotice": true,
+        "staleNotice": true,
+        "refreshing": 0
+      }
+    ],
+    "T-062": [
+      {
+        "area": "sms-test-phone",
+        "repetition": 1,
+        "data": [
+          {
+            "raw": "13800138000",
+            "value": "13800138000",
+            "maxLength": "14",
+            "validity": true
+          },
+          {
+            "raw": "+8613800138000",
+            "value": "+8613800138000",
+            "maxLength": "14",
+            "validity": true
+          },
+          {
+            "raw": "+86 13800138000",
+            "value": "+86 1380013800",
+            "maxLength": "14",
+            "validity": true
+          },
+          {
+            "raw": "138 0013 8000",
+            "value": "138 0013 8000",
+            "maxLength": "14",
+            "validity": true
+          }
+        ]
+      },
+      {
+        "area": "sms-test-phone",
+        "repetition": 2,
+        "data": [
+          {
+            "raw": "13800138000",
+            "value": "13800138000",
+            "maxLength": "14",
+            "validity": true
+          },
+          {
+            "raw": "+8613800138000",
+            "value": "+8613800138000",
+            "maxLength": "14",
+            "validity": true
+          },
+          {
+            "raw": "+86 13800138000",
+            "value": "+86 1380013800",
+            "maxLength": "14",
+            "validity": true
+          },
+          {
+            "raw": "138 0013 8000",
+            "value": "138 0013 8000",
+            "maxLength": "14",
+            "validity": true
+          }
+        ]
+      }
+    ],
+    "T-063": [
+      {
+        "area": "failure-inbox-double-next",
+        "repetition": 1,
+        "calls": [
+          null,
+          "CURSOR_PAGE_TWO",
+          null,
+          "CURSOR_PAGE_TWO",
+          null
+        ],
+        "firstVisible": false,
+        "secondVisible": true,
+        "previousStillEnabled": true
+      },
+      {
+        "area": "failure-inbox-single-next-control",
+        "repetition": 1,
+        "previousDisabled": true
+      },
+      {
+        "area": "failure-inbox-double-next",
+        "repetition": 2,
+        "calls": [
+          null,
+          "CURSOR_PAGE_TWO",
+          null,
+          "CURSOR_PAGE_TWO",
+          null
+        ],
+        "firstVisible": false,
+        "secondVisible": true,
+        "previousStillEnabled": true
+      },
+      {
+        "area": "failure-inbox-single-next-control",
+        "repetition": 2,
+        "previousDisabled": true
+      }
+    ],
+    "T-064": {
+      "personalConnections": [
+        [
+          {
+            "route": "/personal/connections/git",
+            "errorAndEmpty": "还没有个人 Git 连接",
+            "normalApiStatus": 200,
+            "retrySucceeded": true
+          },
+          {
+            "route": "/personal/connections/mcp",
+            "errorAndEmpty": "还没有个人 MCP 连接",
+            "normalApiStatus": 200,
+            "retrySucceeded": true
+          },
+          {
+            "route": "/personal/models",
+            "errorAndEmpty": "还没有个人模型连接",
+            "normalApiStatus": 200,
+            "retrySucceeded": true
+          }
+        ],
+        [
+          {
+            "route": "/personal/connections/git",
+            "errorAndEmpty": "还没有个人 Git 连接",
+            "normalApiStatus": 200,
+            "retrySucceeded": true
+          },
+          {
+            "route": "/personal/connections/mcp",
+            "errorAndEmpty": "还没有个人 MCP 连接",
+            "normalApiStatus": 200,
+            "retrySucceeded": true
+          },
+          {
+            "route": "/personal/models",
+            "errorAndEmpty": "还没有个人模型连接",
+            "normalApiStatus": 200,
+            "retrySucceeded": true
+          }
+        ]
+      ],
+      "perPage": {
+        "项目任务": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "jobs": 2
+            },
+            "visibleEmpty": "还没有页面任务。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "jobs": 2
+            },
+            "visibleEmpty": "还没有页面任务。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "文件资料": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "assets": 0
+            },
+            "visibleEmpty": "还没有文件。上传后，系统会显示解析、识别、审核与发布状态。",
+            "errorMessages": [
+              "文件资料加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。"
+            ],
+            "visibleErrorText": [
+              "文件资料加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。",
+              "解析失败"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "assets": 0
+            },
+            "visibleEmpty": "还没有文件。上传后，系统会显示解析、识别、审核与发布状态。",
+            "errorMessages": [
+              "文件资料加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。"
+            ],
+            "visibleErrorText": [
+              "文件资料加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。",
+              "解析失败"
+            ]
+          }
+        ],
+        "网页来源": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "sources": 0
+            },
+            "visibleEmpty": "还没有网页来源。公开静态网页添加后会抓取；认证及浏览器来源需手动抓取和审核。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "sources": 0
+            },
+            "visibleEmpty": "还没有网页来源。公开静态网页添加后会抓取；认证及浏览器来源需手动抓取和审核。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "通知中心": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "notifications": 2
+            },
+            "visibleEmpty": "还没有活动记录。耗时任务完成、失败或需要人工确认后会出现在这里。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重试"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。",
+              "还没有活动记录。耗时任务完成、失败或需要人工确认后会出现在这里。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "notifications": 2
+            },
+            "visibleEmpty": "还没有活动记录。耗时任务完成、失败或需要人工确认后会出现在这里。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重试"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。",
+              "还没有活动记录。耗时任务完成、失败或需要人工确认后会出现在这里。"
+            ]
+          }
+        ],
+        "个人知识": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "documents": 0
+            },
+            "visibleEmpty": "还没有个人知识",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n\n重新加载"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "documents": 0
+            },
+            "visibleEmpty": "还没有个人知识",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n\n重新加载"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "账号会员": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "items": 4
+            },
+            "visibleEmpty": "没有匹配的用户。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "items": 4
+            },
+            "visibleEmpty": "没有匹配的用户。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "用户额度明细": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "grants": 1,
+              "users": 1
+            },
+            "visibleEmpty": "暂无平台额度记录。",
+            "errorMessages": [],
+            "visibleErrorText": [
+              "请核对当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "grants": 1,
+              "users": 1
+            },
+            "visibleEmpty": "暂无平台额度记录。",
+            "errorMessages": [],
+            "visibleErrorText": [
+              "请核对当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "额度与账单": [
+          {
+            "controlledFailures": 3,
+            "normalStatus": 200,
+            "normalListSizes": {},
+            "visibleEmpty": "暂无记录",
+            "errorMessages": [
+              "额度报表加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。 重试"
+            ],
+            "visibleErrorText": [
+              "额度报表加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。 重试"
+            ]
+          },
+          {
+            "controlledFailures": 3,
+            "normalStatus": 200,
+            "normalListSizes": {},
+            "visibleEmpty": "暂无记录",
+            "errorMessages": [
+              "额度报表加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。 重试"
+            ],
+            "visibleErrorText": [
+              "额度报表加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。 重试"
+            ]
+          }
+        ],
+        "平台供应商": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "providers": 1,
+              "catalog": 4
+            },
+            "visibleEmpty": "尚未配置供应商。新增供应商",
+            "errorMessages": [
+              "供应商配置加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。"
+            ],
+            "visibleErrorText": [
+              "供应商配置加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。",
+              "本批每项最多 1 次测试额度，再次手动测试另计；通过后立即启用，失败保留原配置。结果未知时暂停后续项，不自动重试。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "providers": 1,
+              "catalog": 4
+            },
+            "visibleEmpty": "尚未配置供应商。新增供应商",
+            "errorMessages": [
+              "供应商配置加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。"
+            ],
+            "visibleErrorText": [
+              "供应商配置加载失败 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。",
+              "本批每项最多 1 次测试额度，再次手动测试另计；通过后立即启用，失败保留原配置。结果未知时暂停后续项，不自动重试。"
+            ]
+          }
+        ],
+        "记忆质量": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {},
+            "visibleEmpty": "当前没有待处理质量问题",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {},
+            "visibleEmpty": "当前没有待处理质量问题",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "项目状态": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "facts": 0,
+              "relations": 0,
+              "qualityIssues": 0,
+              "snapshots": 0,
+              "audits": 0
+            },
+            "visibleEmpty": "尚无当前有效事实",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重试"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "facts": 0,
+              "relations": 0,
+              "qualityIssues": 0,
+              "snapshots": 0,
+              "audits": 0
+            },
+            "visibleEmpty": "尚无当前有效事实",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重试"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "项目工具": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "grants": 0,
+              "candidates": 0
+            },
+            "visibleEmpty": "还没有工具授权。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重试"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "grants": 0,
+              "candidates": 0
+            },
+            "visibleEmpty": "还没有工具授权。",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重试"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ],
+        "问答会话": [
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "conversations": 1
+            },
+            "visibleEmpty": "暂无匹配会话",
+            "errorMessages": [
+              "请求未完成，请稍后重试。 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。重新加载"
+            ],
+            "visibleErrorText": []
+          },
+          {
+            "controlledFailures": 1,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "conversations": 1
+            },
+            "visibleEmpty": "暂无匹配会话",
+            "errorMessages": [
+              "请求未完成，请稍后重试。 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。重新加载"
+            ],
+            "visibleErrorText": []
+          }
+        ],
+        "个人工作区": [
+          {
+            "controlledFailures": 3,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "projects": 1
+            },
+            "visibleEmpty": "当前没有可访问的进行中项目",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重新加载"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          },
+          {
+            "controlledFailures": 3,
+            "normalStatus": 200,
+            "normalListSizes": {
+              "projects": 1
+            },
+            "visibleEmpty": "当前没有可访问的进行中项目",
+            "errorMessages": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。\n重新加载"
+            ],
+            "visibleErrorText": [
+              "操作需要核对。请查看当前状态，必要时联系管理员。"
+            ]
+          }
+        ]
+      }
+    },
+    "T-065": [
+      {
+        "enterFromInputWasFocused": true,
+        "enterThenEscapeClosesOnlyDialog": true,
+        "clickedSubmitThenFocus": "BODY",
+        "clickedSubmitThenEscapeLeavesDialogOpen": true,
+        "backgroundSidebarCollapsed": true,
+        "firstTabAfterEscape": {
+          "tag": "BUTTON",
+          "inside": true,
+          "label": null
+        },
+        "mouseCloseWorks": true
+      },
+      {
+        "enterFromInputWasFocused": true,
+        "enterThenEscapeClosesOnlyDialog": true,
+        "clickedSubmitThenFocus": "BODY",
+        "clickedSubmitThenEscapeLeavesDialogOpen": true,
+        "backgroundSidebarCollapsed": true,
+        "firstTabAfterEscape": {
+          "tag": "BUTTON",
+          "inside": true,
+          "label": null
+        },
+        "mouseCloseWorks": true
+      }
+    ],
+    "T-066": [
+      {
+        "round": 1,
+        "requests": 2,
+        "failure": "图谱加载失败，请重试。 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。",
+        "retryButtons": 0,
+        "recovered": "来源内容\nT051 隔离知识：图谱详情读取与导入失败恢复。\n第二行留作核对。\n智能问答"
+      },
+      {
+        "round": 2,
+        "requests": 2,
+        "failure": "图谱加载失败，请重试。 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。",
+        "retryButtons": 0,
+        "recovered": "来源内容\nT051 隔离知识：图谱详情读取与导入失败恢复。\n第二行留作核对。\n智能问答"
+      }
+    ],
+    "T-067": [
+      {
+        "round": 1,
+        "initial": {
+          "selected": "all",
+          "alerts": []
+        },
+        "oldResponseSeen": true,
+        "freshStatus": 200,
+        "before": {
+          "selected": "succeeded",
+          "alerts": []
+        },
+        "after": {
+          "selected": "succeeded",
+          "alerts": [
+            "请核对当前状态。重试"
+          ],
+          "retryButtons": 1
+        }
+      },
+      {
+        "round": 2,
+        "initial": {
+          "selected": "all",
+          "alerts": []
+        },
+        "oldResponseSeen": true,
+        "freshStatus": 200,
+        "before": {
+          "selected": "succeeded",
+          "alerts": []
+        },
+        "after": {
+          "selected": "succeeded",
+          "alerts": [
+            "操作需要核对。 下一步：刷新页面后重试；如果问题持续，请记录发生时间并联系管理员。重试"
+          ],
+          "retryButtons": 1
+        }
+      }
+    ],
+    "T-068": [
+      {
+        "credentialsReadStatus": 503,
+        "auditsReadStatus": 200,
+        "auditSampleRows": 1,
+        "visibleAuditRowsBeforeRetry": 0,
+        "emptyHistoryShown": true,
+        "errorVisibleBeforeRefresh": true,
+        "visibleAuditRowsAfterRefresh": 1,
+        "errorStillVisibleAfterSuccessfulRefresh": true,
+        "externalOperations": 0
+      },
+      {
+        "credentialsReadStatus": 503,
+        "auditsReadStatus": 200,
+        "auditSampleRows": 1,
+        "visibleAuditRowsBeforeRetry": 0,
+        "emptyHistoryShown": true,
+        "errorVisibleBeforeRefresh": true,
+        "visibleAuditRowsAfterRefresh": 1,
+        "errorStillVisibleAfterSuccessfulRefresh": true,
+        "externalOperations": 0
+      }
+    ]
+  },
+  "controls": {
+    "adminReadRecovery": [
+      {
+        "area": "probe-budget-error-retry",
+        "repetition": 1,
+        "probeFailure": 2,
+        "probeRecovery": true
+      },
+      {
+        "area": "audit-error-apply-retry",
+        "repetition": 1,
+        "restored": true
+      },
+      {
+        "area": "failure-inbox-error-apply-retry",
+        "repetition": 1,
+        "restored": true
+      },
+      {
+        "area": "probe-budget-error-retry",
+        "repetition": 2,
+        "probeFailure": 2,
+        "probeRecovery": true
+      },
+      {
+        "area": "audit-error-apply-retry",
+        "repetition": 2,
+        "restored": true
+      },
+      {
+        "area": "failure-inbox-error-apply-retry",
+        "repetition": 2,
+        "restored": true
+      }
+    ],
+    "personalKnowledgeImport": [
+      {
+        "round": 1,
+        "requests": 2,
+        "failure": "请核对当前状态。",
+        "inputEnabled": true,
+        "previewVisible": true
+      },
+      {
+        "round": 2,
+        "requests": 2,
+        "failure": "请核对当前状态。",
+        "inputEnabled": true,
+        "previewVisible": true
+      }
+    ]
+  }
+}

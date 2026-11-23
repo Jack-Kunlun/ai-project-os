@@ -1,0 +1,657 @@
+{
+  "release": "v1.2.27",
+  "counts": {
+    "routes": 35,
+    "openClose": 59,
+    "business": 35,
+    "appearance": 24
+  },
+  "results": [
+    {
+      "route": "/profile",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "编辑资料",
+          "title": "编辑个人资料",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "邮箱与验证",
+          "title": "邮箱与验证",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "手机号",
+          "title": "手机号",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "登录名",
+          "title": "登录名",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "登录密码",
+          "title": "登录密码",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "注销账户",
+          "title": "注销账户",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/credits",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/personal/knowledge",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        },
+        {
+          "trigger": "新建知识",
+          "title": "新建知识",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "导入文件",
+          "title": "导入知识",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/personal/knowledge/graph",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        },
+        {
+          "trigger": "维护个人关系",
+          "title": "维护个人关系",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/personal/connections/git",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/personal/connections/mcp",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/personal/models",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": [
+        {
+          "trigger": "添加连接",
+          "reason": "disabled_or_prerequisite"
+        }
+      ]
+    },
+    {
+      "route": "/personal/configuration",
+      "role": "teamOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/materials",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/materials/review",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/assets",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "导入文件或文件夹",
+          "title": "导入项目文件",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/automations",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "运行记录",
+          "title": "自动化运行记录",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "添加自动化",
+          "title": "添加自动化",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/tools",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "提案只读 MCP 委托",
+          "title": "提案只读 MCP 委托",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/actions",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "新建动作",
+          "title": "可执行能力",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/mcp-actions",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/mcp-export",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/members",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "编辑权限",
+          "title": "编辑 @t051-editor-f77852b053 的项目权限",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/plan",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "新建目标",
+          "title": "创建项目目标",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "新建工作项",
+          "title": "添加人工工作项",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/repositories",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "提交仓库范围提案",
+          "title": "提交仓库范围提案",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/external-sources",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "添加公开网页",
+          "title": "添加网页来源",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "添加认证网页",
+          "title": "添加 Bearer 保护网页",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/memory-quality",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/world",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "建立事实关系",
+          "title": "建立事实关系",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "建立事实替代链",
+          "title": "建立事实替代链",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/governance",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/projects/{id}/intelligence",
+      "role": "projectOwner",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "中文",
+          "title": "语言与外观",
+          "status": "opened_closed",
+          "closedBy": "escape"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/admin/account",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "编辑资料",
+          "title": "编辑管理员账户资料",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "修改密码",
+          "title": "修改管理员登录密码",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": [
+        {
+          "trigger": "绑定手机号",
+          "reason": "disabled_or_prerequisite"
+        }
+      ]
+    },
+    {
+      "route": "/admin/models",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "管理连接",
+          "title": "T051 isolated provider 2c90bd71 · 供应商连接",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "调整测试额度",
+          "title": "设置模型测试额度",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/admin/credits",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "新建策略版本",
+          "title": "创建新注册赠送策略草稿",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "额度操作",
+          "title": "补发平台额度",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/admin/users",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [],
+      "skipped": []
+    },
+    {
+      "route": "/admin/users/memberships",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "管理资格",
+          "title": "管理 @t051_60159bc7 的会员资格",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/admin/audit",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "查看详情",
+          "title": "平台连接探测 · 已结算",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/admin/connectors/mcp",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [],
+      "skipped": []
+    },
+    {
+      "route": "/admin/operations/probes",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "调整测试额度",
+          "title": "设置模型测试额度",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    },
+    {
+      "route": "/admin/operations/failures",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [],
+      "skipped": []
+    },
+    {
+      "route": "/admin/sms",
+      "role": "admin",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "新增供应商",
+          "title": "新增短信供应商",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": [
+        {
+          "trigger": "编辑或更换供应商",
+          "reason": "not_visible_or_prerequisite"
+        }
+      ]
+    },
+    {
+      "role": "admin",
+      "route": "/admin/users/{id}",
+      "pageStatus": "loaded",
+      "opened": [
+        {
+          "trigger": "管理账号状态",
+          "title": "管理 @<隔离账号> 的账号状态",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "管理会员资格",
+          "title": "管理 @<隔离账号> 的会员资格",
+          "status": "opened_closed",
+          "closedBy": "button"
+        },
+        {
+          "trigger": "额度操作",
+          "title": "补发平台额度",
+          "status": "opened_closed",
+          "closedBy": "button"
+        }
+      ],
+      "skipped": []
+    }
+  ]
+}

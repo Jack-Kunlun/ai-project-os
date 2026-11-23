@@ -1,0 +1,2000 @@
+{
+  "release": "v1.2.27",
+  "releaseCommit": "fd9b92c3ca53558a7545eeb48492aa1ad5e48337",
+  "workspaceCommit": "2f37d94",
+  "localBuild": {
+    "buildId": "jKrUCelift6BUQ3b_DUJo",
+    "localArtifact": true
+  },
+  "normalCounts": {
+    "public": 9,
+    "admin": 14,
+    "redirect": 14,
+    "personal": 17,
+    "project": 23
+  },
+  "routes": [
+    {
+      "route": "/accept-invitation",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/login"
+          },
+          {
+            "status": 307,
+            "location": "/admin"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "平台总览"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/account",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/account",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "管理员账户"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/account",
+        "interceptedEndpoints": [
+          "/api/admin/account"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/audit",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/audit",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "审计中心"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/audit",
+        "interceptedEndpoints": [
+          "/api/system/audit"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/connectors/git",
+      "group": "redirect",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "平台总览"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/connectors/mcp",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/connectors/mcp",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "MCP 工具安全审核"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/connectors/mcp",
+        "interceptedEndpoints": [
+          "/api/system/mcp-tool-attestation-candidates"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/credits",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/credits",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "平台额度"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/credits",
+        "interceptedEndpoints": [
+          "/api/admin/credits/policies",
+          "/api/admin/credits/grants"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/guide",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/guide",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "管理员操作指南"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/guide",
+        "interceptedEndpoints": [],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/models/governance",
+      "group": "redirect",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/models",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin/models"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "模型与能力"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/models",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/models",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "模型与能力"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/models",
+        "interceptedEndpoints": [
+          "/api/admin/platform-provider-probe/budget",
+          "/api/settings/platform-ai-operations",
+          "/api/settings/providers"
+        ],
+        "visibleAlerts": 2,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/models/routes",
+      "group": "redirect",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/models",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin/models"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "模型与能力"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/operations/backups",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/operations/backups",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "生产备份与 COS 同步"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/operations/backups",
+        "interceptedEndpoints": [
+          "/api/system/operations/resources"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/operations/failures",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/operations/failures",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "失败与待对账收件箱"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/operations/failures",
+        "interceptedEndpoints": [
+          "/api/admin/operations/failures"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/operations/probes",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/operations/probes",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "模型测试额度"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/operations/probes",
+        "interceptedEndpoints": [
+          "/api/admin/platform-provider-probe/budget"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "平台总览"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin",
+        "interceptedEndpoints": [
+          "/api/system/overview"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/sms",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/sms",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "短信服务"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/sms",
+        "interceptedEndpoints": [
+          "/api/admin/sms"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/users/[userId]",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/users/{id}",
+        "redirects": [],
+        "visibleH1AtSampling": [],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/users/{id}",
+        "interceptedEndpoints": [
+          "/api/admin/users/{id}",
+          "/api/admin/credits/grants"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/users/memberships",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/users/memberships",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "会员资格管理"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/users/memberships",
+        "interceptedEndpoints": [
+          "/api/system/memberships"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/admin/users",
+      "group": "admin",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/users",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "用户运营"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/admin/users",
+        "interceptedEndpoints": [
+          "/api/admin/users"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/contact",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/contact",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "联系作者"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/help",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/help",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "登录与访问帮助"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/login",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "平台总览"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/privacy",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/privacy",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "隐私政策"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/recover",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/recover",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "找回账号与密码"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/register",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "平台总览"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/settings",
+      "group": "redirect",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/models",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin/models"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "模型与能力"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/setup",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "平台总览"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/system/account-access",
+      "group": "redirect",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/users",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin/users"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "用户运营"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/system/memberships",
+      "group": "redirect",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/users/memberships",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin/users/memberships"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "会员资格管理"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/system/operations",
+      "group": "redirect",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/admin/operations/backups",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/admin/operations/backups"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "生产备份与 COS 同步"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/terms",
+      "group": "public",
+      "normal": {
+        "role": "admin",
+        "status": 200,
+        "destination": "/terms",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "服务条款"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/ask",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/ask",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "智能问答"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/ask",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/ask/sources",
+          "/api/ask/conversations"
+        ],
+        "visibleAlerts": 3,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/connections/mcp",
+      "group": "redirect",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/connections/mcp",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/personal/connections/mcp"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "我的 MCP 连接"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/connections",
+      "group": "redirect",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/connections/git",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/personal/connections/git"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "Git 授权管理"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/credits",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/credits",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "额度与账单"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/credits",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/credits"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/dashboard",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/dashboard",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "工作台"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/dashboard",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/dashboard"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/guide",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/guide",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "普通用户操作指南"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/guide",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/notifications",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/notifications",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "通知中心"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/notifications",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/",
+      "group": "redirect",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/dashboard",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/dashboard"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "工作台"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/configuration",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/configuration",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "个人资源配置"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/configuration",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/connections/git",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/connections/git",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "Git 授权管理"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/connections/git",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/me/git-connections",
+          "/api/me/git-delegations"
+        ],
+        "visibleAlerts": 2,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/connections/mcp",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/connections/mcp",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "我的 MCP 连接"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/connections/mcp",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/me/mcp-connections",
+          "/api/me/mcp-delegations"
+        ],
+        "visibleAlerts": 2,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/knowledge/graph",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/knowledge/graph",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "知识图谱"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/knowledge/graph",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/personal/knowledge/graph"
+        ],
+        "visibleAlerts": 2,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/knowledge",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/knowledge",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "我的知识"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/knowledge",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/personal/knowledge"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/models",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/models",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "模型与额度"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/models",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/personal/knowledge/qa-providers",
+          "/api/personal/knowledge/vision-providers",
+          "/api/personal/knowledge/semantic-providers",
+          "/api/credits",
+          "/api/notifications",
+          "/api/me/ai-providers"
+        ],
+        "visibleAlerts": 3,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "我的空间"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/personal/knowledge/overview",
+          "/api/me/ai-providers",
+          "/api/me/git-connections",
+          "/api/me/mcp-connections",
+          "/api/me/git-delegations",
+          "/api/me/mcp-delegations"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/projects",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/projects",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "我的项目"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/projects",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/profile/connections/git",
+      "group": "redirect",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/connections/git",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/personal/connections/git"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "Git 授权管理"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/profile/connections/mcp",
+      "group": "redirect",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/connections/mcp",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/personal/connections/mcp"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "我的 MCP 连接"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/profile/models",
+      "group": "redirect",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/models",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/personal/models"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "模型与额度"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/profile",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/profile",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "账户设置"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/profile",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/profile"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects",
+      "group": "redirect",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/projects",
+        "redirects": [
+          {
+            "status": 307,
+            "location": "/personal/projects"
+          }
+        ],
+        "visibleH1AtSampling": [
+          "我的项目"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      }
+    },
+    {
+      "route": "/team/[workspaceId]",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/team/{id}",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "团队空间"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/team/{id}",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/teams/{id}/overview"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/team",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/team",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "我的团队"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/team",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/teams"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/personal/usage",
+      "group": "personal",
+      "normal": {
+        "role": "ordinary",
+        "status": 200,
+        "destination": "/personal/usage",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "模型 Token 用量"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/personal/usage",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/personal/usage"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/actions",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/actions",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "动作与审批"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/actions",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/actions"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/assets",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/assets",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目 · 文件资料"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/assets",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}",
+          "/api/projects/{id}/assets"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/automations",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/automations",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目自动化"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/automations",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/automations"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/configuration",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/configuration",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目配置"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/configuration",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/ai-provider-delegations",
+          "/api/projects/{id}/git-repository-delegations",
+          "/api/projects/{id}/mcp-connection-delegations",
+          "/api/projects/{id}/mcp-tool-grants"
+        ],
+        "visibleAlerts": 4,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/control",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/control",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/control",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}",
+          "/api/projects/{id}/jobs"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/external-sources",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/external-sources",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "外部资料入口"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/external-sources",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/web-sources"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/github-syncs/[syncRunId]",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/github-syncs/{id}",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "一键同步详情"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/github-syncs/{id}",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/governance",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/governance",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目管理"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/governance",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/world",
+          "/api/projects/{id}"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/intelligence",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/intelligence",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "简报与调查"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/intelligence",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}",
+          "/api/projects/{id}/intelligence/status"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/jobs/[jobId]",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/jobs/{id}",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "任务详情"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/jobs/{id}",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/jobs/{id}"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/materials",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/materials",
+        "redirects": [],
+        "visibleH1AtSampling": [],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/materials",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}",
+          "/api/projects/{id}/sources",
+          "/api/projects/{id}/items"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/materials/review",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/materials/review",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "审核 AI 候选"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/materials/review",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/governance/reviews"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/materials/sources/[sourceId]",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/materials/sources/{id}",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目资料详情"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/materials/sources/{id}",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/sources/{id}"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/mcp-actions",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/mcp-actions",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "只读 MCP 动作审批"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/mcp-actions",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/mcp-actions",
+          "/api/projects/{id}/mcp-tool-grants"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/mcp-export",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/mcp-export",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "向外部客户端提供 MCP"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/mcp-export",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/me/mcp-export-grants",
+          "/api/me/mcp-export-audits"
+        ],
+        "visibleAlerts": 0,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/members",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/members",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "成员权限"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/members",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/members"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/memory",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/memory",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/memory",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}",
+          "/api/projects/{id}/memory/status"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/memory-quality",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/memory-quality",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "记忆质量与生命周期"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/memory-quality",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/memory-quality"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}",
+        "redirects": [],
+        "visibleH1AtSampling": [],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}",
+          "/api/projects/{id}/items",
+          "/api/projects/{id}/snapshots",
+          "/api/projects/{id}/governance",
+          "/api/projects/{id}/world"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/plan",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/plan",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目计划"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/plan",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/plan"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/repositories",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/repositories",
+        "redirects": [],
+        "visibleH1AtSampling": [],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/repositories",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/git-repository-delegations",
+          "/api/projects/{id}/git-automation-grants"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/tools",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/tools",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目工具权限"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/tools",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/mcp-connection-delegations",
+          "/api/projects/{id}/mcp-tool-grants"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    },
+    {
+      "route": "/projects/[projectId]/world",
+      "group": "project",
+      "normal": {
+        "role": "projectOwner",
+        "status": 200,
+        "destination": "/projects/{id}/world",
+        "redirects": [],
+        "visibleH1AtSampling": [
+          "项目状态治理"
+        ],
+        "serverErrorCount": 0,
+        "clientErrorCount": 0
+      },
+      "clientGet503": {
+        "documentStatus": 200,
+        "destination": "/projects/{id}/world",
+        "interceptedEndpoints": [
+          "/api/workspaces/current",
+          "/api/projects",
+          "/api/notifications",
+          "/api/projects/{id}/world"
+        ],
+        "visibleAlerts": 1,
+        "jsErrorCount": 0
+      }
+    }
+  ],
+  "initialStatusClassification": [
+    {
+      "route": "/admin/account",
+      "classification": "configuration_unavailable_and_loading",
+      "detail": "SMS is not configured; session/activity panels were still loading."
+    },
+    {
+      "route": "/admin/audit",
+      "classification": "loading",
+      "detail": "Audit snapshot read was still in progress."
+    },
+    {
+      "route": "/admin/operations/backups",
+      "classification": "expected_runtime_limitation_and_loading",
+      "detail": "Backup status directory is not mounted in this local runtime; server-resource read was still in progress."
+    },
+    {
+      "route": "/admin/sms",
+      "classification": "informational_configuration_state",
+      "detail": "The message describes the prerequisites for phone authentication; supplier configuration was still loading."
+    },
+    {
+      "route": "/recover",
+      "classification": "configuration_unavailable",
+      "detail": "SMS recovery is unavailable because this isolated runtime has no configured SMS provider."
+    },
+    {
+      "route": "/system/operations",
+      "classification": "expected_runtime_limitation",
+      "detail": "Backup status directory is not mounted; Linux kernel metrics are unavailable on the macOS host."
+    },
+    {
+      "route": "/credits",
+      "classification": "loading",
+      "detail": "Credit data read was still in progress."
+    },
+    {
+      "route": "/personal/knowledge/graph",
+      "classification": "loading",
+      "detail": "Source and relation read was still in progress."
+    },
+    {
+      "route": "/personal/knowledge",
+      "classification": "loading",
+      "detail": "Knowledge list read was still in progress."
+    },
+    {
+      "route": "/projects/[projectId]/governance",
+      "classification": "loading",
+      "detail": "Project facts read was still in progress."
+    },
+    {
+      "route": "/projects/[projectId]/members",
+      "classification": "loading",
+      "detail": "Project membership read was still in progress."
+    },
+    {
+      "route": "/projects/[projectId]/tools",
+      "classification": "informational_capability_summary",
+      "detail": "Static copy describes available owner-approved read-only actions; it is not an error state."
+    }
+  ],
+  "laterHeadingVerification": [
+    {
+      "route": "/admin/users/[id]",
+      "documentStatus": 200,
+      "finalPath": "/admin/users/[id]",
+      "readyState": "heading-ready",
+      "headingCount": 1,
+      "pageErrors": 0,
+      "serverErrors": [],
+      "navigationError": null,
+      "elapsedMs": 538
+    },
+    {
+      "route": "/projects/[id]",
+      "documentStatus": 200,
+      "finalPath": "/projects/[id]",
+      "readyState": "heading-ready",
+      "headingCount": 1,
+      "pageErrors": 0,
+      "serverErrors": [],
+      "navigationError": null,
+      "elapsedMs": 499
+    },
+    {
+      "route": "/projects/[id]/materials",
+      "documentStatus": 200,
+      "finalPath": "/projects/[id]/materials",
+      "readyState": "heading-ready",
+      "headingCount": 1,
+      "pageErrors": 0,
+      "serverErrors": [],
+      "navigationError": null,
+      "elapsedMs": 117
+    },
+    {
+      "route": "/projects/[id]/repositories",
+      "documentStatus": 200,
+      "finalPath": "/projects/[id]/repositories",
+      "readyState": "heading-ready",
+      "headingCount": 1,
+      "pageErrors": 0,
+      "serverErrors": [],
+      "navigationError": null,
+      "elapsedMs": 123
+    }
+  ]
+}

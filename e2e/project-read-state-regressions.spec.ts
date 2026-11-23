@@ -139,6 +139,10 @@ test("T-060 ignores an old web-source filter failure after the disabled list suc
     await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
     await expect(status).toHaveValue("disabled");
     await expect(page.getByText("受控停用来源", { exact: true })).toBeVisible();
+    await status.selectOption("active");
+    await expect(page.locator("main").getByRole("alert")).toBeVisible();
+    await expect(page.getByText("受控停用来源", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("没有匹配的网页资料。", { exact: true })).toHaveCount(0);
   } finally {
     releaseActive.resolve();
     await cleanupProject(project.id, owner);

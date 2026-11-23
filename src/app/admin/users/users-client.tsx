@@ -3,7 +3,7 @@ import { UiErrorText } from "@/components/ui-error-text";
 
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { useAppearance } from "@/components/appearance-provider";
 
@@ -75,26 +75,43 @@ export function AdminUsersClient({ username }: { username: string }) {
   const [payload, setPayload] = useState<ListPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestVersionRef = useRef(0);
+  const requestControllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    const requestVersion = ++requestVersionRef.current;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: "20" });
       if (search.trim()) params.set("search", search.trim());
-      const response = await fetch(`/api/admin/users?${params.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/admin/users?${params.toString()}`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(await readError(response, "用户列表加载失败"));
-      setPayload(await response.json() as ListPayload);
+      const nextPayload = await response.json() as ListPayload;
+      if (controller.signal.aborted || requestVersionRef.current !== requestVersion) return;
+      setPayload(nextPayload);
       setError(null);
     } catch (cause) {
+      if (controller.signal.aborted || requestVersionRef.current !== requestVersion) return;
       setError(cause instanceof Error ? cause.message : "用户列表加载失败");
     } finally {
-      setLoading(false);
+      if (requestVersionRef.current === requestVersion) {
+        requestControllerRef.current = null;
+        setLoading(false);
+      }
     }
   }, [page, search]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      requestVersionRef.current += 1;
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
+    };
   }, [load]);
 
   return <div className="w-full px-4 pb-12 pt-5 text-app-text sm:px-5 lg:px-6">

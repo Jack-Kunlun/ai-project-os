@@ -41,6 +41,7 @@ type ProjectSearchPayload = Readonly<{
 
 type ProjectListPayload = Readonly<{
   projects?: readonly ProjectOption[];
+  pagination?: Readonly<{ totalPages?: number }>;
 }>;
 type PersonalResult = Readonly<{ id: string; title: string; excerpt?: string; updatedAt: string }>;
 type ProjectSearchPanelError = Readonly<{ message: string; suffix?: string }>;
@@ -49,6 +50,25 @@ const MAX_SELECTED_PROJECTS = 5;
 
 async function responseError(response: Response, fallback: string): Promise<string> {
   return (await safeResponseError(response, fallback)).message;
+}
+
+async function readProjectView(view: "active" | "archived", signal: AbortSignal): Promise<ProjectOption[]> {
+  const projects: ProjectOption[] = [];
+  let page = 1;
+  let totalPages = 1;
+  do {
+    if (signal.aborted) return projects;
+    const query = new URLSearchParams({ view, page: String(page), pageSize: "50" });
+    const response = await fetch(`/api/projects?${query.toString()}`, { cache: "no-store", signal });
+    if (!response.ok) throw new Error(await responseError(response, "可选项目加载失败"));
+    const payload = await response.json() as ProjectListPayload;
+    if (!Array.isArray(payload.projects)) throw new Error("项目列表返回格式无效");
+    projects.push(...payload.projects);
+    const reportedTotalPages = payload.pagination?.totalPages;
+    totalPages = Number.isSafeInteger(reportedTotalPages) && reportedTotalPages! > 0 ? reportedTotalPages! : 1;
+    page += 1;
+  } while (page <= totalPages && !signal.aborted);
+  return projects;
 }
 
 function sourceKindLabel(kind: string, translate: (text: string) => string): string {
@@ -89,17 +109,12 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
     projectsRequestRef.current?.abort();
     projectsRequestRef.current = controller;
     void Promise.all([
-      fetch("/api/projects?view=active&page=1&pageSize=50", { cache: "no-store", signal: controller.signal }),
-      fetch("/api/projects?view=archived&page=1&pageSize=50", { cache: "no-store", signal: controller.signal }),
-    ]).then(async ([activeResponse, archivedResponse]) => {
-      if (!activeResponse.ok) throw new Error(await responseError(activeResponse, "可选项目加载失败"));
-      if (!archivedResponse.ok) throw new Error(await responseError(archivedResponse, "可选项目加载失败"));
-      const [activePayload, archivedPayload] = await Promise.all([
-        activeResponse.json() as Promise<ProjectListPayload>,
-        archivedResponse.json() as Promise<ProjectListPayload>,
-      ]);
+      readProjectView("active", controller.signal),
+      readProjectView("archived", controller.signal),
+    ]).then(([activeProjects, archivedProjects]) => {
+      if (controller.signal.aborted) return;
       const byId = new Map<string, ProjectOption>();
-      for (const project of [...(activePayload.projects ?? []), ...(archivedPayload.projects ?? [])]) byId.set(project.id, project);
+      for (const project of [...activeProjects, ...archivedProjects]) byId.set(project.id, project);
       const available = [...byId.values()];
       setProjects(available);
       setSelectedIds((current) => current.length > 0 ? current : available[0] ? [available[0].id] : []);

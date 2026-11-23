@@ -4,7 +4,7 @@ import { UiFeedbackText } from "@/components/ui-error-text";
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { OperationPanel } from "@/components/operation-panel";
 import { DialogActions, DialogForm, DialogSubmit } from "@/components/dialog-actions";
 
@@ -75,6 +75,11 @@ function newRequestKey(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`;
 }
 
+function formatDateTimeLocal(value: Date): string {
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
     const payload = await response.json() as { error?: { message?: string } };
@@ -103,15 +108,21 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
   const [operationOpen, setOperationOpen] = useState(false);
   const [selectedRevokeGrant, setSelectedRevokeGrant] = useState<Grant | null>(null);
   const [grantAmount, setGrantAmount] = useState("500000");
-  const [grantExpiresAt, setGrantExpiresAt] = useState(() => new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 16));
+  const [grantExpiresAt, setGrantExpiresAt] = useState(() => formatDateTimeLocal(new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000)));
+  const requestVersionRef = useRef(0);
+  const requestControllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    const requestVersion = ++requestVersionRef.current;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setLoading(true);
     try {
       const params = new URLSearchParams({ grantPage: String(grantPage), grantPageSize: "10", userPage: String(userPage), userPageSize: "10" });
       if (focusUserId !== undefined) params.set("userId", focusUserId);
       if (search.trim()) params.set("search", search.trim());
-      const response = await fetch(`/api/admin/credits/grants?${params.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/admin/credits/grants?${params.toString()}`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(await readError(response, "平台额度读取失败"));
       const payload = await response.json() as {
         grants: Grant[];
@@ -119,6 +130,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
         grantsHasNextPage?: boolean;
         usersHasNextPage?: boolean;
       };
+      if (controller.signal.aborted || requestVersionRef.current !== requestVersion) return;
       setGrants(payload.grants);
       setUsers(payload.users);
       setGrantsHasNextPage(payload.grantsHasNextPage === true);
@@ -128,15 +140,24 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
         : payload.users.find((user) => !user.disabled)?.id ?? ""));
       setMessage(null);
     } catch (error) {
+      if (controller.signal.aborted || requestVersionRef.current !== requestVersion) return;
       setMessage(error instanceof Error ? error.message : "平台额度读取失败");
     } finally {
-      setLoading(false);
+      if (requestVersionRef.current === requestVersion) {
+        requestControllerRef.current = null;
+        setLoading(false);
+      }
     }
   }, [focusUserId, grantPage, search, userPage]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      requestVersionRef.current += 1;
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
+    };
   }, [load]);
 
   const selectedUser = useMemo(() => users.find((user) => user.id === selectedUserId), [selectedUserId, users]);

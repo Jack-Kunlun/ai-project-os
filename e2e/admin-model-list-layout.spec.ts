@@ -380,6 +380,25 @@ test("admin model defaults and scrolling work at desktop and mobile viewport siz
     await page.getByRole("button", { name: "新增供应商", exact: true }).first().click();
     const form = page.getByRole("dialog", { name: "新增供应商", exact: true });
     await expectProviderDefaults(form, false);
+    const generation = form.getByLabel("生成模型（可选）", { exact: true });
+    await generation.focus();
+    await generation.scrollIntoViewIfNeeded();
+    if (page.context().browser()?.browserType().name() === "chromium") {
+      const session = await page.context().newCDPSession(page);
+      try {
+        const box = await generation.boundingBox();
+        if (!box) throw new Error("Generation model input has no visible bounds");
+        const hit = await session.send("DOM.getNodeForLocation", {
+          x: Math.round(box.x + box.width - 20),
+          y: Math.round(box.y + box.height / 2),
+          includeUserAgentShadowDOM: true,
+        });
+        const { node } = await session.send("DOM.describeNode", { backendNodeId: hit.backendNodeId });
+        expect(node.attributes).toContain("-webkit-calendar-picker-indicator");
+      } finally {
+        await session.detach();
+      }
+    }
     await expect(form.getByRole("button", { name: "保存连接", exact: true })).toBeDisabled();
     await page.keyboard.press("Escape");
     await expect(form).toBeHidden();

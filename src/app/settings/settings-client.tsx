@@ -2,6 +2,7 @@
 import { UiErrorText, UiFeedbackText } from "@/components/ui-error-text";
 
 
+import { ModelPicker } from "@/components/model-picker";
 import formFields from "@/components/model-form-fields.module.css";
 
 import { UiText, useAppearance } from "@/components/appearance-provider";
@@ -452,19 +453,21 @@ function ProviderCreateForm({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6">
         <fieldset disabled={pending} className="min-w-0">
         <Field compact label="供应商">
-          <select value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')}>
-            {catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{t(entry.displayName)}</option>)}
-          </select>
+          <ModelPicker>
+            <select value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')}>
+              {catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{t(entry.displayName)}</option>)}
+            </select>
+          </ModelPicker>
         </Field>
         <Field compact label="连接名称"><input value={name} onChange={(event) => { clearProof(); setName(event.target.value); }} maxLength={80} required className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></Field>
         <Field compact label={definition?.apiKeyLabel ?? "API Key"}><input type="password" value={apiKey} onChange={(event) => { clearProof(); setApiKey(event.target.value); }} autoComplete="new-password" maxLength={512} required className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></Field>
-        <Field compact label="生成模型（可选）"><input list={`generation-${kind}`} value={generationModelId} onChange={(event) => { clearProof(); setGenerationModelId(event.target.value); }} className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></Field>
+        <Field compact label="生成模型（可选）"><ModelPicker><input list={`generation-${kind}`} value={generationModelId} onChange={(event) => { clearProof(); setGenerationModelId(event.target.value); }} className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></ModelPicker></Field>
         <datalist id={`generation-${kind}`}>{definition?.generationModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist>
-        {definition?.supportsVision ? <><Field compact label="图片识别模型（可选）"><input list={`vision-${kind}`} value={visionModelId} onChange={(event) => { clearProof(); setVisionModelId(event.target.value); }} className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></Field><datalist id={`vision-${kind}`}>{definition.visionModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist></> : null}
+        {definition?.supportsVision ? <><Field compact label="图片识别模型（可选）"><ModelPicker><input list={`vision-${kind}`} value={visionModelId} onChange={(event) => { clearProof(); setVisionModelId(event.target.value); }} className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></ModelPicker></Field><datalist id={`vision-${kind}`}>{definition.visionModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist></> : null}
         {definition?.supportsEmbeddings ? (
           <>
             <label className="mt-3 flex items-center gap-3 text-sm text-app-text"><input type="checkbox" checked={embeddingEnabled} onChange={(event) => { clearProof(); setEmbeddingEnabled(event.target.checked); }} /> <UiText text={"同时配置向量模型"} /></label>
-            {embeddingEnabled ? <div className="grid grid-cols-[1fr_7rem] gap-3"><Field compact label="向量模型"><input list={`embedding-${kind}`} value={embeddingModelId} onChange={(event) => { clearProof(); chooseEmbeddingModel(event.target.value); }} required className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></Field><Field compact label="维度"><input type="number" min={8} max={8192} value={embeddingDimensions} onChange={(event) => { clearProof(); setEmbeddingDimensions(event.target.value); }} required className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></Field></div> : null}
+            {embeddingEnabled ? <div className="grid grid-cols-[1fr_7rem] gap-3"><Field compact label="向量模型"><ModelPicker><input list={`embedding-${kind}`} value={embeddingModelId} onChange={(event) => { clearProof(); chooseEmbeddingModel(event.target.value); }} required className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></ModelPicker></Field><Field compact label="维度"><input type="number" min={8} max={8192} value={embeddingDimensions} onChange={(event) => { clearProof(); setEmbeddingDimensions(event.target.value); }} required className={["app-field", (`${formFields.lightField} light-field`)].filter(Boolean).join(' ')} /></Field></div> : null}
             <datalist id={`embedding-${kind}`}>{definition.embeddingModelSuggestions.map((item) => <option key={item.id} value={item.id} />)}</datalist>
           </>
         ) : <p className="mt-3 rounded-panel border border-app-warning-border bg-app-warning-soft px-4 py-3 text-xs leading-5 text-app-warning-ink"><UiText text={"DeepSeek 当前作为生成供应商使用；语义索引需为项目另选 OpenAI、Qwen 或 GLM。"} /></p>}

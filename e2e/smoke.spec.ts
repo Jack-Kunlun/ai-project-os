@@ -1,4 +1,4 @@
-import { expectProviderDefaults } from "./support/provider-defaults";
+import { expectModelPickerIndicators, expectProviderDefaults } from "./support/provider-defaults";
 import { createHash, randomUUID } from "node:crypto";
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
@@ -992,6 +992,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.getByRole("button", { name: "管理配置", exact: true }).click();
   await page.getByRole("button", { name: "编辑配置", exact: true }).click();
   await expect(page.getByLabel("新的 API Key", { exact: true })).toHaveCount(0);
+  await expectModelPickerIndicators(page.getByRole("dialog", { name: "编辑个人模型配置", exact: true }));
   await page.getByLabel("连接名称", { exact: true }).last().fill(smokeConnectionNameUpdated);
   await page.getByLabel("生成模型（可选）", { exact: true }).last().fill("gpt-4.1");
   await page.route("**/api/me/ai-providers/*", async (route) => {

@@ -59,3 +59,49 @@
   .lightField,
   .editField { min-height: 44px; }
 }
+
+.picker {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  margin-block-start: .5rem;
+}
+
+.picker:has(> .lightField) { margin-block-start: .375rem; }
+
+.picker > :is(select, input) {
+  grid-area: 1 / 1;
+  min-width: 0;
+  margin: 0;
+  padding-inline-end: 40px;
+}
+
+.picker > select { appearance: none; }
+
+.picker > input[list] { position: relative; }
+
+/* Keep the native suggestion trigger clickable underneath the shared chevron. */
+.picker > input[list]::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 40px;
+  /* Chromium sets an inline block-size of 1em on the native trigger. */
+  block-size: auto !important;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+}
+
+.picker > .pickerIcon {
+  grid-area: 1 / 1;
+  justify-self: end;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  margin-inline-end: 12px;
+  color: var(--app-muted);
+  pointer-events: none;
+}
+
+.picker:has(> :disabled) > .pickerIcon { opacity: .65; }

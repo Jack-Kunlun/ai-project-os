@@ -1,0 +1,74 @@
+{
+  "version": "v1.2.29",
+  "sourceRevision": "d6fdf0ac1c7af3429b58a735c82e3bba3f40dd8c",
+  "candidateRevision": "d12bd6b6884219635790c1cb1946755c6f4fd6e6",
+  "annotatedTag": "456885257a2b51ebb097511d8ab1b809a5e6a4f5",
+  "ci": {
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45303237125",
+    "conclusion": "success",
+    "checks": {
+      "unit": {
+        "mode": "full",
+        "status": "passed",
+        "planFingerprint": "b27d39c0147fa24d0a6b8504568323922fe2672992ea63e48792988dd0562c34"
+      },
+      "browser": {
+        "mode": "full",
+        "status": "passed",
+        "planFingerprint": "b27d39c0147fa24d0a6b8504568323922fe2672992ea63e48792988dd0562c34",
+        "testCount": 122,
+        "executedCount": 115,
+        "skippedCount": 7
+      }
+    },
+    "images": {
+      "app": {
+        "ref": "ghcr.io/jack-kunlun/ai-project-os-app@sha256:4e49232586eb2754b1b2931b5efe693561dc2eedede9ec75cde292e44596a84b",
+        "id": "sha256:327a343e617964f9d231fb3433a5b6d52b294da0764695e087b841cf1829bcb3"
+      },
+      "worker": {
+        "ref": "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:11426fef0b23749f0b4199b5071dd80ec8ff1f8a26b5c90721d043db1067e99d",
+        "id": "sha256:951744a2b90e1817d47b031b51fc9aac25a742c3f857ed419f9a203456766fff"
+      },
+      "migrate": {
+        "ref": "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:d9630070369ca24b92ace4b29210fa07d63945103f5c05a1cb42e72eb71d751a",
+        "id": "sha256:89e079e0e98c6c39b1dfffabd263b7e9e557dc7be4eed0eb828301c459affc6a"
+      }
+    }
+  },
+  "release": {
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45308521337",
+    "conclusion": "success",
+    "successfulAttempt": 2,
+    "earlierAttempt": {
+      "attempt": 1,
+      "status": "restored-before-cutover",
+      "reason": "STABLE_SOURCE_DATABASE_POLICY_CHANGED_DURING_BUILD"
+    },
+    "receipt": "STABLE_DEPLOY_OK tag=v1.2.29 revision=d12bd6b6884219635790c1cb1946755c6f4fd6e6 migration_count=151 backup=not-required restore=not-required",
+    "receiptLogSha256": "4b3a5e464202b3047f9006cf9fb786310229627977a50c2a6cc46f39ac296a4f",
+    "publishedAt": "2026-11-24T02:07:23Z",
+    "github": "https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.29"
+  },
+  "publicHealth": {
+    "checkedAt": "2026-11-24T02:08:09.168157+00:00",
+    "version": "1.2.29",
+    "status": "ok",
+    "database": "up",
+    "worker": "up",
+    "consecutiveFailures": 0
+  },
+  "publicEntryChecks": {
+    "/login": {
+      "status": 200
+    },
+    "/admin/models": {
+      "signedOutFinalPath": "/login",
+      "finalStatus": 200
+    },
+    "/personal/models": {
+      "signedOutFinalPath": "/login",
+      "finalStatus": 200
+    }
+  }
+}

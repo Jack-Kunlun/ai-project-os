@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "task": "T-074",
+  "verifiedAt": "2026-11-24T09:27:42+08:00",
+  "applicationVersion": "1.2.29",
+  "testedRevision": "d12bd6b6884219635790c1cb1946755c6f4fd6e6",
+  "environment": "isolated local Next.js 1.2.29 application, PostgreSQL, and authenticated Chromium browser",
+  "sha256": {
+    "applicationAndRegressionFiles": {
+      "src/app/settings/settings-client.tsx": "742015b749d4bf456b7d725973653abeac1d322a4dd11c65d4d04fee2306f54e",
+      "src/app/profile/models/personal-models-client.tsx": "8501e4435909e94160d338c2dc01935f1dc4af63e7931db101f9bc5bea5a9899",
+      "src/components/model-picker.tsx": "c9e67457c01e1e4253489673c3416a5e05f83c672c94948c2986ae2d764f8cef",
+      "src/components/model-form-fields.module.css": "352ce9d8a363f80eab864f07bd5e1c0fc737c0ac531cc54b9e4e556619b069e5",
+      "e2e/admin-model-list-layout.spec.ts": "6ec3f1c63959c3c0fe83b24f1770959689afe8c185b880bac08f272f0c24c19e",
+      "e2e/support/provider-defaults.ts": "9982aa23e1572c31af26c4854fad25fa176f75c2be8ee397c069e5c455719d2e",
+      "e2e/smoke.spec.ts": "fd296b10bff5c6a45c83afb4bdb842ee14dff8b57a995edd51ca58177ae3512a"
+    },
+    "nativeSelectionEvidence": "266850f1275366991742f3ea40939eb394e1bf496514fafd8b3cdf35fb60ca3b",
+    "mobileReleaseScreenshot": "4ce767913e9e6e69d4b2d9a420c0932e84d9af40d3d37c03dcb87fd52db65776"
+  },
+  "results": [
+    {
+      "case": "authenticated-admin-create-responsive-providers",
+      "command": "pnpm exec playwright test e2e/admin-model-list-layout.spec.ts --grep \"admin model defaults and scrolling\"",
+      "status": "passed",
+      "result": "1 passed. 1680px desktop and 390px mobile. Four providers and model defaults checked. Mobile vector model and dimensions stack. Complete model ID measured to fit available input width. Chevron geometry and native trigger hit target passed."
+    },
+    {
+      "case": "authenticated-personal-create-edit-and-axe",
+      "command": "pnpm exec playwright test e2e/t074-personal-reaccept.spec.ts",
+      "status": "passed",
+      "result": "1 passed. Isolated member login, creation at 390px, edit at 1280px, four provider defaults and recommendation list binding, free model ID entry, and WCAG 2.2 A/AA dialog scans."
+    },
+    {
+      "case": "390px-scroll-dimension-footer-close",
+      "command": "pnpm exec playwright test e2e/t074-mobile-shot.spec.ts",
+      "status": "passed",
+      "result": "1 passed. Scroll container moved 159px. Vector field at y=497px and 3072 dimension field at y=587px, both 44px high. Footer at y=709px, buttons at y=720px and within 844px viewport. Test button enabled and keyboard-focusable after entering an isolated local key. Save stayed disabled until the required connection test. Header close button closed the dialog."
+    },
+    {
+      "case": "native-model-suggestion-selection",
+      "command": "isolated Chromium system-pointer and keyboard acceptance",
+      "status": "passed",
+      "result": "System mouse click on model chevron opened the native suggestion. Down and Return selected gpt-6.2-sol; manual model entry passed; providerRequests=0."
+    },
+    {
+      "case": "admin-dialog-wcag-a11y",
+      "command": "pnpm exec playwright test e2e/admin-model-list-layout.spec.ts --grep \"admin model defaults and scrolling\" with dialog-only axe check",
+      "status": "passed",
+      "result": "1 passed. Admin create dialog scans at desktop and 390px."
+    }
+  ],
+  "mobileGeometry": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "scrollTop": 159,
+    "vectorModelValue": "text-embedding-3-large",
+    "vectorModelTextFitsAvailableWidth": true,
+    "vectorModelInput": {
+      "x": 33,
+      "y": 497,
+      "width": 324,
+      "height": 44
+    },
+    "dimensionsValue": "3072",
+    "dimensionsInput": {
+      "x": 33,
+      "y": 587,
+      "width": 324,
+      "height": 44
+    },
+    "footer": {
+      "x": 13,
+      "y": 709,
+      "width": 364,
+      "height": 64
+    },
+    "testButton": {
+      "x": 185,
+      "y": 720,
+      "width": 82,
+      "height": 40,
+      "enabledAfterLocalKeyEntry": true,
+      "focused": true
+    },
+    "saveButton": {
+      "x": 275,
+      "y": 720,
+      "width": 82,
+      "height": 40,
+      "disabledUntilConnectionTest": true
+    },
+    "closeButton": {
+      "x": 321,
+      "y": 91,
+      "width": 36,
+      "height": 36,
+      "clickedAndDialogClosed": true
+    }
+  },
+  "nativeSelection": {
+    "case": "system mouse click on generation model chevron, Down and Return in native dropdown",
+    "time": "2026-11-24T01:21:37.119Z",
+    "revision": "d12bd6b6884219635790c1cb1946755c6f4fd6e6",
+    "applicationVersion": "1.2.29",
+    "browser": "158.0.8127.36",
+    "status": "passed",
+    "before": "",
+    "selected": "gpt-6.2-sol",
+    "customInput": true,
+    "providerRequests": 0
+  },
+  "screenshots": [
+    "desktop.png",
+    "mobile.png",
+    "mobile-release.png"
+  ],
+  "boundaries": [
+    "No full-site smoke test was run.",
+    "No model-provider request was made.",
+    "The temporary browser test accounts, database, and application were isolated."
+  ]
+}

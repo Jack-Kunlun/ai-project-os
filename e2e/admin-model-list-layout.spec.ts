@@ -380,6 +380,22 @@ test("admin model defaults and scrolling work at desktop and mobile viewport siz
     await page.getByRole("button", { name: "新增供应商", exact: true }).first().click();
     const form = page.getByRole("dialog", { name: "新增供应商", exact: true });
     await expectProviderDefaults(form, false);
+    if (viewport.width === 390) {
+      const vector = form.getByLabel("向量模型", { exact: true });
+      const dimensions = form.getByLabel("维度", { exact: true });
+      const [modelBox, dimensionBox] = await Promise.all([vector.boundingBox(), dimensions.boundingBox()]);
+      if (!modelBox || !dimensionBox) throw new Error("Embedding fields have no visible bounds");
+      expect(dimensionBox.y).toBeGreaterThanOrEqual(modelBox.y + modelBox.height);
+      const fits = await vector.evaluate((input: HTMLInputElement) => {
+        const style = getComputedStyle(input);
+        const context = document.createElement("canvas").getContext("2d");
+        if (!context) throw new Error("Text measurement unavailable");
+        context.font = style.font;
+        const available = input.clientWidth - parseFloat(style.paddingInlineStart) - parseFloat(style.paddingInlineEnd);
+        return context.measureText(input.value).width <= available;
+      });
+      expect(fits, "The complete default embedding model ID should be readable").toBe(true);
+    }
     const generation = form.getByLabel("生成模型（可选）", { exact: true });
     await generation.focus();
     await generation.scrollIntoViewIfNeeded();

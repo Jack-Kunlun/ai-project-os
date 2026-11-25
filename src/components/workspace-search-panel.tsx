@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslate } from "./appearance-provider";
 import { ShellIcon } from "./shell-icon";
 import type { WorkspaceOption } from "./workspace-scope";
-import styles from "./workspace-picker.module.css";
+import styles from "./user-shell.module.css";
 
 type WorkspaceSearchResponse = Readonly<{
   availableWorkspaces: WorkspaceOption[];
@@ -153,8 +153,8 @@ export function WorkspaceSearchPanel({
   }
 
   return (
-    <div id={id} className={styles.dropdown} data-workspace-dropdown>
-      <div className={styles.searchInputWrap}>
+    <div id={id} className={styles.workspaceDropdown} data-workspace-dropdown>
+      <div className={styles.workspaceSearchInputWrap}>
           <ShellIcon name="search" />
           <input
             ref={searchInput}
@@ -174,7 +174,7 @@ export function WorkspaceSearchPanel({
           />
       </div>
       <div
-        className={styles.results}
+        className={styles.workspaceResults}
         role="region"
         aria-label={t("工作区搜索结果")}
         tabIndex={0}
@@ -183,7 +183,7 @@ export function WorkspaceSearchPanel({
         {searchError ? (
           <div role="alert">
             <span>{t("工作区搜索失败，请重试")}</span>
-            <button type="button" className={`app-button-secondary ${styles.action}`} onClick={retrySearch}>{t("重试")}</button>
+            <button type="button" className={`app-button-secondary ${styles.workspaceAction}`} onClick={retrySearch}>{t("重试")}</button>
           </div>
         ) : null}
         {!searchLoading && !searchError && searchResults.length === 0 ? (
@@ -198,7 +198,7 @@ export function WorkspaceSearchPanel({
                 role="option"
                 aria-selected={space.id === selectedId}
                 aria-disabled={space.unavailable || undefined}
-                className={styles.option}
+                className={styles.workspaceOption}
                 data-active={activeIndex === index || undefined}
                 onMouseDown={(event) => event.preventDefault()}
                 onMouseMove={() => { if (!space.unavailable) setActiveIndex(index); }}
@@ -212,7 +212,7 @@ export function WorkspaceSearchPanel({
           ))}
         </ul>
         {!searchError && searchHasMore && searchCursor ? (
-          <button type="button" className={`app-button-secondary ${styles.action}`} onClick={loadMore} aria-disabled={searchLoading}>
+          <button type="button" className={`app-button-secondary ${styles.workspaceAction}`} onClick={loadMore} aria-disabled={searchLoading}>
             {t("下一页")}
           </button>
         ) : null}

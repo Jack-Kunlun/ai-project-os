@@ -1,0 +1,34 @@
+{
+  "task": "T-078",
+  "evidence": "E-034",
+  "date": "2026-11-25",
+  "previousCandidate": "4e86c352c60467a31da85823170045a16a2c6193",
+  "failedCi": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45536511564",
+  "failedChecks": [
+    "even pixel contract for new separate stylesheet",
+    "total static client gzip budget"
+  ],
+  "unitResult": {
+    "passed": 1601,
+    "failed": 1,
+    "skipped": 175
+  },
+  "change": "Consolidate dropdown declarations unchanged into existing sidebar CSS module with workspace class prefix; remove independent stylesheet",
+  "sourceHashes": {
+    "src/components/user-shell.module.css": "41bf6b03c7682d3952182910bf4ba542bc2438b00fc3fec2f272d8f52d8be0c0",
+    "src/components/workspace-search-panel.tsx": "de0a807d60514760f83d5e69941f5d93d47cd70171cf7d5e64fa7c3f1f0b7ec7"
+  },
+  "deleted": [
+    "src/components/workspace-picker.module.css"
+  ],
+  "localChecks": {
+    "targetedContracts": {
+      "passed": 7,
+      "failed": 0
+    },
+    "lint": "passed",
+    "diffCheck": "passed"
+  },
+  "budgetUnchanged": true,
+  "acceptance": "pending exact new SHA CI; no deployment attempted"
+}

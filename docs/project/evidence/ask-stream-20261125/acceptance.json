@@ -1,0 +1,195 @@
+{
+  "task": "T-075",
+  "evidence": "E-032",
+  "status": "accepted_local",
+  "recordedAt": "2026-11-25T09:57:33.850961+08:00",
+  "baseline": "4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+  "workingTreeChanges": true,
+  "releaseEligible": false,
+  "sourceFileSha256": {
+    "e2e/inquiry-stream.spec.ts": "f637296f2d7e4fa0112f515058ea15387ebc63c152cb2c5fc6fd4b9bf7409068",
+    "public/locales/en.add0b0649ddee86f.json": "add0b0649ddee86f4abca69514d3cab81e080d18ed9220e443d846c6188966a5",
+    "src/app/api/ask/turns/route.ts": "2907a625be1818a4e5dc5e1d0e5dad41d98b88b56381d3115b41b07bd2ee133b",
+    "src/app/ask/ask-client.module.css": "0919841b9a5f80d9142fc4c3ddb5cea550700c0dd018b0cf74c4868e2e6ce769",
+    "src/app/ask/ask-client.tsx": "1a18f9c2d4d6efa8b908a04a65ffb7246af1d2ce0173caf749c3eb1f5f94d81e",
+    "src/lib/ai-providers/transport.ts": "77a8a21070c0578d0c2ff36a30d4977d9dc8eb013e22dbd4931834c62336c2fc",
+    "src/lib/inquiry-session.ts": "30003a5cd2685d28b62f4e548f1e6e82b63be19343214145b73f2bc473393a10",
+    "src/lib/inquiry-stream.ts": "946e6e922a69b76cb952de9f58258e407252190ca27d38acc04fae5710dbb00a",
+    "src/lib/ui-polish-messages.ts": "a20cb5e7ecb2f433567978aba3f069e38fe97d38df784bf0b0ca293b399a878c",
+    "src/lib/unified-question-preview.ts": "75d0b7a5be72114713af533975a8f8726f45088e07c66f4f37a22ad17196fca8",
+    "src/lib/unified-question-service.ts": "e8f9deb7b69b624621a1f1e5733b9dd0efe7e62f97fa1cc890872a82897bb1c9",
+    "test/inquiry-stream.test.ts": "d60355f3ea4593ac8a5860246a2e84c2b2405d9c89ded2902d747023df866396",
+    "test/provider-chat-stream.test.ts": "a396ebc11acf734f4dc2f5d599f33800c36d42501cbfbf59f6b4df8a3ddaddeb",
+    "test/unified-question-postgres.test.ts": "ad9cb52ac14cb0988894a9e841ebd7b0d79737fd786c64e42738a1a4137f6bce"
+  },
+  "sourceFingerprint": "06c9b8175962e9004a819197030dd14da5e1f98284fb4e6afe09d858b9c94b7b",
+  "localImages": {
+    "app": {
+      "ref": "ai-project-os-ci/app:4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+      "id": "sha256:95aeb9c886a1d903216ff06ff36c139af47a31e1b417c55f85c1128d0ccdf710"
+    },
+    "worker": {
+      "ref": "ai-project-os-ci/worker:4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+      "id": "sha256:b70915151ef6cc583cf35f0275a4e73a99014f36138d4c7dba1ee16f67ee0d61"
+    },
+    "migrate": {
+      "ref": "ai-project-os-ci/migrate:4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+      "id": "sha256:70b12183563dc283e1f088b848e72ac14ee62e8faedba429912e6294f5797788"
+    }
+  },
+  "scope": [
+    "existing workspace search meaning",
+    "real incremental Ask answer delivery",
+    "full page and floating Ask",
+    "permission/source fences, citation and durable billing finalization"
+  ],
+  "checks": [
+    {
+      "name": "default tests with coverage",
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 pnpm test:coverage",
+      "passed": 1602,
+      "skipped": 173,
+      "failed": 0,
+      "coverage": {
+        "lines": 63.35,
+        "branches": 79.93,
+        "functions": 68.96
+      },
+      "reuseBoundary": "Complete command passed before final narrow terminal-marker and keyboard fixes; those changes received focused regression, final typecheck/build, and final browser acceptance. Not represented as a rerun of every test after every edit."
+    },
+    {
+      "name": "final provider transport regressions",
+      "command": "pnpm exec tsx --test test/provider-chat-stream.test.ts test/ai-provider-chat-completion-transport.test.ts",
+      "passed": 20,
+      "failed": 0
+    },
+    {
+      "name": "preview/client/session/contracts",
+      "passed": 15,
+      "failed": 0,
+      "additionalClientRerun": {
+        "passed": 3,
+        "failed": 0
+      }
+    },
+    {
+      "name": "PostgreSQL gates",
+      "selected": [
+        "unified-question",
+        "ai-entitlements",
+        "personal-knowledge-qa"
+      ],
+      "gatesPassed": 3,
+      "gatesFailed": 0,
+      "reviewFixRerun": "unified-question 2 tests passed; verifies intermediate-only usage remains held, no partial turn persisted, invalid citations, duplicate dispatch and early preview"
+    },
+    {
+      "name": "Prisma generation and validation",
+      "result": "passed",
+      "migrationDirectories": 151
+    },
+    {
+      "name": "TypeScript",
+      "command": "NODE_OPTIONS=--max-old-space-size=6144 pnpm typecheck",
+      "result": "passed"
+    },
+    {
+      "name": "affected ESLint and git diff --check",
+      "result": "passed"
+    },
+    {
+      "name": "final production image build",
+      "command": "docker buildx bake --file docker-bake.hcl --load app worker migrate performance-export",
+      "result": "passed",
+      "scope": "local dirty-source candidate, no CI or release"
+    },
+    {
+      "name": "performance budget on exported final build",
+      "result": "passed",
+      "askRouteKiB": 173.5,
+      "askRouteLimitKiB": 180
+    },
+    {
+      "name": "final authenticated browser and axe",
+      "command": "pnpm test:browser-e2e --file e2e/inquiry-stream.spec.ts",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 8.4,
+      "environment": "isolated PostgreSQL 18 + Chromium + final local immutable images; controlled local HTTP stream fixture, not real provider"
+    }
+  ],
+  "renderedAcceptance": {
+    "reviewer": "primary agent",
+    "viewed": [
+      "desktop.png",
+      "mobile-floating.png"
+    ],
+    "cases": [
+      {
+        "surface": "full Ask",
+        "viewport": [
+          1440,
+          900
+        ],
+        "language": "zh-CN",
+        "theme": "light"
+      },
+      {
+        "surface": "floating Ask",
+        "viewport": [
+          390,
+          844
+        ],
+        "language": "zh-CN",
+        "theme": "light",
+        "reducedMotion": true
+      }
+    ],
+    "observations": [
+      "body grows before completion; no premature citation or completed turn",
+      "Home key reaches top; new delta leaves reading position unchanged; latest button resumes follow",
+      "status gap measured within 9–11px (10px design expectation), no horizontal overflow",
+      "composer and generation state visible without overlapping content",
+      "incomplete stream removes preview and retains question draft; complete stream replaces preview once",
+      "axe WCAG2.2 A/AA checks passed on both rendered streaming surfaces"
+    ],
+    "notRendered": [
+      "English streaming state",
+      "dark streaming state"
+    ],
+    "dictionaryCheck": "generated versioned English dictionary matches source; semantic theme tokens retained"
+  },
+  "review": {
+    "role": "independent review",
+    "outcome": "no remaining blocking findings",
+    "resolved": [
+      "P1 intermediate usage must not become final billing",
+      "P2 finish plus DONE must terminate without waiting for HTTP EOF",
+      "pre-header network outcome classification",
+      "keyboard access for first-turn scroll region found by actual axe"
+    ]
+  },
+  "lessons": {
+    "L-003": "long output, status spacing, composer and narrow floating layout measured/viewed",
+    "L-004": "generation state/control visibility and error recovery checked",
+    "L-006": "unit, isolated provider/DB, real browser, and external/production boundaries separated"
+  },
+  "retainedFailures": [
+    "missing generated dictionary repaired with existing generator",
+    "default/4GiB typecheck OOM;6GiB completed;two new test helper argument omissions corrected",
+    "selected browser fixture initially lacked administrator bootstrap",
+    "floating fixture locator initially omitted shortcut from accessible name",
+    "axe first-turn scroll region failure fixed in shared component",
+    "keyboard test now waits for native Home-key scroll to settle before injecting next chunk",
+    "unrelated 3D graph pointer-hit assertion at e2e/unified-question.spec.ts:921 remains tracked by T-076; not counted as passed"
+  ],
+  "legacyAskRegression": "existing full Ask test passed in preceding isolated image; that run also contained the separate failing graph test. Final modified focus/stream states proved by the two final selected scenarios.",
+  "boundaries": [
+    "No real OpenAI/DeepSeek/Qwen/GLM provider calls",
+    "No production verification",
+    "No commit, push, tag or deployment",
+    "Separate graph investigation T-076 remains pending"
+  ],
+  "cleanup": "Standard browser runner removed its app/worker, disposable database/roles and secret directory; task PostgreSQL container and local credential file removed at closeout."
+}

@@ -1,0 +1,179 @@
+{
+  "task": "T-077",
+  "evidence": "E-033",
+  "recordedDate": "2026-11-25",
+  "timezone": "Asia/Shanghai",
+  "status": "implemented_local_acceptance_pending",
+  "releaseEligible": false,
+  "baseline": "4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+  "workingTreeChanges": true,
+  "sourceFileSha256": {
+    "src/components/workspace-scope.tsx": "21f50fdc486859a236749755483a7ef2bd2385748d922176a49e7b1960a13979",
+    "src/components/workspace-search-panel.tsx": "473d636b634095dea0dc0746efb64c0e449412efe9d48ea919134d1f44b0f29b",
+    "src/components/workspace-picker.module.css": "45d889ef4652fbd3b3f44133b2424e338c5c1ade6abe8096b6b8e26a297478ed",
+    "src/components/user-shell.module.css": "23f4e87ceff8fffa1406dc5a9fa16d37915420cafc15ac2e10e3e91221ecb4c7",
+    "src/app/user-workspace.css": "f1a996ea13ed2053763ee4ef298d8444198b5d649b2e1b247e7fc03ed5be09e6",
+    "e2e/project-scope-limit-regressions.spec.ts": "4cd3410d4ad1de393c5aa5d8bc050a18ca1fe78266e8e4187011b5812e8a2129",
+    "e2e/t051-personal-regressions.spec.ts": "ff6b2201af806a433400c6de989a47f5ce5310ef6784dd5c2605a84776e09789",
+    "e2e/feedback-layout-parity.spec.ts": "acd23a1107556b85cca6bb3d6067186f1af4004b0f0e591e271fb2e8c906c67c",
+    "e2e/ui-style-states.spec.ts": "775640ef0863e23650c79e67979b44ae012f3ff608fe9d9cf505e121b2e9d099"
+  },
+  "localImages": {
+    "schema": 1,
+    "revision": "4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+    "version": "1.2.29",
+    "runId": 77004,
+    "images": {
+      "app": {
+        "ref": "ai-project-os-ci/app:4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+        "id": "sha256:0ce1ab0e5ee1f107f7778a3583b5e16aba470bf08455c2e333c084dab253c4f5"
+      },
+      "worker": {
+        "ref": "ai-project-os-ci/worker:4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+        "id": "sha256:25cfb4d61d08f07ded0b459865796ba7cf2f4d6a11fd11bb2782c43195b7539e"
+      },
+      "migrate": {
+        "ref": "ai-project-os-ci/migrate:4141c2e2cca761137ea8d36cf262f9a5ef893a51",
+        "id": "sha256:3a89a0a2c9db5c5342e3156948a9463009976118d072f233c214db73b4dfef6a"
+      }
+    }
+  },
+  "scope": [
+    "Workspace search inside the existing dropdown; no separate sidebar link or modal",
+    "Server APIs and authorization unchanged; saved selection resolver retained",
+    "Search, paging, stale-request cancellation, IME and keyboard support"
+  ],
+  "checks": {
+    "contracts": {
+      "status": "passed",
+      "command": "pnpm exec tsx --test test/user-navigation.test.ts test/personal-workspace-experience.test.ts",
+      "passed": 6,
+      "skipped": 0
+    },
+    "typecheck": {
+      "status": "passed",
+      "command": "NODE_OPTIONS=--max-old-space-size=6144 pnpm typecheck"
+    },
+    "lint": {
+      "status": "passed",
+      "scope": "workspace-scope.tsx, workspace-search-panel.tsx and four changed browser consumer files"
+    },
+    "productionBuild": {
+      "status": "passed",
+      "command": "docker buildx bake --file docker-bake.hcl --load app worker migrate performance-export",
+      "runId": 77004
+    },
+    "performance": {
+      "status": "failed",
+      "report": {
+        "sharedJavaScriptGzipBytes": 132403,
+        "largestJavaScriptAsset": {
+          "path": "static/chunks/5922-292479552ca25dd2.js",
+          "gzipBytes": 65839
+        },
+        "globalCssGzipBytes": 11826,
+        "totalStaticClientGzipBytes": 896261,
+        "criticalRoutes": {
+          "/setup": 152551,
+          "/dashboard": 164405,
+          "/personal/projects": 164471,
+          "/guide": 159023,
+          "/connections/mcp": 138665,
+          "/system/account-access": 138665,
+          "/personal": 159331,
+          "/personal/knowledge": 160777,
+          "/personal/knowledge/graph": 183538,
+          "/login": 157316,
+          "/register": 159082,
+          "/admin/sms": 164216,
+          "/ask": 177755
+        }
+      },
+      "failures": [
+        {
+          "metric": "all static client assets",
+          "actualBytes": 896261,
+          "budgetBytes": 896000
+        }
+      ],
+      "excessBytes": 261,
+      "budgetUnchanged": true
+    },
+    "browser": {
+      "status": "passed",
+      "command": "pnpm test:browser-e2e --file e2e/project-scope-limit-regressions.spec.ts --file e2e/t051-personal-regressions.spec.ts --file e2e/feedback-layout-parity.spec.ts",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "durationSeconds": 55.4,
+      "environment": "isolated PostgreSQL + authenticated Chromium against the recorded app/worker images"
+    },
+    "fullSiteUiStates": {
+      "status": "not_run",
+      "reason": "Consumer selectors updated and lint/type checked; broad unrelated full-site traversal excluded from this bounded change"
+    },
+    "diffCheck": {
+      "status": "passed",
+      "command": "git diff --check"
+    }
+  },
+  "renderedAcceptance": {
+    "status": "passed_within_selected_scope",
+    "screenshotsGenerated": [
+      "desktop-closed.png",
+      "desktop-search.png",
+      "mobile-long-results.png",
+      "mobile-current.png",
+      "english-dark-desktop.png",
+      "english-dark-mobile.png",
+      "chinese-light-desktop.png",
+      "chinese-light-mobile.png"
+    ],
+    "screenshotsReviewed": [
+      "desktop-closed.png",
+      "desktop-search.png",
+      "mobile-long-results.png",
+      "mobile-current.png",
+      "english-dark-desktop.png",
+      "english-dark-mobile.png"
+    ],
+    "scenarios": [
+      "Closed sidebar has one workspace entry",
+      "Search result inside anchored dropdown",
+      "Mobile current selection and long scrollable options",
+      "English dark theme at 1440 and 390 CSS pixels"
+    ],
+    "geometryAssertions": [
+      "Trigger dimensions match the existing project selector: desktop40px / mobile44px",
+      "Opening the dropdown does not move navigation",
+      "Dropdown width matches trigger within2px; gap is between0 and8px; right edge stays inside viewport"
+    ],
+    "notes": [
+      "Long names wrap without overlapping the selection marker",
+      "Chinese mobile fixture retains a sidebar scroll offset; searchable area is visible",
+      "Axe checks passed on selected sidebar states, including long results without pagination"
+    ]
+  },
+  "retainedFailures": [
+    "First typecheck overlapped removal of an obsolete prop; final check passed",
+    "Initial browser:9 passed/4 failed. Mobile trigger height was corrected; paging check awaited loading; outside-click target moved to an unobstructed link",
+    "Performance totals:942.4KiB ->888.7KiB ->875.5KiB ->875.3KiB. Final total still fails by261 bytes; no threshold increase"
+  ],
+  "remainingWork": [
+    "Reduce the remaining261-byte total-static budget excess and rerun affected candidate checks; full acceptance remains open"
+  ],
+  "evidenceReuse": [
+    "T-075 recorded source hashes remain unchanged; no claim of rerunning its full image acceptance",
+    "No service/API/migration change in T-077"
+  ],
+  "review": {
+    "independentReviewPerformed": false,
+    "reason": "Medium-risk scoped client interaction; root reviewed implementation and rendered results"
+  },
+  "cleanup": "Browser runner removed its app/worker, disposable database/roles and secret directory. Task PostgreSQL container and private environment file were removed.",
+  "boundaries": [
+    "No commit, push, tag or deployment",
+    "Manual selected tests are not formal CI evidence",
+    "Cumulative unreleased changes also include T-075; release risk must be assessed cumulatively"
+  ]
+}

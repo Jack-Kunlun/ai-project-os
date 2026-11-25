@@ -208,3 +208,7 @@ v1.2.29 的 annotated 标签、主分支 CI、三份不可变镜像引用和正�
 
 
 E-034 补充：最终本地预算 895889/896000 字节、13 项同镜像浏览器/axe、6 张实际截图审阅通过。[最终本地复验](evidence/release-stream-workspace-20261125/reacceptance.json)。正式提交 CI 与生产回执仍待取得。
+
+E-034 正式接收：候选 665c8d98eeed5252087651dd7f4c825bd9f361f1 的[主分支 CI](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45547562848) 成功，源码/覆盖率、Prisma、Lint/类型、资源预算、91 项 PostgreSQL 门禁、账号认证和 OID10、117 项同镜像浏览器通过（7 项按配置跳过），隔离发布候选通过。全站矩阵保留 539 次路由和 175 次上级导航；新的单次导航时限与总预算经独立 review 接收。具体执行数量与身份以[正式回执](evidence/release-stream-workspace-20261125/release.json)为准。
+
+[正式发布](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45551599590) 已将 v1.2.30 / 665c8d9 切换上线。annotated tag、三份 CI 镜像、151 条迁移账本及公网应用/数据库/Worker 健康均核对一致。无新增迁移，不要求备份/恢复演练。真实外部模型未调用；历史失败回执保留。

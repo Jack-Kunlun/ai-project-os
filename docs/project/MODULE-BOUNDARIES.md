@@ -61,7 +61,7 @@
 - **上下游：** F-003/F-004 供资料，F-001 控访问，F-010 供模型和用量，F-011 展示正文/引用/浮窗。F-006 是另一条高级检索/调查路径，不能给主入口套用其验收结果。
 - **交接门槛 / 失败归属：** 范围/来源变化后重核确认；无证据、失败、过期、切账号、归档会话、旧响应回流均有适用场景。F-005 负责会话及引用映射；F-010 负责调用和计量事实；接收方不能凭 HTTP 成功把拒答或未知轮次显示为成功。
 - **实现依据：** [unified-question-service](../../src/lib/unified-question-service.ts) 的 `prepareUnifiedQuestion`/`executeUnifiedQuestion`、[contract](../../src/lib/unified-question-contract.ts)。
-- **流式合同（T-075 / C-022，E-032 本地验收通过、未发布）：** `prepare` 沿用 JSON；`execute` 可通过 `Accept: application/x-ndjson` 选择 `delta` / `complete` / `error` 事件。正文增量只作当前请求的临时预览，每批输出前复核现有访问与来源边界；仅最终模型结构、引用、权限、用量及持久化成功后发出 `complete`。断流或 `error` 清除临时预览并保留问题草稿，不自动重试。旧 JSON 调用保持完整结果语义；浏览器离开后服务继续本次审计/计量收口，不重新派发模型。
+- **流式合同（T-075 / C-022，E-032 本地验收、E-034 随 v1.2.30 上线）：** `prepare` 沿用 JSON；`execute` 可通过 `Accept: application/x-ndjson` 选择 `delta` / `complete` / `error` 事件。正文增量只作当前请求的临时预览，每批输出前复核现有访问与来源边界；仅最终模型结构、引用、权限、用量及持久化成功后发出 `complete`。断流或 `error` 清除临时预览并保留问题草稿，不自动重试。旧 JSON 调用保持完整结果语义；浏览器离开后服务继续本次审计/计量收口，不重新派发模型。
 
 ### F-006 图谱、高级检索与只读调查
 
@@ -183,3 +183,5 @@ F-001 现有已授权工作区读取合同不变；F-011 将 current/search/work
 
 
 T-077 / E-034 追加接收：主代理已接收最终同镜像浏览器、资源预算和实际截图；原超预算责任项已按新产物关闭。F-012 正式提交 CI 与生产部署仍由 T-078 核验。
+
+T-078 / E-034 正式接收：F-005/F-010/F-011 将已审查候选 665c8d98eeed5252087651dd7f4c825bd9f361f1 交 F-012；主代理核对精确主分支 CI、同镜像候选、annotated tag 与生产回执后接收。v1.2.30 已上线，服务事务、来源权限和额度仍归原合同，工作区服务端权限与选择持久化语义不变。[部署与健康](evidence/release-stream-workspace-20261125/release.json)。

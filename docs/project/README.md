@@ -1,8 +1,8 @@
 # AI Project OS 项目总览
 
-更新于 2026-11-24（Asia/Shanghai）。当前生产版本为 v1.2.29 / d12bd6b。后台及个人模型表单的下拉箭头、个人模型建议列表与窄屏向量字段已验收上线。[页面复验](evidence/model-picker-20261124/reacceptance.json) · [生产回执](evidence/model-picker-20261124/release.json)
+更新于 2026-11-25（Asia/Shanghai）。当前生产版本为 v1.2.30 / 665c8d9。智能问答已支持边生成边显示，工作区搜索已合并到切换器下拉框。[生产回执](evidence/release-stream-workspace-20261125/release.json)
 
-2026-11-25 本地增量：智能问答已实现边生成边显示，完整页和浮窗的滚动、键盘、减少动态效果及失败恢复已通过隔离验收；尚未发布，也未调用真实外部模型。见 [T-075 / E-032](evidence/ask-stream-20261125/acceptance.json)。
+2026-11-25 上线：完整问答页和浮窗的滚动、键盘、减少动态效果及失败恢复已通过隔离验收；正式 CI 与生产健康通过。真实外部模型未在本轮现场调用。见 [T-075 / E-032](evidence/ask-stream-20261125/acceptance.json) 与 [E-034 发布回执](evidence/release-stream-workspace-20261125/release.json)。
 
 v1.2.27 的登录后复查覆盖 77 个路由，登记的 17 项缺陷已在本版修复。原复现步骤见[复查报告](BUG-AUDIT-AUTHENTICATED-20261123.md)，上一批 12 项修复见[E-026](evidence/release-20261123/release.json)。
 
@@ -123,6 +123,6 @@ C-011 / T-029 将升级触发、边界修订和效果复验接入 LESSONS；当�
 
 本流程已提炼为个人 `project-delivery` skill：支持已有台账、首次建账与老旧项目渐进接管，后续项目可通过 `$project-delivery` 调用。当前项目继续以本仓库规范和台账为权威，不因通用 skill 替换既有约定。安装/演练及使用说明见 [E-020 记录](verification-skill-20261102.md)；安装不表示其他项目已自动接入。
 
-## 2026-11-25 工作区切换器本地修订
+## 2026-11-25 工作区切换器上线
 
-工作区搜索已合并到现有切换器下拉中；桌面/手机及中英文代表交互已验证。最终本地资源预算、13 项浏览器与截图审阅已通过；v1.2.30 正式 CI 和发布由 T-078 承接。状态以 [T-077](TASKS.md#t-077-工作区切换与搜索统一入口) 为准，最新证据见 [E-034](evidence/release-stream-workspace-20261125/reacceptance.json)。
+工作区搜索已合并到现有切换器下拉中，重复查找入口已移除。桌面/手机及中英文代表交互、资源预算、正式 CI 与生产健康均已通过，随 v1.2.30 上线。状态见 [T-077](TASKS.md#t-077-工作区切换与搜索统一入口)，证据见 [E-034](evidence/release-stream-workspace-20261125/release.json)。

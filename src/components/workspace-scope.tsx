@@ -6,7 +6,7 @@ import { useTranslate } from "./appearance-provider";
 import { ShellIcon } from "./shell-icon";
 import styles from "./user-shell.module.css";
 
-const WorkspaceSearchPanel = lazy(() => import("./workspace-search-panel").then((module) => ({ default: module.WorkspaceSearchPanel })));
+const WorkspaceSearchPanel = lazy(() => import("./workspace-search-panel"));
 
 const fallback = new Map<string, string>();
 const changed = "ai-project-os:workspace-changed";

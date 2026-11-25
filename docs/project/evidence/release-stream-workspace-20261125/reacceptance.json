@@ -1,0 +1,160 @@
+{
+  "task": "T-077/T-078",
+  "evidence": "E-034",
+  "date": "2026-11-25",
+  "status": "local_accepted_pending_exact_SHA_CI",
+  "version": "1.2.30",
+  "baseline": "a293e2a1f591048ebfb258a05e6176622b77365a",
+  "workingTreeChanges": true,
+  "localImages": {
+    "schema": 1,
+    "revision": "a293e2a1f591048ebfb258a05e6176622b77365a",
+    "version": "1.2.30",
+    "runId": 78004,
+    "images": {
+      "app": {
+        "ref": "ai-project-os-ci/app:a293e2a1f591048ebfb258a05e6176622b77365a",
+        "id": "sha256:a580ea55d731b4e70b103c7387e6600b7255380a2318907fcc9386e5feffbb9d"
+      },
+      "worker": {
+        "ref": "ai-project-os-ci/worker:a293e2a1f591048ebfb258a05e6176622b77365a",
+        "id": "sha256:e82c6b4d772a1f508de3a0e57c63ba7c41b439fc0f0eb29a70f296d5678ed2fd"
+      },
+      "migrate": {
+        "ref": "ai-project-os-ci/migrate:a293e2a1f591048ebfb258a05e6176622b77365a",
+        "id": "sha256:345fd7da1ff1331473f3a8d84bce338ccd2254740bf9666ca13057d212b09a94"
+      }
+    }
+  },
+  "buildInputHashes": {
+    "Dockerfile": "15bf15e785bcba7ce49bd7fcb05bad414ef6f9f78d068329cf8804efc7a1c60c",
+    "e2e/feedback-layout-parity.spec.ts": "acd23a1107556b85cca6bb3d6067186f1af4004b0f0e591e271fb2e8c906c67c",
+    "e2e/inquiry-stream.spec.ts": "f637296f2d7e4fa0112f515058ea15387ebc63c152cb2c5fc6fd4b9bf7409068",
+    "e2e/project-scope-limit-regressions.spec.ts": "f9b2610cf124f86620503098296d184272aa2ea59d78bbaf99f5ae67eed8250e",
+    "e2e/t051-personal-regressions.spec.ts": "12d811bccc39d4e67e43992f21825ec87a60ea8a6b68e7fc75fc70d567cfbfb3",
+    "e2e/ui-style-states.spec.ts": "775640ef0863e23650c79e67979b44ae012f3ff608fe9d9cf505e121b2e9d099",
+    "package.json": "4082362852d34be6c28ad71e05ddbab910a9296287bd8dc28b62a7ad82671216",
+    "public/locales/en.add0b0649ddee86f.json": "add0b0649ddee86f4abca69514d3cab81e080d18ed9220e443d846c6188966a5",
+    "src/app/api/ask/turns/route.ts": "2907a625be1818a4e5dc5e1d0e5dad41d98b88b56381d3115b41b07bd2ee133b",
+    "src/app/ask/ask-client.module.css": "0919841b9a5f80d9142fc4c3ddb5cea550700c0dd018b0cf74c4868e2e6ce769",
+    "src/app/ask/ask-client.tsx": "1a18f9c2d4d6efa8b908a04a65ffb7246af1d2ce0173caf749c3eb1f5f94d81e",
+    "src/app/user-workspace.css": "f1a996ea13ed2053763ee4ef298d8444198b5d649b2e1b247e7fc03ed5be09e6",
+    "src/components/user-shell.module.css": "7dfaeb43314edfd770101d8d7a2ede7855c2f17eecc21e5b526d0dd7632239ec",
+    "src/components/workspace-picker.module.css": "12176f4a511564b3a7c4e849e9f7cb28f7b74f63ec786cb0de268805f4799474",
+    "src/components/workspace-scope.tsx": "302086707fde6775ef4d8ed254c84c99b5d5b595afe29c14c1a15ca71352f762",
+    "src/components/workspace-search-panel.tsx": "05515c6fc667f932925e19b1a7c450375625317a5f20b5e980a8dc9dfe9a151c",
+    "src/lib/ai-providers/transport.ts": "77a8a21070c0578d0c2ff36a30d4977d9dc8eb013e22dbd4931834c62336c2fc",
+    "src/lib/inquiry-session.ts": "30003a5cd2685d28b62f4e548f1e6e82b63be19343214145b73f2bc473393a10",
+    "src/lib/inquiry-stream.ts": "946e6e922a69b76cb952de9f58258e407252190ca27d38acc04fae5710dbb00a",
+    "src/lib/ui-polish-messages.ts": "a20cb5e7ecb2f433567978aba3f069e38fe97d38df784bf0b0ca293b399a878c",
+    "src/lib/unified-question-preview.ts": "75d0b7a5be72114713af533975a8f8726f45088e07c66f4f37a22ad17196fca8",
+    "src/lib/unified-question-service.ts": "e8f9deb7b69b624621a1f1e5733b9dd0efe7e62f97fa1cc890872a82897bb1c9",
+    "src/lib/version.ts": "c21a93739280c7304e15bec384a65ca3a43a1e3a3bb6fb41effebba72dae87e1",
+    "test/inquiry-stream.test.ts": "d60355f3ea4593ac8a5860246a2e84c2b2405d9c89ded2902d747023df866396",
+    "test/provider-chat-stream.test.ts": "a396ebc11acf734f4dc2f5d599f33800c36d42501cbfbf59f6b4df8a3ddaddeb",
+    "test/unified-question-postgres.test.ts": "ad9cb52ac14cb0988894a9e841ebd7b0d79737fd786c64e42738a1a4137f6bce"
+  },
+  "checks": {
+    "buildAndTypecheck": "passed via production Docker build",
+    "performance": {
+      "report": {
+        "sharedJavaScriptGzipBytes": 132406,
+        "largestJavaScriptAsset": {
+          "path": "static/chunks/5922-292479552ca25dd2.js",
+          "gzipBytes": 65839
+        },
+        "globalCssGzipBytes": 11826,
+        "totalStaticClientGzipBytes": 895889,
+        "criticalRoutes": {
+          "/setup": 152554,
+          "/dashboard": 164414,
+          "/personal/projects": 164480,
+          "/guide": 159032,
+          "/connections/mcp": 138668,
+          "/system/account-access": 138668,
+          "/personal": 159340,
+          "/personal/knowledge": 160786,
+          "/personal/knowledge/graph": 183547,
+          "/login": 157319,
+          "/register": 159085,
+          "/admin/sms": 164219,
+          "/ask": 177764
+        }
+      },
+      "failures": []
+    },
+    "contracts": {
+      "passed": 7,
+      "failed": 0
+    },
+    "lint": "passed on changed components",
+    "browser": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "minutes": 1.2,
+      "files": [
+        "e2e/project-scope-limit-regressions.spec.ts",
+        "e2e/t051-personal-regressions.spec.ts",
+        "e2e/feedback-layout-parity.spec.ts"
+      ],
+      "environment": "same local app/worker/migration images with disposable PostgreSQL and authenticated Chromium"
+    },
+    "diffCheck": "passed"
+  },
+  "renderedAcceptance": {
+    "reviewed": [
+      "desktop-closed.png",
+      "desktop-search.png",
+      "mobile-current.png",
+      "mobile-long-results.png",
+      "english-dark-desktop.png",
+      "english-dark-mobile.png"
+    ],
+    "findings": "Single closed entry; dropdown aligned with trigger; long labels wrap; 12px readable text,16px search icon,even spacing; desktop/mobile and dark English states checked; axe and geometry assertions passed"
+  },
+  "review": {
+    "sourceLogic": "stream_review independently verified functional state updates, cursor semantics, option DOM/ARIA and default import; no blocker",
+    "finalVisual": "root reviewed final six screenshots after private stylesheet restored and even pixel dimensions applied"
+  },
+  "retainedFailures": [
+    "CI45536511564 unit pixel contract and total budget failed",
+    "CI45537486034 unit passed but total budget failed after stylesheet merge",
+    "Local optimized merged-style output896162/896000bytes failed; final private-style output895889/896000bytes passed"
+  ],
+  "postBuildNonBehavioralChange": "Removed one extra blank line at EOF from user-shell.module.css to pass git diff --check; CSS declarations unchanged",
+  "finalSourceHashes": {
+    "Dockerfile": "15bf15e785bcba7ce49bd7fcb05bad414ef6f9f78d068329cf8804efc7a1c60c",
+    "e2e/feedback-layout-parity.spec.ts": "acd23a1107556b85cca6bb3d6067186f1af4004b0f0e591e271fb2e8c906c67c",
+    "e2e/inquiry-stream.spec.ts": "f637296f2d7e4fa0112f515058ea15387ebc63c152cb2c5fc6fd4b9bf7409068",
+    "e2e/project-scope-limit-regressions.spec.ts": "f9b2610cf124f86620503098296d184272aa2ea59d78bbaf99f5ae67eed8250e",
+    "e2e/t051-personal-regressions.spec.ts": "12d811bccc39d4e67e43992f21825ec87a60ea8a6b68e7fc75fc70d567cfbfb3",
+    "e2e/ui-style-states.spec.ts": "775640ef0863e23650c79e67979b44ae012f3ff608fe9d9cf505e121b2e9d099",
+    "package.json": "4082362852d34be6c28ad71e05ddbab910a9296287bd8dc28b62a7ad82671216",
+    "public/locales/en.add0b0649ddee86f.json": "add0b0649ddee86f4abca69514d3cab81e080d18ed9220e443d846c6188966a5",
+    "src/app/api/ask/turns/route.ts": "2907a625be1818a4e5dc5e1d0e5dad41d98b88b56381d3115b41b07bd2ee133b",
+    "src/app/ask/ask-client.module.css": "0919841b9a5f80d9142fc4c3ddb5cea550700c0dd018b0cf74c4868e2e6ce769",
+    "src/app/ask/ask-client.tsx": "1a18f9c2d4d6efa8b908a04a65ffb7246af1d2ce0173caf749c3eb1f5f94d81e",
+    "src/app/user-workspace.css": "f1a996ea13ed2053763ee4ef298d8444198b5d649b2e1b247e7fc03ed5be09e6",
+    "src/components/user-shell.module.css": "23f4e87ceff8fffa1406dc5a9fa16d37915420cafc15ac2e10e3e91221ecb4c7",
+    "src/components/workspace-picker.module.css": "12176f4a511564b3a7c4e849e9f7cb28f7b74f63ec786cb0de268805f4799474",
+    "src/components/workspace-scope.tsx": "302086707fde6775ef4d8ed254c84c99b5d5b595afe29c14c1a15ca71352f762",
+    "src/components/workspace-search-panel.tsx": "05515c6fc667f932925e19b1a7c450375625317a5f20b5e980a8dc9dfe9a151c",
+    "src/lib/ai-providers/transport.ts": "77a8a21070c0578d0c2ff36a30d4977d9dc8eb013e22dbd4931834c62336c2fc",
+    "src/lib/inquiry-session.ts": "30003a5cd2685d28b62f4e548f1e6e82b63be19343214145b73f2bc473393a10",
+    "src/lib/inquiry-stream.ts": "946e6e922a69b76cb952de9f58258e407252190ca27d38acc04fae5710dbb00a",
+    "src/lib/ui-polish-messages.ts": "a20cb5e7ecb2f433567978aba3f069e38fe97d38df784bf0b0ca293b399a878c",
+    "src/lib/unified-question-preview.ts": "75d0b7a5be72114713af533975a8f8726f45088e07c66f4f37a22ad17196fca8",
+    "src/lib/unified-question-service.ts": "e8f9deb7b69b624621a1f1e5733b9dd0efe7e62f97fa1cc890872a82897bb1c9",
+    "src/lib/version.ts": "c21a93739280c7304e15bec384a65ca3a43a1e3a3bb6fb41effebba72dae87e1",
+    "test/inquiry-stream.test.ts": "d60355f3ea4593ac8a5860246a2e84c2b2405d9c89ded2902d747023df866396",
+    "test/provider-chat-stream.test.ts": "a396ebc11acf734f4dc2f5d599f33800c36d42501cbfbf59f6b4df8a3ddaddeb",
+    "test/unified-question-postgres.test.ts": "ad9cb52ac14cb0988894a9e841ebd7b0d79737fd786c64e42738a1a4137f6bce"
+  },
+  "releaseEligible": false,
+  "boundaries": [
+    "Not a substitute for final committed SHA CI",
+    "Real external model providers not called",
+    "Production not switched yet"
+  ]
+}

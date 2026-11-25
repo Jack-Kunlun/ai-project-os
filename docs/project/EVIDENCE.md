@@ -205,3 +205,6 @@ v1.2.29 的 annotated 标签、主分支 CI、三份不可变镜像引用和正�
 ## E-034 / T-078 v1.2.30 提交与发布
 
 最终源代码已独立审查；版本/流式定向测试 15 项、相关 lint 和类型通过。工作区 IME Esc 和残余资源预算收尾在新候选复验中。记录 [候选状态](evidence/release-stream-workspace-20261125/candidate.json)，CI 与生产回执待补，不能作为已发布证明。E-032/E-033 历史结果保留。
+
+
+E-034 补充：最终本地预算 895889/896000 字节、13 项同镜像浏览器/axe、6 张实际截图审阅通过。[最终本地复验](evidence/release-stream-workspace-20261125/reacceptance.json)。正式提交 CI 与生产回执仍待取得。

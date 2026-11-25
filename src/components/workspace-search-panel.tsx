@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslate } from "./appearance-provider";
 import { ShellIcon } from "./shell-icon";
 import type { WorkspaceOption } from "./workspace-scope";
-import styles from "./user-shell.module.css";
+import styles from "./workspace-picker.module.css";
 
 type WorkspaceSearchResponse = Readonly<{
   availableWorkspaces: WorkspaceOption[];
@@ -12,7 +12,7 @@ type WorkspaceSearchResponse = Readonly<{
   nextCursor: string | null;
 }>;
 
-export function WorkspaceSearchPanel({
+export default function WorkspaceSearchPanel({
   id,
   selectedId,
   onSelect,
@@ -26,15 +26,12 @@ export function WorkspaceSearchPanel({
   const [searchResults, setSearchResults] = useState<WorkspaceOption[]>([]);
   const [searchCursor, setSearchCursor] = useState<string | null>(null);
   const [pageCursor, setPageCursor] = useState<string | null>(null);
-  const [searchHasMore, setSearchHasMore] = useState(false);
   const [searchLoading, setSearchLoading] = useState(true);
   const [searchError, setSearchError] = useState(false);
   const [retryVersion, setRetryVersion] = useState(0);
   const [activeIndex, setActiveIndex] = useState(-1);
   const searchController = useRef<AbortController | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const searchResultsRef = useRef(searchResults);
   const listboxId = `${id}-listbox`;
 
   const activeOptionId = activeIndex >= 0 && activeIndex < searchResults.length
@@ -50,9 +47,6 @@ export function WorkspaceSearchPanel({
     searchController.current?.abort();
     const controller = new AbortController();
     searchController.current = controller;
-    if (pageCursor === null) {
-      searchResultsRef.current = [];
-    }
 
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -66,14 +60,11 @@ export function WorkspaceSearchPanel({
           const page = Array.isArray(result.availableWorkspaces)
             ? result.availableWorkspaces.filter((space) => typeof space.id === "string" && typeof space.name === "string")
             : [];
-          const unique = pageCursor
-            ? [...searchResultsRef.current.filter((space) => !page.some((candidate) => candidate.id === space.id)), ...page]
-            : page;
-          searchResultsRef.current = unique;
-          setSearchResults(unique);
-          setSearchCursor(result.nextCursor);
-          setSearchHasMore(result.hasMore);
-          if (pageCursor === null) setActiveIndex(unique.findIndex((space) => !space.unavailable));
+          setSearchResults((current) => pageCursor
+            ? [...current.filter((space) => !page.some((candidate) => candidate.id === space.id)), ...page]
+            : page);
+          setSearchCursor(result.hasMore ? result.nextCursor : null);
+          if (pageCursor === null) setActiveIndex(page.findIndex((space) => !space.unavailable));
         } catch {
           if (!controller.signal.aborted) setSearchError(true);
         } finally {
@@ -89,18 +80,15 @@ export function WorkspaceSearchPanel({
   }, [searchQuery, pageCursor, retryVersion]);
 
   useEffect(() => {
-    if (activeIndex < 0) return;
-    optionRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex]);
+    if (activeOptionId) document.getElementById(activeOptionId)?.scrollIntoView({ block: "nearest" });
+  }, [activeOptionId]);
 
   function changeQuery(value: string) {
     searchController.current?.abort();
     setSearchQuery(value);
     setPageCursor(null);
-    searchResultsRef.current = [];
     setSearchResults([]);
     setSearchCursor(null);
-    setSearchHasMore(false);
     setSearchLoading(true);
     setSearchError(false);
     setActiveIndex(-1);
@@ -153,8 +141,8 @@ export function WorkspaceSearchPanel({
   }
 
   return (
-    <div id={id} className={styles.workspaceDropdown} data-workspace-dropdown>
-      <div className={styles.workspaceSearchInputWrap}>
+    <div id={id} className={styles.dropdown} data-workspace-dropdown>
+      <div className={styles.searchInputWrap}>
           <ShellIcon name="search" />
           <input
             ref={searchInput}
@@ -174,7 +162,7 @@ export function WorkspaceSearchPanel({
           />
       </div>
       <div
-        className={styles.workspaceResults}
+        className={styles.results}
         role="region"
         aria-label={t("工作区搜索结果")}
         tabIndex={0}
@@ -183,7 +171,7 @@ export function WorkspaceSearchPanel({
         {searchError ? (
           <div role="alert">
             <span>{t("工作区搜索失败，请重试")}</span>
-            <button type="button" className={`app-button-secondary ${styles.workspaceAction}`} onClick={retrySearch}>{t("重试")}</button>
+            <button type="button" className={`app-button-secondary ${styles.action}`} onClick={retrySearch}>{t("重试")}</button>
           </div>
         ) : null}
         {!searchLoading && !searchError && searchResults.length === 0 ? (
@@ -191,28 +179,26 @@ export function WorkspaceSearchPanel({
         ) : null}
         <ul id={listboxId} role="listbox" aria-label={t("工作区搜索结果")} aria-busy={searchLoading}>
           {searchResults.map((space, index) => (
-            <li key={space.id} role="presentation">
-              <div
-                ref={(element) => { optionRefs.current[index] = element; }}
-                id={`${id}-option-${index}`}
-                role="option"
-                aria-selected={space.id === selectedId}
-                aria-disabled={space.unavailable || undefined}
-                className={styles.workspaceOption}
-                data-active={activeIndex === index || undefined}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseMove={() => { if (!space.unavailable) setActiveIndex(index); }}
-                onClick={() => { if (!space.unavailable) onSelect(space); }}
-                title={space.name}
-              >
-                <span>{space.name}</span>
-                {space.id === selectedId ? <ShellIcon name="check" /> : null}
-              </div>
+            <li
+              key={space.id}
+              id={`${id}-option-${index}`}
+              role="option"
+              aria-selected={space.id === selectedId}
+              aria-disabled={space.unavailable || undefined}
+              className={styles.option}
+              data-active={activeIndex === index || undefined}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseMove={() => { if (!space.unavailable) setActiveIndex(index); }}
+              onClick={() => { if (!space.unavailable) onSelect(space); }}
+              title={space.name}
+            >
+              <span>{space.name}</span>
+              {space.id === selectedId ? <ShellIcon name="check" /> : null}
             </li>
           ))}
         </ul>
-        {!searchError && searchHasMore && searchCursor ? (
-          <button type="button" className={`app-button-secondary ${styles.workspaceAction}`} onClick={loadMore} aria-disabled={searchLoading}>
+        {!searchError && searchCursor ? (
+          <button type="button" className={`app-button-secondary ${styles.action}`} onClick={loadMore} aria-disabled={searchLoading}>
             {t("下一页")}
           </button>
         ) : null}

@@ -6,6 +6,7 @@ import { ConversationRail, type ConversationSummary, type ConversationView, type
 import { UiErrorText } from "@/components/ui-error-text";
 import { ShellIcon } from "@/components/shell-icon";
 import { inquiryModelMatches, type InquiryModelDisclosure } from "@/lib/inquiry-send";
+import { createInquiryReveal } from "@/lib/inquiry-reveal";
 import { INQUIRY_STREAM_TYPE, readInquiryResponse } from "@/lib/inquiry-stream";
 import { TokenUsageView } from "@/components/token-usage";
 import { AppHeader } from "@/components/app-header";
@@ -16,7 +17,7 @@ import ui from "@/components/workspace-ui.module.css";
 import styles from "./ask-client.module.css";
 import type { TokenUsageSummary } from "@/lib/token-usage";
 
-import { useInquiryValue, inquiryDrafts, startInquiryPreview, appendInquiryPreview, beginInquiryRequest, finishInquiryRequest, inquiryRequestIsCurrent, inquiryEpochIsCurrent, beginInquiryRead, inquiryReadIsCurrent, invalidateInquiryReads, type InquiryRequest, type Scope, type Source, type Turn, type Conversation } from "@/lib/inquiry-session";
+import { useInquiryValue, inquiryDrafts, startInquiryPreview, beginInquiryRequest, finishInquiryRequest, inquiryRequestIsCurrent, inquiryEpochIsCurrent, beginInquiryRead, inquiryReadIsCurrent, invalidateInquiryReads, type InquiryRequest, type Scope, type Source, type Turn, type Conversation } from "@/lib/inquiry-session";
 type Summary = ConversationSummary;
 type Project = { id: string; name: string };
 type RequestDraft = { conversationId?: string; expectedLastTurnId: string | null; scope: Scope; projectId?: string; focusDocumentId?: string; question: string; clientKey: string };
@@ -113,7 +114,12 @@ export function AskClient({ username, isSystemAdmin,embedded=false,onConversatio
   useEffect(()=>{onBusyChange?.(activeRequest!==null&&activeRequest===ownedRequest.current);},[activeRequest,onBusyChange]);
   useEffect(()=>{onConversationChange?.(conversation?.id);},[conversation?.id,onConversationChange]);
   useEffect(()=>{if(rounds.current&&followAnswer.current)rounds.current.scrollTop=rounds.current.scrollHeight;},[conversation?.id,conversation?.lastTurnId,preview?.answer,preview?.question]);
-  function readScrollPosition(){const box=rounds.current;if(!box)return;const nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<64;followAnswer.current=nearBottom;setAwayFromBottom(!nearBottom);}
+  useEffect(()=>{
+    const box=rounds.current;if(!box)return;
+    const resize=new ResizeObserver(()=>{if(box.clientHeight&&followAnswer.current)box.scrollTop=box.scrollHeight;});
+    resize.observe(box);return()=>resize.disconnect();
+  },[]);
+  function readScrollPosition(){const box=rounds.current;if(!box||!box.clientHeight)return;const nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<64;followAnswer.current=nearBottom;setAwayFromBottom(!nearBottom);}
   function showLatest(){followAnswer.current=true;setAwayFromBottom(false);if(rounds.current)rounds.current.scrollTop=rounds.current.scrollHeight;}
   function newConversation(){if(activeRequest)return;invalidateInquiryReads();sequence.current++;loadedConversationId.current=null;setLoading(false);setConversation(null);setQuestion("");drafts.current.set("new","");setError(null);setNewSessionStarted(true);if(!embedded)router.replace("/ask",{scroll:false});requestAnimationFrame(()=>questionInput.current?.focus());}
   async function send(event:FormEvent){
@@ -125,6 +131,7 @@ export function AskClient({ username, isSystemAdmin,embedded=false,onConversatio
     const draft:RequestDraft={...(conversation?{conversationId:conversation.id}:{}),expectedLastTurnId:conversation?.lastTurnId||null,scope,...(scope==="project"?{projectId}:{}),...(scope==="personal"&&focusDocumentId?{focusDocumentId}:{}),question:question.trim(),clientKey:crypto.randomUUID()};
     followAnswer.current=true;setAwayFromBottom(false);startInquiryPreview(preparation,draft.question);
     let job=preparation;
+    let reveal: ReturnType<typeof createInquiryReveal> | undefined;
     const sourceUrl=window.location.pathname+window.location.search;
     try {
       const prepared=await read<{confirmation:Confirmation}>(await fetch("/api/ask/turns",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({phase:"prepare",...draft})}));
@@ -134,12 +141,15 @@ export function AskClient({ username, isSystemAdmin,embedded=false,onConversatio
         setError(t("默认模型已变更，请核对当前模型后重新发送。"));return;
       }
       const execution=beginInquiryRequest("execute",preparation);if(!execution)return;job=execution;ownedRequest.current=execution;
-      const result=await readInquiryResponse(await fetch("/api/ask/turns",{method:"POST",headers:{"content-type":"application/json",accept:INQUIRY_STREAM_TYPE},body:JSON.stringify({...draft,conversationId:prepared.confirmation.conversationId,phase:"execute",challengeId:prepared.confirmation.confirmationId})}),text=>appendInquiryPreview(job,text));
+      reveal=createInquiryReveal(job);
+      const buffer=reveal.buffer;
+      const result=await readInquiryResponse(await fetch("/api/ask/turns",{method:"POST",headers:{"content-type":"application/json",accept:INQUIRY_STREAM_TYPE},body:JSON.stringify({...draft,conversationId:prepared.confirmation.conversationId,phase:"execute",challengeId:prepared.confirmation.confirmationId})}),text=>buffer.append(text));
+      await buffer.finish(result.conversation.turns.at(-1)?.answer??"");
       if(!inquiryRequestIsCurrent(job))return;
       sequence.current++;loadedConversationId.current=result.conversation.id;setConversation(result.conversation);setQuestion("");setNewSessionStarted(false);drafts.current.delete(result.conversation.id);drafts.current.delete("new");setHistoryRefresh(value=>value+1);
       if(!embedded&&mounted.current&&window.location.pathname+window.location.search===sourceUrl)router.replace(`/ask?conversation=${result.conversation.id}`,{scroll:false});
     } catch(cause){if(inquiryRequestIsCurrent(job)){if(job.phase==="execute")setConversation(previous=>previous?{...previous,usage:undefined,usageStale:true}:previous);setError(cause instanceof Error?cause.message:t("提问未完成。请核对会话状态后重试。"));}}
-    finally{finishInquiryRequest(job);}
+    finally{reveal?.dispose();finishInquiryRequest(job);}
   }
   async function updateHistory(item:Summary, patch:PresentationPatch) {
     if(historyWriteLock.current||pending)return;

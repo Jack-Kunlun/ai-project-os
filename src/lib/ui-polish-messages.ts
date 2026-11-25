@@ -376,4 +376,9 @@ export const uiPolishMessages: Readonly<Record<string,string>> = {
   "文件已保存，部分文件仍在后台解析，请稍后刷新文件状态。": "The files are saved. Some are still being parsed. Refresh the file status later.",
   "文件已保存，请查看每个文件的处理状态。": "The files are saved. Review the processing status of each file.",
   "文件已保存，部分文件本地解析失败，请在文件卡片中查看详情。": "The files are saved, but some could not be parsed locally. Review their file cards for details.",
+  "正在回答的问题": "Question in progress",
+  "正在准备资料…": "Preparing sources…",
+  "正在生成回答…": "Generating answer…",
+  "查看最新回答": "Jump to latest answer",
+  "回答连接中断，请重新核对会话后再试。": "The answer connection was interrupted. Check the conversation before trying again.",
 };

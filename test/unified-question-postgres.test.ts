@@ -281,7 +281,7 @@ test(
     const originalMasterKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const keyFixture = await createSecureMasterKeyFixture();
     let dispatches = 0;
-    let providerOutcome: "success" | "unknown" = "success";
+    let providerOutcome: "success" | "unknown" | "invalidCitation" | "streamEof" | "intermediateUsage" = "success";
     const personalOriginal = "青松迁移方案：先核对备份，再验证切换并保留回滚窗口。";
     const personalRevisionOne = "青松迁移方案更新：核对备份、验证切换，保留完整回滚窗口。";
     const personalRevisionTwo = "青松迁移方案再次更新：确认备份、演练切换并保留审批记录。";
@@ -428,6 +428,7 @@ test(
         assert.match(url, /\/chat\/completions$/u, "only the isolated fake provider endpoint is used");
         if (providerOutcome === "unknown") throw new Error("synthetic network loss after dispatch");
         const request = JSON.parse(String(init?.body)) as {
+          stream?: boolean;
           model: string;
           messages: Array<{ role: string; content: string }>;
         };
@@ -457,6 +458,24 @@ test(
           assert.equal(payload.completeHistory[0]?.answer, "统一问答模型答案-1");
         }
         if (citationId === undefined) throw new Error("UNIFIED_QUESTION_TEST_CITATION_REQUIRED");
+        if (request.stream) {
+          const encoder = new TextEncoder();
+          let step = 0;
+          return new Response(new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              if (step++ === 0) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '{"answer":"统一问答' }, finish_reason: null }], ...(providerOutcome === "intermediateUsage" ? { usage: { prompt_tokens: 10, completion_tokens: 2 } } : {}) })}\n\n`));
+              } else {
+                await firstPreviewReceived;
+                if (providerOutcome === "streamEof") { controller.close(); return; }
+                const remainder = `模型答案-${dispatches}","citations":["${providerOutcome === "invalidCitation" ? "s8" : citationId}"]}`;
+                const finalUsage = providerOutcome === "intermediateUsage" ? "" : `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 32, completion_tokens: 12 } })}\n\n`;
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: remainder }, finish_reason: "stop" }] })}\n\n${finalUsage}data: [DONE]\n\n`));
+                controller.close();
+              }
+            },
+          }), { headers: { "content-type": "text/event-stream", "x-request-id": `uq-${dispatches}` } });
+        }
         return new Response(JSON.stringify({
           choices: [{ message: { content: JSON.stringify({
             answer: `统一问答模型答案-${dispatches}`,
@@ -497,10 +516,15 @@ test(
       };
       const analyticsWindowEnd = new Date(Date.now() + 60 * 60 * 1_000);
       const analyticsBeforeFirstDispatch = await readSystemOverviewAnalytics(db, analyticsWindowEnd);
+      let releaseFirstPreview!: () => void;
+      const firstPreviewReceived = new Promise<void>(resolve => { releaseFirstPreview = resolve; });
+      const firstPreviews: string[] = [];
+      const onFirstPreview = (text: string) => { firstPreviews.push(text); releaseFirstPreview(); };
       const duplicateExecutions = await Promise.allSettled([
-        executeUnifiedQuestion(firstExecute, owner, db),
-        executeUnifiedQuestion(firstExecute, owner, db),
+        executeUnifiedQuestion(firstExecute, owner, db, onFirstPreview),
+        executeUnifiedQuestion(firstExecute, owner, db, onFirstPreview),
       ]);
+      assert.equal(firstPreviews[0], "统一问答", "partial answer arrives while the provider is still waiting to send the final chunk");
       const firstSuccesses = duplicateExecutions.filter((result) => result.status === "fulfilled");
       const firstFailures = duplicateExecutions.filter((result) => result.status === "rejected");
       assert.equal(firstSuccesses.length, 1, "same-head duplicate execution appends one turn");
@@ -935,6 +959,32 @@ test(
       assert.equal(redacted.conversation.usage.requestCount, 0, "hidden request counts are not returned");
       const redactedList = await listUnifiedQuestionConversations({}, owner, db) as { conversations: Array<{ id: string; usage: unknown }> };
       assert.deepEqual(redactedList.conversations.find(row => row.id === newConversation.conversationId)?.usage, redacted.conversation.usage);
+      for (const outcome of ["invalidCitation", "streamEof"] as const) {
+        providerOutcome = outcome;
+        const streamInput = { ...firstInput, clientKey: `uq-stream-${randomUUID()}` };
+        const confirmation = (await prepareUnifiedQuestion(streamInput, owner, db) as Prepared).confirmation;
+        const previews: string[] = [];
+        await assert.rejects(executeUnifiedQuestion({ ...streamInput, phase: "execute", conversationId: confirmation.conversationId,
+          confirmationId: confirmation.confirmationId }, owner, db, text => previews.push(text)),
+        (error: unknown) => unifiedCode(error) === (outcome === "invalidCitation" ? "UNIFIED_QUESTION_INVALID_CITATION" : "UNIFIED_QUESTION_PROVIDER_UNAVAILABLE"));
+        assert.equal(previews[0], "统一问答");
+        assert.equal(await db.unifiedQuestionTurn.count({ where: { conversationId: confirmation.conversationId } }), 0, "partial output is never a saved turn");
+        const audit = await db.unifiedQuestionAudit.findFirstOrThrow({ where: { confirmationId: confirmation.confirmationId } });
+        assert.equal(audit.status, "failed");
+        assert.equal(audit.usageKnown, outcome === "invalidCitation");
+        const reservation = await db.platformTokenReservation.findFirstOrThrow({ where: { callKey: `unified-question:${confirmation.confirmationId}` } });
+        assert.equal(reservation.status, outcome === "invalidCitation" ? "settled" : "held");
+      }
+      providerOutcome = "intermediateUsage";
+      const unmeteredInput = { ...firstInput, clientKey: `uq-stream-usage-${randomUUID()}` };
+      const unmetered = (await prepareUnifiedQuestion(unmeteredInput, owner, db) as Prepared).confirmation;
+      await executeUnifiedQuestion({ ...unmeteredInput, phase: "execute", conversationId: unmetered.conversationId,
+        confirmationId: unmetered.confirmationId }, owner, db, () => {});
+      const unmeteredAudit = await db.unifiedQuestionAudit.findFirstOrThrow({ where: { confirmationId: unmetered.confirmationId } });
+      assert.equal(unmeteredAudit.status, "succeeded", "complete valid text may be stored even when usage is unknown");
+      assert.equal(unmeteredAudit.usageKnown, false, "intermediate counters are not a final provider bill");
+      const heldUsage = await db.platformTokenReservation.findFirstOrThrow({ where: { callKey: `unified-question:${unmetered.confirmationId}` } });
+      assert.equal(heldUsage.status, "held", "unknown final usage stays pending reconciliation instead of charging intermediate counts");
     } finally {
       globalThis.fetch = originalFetch;
       if (originalMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

@@ -18,6 +18,7 @@ import {
 import { getDb } from "@/lib/db";
 import { loadOrCreateMasterKey } from "@/lib/credential-vault";
 import { invokeChatCompletion, ProviderTransportError } from "@/lib/ai-providers";
+import { UnifiedQuestionPreview } from "@/lib/unified-question-preview";
 import { lockProviderConfiguration } from "@/lib/ai-providers/service";
 import {
   lockPersonalKnowledgeQaRoute,
@@ -1162,7 +1163,8 @@ async function successfulConversation(snapshot: Snapshot, answer: string, citati
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
 }
 
-export async function executeUnifiedQuestion(inputValue: unknown, actorValue: unknown, db: PrismaClient = getDb()): Promise<unknown> {
+export async function executeUnifiedQuestion(inputValue: unknown, actorValue: unknown, db: PrismaClient = getDb(),
+  onAnswerDelta?: (text: string) => void): Promise<unknown> {
   assertActorShape(actorValue);
   const parsed = unifiedQuestionExecuteSchema.safeParse(inputValue);
   if (!parsed.success) return fail("UNIFIED_QUESTION_INVALID_INPUT");
@@ -1181,6 +1183,8 @@ export async function executeUnifiedQuestion(inputValue: unknown, actorValue: un
   const callKey = `unified-question:${snapshot.confirmationId}`;
   const billing = { dispatched: false, inputTokens: 0, outputTokens: 0, usageKnown: false, requestId: null as string | null };
   let reserved = false;
+  const preview = new UnifiedQuestionPreview();
+  let pendingPreview = "", lastPreviewAt = 0;
   try {
     const route = snapshot.provider.billingRoute!;
     const reservation = await reservePlatformTokens({
@@ -1200,6 +1204,19 @@ export async function executeUnifiedQuestion(inputValue: unknown, actorValue: un
         onBeforeRequest: async () => { const allowed = await assertDispatchStillValid(snapshot, db); if (allowed) billing.dispatched = true; return allowed; } },
       operation: OPERATION, modelId: snapshot.provider.defaultGenerationModelId!, messages,
       maxOutputTokens: route.maxOutputTokens, temperature: 0, jsonOutput: true, disableThinking: true,
+      onUsage: usage => {
+        billing.inputTokens = usage.inputTokens; billing.outputTokens = usage.outputTokens;
+        billing.usageKnown = usage.usageKnown; billing.requestId = usage.providerRequestId;
+      },
+      ...(onAnswerDelta ? { onContentDelta: async (delta: string) => {
+        pendingPreview += preview.push(delta);
+        // Coalesce fast tokens and recheck the existing permission/source fence
+        // before each browser-visible batch. Final persistence still rechecks.
+        if (!pendingPreview || Date.now() - lastPreviewAt < 200) return;
+        if (!(await assertDispatchStillValid(snapshot, db))) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+        onAnswerDelta(pendingPreview);
+        pendingPreview = ""; lastPreviewAt = Date.now();
+      } } : {}),
     });
     billing.dispatched = true;
     billing.inputTokens = generated.inputTokens;

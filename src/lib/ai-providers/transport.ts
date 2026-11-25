@@ -227,6 +227,281 @@ async function providerPost(
   }
 }
 
+type StreamedChatResult = Readonly<{
+  content: string;
+  inputTokens: number;
+  outputTokens: number;
+  usageKnown: boolean;
+  outputTruncated: boolean;
+}>;
+
+/**
+ * Read a bounded OpenAI-compatible SSE chat completion. Only delta.content is
+ * exposed to callers; reasoning and tool-call fields stay inside transport.
+ */
+async function providerPostStream(
+  connection: RuntimeConnection,
+  body: Readonly<Record<string, unknown>>,
+  absoluteDeadlineAt: Date | undefined,
+  onContentDelta: (delta: string) => void | Promise<void>,
+  onUsage: ((usage: VisionUsageObservation) => void | Promise<void>) | undefined,
+): Promise<Readonly<{ result: StreamedChatResult; requestId: string | null }>> {
+  if (connection.status === "disabled") throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+  const remaining = absoluteDeadlineAt === undefined
+    ? PROVIDER_REQUEST_TIMEOUT_MS
+    : absoluteDeadlineAt.getTime() - Date.now();
+  if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
+  const endpoint = `${connection.baseUrl}/chat/completions`;
+  let openAiProxyFetch: ReturnType<typeof prepareModelProviderFetch> = undefined;
+  if (connection.kind === "openai") {
+    try {
+      openAiProxyFetch = prepareModelProviderFetch(endpoint);
+    } catch {
+      throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+    }
+  }
+  await runProviderBoundary(connection.onBeforeCredentialRead);
+  let apiKey: string;
+  if (connection.apiKey !== undefined) {
+    if (connection.apiKey.trim().length === 0) throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+    apiKey = connection.apiKey;
+  } else {
+    try {
+      apiKey = await readCredentialSecretWithDeadline(
+        connection.credentialId,
+        absoluteDeadlineAt,
+        connection.credentialSecretFingerprint,
+      );
+    } catch (error) {
+      if (error instanceof CredentialVaultError) {
+        throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+      }
+      throw error;
+    }
+  }
+  const remainingAfterCredential = absoluteDeadlineAt === undefined
+    ? PROVIDER_REQUEST_TIMEOUT_MS
+    : absoluteDeadlineAt.getTime() - Date.now();
+  if (remainingAfterCredential <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
+  await runProviderBoundary(connection.onBeforeRequest);
+
+  const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let timeoutReject: ((error: ProviderTransportError) => void) | undefined;
+  const timeoutFailure = new Promise<never>((_, reject) => { timeoutReject = reject; });
+  let timedOut = false;
+  let responseReceived = false;
+  let sawDone = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+    if (reader !== undefined) void reader.cancel().catch(() => {});
+    timeoutReject?.(new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, true, responseReceived));
+  }, Math.min(PROVIDER_REQUEST_TIMEOUT_MS, remainingAfterCredential));
+  let callbackFailed = false;
+  let callbackFailure: unknown;
+  const deliverContent = async (value: string) => {
+    try {
+      await Promise.race([Promise.resolve().then(() => onContentDelta(value)), timeoutFailure]);
+    } catch (error) {
+      if (timedOut) throw error;
+      callbackFailed = true;
+      callbackFailure = error;
+      throw error;
+    }
+  };
+  const deliverUsage = async (usage: VisionUsageObservation) => {
+    if (onUsage === undefined) return;
+    try {
+      await Promise.race([Promise.resolve().then(() => onUsage(usage)), timeoutFailure]);
+    } catch (error) {
+      if (timedOut) throw error;
+      callbackFailed = true;
+      callbackFailure = error;
+      throw error;
+    }
+  };
+
+  try {
+    const responsePromise = (openAiProxyFetch ?? fetch)(endpoint, {
+      method: "POST",
+      redirect: "error",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        accept: "text/event-stream",
+      },
+      body: JSON.stringify(body),
+    });
+    const response = await Promise.race([responsePromise, timeoutFailure]);
+    responseReceived = true;
+    const requestId = safeRequestId(response);
+    if (!response.ok) {
+      cancelResponseBody(response);
+      return mapHttpError(response.status);
+    }
+    if (response.body === null || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
+      cancelResponseBody(response);
+      return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+    }
+    reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const chunks: string[] = [];
+    let contentLength = 0;
+    let receivedBytes = 0;
+    let line = "";
+    let skipLf = false;
+    let dataLines: string[] = [];
+    let eventName = "";
+    let finishReason: "stop" | "length" | null = null;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let usageKnown = false;
+    let usageFinalSeen = false;
+
+    const processData = async (data: string) => {
+      if (sawDone) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+      if (data === "[DONE]") {
+        if (finishReason === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+        sawDone = true;
+        return;
+      }
+      if (usageFinalSeen) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+      let payload: unknown;
+      try { payload = JSON.parse(data) as unknown; } catch { return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true); }
+      if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+      const record = payload as Record<string, unknown>;
+      if (eventName === "error" || record.error !== undefined && record.error !== null) return fail("AI_PROVIDER_UNAVAILABLE", 502, true);
+      const frameHasUsage = record.usage !== undefined && record.usage !== null;
+      if (frameHasUsage) {
+        const counts = usageCounts(record);
+        inputTokens = counts.input;
+        outputTokens = counts.output;
+        usageKnown = counts.known;
+      }
+      const finishWasAlreadySeen = finishReason !== null;
+      const choices = record.choices;
+      if (!Array.isArray(choices)) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+      if (choices.length === 0) {
+        if (!frameHasUsage) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+        const usageIsFinal = usageKnown && finishWasAlreadySeen;
+        usageFinalSeen = usageIsFinal;
+        await deliverUsage(Object.freeze({ inputTokens, outputTokens, usageKnown: usageIsFinal, providerRequestId: requestId }));
+        return;
+      }
+      if (choices.length !== 1) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+      const choice = choices[0];
+      if (typeof choice !== "object" || choice === null || Array.isArray(choice)) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+      const choiceRecord = choice as Record<string, unknown>;
+      if (choiceRecord.index !== undefined && choiceRecord.index !== 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+      const reason = choiceRecord.finish_reason;
+      let frameHasFinishReason = false;
+      if (reason !== undefined && reason !== null) {
+        if (reason !== "stop" && reason !== "length") return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+        if (finishReason !== null && finishReason !== reason) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+        finishReason = reason;
+        frameHasFinishReason = true;
+      }
+      const delta = choiceRecord.delta;
+      if (delta !== undefined && delta !== null) {
+        if (typeof delta !== "object" || Array.isArray(delta)) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+        const deltaRecord = delta as Record<string, unknown>;
+        if (deltaRecord.role !== undefined && deltaRecord.role !== "assistant") return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+        const text = deltaRecord.content;
+        if (text !== undefined && text !== null) {
+          if (typeof text !== "string") return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+          contentLength += text.length;
+          if (contentLength > 1_000_000) return fail("AI_PROVIDER_RESPONSE_TOO_LARGE", 502, true);
+          chunks.push(text);
+          await deliverContent(text);
+        }
+      }
+      if (frameHasUsage) {
+        const usageIsFinal = usageKnown && frameHasFinishReason;
+        usageFinalSeen = usageIsFinal;
+        await deliverUsage(Object.freeze({ inputTokens, outputTokens, usageKnown: usageIsFinal, providerRequestId: requestId }));
+      }
+    };
+
+    const processLine = async (value: string) => {
+      if (value === "") {
+        if (dataLines.length > 0) await processData(dataLines.join("\n"));
+        dataLines = [];
+        eventName = "";
+        return;
+      }
+      if (value.startsWith(":")) return;
+      const separator = value.indexOf(":");
+      const field = separator === -1 ? value : value.slice(0, separator);
+      const fieldValue = separator === -1 ? "" : value.slice(separator + 1).replace(/^ /u, "");
+      if (field === "data") dataLines.push(fieldValue);
+      else if (field === "event") eventName = fieldValue;
+    };
+
+    while (true) {
+      const readPromise = reader.read();
+      const next = await Promise.race([readPromise, timeoutFailure]);
+      if (timedOut) return fail("AI_PROVIDER_TIMEOUT", 504, true);
+      if (next.done) break;
+      receivedBytes += next.value.byteLength;
+      if (receivedBytes > MAX_RESPONSE_BYTES) return fail("AI_PROVIDER_RESPONSE_TOO_LARGE", 502, true);
+      let decoded: string;
+      try { decoded = decoder.decode(next.value, { stream: true }); } catch { return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true); }
+      for (const character of decoded) {
+        if (skipLf) {
+          skipLf = false;
+          if (character === "\n") continue;
+        }
+        if (character === "\r") {
+          await processLine(line);
+          line = "";
+          skipLf = true;
+          if (sawDone) break;
+        } else if (character === "\n") {
+          await processLine(line);
+          line = "";
+          if (sawDone) break;
+        } else {
+          line += character;
+        }
+      }
+      if (sawDone) break;
+    }
+    if (!sawDone) {
+      try {
+        const finalText = decoder.decode();
+        if (finalText.length > 0) line += finalText;
+      } catch { return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true); }
+      if (line !== "" || dataLines.length > 0 || !sawDone || finishReason === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+    }
+    return Object.freeze({
+      requestId,
+      result: Object.freeze({
+        content: chunks.join(""),
+        inputTokens,
+        outputTokens,
+        usageKnown: usageFinalSeen,
+        outputTruncated: finishReason === "length",
+      }),
+    });
+  } catch (error) {
+    if (reader !== undefined) void reader.cancel().catch(() => {});
+    if (callbackFailed) throw callbackFailure;
+    if (error instanceof ProviderTransportError) throw error;
+    if (controller.signal.aborted || isAbortError(error)) return fail("AI_PROVIDER_TIMEOUT", 504, responseReceived);
+    return fail("AI_PROVIDER_UNAVAILABLE", 502, responseReceived);
+  } finally {
+    clearTimeout(timeout);
+    if (reader !== undefined) {
+      if (sawDone) {
+        try { void reader.cancel().catch(() => {}); } catch { /* A completed terminal frame still wins. */ }
+      }
+      reader.releaseLock();
+    }
+  }
+}
+
 /**
  * A rejected fresh fence is still pre-dispatch. Keep that classification
  * explicit so auditedProviderCall can release a reservation and reset the
@@ -310,15 +585,34 @@ export async function invokeChatCompletion(input: Readonly<{
   /** Request a JSON object response from providers that support JSON mode. */
   jsonOutput?: boolean;
   absoluteDeadlineAt?: Date;
+  /** Optional raw assistant text deltas for an explicitly streamed request. */
+  onContentDelta?: (delta: string) => void | Promise<void>;
+  /** Latest provider usage metadata received during a streamed request. */
+  onUsage?: (usage: VisionUsageObservation) => void | Promise<void>;
 }>): Promise<ChatResult> {
-  const { payload, requestId } = await providerPost(input.connection, "/chat/completions", {
+  const body = {
     model: input.modelId,
     messages: input.messages,
     ...chatModelParameters(input.connection, input.modelId, input.maxOutputTokens, input.temperature ?? 0, input.disableThinking),
-    stream: false,
+    stream: input.onContentDelta !== undefined,
+    ...(input.onContentDelta !== undefined && input.connection.kind !== "glm" ? { stream_options: { include_usage: true } } : {}),
     ...(input.connection.kind === "deepseek" && input.disableThinking ? { thinking: { type: "disabled" } } : {}),
     ...(input.connection.kind === "deepseek" && input.jsonOutput ? { response_format: { type: "json_object" } } : {}),
-  }, input.absoluteDeadlineAt);
+  };
+  if (input.onContentDelta !== undefined) {
+    const streamed = await providerPostStream(input.connection, body, input.absoluteDeadlineAt, input.onContentDelta, input.onUsage);
+    const { result, requestId } = streamed;
+    if (result.content.trim().length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
+    return Object.freeze({
+      content: result.content,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      usageKnown: result.usageKnown,
+      providerRequestId: requestId,
+      outputTruncated: result.outputTruncated,
+    });
+  }
+  const { payload, requestId } = await providerPost(input.connection, "/chat/completions", { ...body, stream: false }, input.absoluteDeadlineAt);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
   const choices = record.choices;

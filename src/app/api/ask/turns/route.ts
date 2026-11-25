@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { INQUIRY_STREAM_TYPE } from "@/lib/inquiry-stream";
 import {
   executeUnifiedQuestion,
   prepareUnifiedQuestion,
@@ -34,6 +35,38 @@ export async function POST(request: Request) {
       return noStore(NextResponse.json({ error: { code, message: UNIFIED_QUESTION_ERROR_PRESENTATION[code].message } }, { status: 400 }));
     }
     const record = input as Record<string, unknown>;
+    if (record.phase === "execute" && request.headers.get("accept")?.includes(INQUIRY_STREAM_TYPE)) {
+      const encoder = new TextEncoder();
+      let closed = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const send = (event: unknown) => {
+            if (!closed) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          };
+          void (async () => {
+            try {
+              const result = await executeUnifiedQuestion(record, actor, undefined, text => send({ type: "delta", text }));
+              send({ type: "complete", ...result as object });
+            } catch (error) {
+              const response = errorResponse(error);
+              const payload = await response.json();
+              send({ type: "error", error: payload.error });
+            } finally {
+              if (!closed) { closed = true; controller.close(); }
+            }
+          })();
+        },
+        // A disconnected browser must not interrupt durable audit/usage cleanup
+        // or cause a second provider dispatch. Stop buffering; finish this call.
+        cancel() { closed = true; },
+      });
+      return new Response(stream, { headers: {
+        "content-type": `${INQUIRY_STREAM_TYPE}; charset=utf-8`,
+        "cache-control": "private, no-store, no-transform",
+        "x-accel-buffering": "no",
+        "x-content-type-options": "nosniff",
+      } });
+    }
     const result = record.phase === "prepare"
       ? await prepareUnifiedQuestion(record, actor)
       : record.phase === "execute"

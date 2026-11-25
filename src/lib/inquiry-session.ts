@@ -7,8 +7,9 @@ export type Turn = { id: string; sequence: number; scope: Scope; projectId?: str
 export type Conversation = { id: string; title: string; turns: Turn[]; lastTurnId: string | null; pinned?: boolean; archived?: boolean; deleted?: boolean; presentationRevision?: number; usage?: TokenUsageSummary; usageStale?: boolean };
 
 export type InquiryRequest=Readonly<{epoch:number;phase:"prepare"|"execute"}>;
-type Session={scope:Scope;projectId:string;focusDocumentId:string|undefined;conversation:Conversation|null;question:string;request:InquiryRequest|null;epoch:number;error:string|null};
-const empty:Session={scope:"all",projectId:"",focusDocumentId:undefined,conversation:null,question:"",request:null,epoch:0,error:null};
+export type InquiryPreview = Readonly<{ question: string; answer: string }>;
+type Session={scope:Scope;projectId:string;focusDocumentId:string|undefined;conversation:Conversation|null;question:string;request:InquiryRequest|null;preview:InquiryPreview|null;epoch:number;error:string|null};
+const empty:Session={scope:"all",projectId:"",focusDocumentId:undefined,conversation:null,question:"",request:null,preview:null,epoch:0,error:null};
 let session:Session=empty;
 let readRevision=0;
 const listeners=new Set<()=>void>();
@@ -21,7 +22,9 @@ export function inquiryEpochIsCurrent(epoch:number){return session.epoch===epoch
 export function beginInquiryRead(){return session.request?null:Object.freeze({epoch:session.epoch,revision:++readRevision});}
 export function inquiryReadIsCurrent(read:{epoch:number;revision:number}){return inquiryEpochIsCurrent(read.epoch)&&read.revision===readRevision&&!session.request;}
 export function inquiryRequestIsCurrent(request:InquiryRequest){return session.request===request&&session.epoch===request.epoch;}
-export function finishInquiryRequest(request:InquiryRequest){if(inquiryRequestIsCurrent(request))publish({...session,request:null});}
+export function finishInquiryRequest(request:InquiryRequest){if(inquiryRequestIsCurrent(request))publish({...session,request:null,preview:null});}
+export function startInquiryPreview(request:InquiryRequest,question:string){if(inquiryRequestIsCurrent(request))publish({...session,preview:{question,answer:""}});}
+export function appendInquiryPreview(request:InquiryRequest,text:string){if(inquiryRequestIsCurrent(request)&&session.preview)publish({...session,preview:{...session.preview,answer:session.preview.answer+text}});}
 export function clearInquirySession(){readRevision++;inquiryDrafts.clear();publish({...empty,epoch:session.epoch+1});}
 export function useInquiryValue<K extends keyof Session>(key:K){
  const value=useSyncExternalStore(subscribe,()=>session[key],()=>empty[key]);

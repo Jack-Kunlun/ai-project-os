@@ -295,7 +295,9 @@ async function assertUserShellInteractions(page: Page): Promise<void> {
 }
 
 test("all page routes remain consistent across Chinese light and English dark desktop/mobile", async ({ browser }, testInfo) => {
-  test.setTimeout(900_000);
+  // CI needs room for 539 route visits, 175 parent links and the access guards.
+  // Bound individual navigations separately so a stalled page still fails promptly.
+  test.setTimeout(1_200_000);
   const routes = discoverAppPageRoutes();
   expect(routes, "route discovery must cover every current src/app/**/page.tsx page").toHaveLength(77);
   for (const route of routes) expect(prototypeRoutes[route.path as keyof typeof prototypeRoutes], `${route.path} needs an explicit prototype view or compatibility destination`).toBeDefined();
@@ -303,6 +305,7 @@ test("all page routes remain consistent across Chinese light and English dark de
   const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const userContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const anonymousContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  for (const context of [adminContext, userContext, anonymousContext]) context.setDefaultNavigationTimeout(30_000);
   const adminPage = await adminContext.newPage();
   const userPage = await userContext.newPage();
   const anonymousPage = await anonymousContext.newPage();
@@ -566,6 +569,7 @@ test("all page routes remain consistent across Chinese light and English dark de
 
     const outsider = await seedBrowserPersonalUser(`ui-matrix-outsider-${randomUUID().replaceAll("-", "").slice(0, 12)}`, "UiMatrixOutsider2026Password!");
     const outsiderContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    outsiderContext.setDefaultNavigationTimeout(30_000);
     extraContexts.push(outsiderContext);
     const outsiderPage = await outsiderContext.newPage();
     await signInR02PersonalUser(outsiderPage, outsider);

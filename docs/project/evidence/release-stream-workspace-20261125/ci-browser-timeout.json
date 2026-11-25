@@ -1,0 +1,128 @@
+{
+  "candidateRevision": "b50d86bf8ee4a5aa7ae049c0e7f2cb521695b0dd",
+  "ciUrl": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45539839081",
+  "status": "failed",
+  "checks": {
+    "source": "passed",
+    "database": "passed",
+    "build": "passed",
+    "performance": "passed",
+    "browser": {
+      "passed": 116,
+      "skipped": 7,
+      "failed": 1
+    }
+  },
+  "failure": "ui-consistency-matrix cumulative 900000ms test timeout",
+  "attempts": [
+    {
+      "attempt": 1,
+      "sha256": "3755ccbda629c567085d6377c1a9b3a5df933e208528b514e3f030e170b3afd5",
+      "expectedRouteVisits": 539,
+      "actualRouteVisits": 539,
+      "successfulRouteVisits": 539,
+      "failedRouteVisits": 0,
+      "parentNavigationCount": 175,
+      "parentNavigationSuccesses": 175,
+      "parentNavigationFailures": 0,
+      "routeFailures": [],
+      "completedGuardChecks": 29
+    },
+    {
+      "attempt": 2,
+      "sha256": "827699dcdc178762367df440e74db6dd6a513180d80887debd916fe26156a831",
+      "expectedRouteVisits": 539,
+      "actualRouteVisits": 539,
+      "successfulRouteVisits": 534,
+      "failedRouteVisits": 5,
+      "parentNavigationCount": 175,
+      "parentNavigationSuccesses": 175,
+      "parentNavigationFailures": 0,
+      "routeFailures": [
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/system/memberships/page.tsx",
+          "path": "/system/memberships",
+          "role": "admin",
+          "phase": "route",
+          "error": "page.waitForLoadState: Test ended."
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/system/memberships/page.tsx",
+          "path": "/system/memberships",
+          "role": "admin",
+          "phase": "parent-navigation",
+          "error": "locator.count: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/system/operations/page.tsx",
+          "path": "/system/operations",
+          "role": "admin",
+          "phase": "route",
+          "error": "page.goto: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/system/operations/page.tsx",
+          "path": "/system/operations",
+          "role": "admin",
+          "phase": "parent-navigation",
+          "error": "locator.count: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/team/[workspaceId]/page.tsx",
+          "path": "/team/8819cf03-45e3-43c3-9946-40bee44752fe",
+          "role": "user",
+          "phase": "route",
+          "error": "page.goto: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/team/[workspaceId]/page.tsx",
+          "path": "/team/8819cf03-45e3-43c3-9946-40bee44752fe",
+          "role": "user",
+          "phase": "parent-navigation",
+          "error": "locator.count: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/team/page.tsx",
+          "path": "/team",
+          "role": "user",
+          "phase": "route",
+          "error": "page.goto: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/team/page.tsx",
+          "path": "/team",
+          "role": "user",
+          "phase": "parent-navigation",
+          "error": "locator.count: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/terms/page.tsx",
+          "path": "/terms",
+          "role": "anonymous",
+          "phase": "route",
+          "error": "page.goto: Target page, context or browser has been closed"
+        },
+        {
+          "mode": "en-dark-390",
+          "source": "src/app/terms/page.tsx",
+          "path": "/terms",
+          "role": "anonymous",
+          "phase": "parent-navigation",
+          "error": "locator.count: Target page, context or browser has been closed"
+        }
+      ],
+      "completedGuardChecks": 0
+    }
+  ],
+  "releaseEligible": false,
+  "productionSwitched": false
+}

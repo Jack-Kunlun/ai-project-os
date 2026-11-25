@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode, type SelectHTMLAttributes } from "react";
+import { lazy, Suspense, useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type SelectHTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslate } from "./appearance-provider";
 import { ShellIcon } from "./shell-icon";
@@ -68,7 +68,9 @@ export function WorkspacePicker({ username, onNameChange }: { username: string; 
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchMounted, setSearchMounted] = useState(false);
+  const switcherRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownId = useId();
   const activeSpace = spaces.find((space) => space.id === selected);
   const optionLabel = t(failed ? "工作空间暂不可用" : "正在读取工作空间…");
 
@@ -124,51 +126,65 @@ export function WorkspacePicker({ username, onNameChange }: { username: string; 
     onNameChange?.(activeSpace?.name || "");
   }, [activeSpace?.name, onNameChange]);
 
-  function chooseWorkspace(space: WorkspaceOption) {
+  useEffect(() => {
+    if (!searchOpen) return;
+    const closeOutside = (event: Event) => {
+      if (event.target instanceof Node && !switcherRef.current?.contains(event.target)) setSearchOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+    };
+  }, [searchOpen]);
+
+  function chooseWorkspace(space: WorkspaceOption, restoreFocus = false) {
     if (!space.id || space.unavailable) return;
     setSpaces((current) => [space, ...current.filter((entry) => entry.id !== space.id)]);
     selectWorkspace(username, space.id);
     setSearchOpen(false);
     router.push("/dashboard");
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
+  }
+
+  function handlePickerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape" || !searchOpen) return;
+    event.stopPropagation();
+    if (event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    setSearchOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
   }
 
   return (
-    <div className="workspace-switcher">
-      <SidebarSelect
-        initial={activeSpace?.name || username}
-        value={activeSpace?.id ?? ""}
+    <div ref={switcherRef} className="workspace-switcher" onKeyDown={handlePickerKeyDown}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`${styles.projectPicker} ${styles.workspaceTrigger}`}
         aria-label={t("切换工作空间")}
-        title={activeSpace?.name}
+        aria-haspopup="listbox"
+        aria-expanded={searchOpen}
+        aria-controls={searchOpen ? `${dropdownId}-listbox` : undefined}
+        title={activeSpace?.name || optionLabel}
+        data-workspace-id={activeSpace?.id}
         disabled={!spaces.length}
-        onChange={(event) => {
-          const space = spaces.find((candidate) => candidate.id === event.currentTarget.value);
-          if (space) chooseWorkspace(space);
-        }}
+        onClick={() => setSearchOpen((open) => !open)}
       >
-        {spaces.length === 0 ? <option value="">{optionLabel}</option> : null}
-        {spaces.map((space) => (
-          <option key={space.id} value={space.id} disabled={space.unavailable}>{space.name}</option>
-        ))}
-      </SidebarSelect>
-      <div className="workspace-more">
-        <button
-          type="button"
-          data-operation-trigger
-          aria-haspopup="dialog"
-          aria-expanded={searchOpen}
-          onClick={() => {
-            setSearchMounted(true);
-            setSearchOpen(true);
-          }}
-        >
-          {t("查找其他工作区")}
-        </button>
-        {searchMounted ? (
-          <Suspense fallback={<span className="sr-only" role="status">{t("正在加载…")}</span>}>
-            <WorkspaceSearchPanel open={searchOpen} onOpenChange={setSearchOpen} onSelect={chooseWorkspace} />
-          </Suspense>
-        ) : null}
-      </div>
+        <span className={styles.projectDot} aria-hidden="true">{(activeSpace?.name || username).slice(0, 1) || "·"}</span>
+        <span className={styles.workspaceTriggerName}>{activeSpace?.name || optionLabel}</span>
+        <ShellIcon className={styles.icon} name="chevron" />
+      </button>
+      {searchOpen ? (
+        <Suspense fallback={<span className="sr-only" role="status">{t("正在加载…")}</span>}>
+          <WorkspaceSearchPanel
+            id={dropdownId}
+            selectedId={selected}
+            onSelect={chooseWorkspace}
+          />
+        </Suspense>
+      ) : null}
       {failed ? <button className="workspace-retry" onClick={() => setVersion((value) => value + 1)}>{t("重试")}</button> : null}
     </div>
   );

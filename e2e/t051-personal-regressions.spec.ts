@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { AxeBuilder } from "@axe-core/playwright";
 import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 import { signInR02Admin, signInR02PersonalUser, signOutR02User } from "./support/r02-admin-navigation";
 
@@ -254,33 +255,94 @@ test("T-059 an old usage page failure cannot replace a newer successful filter",
   await expect(page.getByRole("combobox", { name: "调用状态", exact: true })).toHaveValue("succeeded");
 });
 
-test("T-065 click and Enter submissions keep the top workspace dialog focused on mobile", async ({ page }) => {
+test("T-077 workspace search stays inside the dropdown and preserves mobile navigation focus", async ({ page }, testInfo) => {
   await signInPersonalUser(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.route("**/api/workspaces/current?*", (route) => fulfillJson(route, { availableWorkspaces: [], hasMore: false, nextCursor: null }));
+  const started = deferred();
+  const release = deferred();
+  let failSearch = true;
+  await page.route("**/api/workspaces/current?*", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("search");
+    if (query === "old") {
+      started.resolve();
+      await release.promise;
+      return fulfillJson(route, { availableWorkspaces: [{ id: randomUUID(), name: "Stale workspace result" }], hasMore: false, nextCursor: null });
+    }
+    if (query === "retry" && failSearch) return fulfillJson(route, { error: { code: "ISOLATED_FAILURE", message: "隔离搜索失败" } }, 503);
+    if (query === "long") return fulfillJson(route, {
+      availableWorkspaces: Array.from({ length: 20 }, (_, index) => ({ id: randomUUID(), name: `工作区 ${index} - Long workspace name for the dropdown` })),
+      hasMore: false, nextCursor: null,
+    });
+    if (query === "") return route.continue();
+    return fulfillJson(route, { availableWorkspaces: [], hasMore: false, nextCursor: null });
+  });
 
   await page.getByRole("button", { name: "打开导航", exact: true }).click();
   const sidebar = page.locator("#user-shell-navigation");
-  await sidebar.getByRole("button", { name: "查找其他工作区", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "查找其他工作区", exact: true });
-  const search = dialog.getByRole("textbox", { name: "搜索工作区名称", exact: true });
+  const trigger = sidebar.getByRole("button", { name: "切换工作空间", exact: true });
+  await expect(page.getByRole("button", { name: "查找其他工作区", exact: true })).toHaveCount(0);
+  await trigger.click();
+  const dropdown = page.locator("[data-workspace-dropdown]");
+  const search = dropdown.getByRole("combobox", { name: "搜索工作区名称", exact: true });
+  await expect(search).toBeFocused();
+  await expect(dropdown.getByRole("option").first()).toBeVisible();
+  const geometry = await dropdown.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    const trigger = document.querySelector('[data-workspace-id]')!.getBoundingClientRect();
+    return { width: box.width, triggerWidth: trigger.width, gap: box.top - trigger.bottom, right: box.right, viewport: innerWidth };
+  });
+  expect(Math.abs(geometry.width - geometry.triggerWidth)).toBeLessThanOrEqual(2);
+  expect(geometry.gap).toBeGreaterThanOrEqual(0);
+  expect(geometry.gap).toBeLessThanOrEqual(8);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
+  await testInfo.attach("workspace-dropdown-geometry", { body: JSON.stringify(geometry), contentType: "application/json" });
+  const accessibility = await new AxeBuilder({ page }).include("#user-shell-navigation").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("mobile-workspace.png"), fullPage: true });
+  await search.fill("long");
+  await expect(dropdown.getByRole("option")).toHaveCount(20);
+  const longAccessibility = await new AxeBuilder({ page }).include("#user-shell-navigation").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(longAccessibility.violations).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("mobile-long-results.png"), fullPage: true });
   await search.fill("no matching workspace");
-  await dialog.getByRole("button", { name: "搜索工作区名称", exact: true }).click();
-  await expect(dialog.getByText("没有匹配的工作区", { exact: true })).toBeVisible();
+  await expect(dropdown.getByText("没有匹配的工作区", { exact: true })).toBeVisible();
+  await expect(search).toBeFocused();
+  await search.dispatchEvent("keydown", { key: "Escape", code: "Escape", isComposing: true });
+  await expect(dropdown).toBeVisible();
+  await expect(sidebar).toBeVisible();
   await expect(search).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
+  await expect(dropdown).toBeHidden();
   await expect(sidebar).toBeVisible();
+  await expect(trigger).toBeFocused();
 
-  await sidebar.getByRole("button", { name: "查找其他工作区", exact: true }).click();
-  const secondDialog = page.getByRole("dialog", { name: "查找其他工作区", exact: true });
-  const secondSearch = secondDialog.getByRole("textbox", { name: "搜索工作区名称", exact: true });
-  await secondSearch.fill("no matching workspace");
-  await secondSearch.press("Enter");
-  await expect(secondDialog.getByText("没有匹配的工作区", { exact: true })).toBeVisible();
+  await trigger.click();
+  await expect(dropdown).toBeVisible();
+  await trigger.click();
+  await expect(dropdown).toBeHidden();
+  await trigger.click();
+  await search.fill("old");
+  await started.promise;
+  await search.fill("new");
+  await expect(dropdown.getByText("没有匹配的工作区", { exact: true })).toBeVisible();
+  release.resolve();
+  await expect(dropdown.getByRole("option", { name: "Stale workspace result", exact: true })).toHaveCount(0);
+  await search.fill("retry");
+  await expect(dropdown.getByRole("alert")).toContainText("工作区搜索失败");
+  failSearch = false;
+  await dropdown.getByRole("button", { name: "重试", exact: true }).click();
+  await expect(dropdown.getByText("没有匹配的工作区", { exact: true })).toBeVisible();
+  await expect(dropdown.getByRole("alert")).toHaveCount(0);
+  await search.focus();
+  await search.press("Enter");
+  await expect(dropdown).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(secondDialog).toBeHidden();
+  await expect(dropdown).toBeHidden();
   await expect(sidebar).toBeVisible();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await sidebar.getByRole("link", { name: "AI Project OS 工作台", exact: true }).click();
+  await expect(dropdown).toBeHidden();
 });
 
 test("T-066 personal source version failure stays in its dialog and can be retried there", async ({ page }) => {

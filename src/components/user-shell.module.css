@@ -196,6 +196,28 @@
   color: var(--shell-secondary);
 }
 
+.workspaceTrigger {
+  width: 100%;
+  min-width: 0;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspaceTrigger:hover:not(:disabled) { border-color: var(--app-focus); }
+.workspaceTrigger:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.workspaceTrigger:disabled { color: var(--app-muted); cursor: not-allowed; }
+
+.workspaceTriggerName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .projectStatus {
   min-height: 16px;
   margin: 5px 3px 7px;

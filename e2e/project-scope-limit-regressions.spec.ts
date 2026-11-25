@@ -10,7 +10,7 @@ import { signInR02Admin, signInR02PersonalUser, signOutR02User } from "./support
 test.describe("project scope limits", () => {
   test.use({ timezoneId: "America/Los_Angeles" });
 
-  test("the workspace picker searches and pages beyond the first 100 without resetting its saved selection", async ({ page }) => {
+  test("the workspace dropdown searches and pages beyond the first 100 without resetting its saved selection", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await signInR02Admin(page);
     const suffix = randomUUID().slice(0, 8);
@@ -37,43 +37,73 @@ test.describe("project scope limits", () => {
     }, { timeout: 120_000 });
 
     const storageKey = `ai-project-os:workspace:${user.username}`;
-    const picker = page.getByRole("combobox", { name: "切换工作空间", exact: true });
+    const picker = page.getByRole("button", { name: "切换工作空间", exact: true });
     await page.evaluate((key) => localStorage.removeItem(key), storageKey);
     await page.reload();
     await expect(picker).toBeEnabled({ timeout: 15_000 });
-    await expect(picker.locator(`option[value="${targetId}"]`)).toHaveCount(0);
-
-    await page.getByRole("button", { name: "查找其他工作区", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "查找其他工作区", exact: true });
-    await dialog.getByLabel("搜索工作区名称", { exact: true }).fill("Z");
-    await dialog.getByRole("button", { name: "搜索工作区名称", exact: true }).click();
-    const targetResult = dialog.getByRole("button", { name: targetName, exact: true });
+    await expect(page.getByRole("button", { name: "查找其他工作区", exact: true })).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("desktop-closed.png"), fullPage: true });
+    const navigation = page.getByRole("navigation", { name: "全局入口", exact: true });
+    const navigationBefore = await navigation.boundingBox();
+    await picker.click();
+    const dropdown = page.locator("[data-workspace-dropdown]");
+    const search = dropdown.getByRole("combobox", { name: "搜索工作区名称", exact: true });
+    await expect(search).toBeFocused();
+    expect(await navigation.boundingBox()).toEqual(navigationBefore);
+    await expect(page.getByRole("option", { name: targetName, exact: true })).toHaveCount(0);
+    await search.fill("Z");
+    const targetResult = dropdown.getByRole("option", { name: targetName, exact: true });
     await expect(targetResult).toBeVisible();
+    await search.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
+    await expect(dropdown).toBeVisible();
+    await expect(picker).toHaveAttribute("data-workspace-id", user.workspaceId);
+    await search.dispatchEvent("keydown", { key: "Escape", code: "Escape", isComposing: true });
+    await expect(dropdown).toBeVisible();
+    await expect(search).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath("desktop-search.png"), fullPage: true });
     await targetResult.click();
     await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), storageKey)).toBe(targetId);
-    await expect(picker).toHaveValue(targetId);
+    await expect(picker).toHaveAttribute("data-workspace-id", targetId);
 
     await page.reload();
-    await expect(picker).toHaveValue(targetId);
-    await expect(picker.locator(`option[value="${targetId}"]`)).toHaveCount(1);
+    await expect(picker).toHaveAttribute("data-workspace-id", targetId);
+    await expect(picker).toHaveAttribute("title", targetName);
 
     await page.evaluate((key) => localStorage.removeItem(key), storageKey);
     await page.reload();
-    await expect(picker).toHaveValue(user.workspaceId);
-    await page.getByRole("button", { name: "查找其他工作区", exact: true }).click();
-    const browseDialog = page.getByRole("dialog", { name: "查找其他工作区", exact: true });
-    await browseDialog.getByRole("button", { name: "搜索工作区名称", exact: true }).click();
-    const browseResults = browseDialog.getByRole("list", { name: "工作区搜索结果", exact: true });
-    await expect(browseResults.getByRole("button").first()).toBeVisible();
-    const browsedTarget = browseDialog.getByRole("button", { name: targetName, exact: true });
+    await expect(picker).toHaveAttribute("data-workspace-id", user.workspaceId);
+    await picker.click();
+    const browseResults = dropdown.getByRole("listbox", { name: "工作区搜索结果", exact: true });
+    await expect(browseResults.getByRole("option").first()).toBeVisible();
+    await expect(browseResults).toHaveAttribute("aria-busy", "false");
+    await search.press("ArrowDown");
+    const activeBeforePaging = await search.getAttribute("aria-activedescendant");
+    const nextPage = dropdown.getByRole("button", { name: "下一页", exact: true });
+    await nextPage.focus();
+    const previousCount = await browseResults.getByRole("option").count();
+    const resultsRegion = dropdown.getByRole("region", { name: "工作区搜索结果", exact: true });
+    const scrollBeforePaging = await resultsRegion.evaluate((element) => element.scrollTop);
+    await nextPage.press("Enter");
+    await expect.poll(() => browseResults.getByRole("option").count()).toBeGreaterThan(previousCount);
+    await expect(search).toHaveAttribute("aria-activedescendant", activeBeforePaging!);
+    await expect(nextPage).toBeFocused();
+    expect(await resultsRegion.evaluate((element) => element.scrollTop)).toBeGreaterThanOrEqual(scrollBeforePaging);
+    const browsedTarget = dropdown.getByRole("option", { name: targetName, exact: true });
     while (!(await browsedTarget.isVisible().catch(() => false))) {
-      const next = browseDialog.getByRole("button", { name: "下一页", exact: true });
+      const next = dropdown.getByRole("button", { name: "下一页", exact: true });
       if (!(await next.isVisible().catch(() => false)) || !(await next.isEnabled().catch(() => false))) break;
-      const previousCount = await browseResults.getByRole("button").count();
+      const previousCount = await browseResults.getByRole("option").count();
       await next.click();
-      await expect.poll(() => browseResults.getByRole("button").count()).toBeGreaterThan(previousCount);
+      await expect.poll(() => browseResults.getByRole("option").count()).toBeGreaterThan(previousCount);
     }
     await expect(browsedTarget).toBeVisible();
+    await search.fill("Z");
+    await expect(dropdown.getByRole("option")).toHaveCount(1);
+    await search.press("ArrowDown");
+    await search.press("Enter");
+    await expect(dropdown).toBeHidden();
+    await expect(picker).toHaveAttribute("data-workspace-id", targetId);
+    await expect(picker).toBeFocused();
   });
 
   test("the plan displays date-only values consistently and searches old facts and sources for persistent linking", async ({ page }) => {

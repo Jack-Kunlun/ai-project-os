@@ -14,7 +14,7 @@ const modes = [
   { id: "zh-dark-mobile", language: "zh-CN", theme: "dark", width: 390 },
 ] as const;
 type Entry = { route: string; mode: string; state: string; requests?: string[]; text?: string; screenshot?: string };
-const workspaceDialogModes = [
+const workspaceDropdownModes = [
   { id: "en-light-desktop", language: "en", theme: "light", width: 1440 },
   { id: "en-dark-mobile", language: "en", theme: "dark", width: 390 },
   { id: "zh-light-desktop", language: "zh-CN", theme: "light", width: 1440 },
@@ -182,8 +182,8 @@ test("all application pages retain the new style during loading, failed reads an
             expect(actionCatalogVerified, "the named project action dialog must complete its three-button acceptance").toBe(true);
           }
           if (pattern === "/dashboard" && mode.id === modes[0].id) {
-            const workspaceTrigger = page.locator(".workspace-more [data-operation-trigger]:visible:not(:disabled)");
-            for (const workspaceMode of workspaceDialogModes) {
+            const workspaceTrigger = page.getByRole("button", { name: /^(切换工作空间|Switch workspace)$/u });
+            for (const workspaceMode of workspaceDropdownModes) {
               await page.setViewportSize({ width: workspaceMode.width, height: 900 });
               await page.context().addCookies([
                 { name: "aipos-language", value: workspaceMode.language, url: new URL(page.url()).origin },
@@ -198,17 +198,17 @@ test("all application pages retain the new style during loading, failed reads an
               }
               await expect(workspaceTrigger).toHaveCount(1);
               await workspaceTrigger.click();
-              const dialog = page.getByRole("dialog").last();
-              await expect(dialog).toBeVisible();
+              const dropdown = page.locator("[data-workspace-dropdown]");
+              await expect(dropdown).toBeVisible();
               await settleVisualState(page);
-              await expectR02NoHorizontalOverflow(page, `${path} workspace dialog ${workspaceMode.id}`);
-              await expectUiStyleContract(page, `${path} workspace dialog ${workspaceMode.id}`);
-              await expectDialogStyleContract(dialog, `workspace search: ${workspaceMode.id}`);
+              await expectR02NoHorizontalOverflow(page, `${path} workspace dropdown ${workspaceMode.id}`);
+              await expectUiStyleContract(page, `${path} workspace dropdown ${workspaceMode.id}`);
+              await expect(dropdown.getByRole("combobox")).toBeFocused();
               const screenshot = `states/workspace-search-${workspaceMode.id}.png`;
-              await dialog.screenshot({ path: testInfo.outputPath(screenshot), animations: "disabled" });
-              entries.push({ route: pattern, mode: workspaceMode.id, state: "workspace-search-dialog", screenshot });
+              await dropdown.screenshot({ path: testInfo.outputPath(screenshot), animations: "disabled" });
+              entries.push({ route: pattern, mode: workspaceMode.id, state: "workspace-search-dropdown", screenshot });
               await page.keyboard.press("Escape");
-              await expect(dialog).toBeHidden();
+              await expect(dropdown).toBeHidden();
             }
             await page.setViewportSize({ width: mode.width, height: 900 });
             await page.context().addCookies([

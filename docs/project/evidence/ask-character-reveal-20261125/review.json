@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-25",
+  "agent": "/root/reveal_review",
+  "role": "review",
+  "result": "accepted_local",
+  "blockers": [],
+  "fixedFindings": [
+    "Floating collapse/reopen bottom-follow restoration",
+    "Grapheme split across network deltas"
+  ],
+  "verified": {
+    "sourceHashes": "match E-035",
+    "targetedPassed": 14,
+    "defaultPassed": 1612,
+    "defaultSkipped": 173,
+    "defaultFailed": 0,
+    "browserPassed": 3,
+    "normalPrefixFramesPerSurface": 30,
+    "totalStaticBytes": 896761,
+    "budgetBytes": 897024
+  },
+  "boundary": "Exact v1.2.31 SHA CI, immutable image/candidate and release workflow remain required; old local images identify v1.2.30; no real external model called.",
+  "confidence": "high for local scope"
+}

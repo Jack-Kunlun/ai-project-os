@@ -219,4 +219,8 @@ E-034 正式接收：候选 665c8d98eeed5252087651dd7f4c825bd9f361f1 的[主分�
 
 ## E-036 / T-080 v1.2.31 发布
 
-E-035 产品交付已接收；当前待精确提交、正式 CI 与既有 Workflow。正式回执将记录线上源、最终候选、版本、不可变镜像和部署健康。
+E-036 开工时已接收 E-035 产品交付，等待精确提交、正式 CI 与既有 Workflow；最终接收和回执见下段。
+
+E-036 正式接收：候选 b8aacce22011afa9eb6695d3bb31ee3499cfc4a4 的[主分支 CI](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45563950940) 成功，源码/覆盖率、Prisma、Lint/类型、预算、数据库门禁、同镜像浏览器和隔离发布候选通过。正式数量、计划指纹、不可变镜像和候选身份见[发布回执](evidence/ask-character-reveal-20261125/release.json)。
+
+[正式发布](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45569058698) 已将 v1.2.31 切换上线，annotated tag、生产部署回执、镜像和公网应用/数据库/Worker 健康一致。无新增迁移，不要求备份/恢复；已按既有流程完成镜像/缓存维护。真实外部模型未在本轮现场调用。

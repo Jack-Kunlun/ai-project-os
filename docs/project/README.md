@@ -1,10 +1,10 @@
 # AI Project OS 项目总览
 
-更新于 2026-11-25（Asia/Shanghai）。当前生产版本为 v1.2.30 / 665c8d9。智能问答已支持边生成边显示，工作区搜索已合并到切换器下拉框。[生产回执](evidence/release-stream-workspace-20261125/release.json)
+更新于 2026-11-25（Asia/Shanghai）。当前生产版本为 v1.2.31 / b8aacce。智能问答已支持逐字平滑显示，浮窗收起恢复保留阅读位置；工作区搜索仍在切换器下拉内。[生产回执](evidence/ask-character-reveal-20261125/release.json)
 
 2026-11-25 上线：完整问答页和浮窗的滚动、键盘、减少动态效果及失败恢复已通过隔离验收；正式 CI 与生产健康通过。真实外部模型未在本轮现场调用。见 [T-075 / E-032](evidence/ask-stream-20261125/acceptance.json) 与 [E-034 发布回执](evidence/release-stream-workspace-20261125/release.json)。
 
-问答逐字显示体验修正已完成本地验收：双表面各观察到 30 个连续前缀，浮窗收起恢复保留阅读意图；[E-035](evidence/ask-character-reveal-20261125/acceptance.json)。v1.2.31 正式提交与部署由 T-080 跟踪，当前生产仍为上述 v1.2.30。
+问答逐字显示体验修正已完成本地验收：双表面各观察到 30 个连续前缀，浮窗收起恢复保留阅读意图；[E-035](evidence/ask-character-reveal-20261125/acceptance.json)。v1.2.31 已由 T-080 完成正式 CI 与上线接收，见 [E-036](evidence/ask-character-reveal-20261125/release.json)。
 
 v1.2.27 的登录后复查覆盖 77 个路由，登记的 17 项缺陷已在本版修复。原复现步骤见[复查报告](BUG-AUDIT-AUTHENTICATED-20261123.md)，上一批 12 项修复见[E-026](evidence/release-20261123/release.json)。
 

@@ -1,0 +1,22 @@
+✔ a network burst reveals multiple prefixes promptly and catches up without losing the next delta (9.547ms)
+✔ visible prefixes end at full Chinese, combining-mark and emoji grapheme boundaries (0.140292ms)
+✔ completion drains the authoritative tail smoothly within a short bounded delay (0.902541ms)
+✔ reduced motion and hidden-page flushing do not leave a completion waiting on animation frames (0.08775ms)
+✔ cancellation discards scheduled output and releases completion without writing stale text (0.3515ms)
+✔ a corrected final answer replaces incompatible provisional content immediately (0.059166ms)
+✔ the request cursor releases pending completion on session reset or a hidden-page event (0.8795ms)
+✔ a trailing grapheme stays pending when emoji or accents span network deltas (0.144333ms)
+✔ the full page and floating Ask share one request lock and stale completion cannot unlock a new account (0.425292ms)
+✔ older reads across Ask instances cannot replace a newer read, generated answer, or cleared account (0.080834ms)
+✔ a confirmation keeps reads and other senders locked until its own execution or dismissal (0.0575ms)
+✔ answer preview decodes split JSON escapes and emits only the top-level answer (2.421375ms)
+✔ client delivers partial Chinese text before the final network chunk (27.118417ms)
+✔ client rejects missing completion, corrupt frames, remote errors and truncated UTF-8 (4.042833ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 205.083417

@@ -1,0 +1,27 @@
+{
+  "report": {
+    "sharedJavaScriptGzipBytes": 132405,
+    "largestJavaScriptAsset": {
+      "path": "static/chunks/5922-292479552ca25dd2.js",
+      "gzipBytes": 65839
+    },
+    "globalCssGzipBytes": 11826,
+    "totalStaticClientGzipBytes": 896761,
+    "criticalRoutes": {
+      "/setup": 152551,
+      "/dashboard": 164411,
+      "/personal/projects": 164477,
+      "/guide": 159029,
+      "/connections/mcp": 138665,
+      "/system/account-access": 138665,
+      "/personal": 159337,
+      "/personal/knowledge": 160783,
+      "/personal/knowledge/graph": 183544,
+      "/login": 157316,
+      "/register": 159082,
+      "/admin/sms": 164216,
+      "/ask": 178636
+    }
+  },
+  "failures": []
+}

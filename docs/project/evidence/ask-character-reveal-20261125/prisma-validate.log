@@ -1,0 +1,13 @@
+
+> ai-project-os@1.2.30 db:validate /Users/fenglan/projects/ai-project-os
+> prisma validate --config prisma.config.ts && pnpm db:migrations:validate
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+The schema at prisma/schema.prisma is valid 🚀
+
+> ai-project-os@1.2.30 db:migrations:validate /Users/fenglan/projects/ai-project-os
+> tsx scripts/validate-migrations.ts
+
+Validated 151 Prisma migration directories.

@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "revision": "cdbfb22a7201acec89bdcbaa36cec1e13b1bf0a7",
+  "version": "1.2.30",
+  "runId": 79003,
+  "images": {
+    "app": {
+      "ref": "ai-project-os-ci/app:cdbfb22a7201acec89bdcbaa36cec1e13b1bf0a7",
+      "id": "sha256:c15de4bb74af14d41432d161b30a9b903713dd805ae417a7418b1a9a77c7375b"
+    },
+    "worker": {
+      "ref": "ai-project-os-ci/worker:cdbfb22a7201acec89bdcbaa36cec1e13b1bf0a7",
+      "id": "sha256:5efe1402146a3a8486ad0bac5f9057f95b2cdd420160acf35356481fe1937127"
+    },
+    "migrate": {
+      "ref": "ai-project-os-ci/migrate:cdbfb22a7201acec89bdcbaa36cec1e13b1bf0a7",
+      "id": "sha256:e3517b62c0bf5b737c53eb53d3928f967e7457ed07a164955e99c7168c0baae2"
+    }
+  }
+}

@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-25",
+  "timezone": "Asia/Shanghai",
+  "task": "T-079",
+  "status": "accepted_local",
+  "baseRevision": "cdbfb22a7201acec89bdcbaa36cec1e13b1bf0a7",
+  "localImageVersion": "1.2.30",
+  "candidateKind": "product source hashes verified against productCommit; local build preceded version metadata",
+  "sourceSha256": {
+    "src/lib/inquiry-reveal.ts": "7279c20062d779a46f6e31fe61b09c93a28590c1e27f6147e45eaa908fe0d71d",
+    "src/lib/inquiry-session.ts": "ff73c374628f716183f43111548cf6792c791bab97b2321b2e5966ba252253f5",
+    "src/app/ask/ask-client.tsx": "495e0a731dd4ddfa9850111e372d2b1cec81789a9d1390c797811f84e3917981",
+    "e2e/inquiry-stream.spec.ts": "df2f9fe32f0f03896a787dbabc32708da43677fcf622a841e242ada136ecc35e",
+    "test/inquiry-reveal.test.ts": "74a8bbb3a2f202243b52de81b9db66f0e1d71eb5e2d0a35a87363fb5d63b1419",
+    "config/performance-budgets.json": "708ef414cb5db5228f5ff8fa256784a0966d6979c962b2d296f1f4478518c644",
+    "test/performance-budget.test.ts": "b53eda7de53eb5d07186a2f5bb08afee13b7928aa6754039fa506ee672e03261"
+  },
+  "checks": {
+    "targeted": {
+      "passed": 14,
+      "failed": 0
+    },
+    "defaultCoverage": {
+      "total": 1785,
+      "passed": 1612,
+      "skipped": 173,
+      "failed": 0,
+      "lines": 63.42,
+      "branches": 80.08,
+      "functions": 69.11
+    },
+    "prisma": {
+      "generate": "passed in Docker build",
+      "schema": "passed",
+      "migrationDirectories": 151
+    },
+    "lint": "passed for all changed TypeScript files",
+    "productionBuildAndTypeScript": "passed",
+    "performance": {
+      "report": {
+        "sharedJavaScriptGzipBytes": 132405,
+        "largestJavaScriptAsset": {
+          "path": "static/chunks/5922-292479552ca25dd2.js",
+          "gzipBytes": 65839
+        },
+        "globalCssGzipBytes": 11826,
+        "totalStaticClientGzipBytes": 896761,
+        "criticalRoutes": {
+          "/setup": 152551,
+          "/dashboard": 164411,
+          "/personal/projects": 164477,
+          "/guide": 159029,
+          "/connections/mcp": 138665,
+          "/system/account-access": 138665,
+          "/personal": 159337,
+          "/personal/knowledge": 160783,
+          "/personal/knowledge/graph": 183544,
+          "/login": 157316,
+          "/register": 159082,
+          "/admin/sms": 164216,
+          "/ask": 178636
+        }
+      },
+      "failures": []
+    },
+    "browser": {
+      "passed": 3,
+      "failed": 0,
+      "seconds": 27,
+      "cases": [
+        "1440x900 full page",
+        "390x844 floating",
+        "390x844 floating reduced motion"
+      ],
+      "coverage": [
+        "multiple rendered prefixes per HTTP chunk",
+        "final handoff",
+        "bottom follow",
+        "upward reading preservation",
+        "collapse/reopen in both reading modes",
+        "partial error clears preview",
+        "axe and horizontal overflow"
+      ]
+    },
+    "renderedSamples": {
+      "floating": {
+        "frames": 30,
+        "prefixLengths": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "durationMs": 408.7
+      },
+      "floating-reduced": {
+        "frames": 1,
+        "prefixLengths": [
+          31
+        ],
+        "durationMs": 0.0
+      },
+      "page": {
+        "frames": 30,
+        "prefixLengths": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "durationMs": 409.5
+      }
+    },
+    "visualReview": {
+      "reviewer": "root",
+      "screenshots": 5,
+      "result": "accepted for current scope"
+    }
+  },
+  "boundaries": [
+    "Local HTTP streaming fixture; no real external model called",
+    "No formal CI or production claim from these local images",
+    "release:local refused dirty worktree before startup; exact committed CI candidate will supersede that precondition"
+  ],
+  "history": "verification-history.json",
+  "cleanup": {
+    "ownedPostgresContainer": "removed with its temporary volume",
+    "privateLocalEnvironment": "removed",
+    "browserAppWorkerRolesAndDatabase": "runner completed cleanup"
+  },
+  "releaseMetadataCheck": {
+    "version": "1.2.31",
+    "command": "pnpm exec tsx --test test/release-version-identity.test.ts",
+    "passed": 1,
+    "boundary": "Does not turn v1.2.30 local images into v1.2.31 production proof"
+  },
+  "productCommit": "2e7a47e79ad89ed5f840cbfb9b4f87e5ad819e87"
+}

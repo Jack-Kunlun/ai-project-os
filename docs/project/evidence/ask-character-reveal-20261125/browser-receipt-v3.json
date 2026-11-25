@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "releaseEligible": false,
+  "revision": "cdbfb22a7201acec89bdcbaa36cec1e13b1bf0a7",
+  "version": "1.2.30",
+  "mode": "selected",
+  "files": [
+    "e2e/inquiry-stream.spec.ts"
+  ],
+  "testCount": 3,
+  "executedCount": 3,
+  "skippedCount": 0
+}

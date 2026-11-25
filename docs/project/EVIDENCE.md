@@ -212,3 +212,11 @@ E-034 补充：最终本地预算 895889/896000 字节、13 项同镜像浏览�
 E-034 正式接收：候选 665c8d98eeed5252087651dd7f4c825bd9f361f1 的[主分支 CI](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45547562848) 成功，源码/覆盖率、Prisma、Lint/类型、资源预算、91 项 PostgreSQL 门禁、账号认证和 OID10、117 项同镜像浏览器通过（7 项按配置跳过），隔离发布候选通过。全站矩阵保留 539 次路由和 175 次上级导航；新的单次导航时限与总预算经独立 review 接收。具体执行数量与身份以[正式回执](evidence/release-stream-workspace-20261125/release.json)为准。
 
 [正式发布](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45551599590) 已将 v1.2.30 / 665c8d9 切换上线。annotated tag、三份 CI 镜像、151 条迁移账本及公网应用/数据库/Worker 健康均核对一致。无新增迁移，不要求备份/恢复演练。真实外部模型未调用；历史失败回执保留。
+
+## E-035 / T-079 智能问答逐字显示
+
+[本地回执](evidence/ask-character-reveal-20261125/acceptance.json) 绑定实际产品/用例哈希与 Docker 镜像：14 项定向、1612 项默认测试通过（173 配置跳过）、覆盖率 63.42/80.08/69.11、Prisma 151 目录、相关 lint、构建/类型、预算 896761/897024、3 项认证后同镜像浏览器/axe 通过。完整页和浮窗各 30 个可见前缀，约 409ms；reduced-motion 一次显示全文。5 张截图已审阅，独立 review 接收修复后的范围。前两版失败及 dirty-worktree 候选拒绝见同目录历史。仅本地合成 HTTP 流，没有真实模型调用或正式部署证明。
+
+## E-036 / T-080 v1.2.31 发布
+
+E-035 产品交付已接收；当前待精确提交、正式 CI 与既有 Workflow。正式回执将记录线上源、最终候选、版本、不可变镜像和部署健康。

@@ -1,0 +1,86 @@
+{
+  "date": "2026-11-25",
+  "timezone": "Asia/Shanghai",
+  "initial": {
+    "sourceHashes": {
+      "src/lib/inquiry-reveal.ts": "f2b6d4f83b8aa18748447cd6a98e505c584b4f6e222c51a3cfbdd901b657104d",
+      "src/lib/inquiry-session.ts": "ee7578e517ec33f002251876fe7c4eadb3fd1fb8dc8bc318ebd36189ef19371c",
+      "src/app/ask/ask-client.tsx": "db126180868b3b686e14013be1ee978b4c06684ca202feef75726eabe00df649",
+      "test/inquiry-reveal.test.ts": "eed896ea38dcb42691c6676602ab0b8b66a576955082702315923654d56ebae1",
+      "e2e/inquiry-stream.spec.ts": "f874c7e458c33b559fc4e19eb7bb61a8e273a080df56400d9fc72a7279b17861"
+    },
+    "targetedTests": {
+      "passed": 12,
+      "failed": 0
+    },
+    "browser": {
+      "passed": 3,
+      "failed": 0,
+      "collapseReopenCovered": false
+    },
+    "performance": {
+      "report": {
+        "sharedJavaScriptGzipBytes": 132403,
+        "largestJavaScriptAsset": {
+          "path": "static/chunks/5922-292479552ca25dd2.js",
+          "gzipBytes": 65839
+        },
+        "globalCssGzipBytes": 11826,
+        "totalStaticClientGzipBytes": 918701,
+        "criticalRoutes": {
+          "/setup": 153407,
+          "/dashboard": 165829,
+          "/personal/projects": 166476,
+          "/guide": 160491,
+          "/connections/mcp": 139521,
+          "/system/account-access": 139521,
+          "/personal": 160763,
+          "/personal/knowledge": 162209,
+          "/personal/knowledge/graph": 185540,
+          "/login": 158172,
+          "/register": 159938,
+          "/admin/sms": 165672,
+          "/ask": 179263
+        }
+      },
+      "failures": [
+        {
+          "metric": "all static client assets",
+          "actualBytes": 918701,
+          "budgetBytes": 896000
+        },
+        {
+          "metric": "route /guide",
+          "actualBytes": 160491,
+          "budgetBytes": 159744
+        },
+        {
+          "metric": "route /register",
+          "actualBytes": 159938,
+          "budgetBytes": 159744
+        },
+        {
+          "metric": "route /admin/sms",
+          "actualBytes": 165672,
+          "budgetBytes": 164864
+        }
+      ]
+    }
+  },
+  "second": {
+    "totalStaticClientGzipBytes": 896695,
+    "originalBudgetBytes": 896000,
+    "performanceBeforeBudgetAdjustment": "failed by 695 bytes; all critical routes passed",
+    "browser": {
+      "passed": 1,
+      "failed": 2,
+      "reason": "After collapse/reopen, both floating variants stayed 864px away from bottom; expected less than 65px."
+    }
+  },
+  "formalCandidate": {
+    "command": "pnpm release:local",
+    "result": "blocked before startup",
+    "code": "LOCAL_RELEASE_WORKTREE_DIRTY",
+    "boundary": "No clean committed candidate yet; this is not a deployment success."
+  }
+}

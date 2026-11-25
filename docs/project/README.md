@@ -4,6 +4,8 @@
 
 2026-11-25 上线：完整问答页和浮窗的滚动、键盘、减少动态效果及失败恢复已通过隔离验收；正式 CI 与生产健康通过。真实外部模型未在本轮现场调用。见 [T-075 / E-032](evidence/ask-stream-20261125/acceptance.json) 与 [E-034 发布回执](evidence/release-stream-workspace-20261125/release.json)。
 
+问答逐字显示体验修正已完成本地验收：双表面各观察到 30 个连续前缀，浮窗收起恢复保留阅读意图；[E-035](evidence/ask-character-reveal-20261125/acceptance.json)。v1.2.31 正式提交与部署由 T-080 跟踪，当前生产仍为上述 v1.2.30。
+
 v1.2.27 的登录后复查覆盖 77 个路由，登记的 17 项缺陷已在本版修复。原复现步骤见[复查报告](BUG-AUDIT-AUTHENTICATED-20261123.md)，上一批 12 项修复见[E-026](evidence/release-20261123/release.json)。
 
 [查看完整流程架构图](FLOW-ARCHITECTURE.md)：交付主流程、模块交接、任务追溯、临时变更与问题改进闭环。

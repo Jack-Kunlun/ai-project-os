@@ -1,0 +1,9 @@
+{
+  "src/lib/inquiry-reveal.ts": "7279c20062d779a46f6e31fe61b09c93a28590c1e27f6147e45eaa908fe0d71d",
+  "src/lib/inquiry-session.ts": "ff73c374628f716183f43111548cf6792c791bab97b2321b2e5966ba252253f5",
+  "src/app/ask/ask-client.tsx": "495e0a731dd4ddfa9850111e372d2b1cec81789a9d1390c797811f84e3917981",
+  "e2e/inquiry-stream.spec.ts": "df2f9fe32f0f03896a787dbabc32708da43677fcf622a841e242ada136ecc35e",
+  "test/inquiry-reveal.test.ts": "74a8bbb3a2f202243b52de81b9db66f0e1d71eb5e2d0a35a87363fb5d63b1419",
+  "config/performance-budgets.json": "708ef414cb5db5228f5ff8fa256784a0966d6979c962b2d296f1f4478518c644",
+  "test/performance-budget.test.ts": "b53eda7de53eb5d07186a2f5bb08afee13b7928aa6754039fa506ee672e03261"
+}

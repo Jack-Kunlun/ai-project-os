@@ -19,6 +19,15 @@ import { getDb } from "@/lib/db";
 import { loadOrCreateMasterKey } from "@/lib/credential-vault";
 import { invokeChatCompletion, ProviderTransportError } from "@/lib/ai-providers";
 import { UnifiedQuestionPreview } from "@/lib/unified-question-preview";
+import {
+  checkpointUnifiedQuestionProgress,
+  createUnifiedQuestionProgress,
+  finalizeUnifiedQuestionProgress,
+  heartbeatUnifiedQuestionProgress,
+  reconcileStaleUnifiedQuestionRequests,
+  requestUnifiedQuestionStop as requestUnifiedQuestionStopFlag,
+  UNIFIED_QUESTION_HEARTBEAT_INTERVAL_MS,
+} from "@/lib/unified-question-recovery";
 import { lockProviderConfiguration } from "@/lib/ai-providers/service";
 import {
   lockPersonalKnowledgeQaRoute,
@@ -43,6 +52,7 @@ import {
   UNIFIED_QUESTION_CONFIRMATION_TTL_MS,
   unifiedQuestionScopeSchema,
   unifiedQuestionPresentationSchema,
+  UNIFIED_QUESTION_MAX_ANSWER_LENGTH,
   type UnifiedQuestionCitationSnapshot,
   type UnifiedQuestionScope,
   type UnifiedQuestionSourcePreview,
@@ -55,6 +65,9 @@ const HISTORY_SCAN_LIMIT = 2_000;
 const MAX_PAGE = 100_000;
 const HMAC_CONTEXT = "ai-project-os:unified-question:v1";
 const OPERATION = "generateWithContext" as const;
+const SAFE_RETRY_AFTER_REJECTION_CODES = new Set([
+  "AI_PROVIDER_QUOTA_EXHAUSTED", "AI_PROVIDER_RATE_LIMITED", "AI_PROVIDER_REJECTED", "AI_PROVIDER_AUTH_FAILED",
+]);
 
 export type UnifiedQuestionErrorCode =
   | "UNIFIED_QUESTION_INVALID_INPUT"
@@ -74,7 +87,10 @@ export type UnifiedQuestionErrorCode =
   | "UNIFIED_QUESTION_HISTORY_UNAVAILABLE"
   | "UNIFIED_QUESTION_PROVIDER_UNAVAILABLE"
   | "UNIFIED_QUESTION_PROVIDER_UNCERTAIN"
+  | "UNIFIED_QUESTION_STOPPED"
   | "UNIFIED_QUESTION_OUTCOME_UNRESOLVED"
+  | "AI_PROVIDER_QUOTA_EXHAUSTED"
+  | "AI_PROVIDER_RATE_LIMITED"
   | "UNIFIED_QUESTION_INVALID_MODEL_OUTPUT"
   | "UNIFIED_QUESTION_OUTPUT_TRUNCATED"
   | "UNIFIED_QUESTION_INVALID_CITATION"
@@ -131,6 +147,8 @@ type Snapshot = Readonly<{
   sources: readonly UnifiedQuestionCitationSnapshot[];
   contextName: string;
   provider: Provider;
+  resumeAnswer?: string;
+  resumeFromConfirmationId?: string;
 }>;
 
 export const UNIFIED_QUESTION_ERROR_PRESENTATION: Readonly<Record<UnifiedQuestionErrorCode, Readonly<{ status: number; message: string }>>> = Object.freeze({
@@ -151,7 +169,10 @@ export const UNIFIED_QUESTION_ERROR_PRESENTATION: Readonly<Record<UnifiedQuestio
   UNIFIED_QUESTION_HISTORY_UNAVAILABLE: { status: 404, message: "会话不存在或其中部分项目当前不可访问。" },
   UNIFIED_QUESTION_PROVIDER_UNAVAILABLE: { status: 503, message: "平台默认模型当前不可用，请稍后重新准备。" },
   UNIFIED_QUESTION_PROVIDER_UNCERTAIN: { status: 503, message: "模型调用结果尚未确认，额度已保留；请查看会话状态，不要重复发送。" },
+  UNIFIED_QUESTION_STOPPED: { status: 409, message: "回答已停止，已保留中断前的内容；可以继续回答。" },
   UNIFIED_QUESTION_OUTCOME_UNRESOLVED: { status: 409, message: "当前会话有一轮模型调用结果尚未确认，无法继续发送；请新建会话后继续。" },
+  AI_PROVIDER_QUOTA_EXHAUSTED: { status: 402, message: "模型供应商余额或配额不足，请联系管理员处理后重试。" },
+  AI_PROVIDER_RATE_LIMITED: { status: 429, message: "模型供应商暂时限制了请求频率，请稍后重试。" },
   UNIFIED_QUESTION_INVALID_MODEL_OUTPUT: { status: 502, message: "模型返回内容无法安全保存，请重新准备后再试。" },
   UNIFIED_QUESTION_OUTPUT_TRUNCATED: { status: 502, message: "模型回答超出长度限制，未保存本轮。" },
   UNIFIED_QUESTION_INVALID_CITATION: { status: 502, message: "模型引用了本轮未提供的来源，未保存本轮。" },
@@ -229,8 +250,18 @@ async function assertNoUnresolvedExecution(
   expectedLastTurnId: string | null,
   expectedSequence: number,
   expectedVersion: number,
+  resumeFromConfirmationId?: string,
 ): Promise<void> {
   const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    WITH RECURSIVE recovery_chain AS (
+      SELECT ${resumeFromConfirmationId ?? null}::uuid AS "id"
+      WHERE ${resumeFromConfirmationId ?? null}::uuid IS NOT NULL
+      UNION ALL
+      SELECT parent."resumeFromConfirmationId"
+      FROM "UnifiedQuestionConfirmation" AS parent
+      JOIN recovery_chain AS child ON child."id" = parent."id"
+      WHERE parent."resumeFromConfirmationId" IS NOT NULL
+    )
     SELECT confirmation."id"
     FROM "UnifiedQuestionConfirmation" AS confirmation
     JOIN "UnifiedQuestionAudit" AS audit
@@ -243,6 +274,7 @@ async function assertNoUnresolvedExecution(
       AND confirmation."expectedVersion" = ${expectedVersion}
       AND confirmation."status" = 'consumed'::"UnifiedQuestionConfirmationStatus"
       AND audit."status" IN ('running'::"UnifiedQuestionAuditStatus", 'unknown'::"UnifiedQuestionAuditStatus")
+      AND NOT EXISTS (SELECT 1 FROM recovery_chain WHERE recovery_chain."id" = confirmation."id")
     LIMIT 1
   `);
   if (rows.length > 0) return fail("UNIFIED_QUESTION_OUTCOME_UNRESOLVED");
@@ -775,15 +807,19 @@ function validateScopeInput(input: ScopeInput): ScopeInput {
 }
 
 function preparedShape(
-  confirmation: { id: string; conversationId: string; expectedLastTurnId: string | null; expiresAt: Date; modelId: string; providerName: string; quotaMultiplierBps: number; maxOutputTokens: number },
+  confirmation: { id: string; conversationId: string; expectedLastTurnId: string | null; expiresAt: Date; modelId: string; providerName: string; quotaMultiplierBps: number; maxOutputTokens: number; resumeFromConfirmationId?: string | null },
   scope: UnifiedQuestionScope,
   context: string,
   question: string,
   historyCount: number,
   sources: readonly UnifiedQuestionCitationSnapshot[],
   estimatedTokens: number,
+  resumeAnswer?: string,
 ): unknown {
   return Object.freeze({ confirmationId: confirmation.id, conversationId: confirmation.conversationId,
+    ...(confirmation.resumeFromConfirmationId === null || confirmation.resumeFromConfirmationId === undefined
+      ? {} : { resumeFromConfirmationId: confirmation.resumeFromConfirmationId }),
+    ...(resumeAnswer === undefined ? {} : { resumeAnswer }),
     expectedLastTurnId: confirmation.expectedLastTurnId, expiresAt: confirmation.expiresAt.toISOString(),
     scope, contextName: context, modelId: confirmation.modelId, providerName: confirmation.providerName,
     billing: Object.freeze({ mode: "platform", quotaMultiplierBps: confirmation.quotaMultiplierBps,
@@ -793,16 +829,62 @@ function preparedShape(
     contextTurnCount: historyCount, sources, question });
 }
 
+async function hasSafeNoExecutionEvidence(
+  db: Prisma.TransactionClient,
+  ownerUserId: string,
+  confirmationId: string,
+  errorCode: string | null,
+): Promise<boolean> {
+  const reservation = await db.platformTokenReservation.findFirst({
+    where: { userId: ownerUserId, unifiedQuestionConfirmationId: confirmationId },
+    select: { status: true },
+  });
+  if (errorCode === "AI_PLATFORM_TOKEN_EXHAUSTED" || errorCode === "AI_PLATFORM_TOKEN_EXPIRED") return reservation === null;
+  return SAFE_RETRY_AFTER_REJECTION_CODES.has(errorCode ?? "") && reservation?.status === "released";
+}
+
+async function isResumableRequestState(
+  db: Prisma.TransactionClient,
+  ownerUserId: string,
+  confirmationId: string,
+  auditStatus: string | null | undefined,
+  auditErrorCode: string | null | undefined,
+  progressStatus: string | null | undefined,
+): Promise<boolean> {
+  if (auditStatus !== "failed" && auditStatus !== "unknown") return false;
+  if (progressStatus === "stopped" || progressStatus === "unknown") return true;
+  return progressStatus === "failed"
+    && await hasSafeNoExecutionEvidence(db, ownerUserId, confirmationId, auditErrorCode ?? null);
+}
+
 async function createOrReplayConfirmation(
   actor: Actor,
-  input: ScopeInput & Readonly<{ conversationId?: string; expectedLastTurnId: string | null; clientKey: string }>,
+  input: ScopeInput & Readonly<{ conversationId?: string; expectedLastTurnId: string | null; clientKey: string; resumeFromConfirmationId?: string }>,
   db: PrismaClient,
 ): Promise<unknown> {
   const clientHash = await clientKeyHash(input.clientKey);
+  const resumeFromConfirmationId = input.resumeFromConfirmationId;
+  if (resumeFromConfirmationId !== undefined && input.conversationId === undefined) return fail("UNIFIED_QUESTION_INVALID_INPUT");
   const found = await db.$transaction(async (tx) => {
     await lockActorAccess(tx, actor.id);
     const current = await currentActor(tx, actor);
     const existing = await tx.unifiedQuestionConfirmation.findFirst({ where: { ownerUserId: actor.id, clientKeyHash: clientHash } });
+    if (existing !== null && existing.resumeFromConfirmationId !== (resumeFromConfirmationId ?? null)) return fail("UNIFIED_QUESTION_CONFLICT");
+    if (resumeFromConfirmationId !== undefined) {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "UnifiedQuestionConfirmation"
+        WHERE "ownerUserId" = ${actor.id}::uuid AND "id" = ${resumeFromConfirmationId}::uuid FOR UPDATE`);
+    }
+    const resumeSource = resumeFromConfirmationId === undefined ? null : await tx.unifiedQuestionConfirmation.findFirst({
+      where: { ownerUserId: actor.id, id: resumeFromConfirmationId },
+      select: {
+        id: true, conversationId: true, expectedLastTurnId: true, expectedSequence: true, expectedVersion: true,
+        scope: true, projectId: true, focusDocumentId: true, question: true, questionHash: true, historyFingerprint: true,
+        scopeProjectIds: true, evidenceManifest: true, sourceSnapshots: true, actorAccountAccessVersion: true,
+        status: true, audit: { select: { status: true, safeErrorCode: true } },
+        progress: { select: { status: true, partialAnswer: true } },
+      },
+    });
+    if (resumeFromConfirmationId !== undefined && resumeSource === null) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
     const conversationId = existing?.conversationId ?? input.conversationId ?? randomUUID();
     const seedScopeRows = await scopeProjectRows(current, input.scope, input.projectId, tx, true);
     const scopeProjectIds = seedScopeRows.map((row) => row.id).sort();
@@ -830,9 +912,25 @@ async function createOrReplayConfirmation(
     const historyRead = conversation === null
       ? Object.freeze({ conversation: { id: conversationId, title: null, headTurnId: null, headSequence: 0, version: 0 }, turns: Object.freeze([] as HistoryTurn[]) })
       : await readHistory(tx, actor.id, conversationId);
+    let resumeAnswer: string | undefined;
+    if (resumeSource !== null) {
+      const partialAnswer = resumeSource.progress?.partialAnswer ?? "";
+      const resumableStatus = await isResumableRequestState(tx, actor.id, resumeSource.id,
+        resumeSource.audit?.status, resumeSource.audit?.safeErrorCode, resumeSource.progress?.status);
+      if (!resumableStatus || resumeSource.status !== "consumed" || partialAnswer.trim().length === 0
+        || partialAnswer.length + 2 >= UNIFIED_QUESTION_MAX_ANSWER_LENGTH
+        || resumeSource.conversationId !== conversationId || resumeSource.expectedLastTurnId !== historyRead.conversation.headTurnId
+        || resumeSource.expectedSequence !== historyRead.conversation.headSequence || resumeSource.expectedVersion !== historyRead.conversation.version
+        || resumeSource.scope !== input.scope || resumeSource.projectId !== (input.projectId ?? null)
+        || resumeSource.focusDocumentId !== (input.focusDocumentId ?? null) || resumeSource.question !== input.question
+        || resumeSource.actorAccountAccessVersion !== current.accountAccessVersion) {
+        return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+      }
+      resumeAnswer = `${partialAnswer}\n\n`;
+    }
     if (existing === null || existing.status === "issued") {
       await assertNoUnresolvedExecution(tx, actor.id, conversationId, historyRead.conversation.headTurnId,
-        historyRead.conversation.headSequence, historyRead.conversation.version);
+        historyRead.conversation.headSequence, historyRead.conversation.version, resumeFromConfirmationId);
     }
     const projectRows = await scopeProjectRows(current, input.scope, input.projectId, tx, true);
     if (!sameJson(projectRows.map((row) => row.id).sort(), scopeProjectIds)) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
@@ -844,24 +942,47 @@ async function createOrReplayConfirmation(
     const provider = await readProvider(tx);
     const context = await contextName(input.scope, projectRows);
     const manifest = unifiedQuestionEvidenceManifest(sources);
+    if (resumeSource !== null && (resumeSource.questionHash !== questionDigest
+      || resumeSource.historyFingerprint !== historyIdFingerprint
+      || !sameJson(resumeSource.scopeProjectIds, scopeProjectIds)
+      || !sameJson(resumeSource.evidenceManifest, manifest)
+      || !sameJson(resumeSource.sourceSnapshots, sources))) {
+      return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+    }
     const inputMaterial = {
       actor: { id: current.id, role: current.role, accountAccessVersion: current.accountAccessVersion },
       conversationId, expectedLastTurnId: historyRead.conversation.headTurnId,
       expectedSequence: historyRead.conversation.headSequence, expectedVersion: historyRead.conversation.version,
       scope: input.scope, projectId: input.projectId ?? null, focusDocumentId: input.focusDocumentId ?? null,
       questionHash: questionDigest, historyFingerprint: historyIdFingerprint,
+      resumeFromConfirmationId: resumeFromConfirmationId ?? null,
       scopeProjectIds, manifestFingerprint: unifiedQuestionManifestFingerprint(sources), sourceSnapshots: sources,
       contextName: context, provider: providerFingerprint(provider), clientKeyHash: clientHash,
     };
     const inputDigest = await snapshotFingerprint(inputMaterial);
     const now = await databaseNow(tx);
+    if (resumeFromConfirmationId !== undefined) {
+      await mutationContext(tx);
+      await tx.unifiedQuestionConfirmation.updateMany({
+        where: { ownerUserId: actor.id, resumeFromConfirmationId, status: "issued", ...(existing === null ? {} : { id: { not: existing.id } }) },
+        data: { status: "expired" },
+      });
+      const alreadyResumed = await tx.unifiedQuestionConfirmation.findFirst({
+        where: { ownerUserId: actor.id, resumeFromConfirmationId, status: { in: ["issued", "consumed"] }, ...(existing === null ? {} : { id: { not: existing.id } }) },
+        select: { id: true },
+      });
+      if (alreadyResumed !== null) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+    }
     if (existing !== null) {
       if (existing.status !== "issued" || existing.expiresAt <= now) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
       if (!sameHash(existing.inputFingerprint, inputDigest)) return fail("UNIFIED_QUESTION_CONFLICT");
       return Object.freeze({ confirmation: preparedShape({ id: existing.id, conversationId, expectedLastTurnId: existing.expectedLastTurnId,
         expiresAt: existing.expiresAt, modelId: existing.modelId, providerName: existing.providerName,
-        quotaMultiplierBps: existing.quotaMultiplierBps, maxOutputTokens: existing.maxOutputTokens }, input.scope, existing.contextName,
-        input.question, historyRead.turns.length, sources, estimatePlatformTokens(buildUnifiedQuestionMessages({ question: input.question, history: historyRead.turns, evidence: sources.map((source) => ({ id: source.id as `s${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`, scope: source.scope, projectId: source.projectId, title: source.title, contentHash: source.contentHash, content: source.content })) }), provider.billingRoute!.maxOutputTokens)) });
+        quotaMultiplierBps: existing.quotaMultiplierBps, maxOutputTokens: existing.maxOutputTokens,
+        resumeFromConfirmationId: existing.resumeFromConfirmationId }, input.scope, existing.contextName,
+        input.question, historyRead.turns.length, sources, estimatePlatformTokens(buildUnifiedQuestionMessages({ question: input.question, history: historyRead.turns,
+          resumeDraft: resumeAnswer === undefined ? undefined : resumeAnswer.slice(0, -2),
+          evidence: sources.map((source) => ({ id: source.id as `s${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`, scope: source.scope, projectId: source.projectId, title: source.title, contentHash: source.contentHash, content: source.content })) }), provider.billingRoute!.maxOutputTokens), resumeAnswer) });
     }
     await assertPlatformConcurrency({ id: actor.id, role: actor.role }, tx);
     const expiresAt = new Date(now.getTime() + UNIFIED_QUESTION_CONFIRMATION_TTL_MS);
@@ -881,10 +1002,12 @@ async function createOrReplayConfirmation(
         routeUpdatedAt: provider.billingRoute!.routeUpdatedAt, quotaMultiplierBps: provider.billingRoute!.quotaMultiplierBps,
         maxOutputTokens: provider.billingRoute!.maxOutputTokens, routeFenceFingerprint: provider.billingRoute!.routeFenceFingerprint,
         actorAccountAccessVersion: current.accountAccessVersion, clientKeyHash: clientHash,
+        resumeFromConfirmationId: resumeFromConfirmationId ?? null,
         inputFingerprint: inputDigest, status: "issued", issuedAt: now, expiresAt,
       },
     });
-    const messages = buildUnifiedQuestionMessages({ question: input.question, history: historyRead.turns, evidence: sources.map((source) => ({
+    const messages = buildUnifiedQuestionMessages({ question: input.question, history: historyRead.turns,
+      resumeDraft: resumeAnswer === undefined ? undefined : resumeAnswer.slice(0, -2), evidence: sources.map((source) => ({
       id: source.id as `s${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`, scope: source.scope, projectId: source.projectId,
       title: source.title, contentHash: source.contentHash, content: source.content,
     })) });
@@ -892,7 +1015,8 @@ async function createOrReplayConfirmation(
     return Object.freeze({ confirmation: preparedShape({ id: confirmation.id, conversationId,
       expectedLastTurnId: confirmation.expectedLastTurnId, expiresAt, modelId: confirmation.modelId,
       providerName: confirmation.providerName, quotaMultiplierBps: confirmation.quotaMultiplierBps,
-      maxOutputTokens: confirmation.maxOutputTokens }, input.scope, context, input.question, historyRead.turns.length, sources, estimatedTokens) });
+      maxOutputTokens: confirmation.maxOutputTokens, resumeFromConfirmationId: confirmation.resumeFromConfirmationId }, input.scope, context,
+      input.question, historyRead.turns.length, sources, estimatedTokens, resumeAnswer) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
   return found;
 }
@@ -902,21 +1026,25 @@ export async function prepareUnifiedQuestion(inputValue: unknown, actorValue: un
   const parsed = unifiedQuestionPrepareSchema.safeParse(inputValue);
   if (!parsed.success) return fail("UNIFIED_QUESTION_INVALID_INPUT");
   const actor = actorValue;
+  await reconcileStaleUnifiedQuestionRequests(actor.id, db);
   const input = validateScopeInput(parsed.data);
   const conversationId = parsed.data.conversationId === undefined ? undefined : canonicalId(parsed.data.conversationId);
   const expectedLastTurnId = parsed.data.expectedLastTurnId === null ? null : canonicalId(parsed.data.expectedLastTurnId);
-  return createOrReplayConfirmation(actor, { ...input, conversationId, expectedLastTurnId, clientKey: parsed.data.clientKey }, db);
+  return createOrReplayConfirmation(actor, { ...input, conversationId, expectedLastTurnId, clientKey: parsed.data.clientKey,
+    ...(parsed.data.resumeFromConfirmationId === undefined ? {} : { resumeFromConfirmationId: canonicalId(parsed.data.resumeFromConfirmationId) }) }, db);
 }
 
 type ExecuteInput = z.infer<typeof unifiedQuestionExecuteSchema>;
 
 async function admitExecution(actor: Actor, parsed: ExecuteInput, db: PrismaClient): Promise<Snapshot> {
+  await reconcileStaleUnifiedQuestionRequests(actor.id, db);
   const confirmationId = (parsed.confirmationId ?? parsed.challengeId)!.toLowerCase();
   const admission = () => db.$transaction(async (tx) => {
     await lockActorAccess(tx, actor.id);
     const current = await currentActor(tx, actor);
     const confirmation = await tx.unifiedQuestionConfirmation.findFirst({ where: { id: confirmationId, ownerUserId: actor.id } });
     if (confirmation === null) return fail("UNIFIED_QUESTION_CONFIRMATION_REQUIRED");
+    if (confirmation.resumeFromConfirmationId !== (parsed.resumeFromConfirmationId?.toLowerCase() ?? null)) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
     if ((await presentation(tx, actor.id, confirmation.conversationId))?.deleted) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
     const confirmationProjectIds = confirmation.scopeProjectIds;
     const historyMetadata = await tx.unifiedQuestionTurn.findMany({
@@ -946,7 +1074,7 @@ async function admitExecution(actor: Actor, parsed: ExecuteInput, db: PrismaClie
       return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
     }
     await assertNoUnresolvedExecution(tx, actor.id, confirmation.conversationId, confirmation.expectedLastTurnId,
-      confirmation.expectedSequence, confirmation.expectedVersion);
+      confirmation.expectedSequence, confirmation.expectedVersion, confirmation.resumeFromConfirmationId ?? undefined);
     const questionDigest = await questionHash(parsed.question);
     const sources = await selectedSources(current, confirmation.scope as UnifiedQuestionScope, currentScopeRows,
       confirmation.focusDocumentId ?? undefined, parsed.question, tx);
@@ -961,6 +1089,7 @@ async function admitExecution(actor: Actor, parsed: ExecuteInput, db: PrismaClie
         expectedSequence: historyRead.conversation.headSequence, expectedVersion: historyRead.conversation.version,
         scope: confirmation.scope, projectId: confirmation.projectId, focusDocumentId: confirmation.focusDocumentId,
         questionHash: questionDigest, historyFingerprint: historyFingerprint(historyRead.turns),
+        resumeFromConfirmationId: confirmation.resumeFromConfirmationId,
         scopeProjectIds: [...confirmationProjectIds], manifestFingerprint: unifiedQuestionManifestFingerprint(sources),
         sourceSnapshots: sources, contextName: await contextName(confirmation.scope as UnifiedQuestionScope, currentScopeRows),
         provider: providerFingerprint(await readProvider(tx)), clientKeyHash: confirmation.clientKeyHash,
@@ -993,6 +1122,18 @@ async function admitExecution(actor: Actor, parsed: ExecuteInput, db: PrismaClie
       actorAccountAccessVersion: current.accountAccessVersion, routeFenceFingerprint: provider.billingRoute!.routeFenceFingerprint,
       status: "running", createdAt: now,
     } });
+    const resumeSource = confirmation.resumeFromConfirmationId === null ? null : await tx.unifiedQuestionConfirmation.findFirst({
+      where: { id: confirmation.resumeFromConfirmationId, ownerUserId: actor.id },
+      select: { audit: { select: { status: true, safeErrorCode: true } }, progress: { select: { status: true, partialAnswer: true } } },
+    });
+    if (confirmation.resumeFromConfirmationId !== null && (resumeSource?.progress === null || resumeSource?.progress === undefined
+      || !(await isResumableRequestState(tx, actor.id, confirmation.resumeFromConfirmationId,
+        resumeSource.audit?.status, resumeSource.audit?.safeErrorCode, resumeSource.progress.status))
+      || resumeSource.progress.partialAnswer.length + 2 >= UNIFIED_QUESTION_MAX_ANSWER_LENGTH)) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+    const resumeAnswer = resumeSource?.progress === null || resumeSource?.progress === undefined
+      ? undefined : `${resumeSource.progress.partialAnswer}\n\n`;
+    await createUnifiedQuestionProgress(tx, { confirmationId: confirmation.id, ownerUserId: actor.id, conversationId: confirmation.conversationId,
+      ...(resumeAnswer === undefined ? {} : { partialAnswer: resumeAnswer }) });
     return Object.freeze({ confirmationId: confirmation.id, auditId, owner: current,
       conversationId: confirmation.conversationId, expectedLastTurnId: confirmation.expectedLastTurnId,
       expectedSequence: confirmation.expectedSequence, expectedVersion: confirmation.expectedVersion,
@@ -1000,7 +1141,9 @@ async function admitExecution(actor: Actor, parsed: ExecuteInput, db: PrismaClie
       ...(confirmation.focusDocumentId === null ? {} : { focusDocumentId: confirmation.focusDocumentId }),
       question: confirmation.question, questionHash: confirmation.questionHash, historyFingerprint: confirmation.historyFingerprint,
       history: historyRead.turns, scopeProjectIds: Object.freeze([...confirmationProjectIds]),
-      sources, contextName: confirmation.contextName, provider });
+      sources, contextName: confirmation.contextName, provider,
+      ...(resumeAnswer === undefined ? {} : { resumeAnswer }),
+      ...(confirmation.resumeFromConfirmationId === null ? {} : { resumeFromConfirmationId: confirmation.resumeFromConfirmationId }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1029,14 +1172,15 @@ async function assertDispatchStillValid(snapshot: Snapshot, db: PrismaClient): P
       await verifyHistoryProjects(current, snapshot.history.flatMap((turn) => turn.projectIds ?? []), tx, true);
       await lockPersonalKnowledgeQaRoute(tx);
       await lockProviderConfiguration(tx, snapshot.provider.id);
-      const [confirmation, audit, conversation, provider] = await Promise.all([
+      const [confirmation, audit, progress, conversation, provider] = await Promise.all([
         tx.unifiedQuestionConfirmation.findFirst({ where: { id: snapshot.confirmationId, ownerUserId: snapshot.owner.id } }),
         tx.unifiedQuestionAudit.findFirst({ where: { id: snapshot.auditId, ownerUserId: snapshot.owner.id }, select: { status: true } }),
+        tx.unifiedQuestionProgress.findFirst({ where: { confirmationId: snapshot.confirmationId, ownerUserId: snapshot.owner.id }, select: { status: true, stopRequestedAt: true } }),
         tx.unifiedQuestionConversation.findFirst({ where: { id: snapshot.conversationId, ownerUserId: snapshot.owner.id }, select: { headTurnId: true, headSequence: true, version: true } }),
         readProvider(tx),
       ]);
       if (confirmation === null || confirmation.status !== "consumed" || confirmation.consumedAt === null
-        || audit?.status !== "running" || conversation === null
+        || audit?.status !== "running" || progress?.status !== "running" || progress.stopRequestedAt !== null || conversation === null
         || conversation.headTurnId !== snapshot.expectedLastTurnId || conversation.headSequence !== snapshot.expectedSequence
         || conversation.version !== snapshot.expectedVersion || !sameHash(confirmation.questionHash, snapshot.questionHash)
         || !sameHash(confirmation.historyFingerprint, snapshot.historyFingerprint)
@@ -1067,14 +1211,22 @@ function safeProviderRequestId(value: string | null): string | null {
 function safeFailureCode(error: unknown): string {
   if (error instanceof UnifiedQuestionError) return error.code;
   if (error instanceof AiEntitlementError) return error.code;
-  if (error instanceof ProviderTransportError) return error.code;
+  if (error instanceof ProviderTransportError) {
+    if (error.providerQuotaExceeded) return "AI_PROVIDER_QUOTA_EXHAUSTED";
+    if (error.code === "AI_PROVIDER_RATE_LIMITED") return "AI_PROVIDER_RATE_LIMITED";
+    return error.code;
+  }
   return "UNIFIED_QUESTION_PROVIDER_UNAVAILABLE";
+}
+
+function isDefinitiveProviderRejection(error: unknown): boolean {
+  return error instanceof ProviderTransportError && error.responseReceived
+    && (error.providerRejectedBeforeOutput || [400, 401, 402, 403, 429].includes(error.providerHttpStatus ?? -1));
 }
 
 function isUncertain(error: unknown): boolean {
   if (error instanceof UnifiedQuestionError || error instanceof AiEntitlementError) return false;
-  if (error instanceof ProviderTransportError) return error.requestDispatched && !error.responseReceived
-    && (error.code === "AI_PROVIDER_TIMEOUT" || error.code === "AI_PROVIDER_UNAVAILABLE");
+  if (error instanceof ProviderTransportError) return error.requestDispatched && !isDefinitiveProviderRejection(error);
   return true;
 }
 
@@ -1084,12 +1236,18 @@ async function finalizeAudit(snapshot: Snapshot, status: "succeeded" | "failed" 
     await db.$transaction(async (tx) => {
       await lockActorAccess(tx, snapshot.owner.id);
       await mutationContext(tx);
-      await tx.unifiedQuestionAudit.updateMany({
+      const audit = await tx.unifiedQuestionAudit.updateMany({
         where: { id: snapshot.auditId, ownerUserId: snapshot.owner.id, status: "running" },
         data: { status, safeErrorCode: errorCode, providerRequestId: safeProviderRequestId(usage.requestId ?? null),
           inputTokens: Math.max(0, usage.inputTokens), outputTokens: Math.max(0, usage.outputTokens),
           usageKnown: usage.usageKnown, completedAt: new Date() },
       });
+      if (audit.count === 1) {
+        await finalizeUnifiedQuestionProgress(tx, {
+          confirmationId: snapshot.confirmationId, ownerUserId: snapshot.owner.id,
+          status: errorCode === "UNIFIED_QUESTION_STOPPED" ? "stopped" : status,
+        });
+      }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 15_000 });
   } catch {
     // A still-running audit conservatively occupies concurrency until reconciled.
@@ -1102,6 +1260,15 @@ async function successfulConversation(snapshot: Snapshot, answer: string, citati
   return db.$transaction(async (tx) => {
     await lockActorAccess(tx, snapshot.owner.id);
     const current = await currentActor(tx, snapshot.owner);
+    const progressRows = await tx.$queryRaw<Array<{ status: string; stopRequestedAt: Date | null }>>(Prisma.sql`
+      SELECT "status", "stopRequestedAt" FROM "UnifiedQuestionProgress"
+      WHERE "confirmationId" = ${snapshot.confirmationId}::uuid AND "ownerUserId" = ${snapshot.owner.id}::uuid
+      FOR UPDATE
+    `);
+    const progress = progressRows[0];
+    if (progress === undefined || progress.status !== "running" || progress.stopRequestedAt !== null) {
+      return fail(progress?.status === "stopping" || progress?.stopRequestedAt !== null ? "UNIFIED_QUESTION_STOPPED" : "UNIFIED_QUESTION_CONFLICT");
+    }
     const historyMetadata = await tx.unifiedQuestionTurn.findMany({
       where: { ownerUserId: snapshot.owner.id, conversationId: snapshot.conversationId }, select: { projectIds: true },
     });
@@ -1152,6 +1319,8 @@ async function successfulConversation(snapshot: Snapshot, answer: string, citati
         usageKnown: usage.usageKnown, completedAt: now },
     });
     if (auditUpdated.count !== 1) return fail("UNIFIED_QUESTION_CONFLICT");
+    if (!(await finalizeUnifiedQuestionProgress(tx, { confirmationId: snapshot.confirmationId,
+      ownerUserId: snapshot.owner.id, status: "succeeded" }))) return fail("UNIFIED_QUESTION_CONFLICT");
     const turns = await tx.unifiedQuestionTurn.findMany({ where: { ownerUserId: snapshot.owner.id, conversationId: snapshot.conversationId }, orderBy: { sequence: "asc" },
       select: { id: true, sequence: true, scope: true, projectId: true, contextName: true, question: true, answer: true,
         modelId: true, providerName: true, createdAt: true, citations: true } });
@@ -1164,7 +1333,7 @@ async function successfulConversation(snapshot: Snapshot, answer: string, citati
 }
 
 export async function executeUnifiedQuestion(inputValue: unknown, actorValue: unknown, db: PrismaClient = getDb(),
-  onAnswerDelta?: (text: string) => void): Promise<unknown> {
+  onAnswerDelta?: (text: string) => void, onStarted?: () => void | Promise<void>): Promise<unknown> {
   assertActorShape(actorValue);
   const parsed = unifiedQuestionExecuteSchema.safeParse(inputValue);
   if (!parsed.success) return fail("UNIFIED_QUESTION_INVALID_INPUT");
@@ -1177,15 +1346,47 @@ export async function executeUnifiedQuestion(inputValue: unknown, actorValue: un
   });
   const scopeInput = validateScopeInput(normalized);
   const snapshot = await admitExecution(actorValue, { ...normalized, ...scopeInput }, db);
+  const resumeAnswer = snapshot.resumeAnswer ?? "";
   const messages = buildUnifiedQuestionMessages({ question: snapshot.question, history: snapshot.history,
+    resumeDraft: resumeAnswer.length === 0 ? undefined : resumeAnswer.slice(0, -2),
     evidence: snapshot.sources.map((source) => ({ id: source.id as `s${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`,
       scope: source.scope, projectId: source.projectId, title: source.title, contentHash: source.contentHash, content: source.content })) });
   const callKey = `unified-question:${snapshot.confirmationId}`;
   const billing = { dispatched: false, inputTokens: 0, outputTokens: 0, usageKnown: false, requestId: null as string | null };
   let reserved = false;
-  const preview = new UnifiedQuestionPreview();
-  let pendingPreview = "", lastPreviewAt = 0;
+  const preview = new UnifiedQuestionPreview(UNIFIED_QUESTION_MAX_ANSWER_LENGTH - resumeAnswer.length);
+  const abortController = new AbortController();
+  let stopObserved = false;
+  let controlFailure: unknown = null;
+  let continuation = "";
+  let pendingPreview = "", lastPreviewAt = 0, lastCheckpointAt = 0;
+  let heartbeatInFlight = false;
+  const stopIfNoLongerRunning = (state: Readonly<{ status: string | null; stopRequested: boolean }>): boolean => {
+    if (state.status === "running" && !state.stopRequested) return false;
+    if (state.status === "stopping" || state.stopRequested) stopObserved = true;
+    if (!abortController.signal.aborted) abortController.abort();
+    return true;
+  };
+  const heartbeatTimer = setInterval(() => {
+    if (heartbeatInFlight || abortController.signal.aborted) return;
+    heartbeatInFlight = true;
+    void heartbeatUnifiedQuestionProgress({ confirmationId: snapshot.confirmationId, ownerUserId: snapshot.owner.id }, db)
+      .then(state => { stopIfNoLongerRunning(state); })
+      .catch(error => { controlFailure = error; if (!abortController.signal.aborted) abortController.abort(); })
+      .finally(() => { heartbeatInFlight = false; });
+  }, UNIFIED_QUESTION_HEARTBEAT_INTERVAL_MS);
+  const persistPrefix = async (): Promise<void> => {
+    const state = await checkpointUnifiedQuestionProgress({ confirmationId: snapshot.confirmationId,
+      ownerUserId: snapshot.owner.id, partialAnswer: resumeAnswer + continuation }, db);
+    if (stopIfNoLongerRunning(state)) {
+      if (stopObserved) return fail("UNIFIED_QUESTION_STOPPED");
+      return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+    }
+    lastCheckpointAt = Date.now();
+  };
   try {
+    // Only advertise Stop once admission and its durable progress row have committed.
+    await onStarted?.();
     const route = snapshot.provider.billingRoute!;
     const reservation = await reservePlatformTokens({
       userId: snapshot.owner.id, unifiedQuestionConfirmationId: snapshot.confirmationId,
@@ -1204,28 +1405,44 @@ export async function executeUnifiedQuestion(inputValue: unknown, actorValue: un
         onBeforeRequest: async () => { const allowed = await assertDispatchStillValid(snapshot, db); if (allowed) billing.dispatched = true; return allowed; } },
       operation: OPERATION, modelId: snapshot.provider.defaultGenerationModelId!, messages,
       maxOutputTokens: route.maxOutputTokens, temperature: 0, jsonOutput: true, disableThinking: true,
+      signal: abortController.signal,
       onUsage: usage => {
         billing.inputTokens = usage.inputTokens; billing.outputTokens = usage.outputTokens;
         billing.usageKnown = usage.usageKnown; billing.requestId = usage.providerRequestId;
       },
-      ...(onAnswerDelta ? { onContentDelta: async (delta: string) => {
-        pendingPreview += preview.push(delta);
-        // Coalesce fast tokens and recheck the existing permission/source fence
-        // before each browser-visible batch. Final persistence still rechecks.
-        if (!pendingPreview || Date.now() - lastPreviewAt < 200) return;
+      onContentDelta: async (delta: string) => {
+        const visible = preview.push(delta);
+        if (visible) {
+          continuation += visible;
+          pendingPreview += visible;
+          // Persist the first visible prefix before exposing it to the browser;
+          // later chunks are batched to keep checkpoint writes bounded.
+          if (lastCheckpointAt === 0 || Date.now() - lastCheckpointAt >= 250) await persistPrefix();
+        }
+        if (!pendingPreview || Date.now() - lastPreviewAt < 200 || onAnswerDelta === undefined) return;
         if (!(await assertDispatchStillValid(snapshot, db))) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
         onAnswerDelta(pendingPreview);
         pendingPreview = ""; lastPreviewAt = Date.now();
-      } } : {}),
+      },
     });
-    billing.dispatched = true;
     billing.inputTokens = generated.inputTokens;
     billing.outputTokens = generated.outputTokens;
     billing.usageKnown = generated.usageKnown;
     billing.requestId = generated.providerRequestId;
     if (generated.outputTruncated === true) return fail("UNIFIED_QUESTION_OUTPUT_TRUNCATED");
+    if (controlFailure !== null) throw controlFailure;
+    if (abortController.signal.aborted) {
+      if (stopObserved) return fail("UNIFIED_QUESTION_STOPPED");
+      return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+    }
     if (!(await assertDispatchStillValid(snapshot, db))) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
     const parsedAnswer = parseUnifiedQuestionModelOutput(generated.content);
+    await persistPrefix();
+    if (pendingPreview && onAnswerDelta !== undefined) {
+      if (!(await assertDispatchStillValid(snapshot, db))) return fail("UNIFIED_QUESTION_CONFIRMATION_STALE");
+      onAnswerDelta(pendingPreview);
+      pendingPreview = "";
+    }
     const citationMap = new Map(snapshot.sources.map((source) => [source.id, source]));
     const citations = parsedAnswer.citations.map((id) => {
       const source = citationMap.get(id);
@@ -1235,33 +1452,183 @@ export async function executeUnifiedQuestion(inputValue: unknown, actorValue: un
     await settlePlatformTokenReservation({ userId: snapshot.owner.id, callKey,
       actualTokens: billing.inputTokens + billing.outputTokens, usageKnown: billing.usageKnown }, db);
     reserved = false;
-    const result = await successfulConversation(snapshot, parsedAnswer.answer, citations, billing, db);
+    const finalAnswer = resumeAnswer + parsedAnswer.answer;
+    if (finalAnswer.length > UNIFIED_QUESTION_MAX_ANSWER_LENGTH) return fail("UNIFIED_QUESTION_OUTPUT_TRUNCATED");
+    const result = await successfulConversation(snapshot, finalAnswer, citations, billing, db);
     return result;
   } catch (error) {
+    if (!stopObserved) {
+      try {
+        const state = await heartbeatUnifiedQuestionProgress({ confirmationId: snapshot.confirmationId, ownerUserId: snapshot.owner.id }, db);
+        if (state.status === "stopping" || state.stopRequested) stopObserved = true;
+      } catch { /* Preserve the original provider/transport outcome if status cannot be read. */ }
+    }
+    if (controlFailure !== null && !stopObserved) error = controlFailure;
+    if (stopObserved || (error instanceof UnifiedQuestionError && error.code === "UNIFIED_QUESTION_STOPPED")) {
+      error = new UnifiedQuestionError("UNIFIED_QUESTION_STOPPED");
+    }
     if (reserved) {
       try {
-        if (!billing.dispatched) await releasePlatformTokenReservation({ userId: snapshot.owner.id, callKey }, db);
-        else if (!billing.usageKnown || isUncertain(error)) await holdPlatformTokenReservation({ userId: snapshot.owner.id, callKey, errorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" }, db);
+        if (!billing.dispatched || isDefinitiveProviderRejection(error)) await releasePlatformTokenReservation({ userId: snapshot.owner.id, callKey }, db);
+        else if (!billing.usageKnown) await holdPlatformTokenReservation({ userId: snapshot.owner.id, callKey, errorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" }, db);
         else await settlePlatformTokenReservation({ userId: snapshot.owner.id, callKey,
           actualTokens: billing.inputTokens + billing.outputTokens, usageKnown: true }, db);
       } catch { /* expiry recovery holds consumed confirmations as dispatch evidence */ }
     }
-    const uncertain = isUncertain(error) && billing.dispatched;
-    await finalizeAudit(snapshot, uncertain ? "unknown" : "failed", safeFailureCode(error), {
-      inputTokens: billing.inputTokens, outputTokens: billing.outputTokens, usageKnown: billing.usageKnown, requestId: billing.requestId,
+    const uncertain = !stopObserved && isUncertain(error) && billing.dispatched && !billing.usageKnown;
+    await finalizeAudit(snapshot, uncertain ? "unknown" : "failed",
+      uncertain ? "UNIFIED_QUESTION_OUTCOME_UNRESOLVED" : safeFailureCode(error), {
+      inputTokens: billing.inputTokens, outputTokens: billing.outputTokens, usageKnown: billing.usageKnown,
+      requestId: billing.requestId,
     }, db);
     if (error instanceof UnifiedQuestionError) throw error;
+    if (error instanceof AiEntitlementError) throw error;
     if (uncertain) return fail("UNIFIED_QUESTION_PROVIDER_UNCERTAIN");
-    if (error instanceof ProviderTransportError || error instanceof AiEntitlementError) return fail("UNIFIED_QUESTION_PROVIDER_UNAVAILABLE");
+    if (error instanceof ProviderTransportError && error.providerQuotaExceeded) return fail("AI_PROVIDER_QUOTA_EXHAUSTED");
+    if (error instanceof ProviderTransportError && error.code === "AI_PROVIDER_RATE_LIMITED") return fail("AI_PROVIDER_RATE_LIMITED");
+    if (error instanceof ProviderTransportError) return fail("UNIFIED_QUESTION_PROVIDER_UNAVAILABLE");
     if (error instanceof Error && error.message === "UNIFIED_QUESTION_INVALID_MODEL_OUTPUT") return fail("UNIFIED_QUESTION_INVALID_MODEL_OUTPUT");
     if (error instanceof Error && error.message === "UNIFIED_QUESTION_INVALID_CITATION") return fail("UNIFIED_QUESTION_INVALID_CITATION");
     if (error instanceof Error && error.message === "UNIFIED_QUESTION_OUTPUT_TRUNCATED") return fail("UNIFIED_QUESTION_OUTPUT_TRUNCATED");
     return fail("UNIFIED_QUESTION_PROVIDER_UNAVAILABLE");
+  } finally {
+    clearInterval(heartbeatTimer);
   }
 }
 
 function scopeLabel(scope: string): string {
   return scope === "project" ? "项目" : scope === "personal" ? "个人空间" : "全量可访问内容";
+}
+
+type RequestStatus = "prepared" | "running" | "stopping" | "stopped" | "succeeded" | "failed" | "unknown";
+type RequestView = Readonly<{
+  id: string;
+  conversationId: string;
+  status: RequestStatus;
+  question: string;
+  answer: string;
+  scope: UnifiedQuestionScope;
+  projectId?: string;
+  focusDocumentId?: string;
+  contextName: string;
+  errorCode: string | null;
+  canResume: boolean;
+}>;
+
+function requestStatusFromAudit(auditStatus: string, progressStatus: string | null | undefined): RequestStatus {
+  if (auditStatus === "succeeded") return "succeeded";
+  if (auditStatus === "unknown") return "unknown";
+  if (auditStatus === "running") return progressStatus === "stopping" ? "stopping" : "running";
+  return progressStatus === "stopped" ? "stopped" : "failed";
+}
+
+async function readUnifiedQuestionRequest(actor: Actor, confirmationId: string, db: PrismaClient): Promise<RequestView> {
+  return db.$transaction(async tx => {
+    await lockActorAccess(tx, actor.id);
+    const current = await currentActor(tx, actor);
+    const confirmation = await tx.unifiedQuestionConfirmation.findFirst({
+      where: { id: confirmationId, ownerUserId: current.id },
+      select: { id: true, conversationId: true, expectedLastTurnId: true, expectedSequence: true, expectedVersion: true,
+        scope: true, projectId: true, focusDocumentId: true, question: true, historyFingerprint: true,
+        scopeProjectIds: true, sourceSnapshots: true, contextName: true, status: true, expiresAt: true,
+        audit: { select: { status: true, safeErrorCode: true } }, progress: { select: { status: true, partialAnswer: true, stopRequestedAt: true } } },
+    });
+    if (confirmation === null) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    const display = await presentation(tx, current.id, confirmation.conversationId);
+    if (display?.deleted) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    const historyMetadata = await tx.unifiedQuestionTurn.findMany({
+      where: { ownerUserId: current.id, conversationId: confirmation.conversationId }, select: { projectIds: true },
+    });
+    const historyProjectIds = historyMetadata.flatMap(turn => turn.projectIds);
+    const snapshots = Array.isArray(confirmation.sourceSnapshots)
+      ? confirmation.sourceSnapshots as unknown as UnifiedQuestionCitationSnapshot[] : [];
+    const sourceProjectIds = citationProjectIds(snapshots);
+    await lockProjects(tx, [...historyProjectIds, ...confirmation.scopeProjectIds, ...sourceProjectIds]);
+    await verifyHistoryProjects(current, historyProjectIds, tx);
+    const history = await readHistory(tx, current.id, confirmation.conversationId);
+    if (history.turns.length < confirmation.expectedSequence
+      || !sameHash(confirmation.historyFingerprint, historyFingerprint(history.turns.slice(0, confirmation.expectedSequence)))) {
+      return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    }
+
+    const now = await databaseNow(tx);
+    const audit = confirmation.audit;
+    const progress = confirmation.progress;
+    let status: RequestStatus;
+    let errorCode = audit?.safeErrorCode ?? null;
+    if (audit === null) {
+      status = confirmation.status === "issued" && confirmation.expiresAt > now ? "prepared" : "failed";
+      if (status === "failed" && confirmation.status === "issued") errorCode = "UNIFIED_QUESTION_CONFIRMATION_EXPIRED";
+    } else status = requestStatusFromAudit(audit.status, progress?.status);
+
+    const terminallySuccessful = status === "succeeded";
+    const scope = confirmation.scope as UnifiedQuestionScope;
+    if (!terminallySuccessful) {
+      const projectRows = await scopeProjectRows(current, scope, confirmation.projectId ?? undefined, tx, true);
+      if (!sameJson(projectRows.map(row => row.id).sort(), [...confirmation.scopeProjectIds].sort())) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+      if (snapshots.length === 0) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+      await verifyHistoryProjects(current, [...historyProjectIds, ...sourceProjectIds], tx, true);
+      const sources = await selectedSources(current, scope, projectRows, confirmation.focusDocumentId ?? undefined, confirmation.question, tx);
+      if (!sameJson(sources, snapshots)) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    } else {
+      await verifyHistoryProjects(current, sourceProjectIds, tx);
+    }
+
+    const headMatches = history.conversation.headTurnId === confirmation.expectedLastTurnId
+      && history.conversation.headSequence === confirmation.expectedSequence
+      && history.conversation.version === confirmation.expectedVersion;
+    let canResume = false;
+    if (headMatches && confirmation.status === "consumed"
+      && await isResumableRequestState(tx, current.id, confirmation.id, audit?.status,
+        audit?.safeErrorCode, progress?.status)) {
+      const answer = progress?.partialAnswer ?? "";
+      canResume = answer.trim().length > 0 && answer.length + 2 < UNIFIED_QUESTION_MAX_ANSWER_LENGTH
+        && (status === "stopped" || status === "unknown" || status === "failed");
+    }
+    let answer = progress?.partialAnswer ?? "";
+    if (terminallySuccessful) {
+      const turn = await tx.unifiedQuestionTurn.findFirst({
+        where: { ownerUserId: current.id, conversationId: confirmation.conversationId, sequence: confirmation.expectedSequence + 1 },
+        select: { question: true, answer: true },
+      });
+      answer = turn?.question === confirmation.question ? turn.answer : answer;
+    }
+    if (status === "unknown") errorCode = "UNIFIED_QUESTION_PROVIDER_UNCERTAIN";
+    return Object.freeze({ id: confirmation.id, conversationId: confirmation.conversationId, status,
+      question: confirmation.question, answer, scope,
+      ...(confirmation.projectId === null ? {} : { projectId: confirmation.projectId }),
+      ...(confirmation.focusDocumentId === null ? {} : { focusDocumentId: confirmation.focusDocumentId }),
+      contextName: confirmation.contextName, errorCode, canResume });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 });
+}
+
+export async function getUnifiedQuestionRequest(confirmationIdInput: unknown, actorValue: unknown, db: PrismaClient = getDb()): Promise<unknown> {
+  assertActorShape(actorValue);
+  const actor = actorValue;
+  const confirmationId = canonicalId(confirmationIdInput, "UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+  await reconcileStaleUnifiedQuestionRequests(actor.id, db);
+  const request = await readUnifiedQuestionRequest(actor, confirmationId, db);
+  return Object.freeze({ request });
+}
+
+export async function stopUnifiedQuestionRequest(confirmationIdInput: unknown, actorValue: unknown, db: PrismaClient = getDb()): Promise<unknown> {
+  assertActorShape(actorValue);
+  const actor = actorValue;
+  const confirmationId = canonicalId(confirmationIdInput, "UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+  await reconcileStaleUnifiedQuestionRequests(actor.id, db);
+  const status = await db.$transaction(async tx => {
+    await lockActorAccess(tx, actor.id);
+    const current = await currentActor(tx, actor);
+    const confirmation = await tx.unifiedQuestionConfirmation.findFirst({
+      where: { id: confirmationId, ownerUserId: current.id }, select: { conversationId: true },
+    });
+    if (confirmation === null || (await presentation(tx, current.id, confirmation.conversationId))?.deleted) {
+      return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+    }
+    return requestUnifiedQuestionStopFlag(current.id, confirmationId, tx);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 15_000 });
+  if (status.status === null) return fail("UNIFIED_QUESTION_HISTORY_UNAVAILABLE");
+  return Object.freeze({ request: Object.freeze({ status: status.status }) });
 }
 
 async function authorizedConversation(actor: Actor, conversationId: string, db: PrismaClient): Promise<unknown> {
@@ -1277,8 +1644,17 @@ async function authorizedConversation(actor: Actor, conversationId: string, db: 
       select: { id: true, sequence: true, scope: true, projectId: true, contextName: true, question: true, answer: true,
         modelId: true, providerName: true, createdAt: true, citations: true } });
     const display = await presentation(tx, actor.id, conversationId);
+    const latest = await tx.unifiedQuestionConfirmation.findFirst({
+      where: { ownerUserId: actor.id, conversationId, status: "consumed" },
+      orderBy: [{ consumedAt: "desc" }, { id: "desc" }],
+      select: { id: true, audit: { select: { status: true } }, progress: { select: { status: true } } },
+    });
+    const currentRequest = latest?.audit === null || latest?.audit === undefined || latest.audit.status === "succeeded" ? null : {
+      id: latest.id, status: requestStatusFromAudit(latest.audit.status, latest.progress?.status),
+    };
     return Object.freeze({ conversation: Object.freeze({ id: conversationId, title: display?.title ?? history.conversation.title ?? turns[0]?.question ?? "新会话",
       pinned: display?.pinned ?? false, archived: display?.archived ?? false, deleted: display?.deleted ?? false, presentationRevision: display?.revision ?? 0,
+      currentRequestId: currentRequest?.id ?? null, currentRequestStatus: currentRequest?.status ?? null,
       usage: (await conversationTokenUsage(tx, actor, [conversationId])).get(conversationId),
       turns: await addTurnTokenUsage(tx, actor.id, conversationId, turns), lastTurnId: history.conversation.headTurnId }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 });
@@ -1373,19 +1749,29 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
         SELECT r."archived", r."deleted" FROM "UnifiedQuestionPresentationRevision" r
         WHERE r."ownerUserId" = c."ownerUserId" AND r."conversationId" = c."id" ORDER BY r."revision" DESC LIMIT 1
       ) display ON true
-      WHERE c."ownerUserId" = ${actor.id}::uuid AND c."headTurnId" IS NOT NULL
+      LEFT JOIN LATERAL (
+        SELECT confirmation."id", confirmation."question", confirmation."consumedAt", audit."status"
+        FROM "UnifiedQuestionConfirmation" confirmation
+        JOIN "UnifiedQuestionAudit" audit
+          ON audit."ownerUserId" = confirmation."ownerUserId" AND audit."confirmationId" = confirmation."id"
+        WHERE confirmation."ownerUserId" = c."ownerUserId" AND confirmation."conversationId" = c."id"
+          AND confirmation."status" = 'consumed'::"UnifiedQuestionConfirmationStatus"
+        ORDER BY confirmation."consumedAt" DESC, confirmation."id" DESC LIMIT 1
+      ) pending ON true
+      WHERE c."ownerUserId" = ${actor.id}::uuid
+        AND (c."headTurnId" IS NOT NULL OR (pending."id" IS NOT NULL AND pending."status" <> 'succeeded'::"UnifiedQuestionAuditStatus"))
         AND CASE WHEN ${view}::text = 'deleted' THEN COALESCE(display."deleted", false)
           WHEN ${view}::text = 'archived' THEN NOT COALESCE(display."deleted", false) AND COALESCE(display."archived", false)
           ELSE NOT COALESCE(display."deleted", false) AND NOT COALESCE(display."archived", false) END
         AND (${needle}::text IS NULL OR COALESCE((
           SELECT r."title" FROM "UnifiedQuestionPresentationRevision" r
           WHERE r."ownerUserId" = c."ownerUserId" AND r."conversationId" = c."id" ORDER BY r."revision" DESC LIMIT 1
-        ), c."title") ILIKE ${needle} ESCAPE '\\' OR EXISTS (
+        ), c."title", pending."question") ILIKE ${needle} ESCAPE '\\' OR EXISTS (
           SELECT 1 FROM "UnifiedQuestionTurn" t
           WHERE t."ownerUserId" = c."ownerUserId" AND t."conversationId" = c."id"
             AND (t."question" ILIKE ${needle} ESCAPE '\\' OR t."answer" ILIKE ${needle} ESCAPE '\\' OR t."citations"::text ILIKE ${needle} ESCAPE '\\')
         ))
-      ORDER BY c."updatedAt" DESC, c."id" DESC LIMIT ${HISTORY_SCAN_LIMIT + 1}
+      ORDER BY COALESCE(pending."consumedAt", c."updatedAt") DESC, c."id" DESC LIMIT ${HISTORY_SCAN_LIMIT + 1}
     `);
     if (candidateRows.length > HISTORY_SCAN_LIMIT) return fail("UNIFIED_QUESTION_SCOPE_TOO_BROAD");
     const ids = candidateRows.map((row) => row.id);
@@ -1401,7 +1787,7 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
     }
     const safeIds = ids.filter((id) => !inaccessible.has(id));
     if (safeIds.length === 0) return Object.freeze({ conversations: Object.freeze([]), pagination: Object.freeze({ page, totalPages: 1, total: 0 }) });
-    const conversations = await tx.unifiedQuestionConversation.findMany({ where: { ownerUserId: actor.id, id: { in: safeIds }, headTurnId: { not: null } },
+    const conversations = await tx.unifiedQuestionConversation.findMany({ where: { ownerUserId: actor.id, id: { in: safeIds } },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }], select: { id: true, title: true, updatedAt: true, headSequence: true } });
     const displays = await tx.$queryRaw<Array<{ conversationId: string; title: string | null; pinned: boolean; archived: boolean; deleted: boolean; revision: number }>>(Prisma.sql`
       SELECT DISTINCT ON ("conversationId") "conversationId", "title", "pinned", "archived", "deleted", "revision"
@@ -1410,8 +1796,24 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
       ORDER BY "conversationId", "revision" DESC
     `);
     const displayById = new Map(displays.map(row => [row.conversationId, row]));
+    const pendingRows = await tx.$queryRaw<Array<{ conversationId: string; id: string; question: string; consumedAt: Date; auditStatus: string; progressStatus: string | null }>>(Prisma.sql`
+      SELECT DISTINCT ON (confirmation."conversationId") confirmation."conversationId", confirmation."id", confirmation."question", confirmation."consumedAt",
+        audit."status"::text AS "auditStatus", progress."status"::text AS "progressStatus"
+      FROM "UnifiedQuestionConfirmation" confirmation
+      JOIN "UnifiedQuestionAudit" audit
+        ON audit."ownerUserId" = confirmation."ownerUserId" AND audit."confirmationId" = confirmation."id"
+      LEFT JOIN "UnifiedQuestionProgress" progress
+        ON progress."ownerUserId" = confirmation."ownerUserId" AND progress."confirmationId" = confirmation."id"
+      WHERE confirmation."ownerUserId" = ${actor.id}::uuid AND confirmation."conversationId" = ANY(${safeIds}::uuid[])
+        AND confirmation."status" = 'consumed'::"UnifiedQuestionConfirmationStatus"
+      ORDER BY confirmation."conversationId", confirmation."consumedAt" DESC, confirmation."id" DESC
+    `);
+    const pendingById = new Map(pendingRows.filter(row => row.auditStatus !== "succeeded").map(row => [row.conversationId, {
+      id: row.id, question: row.question, consumedAt: row.consumedAt, status: requestStatusFromAudit(row.auditStatus, row.progressStatus),
+    }]));
     // Stable sort retains the last-question ordering within each pin group.
-    conversations.sort((a, b) => Number(displayById.get(b.id)?.pinned ?? false) - Number(displayById.get(a.id)?.pinned ?? false));
+    conversations.sort((a, b) => Number(displayById.get(b.id)?.pinned ?? false) - Number(displayById.get(a.id)?.pinned ?? false)
+      || (pendingById.get(b.id)?.consumedAt.getTime() ?? b.updatedAt.getTime()) - (pendingById.get(a.id)?.consumedAt.getTime() ?? a.updatedAt.getTime()));
     const rows = await tx.unifiedQuestionTurn.findMany({ where: { ownerUserId: actor.id, conversationId: { in: safeIds } },
       orderBy: [{ conversationId: "asc" }, { sequence: "asc" }], select: { conversationId: true, scope: true, contextName: true } });
     const rangesById = new Map<string, Set<string>>();
@@ -1426,10 +1828,11 @@ export async function listUnifiedQuestionConversations(input: Readonly<{ search?
     const pageRows = conversations.slice(start, start + HISTORY_PAGE_SIZE);
     const usageById = await conversationTokenUsage(tx, actor, pageRows.map(row => row.id));
     const selected = pageRows.map((conversation) => Object.freeze({
-      id: conversation.id, title: displayById.get(conversation.id)?.title ?? conversation.title ?? "新会话", updatedAt: conversation.updatedAt.toISOString(),
+      id: conversation.id, title: displayById.get(conversation.id)?.title ?? conversation.title ?? pendingById.get(conversation.id)?.question ?? "新会话", updatedAt: (pendingById.get(conversation.id)?.consumedAt ?? conversation.updatedAt).toISOString(),
       pinned: displayById.get(conversation.id)?.pinned ?? false, archived: displayById.get(conversation.id)?.archived ?? false, deleted: displayById.get(conversation.id)?.deleted ?? false, presentationRevision: displayById.get(conversation.id)?.revision ?? 0,
       usage: usageById.get(conversation.id),
       turnCount: conversation.headSequence, ranges: Object.freeze([...(rangesById.get(conversation.id) ?? [])].slice(0, 8)),
+      currentRequestId: pendingById.get(conversation.id)?.id ?? null, status: pendingById.get(conversation.id)?.status ?? null,
     }));
     return Object.freeze({ conversations: Object.freeze(selected), pagination: Object.freeze({ page, totalPages, total }) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000 });

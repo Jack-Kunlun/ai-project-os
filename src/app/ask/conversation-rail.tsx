@@ -8,7 +8,7 @@ import type { TokenUsageSummary } from "@/lib/token-usage";
 import styles from "./ask-client.module.css";
 import ui from "@/components/workspace-ui.module.css";
 
-export type ConversationSummary = { id: string; title: string; updatedAt: string; turnCount: number; ranges?: string[]; pinned?: boolean; archived?: boolean; deleted?: boolean; presentationRevision?: number; usage?: TokenUsageSummary };
+export type ConversationSummary = { id: string; title: string; updatedAt: string; turnCount: number; ranges?: string[]; pinned?: boolean; archived?: boolean; deleted?: boolean; presentationRevision?: number; usage?: TokenUsageSummary; currentRequestId?: string | null; status?: string };
 export type ConversationView = "active" | "archived" | "deleted";
 export type PresentationPatch = { title?: string; pinned?: boolean; archived?: boolean; deleted?: boolean };
 function ConversationActions({ item, disabled, update, rename }: { item: ConversationSummary; disabled: boolean; update: (patch: PresentationPatch) => void; rename: () => void }) {
@@ -32,7 +32,7 @@ function ConversationActions({ item, disabled, update, rename }: { item: Convers
   </>;
 }
 export function ConversationRail(props: {
-  collapsed: boolean; setCollapsed: (value: boolean) => void; busy: boolean; currentId?: string;
+  collapsed: boolean; setCollapsed: (value: boolean) => void; busy: boolean; navigationBusy?: boolean; currentId?: string;
   items: ConversationSummary[]; view: ConversationView; setView: (value: ConversationView) => void;
   query: string; setQuery: (value: string) => void; loading: boolean; error: string | null;
   page: number; totalPages: number; setPage: (value: number) => void;
@@ -45,16 +45,16 @@ export function ConversationRail(props: {
       {!props.collapsed ? <strong><UiText text="最近会话"/></strong> : null}
       <button className={styles.railIcon} type="button" onClick={() => props.setCollapsed(!props.collapsed)} aria-label={t(props.collapsed ? "展开最近会话" : "收起最近会话")} title={t(props.collapsed ? "展开最近会话" : "收起最近会话")} aria-expanded={!props.collapsed}><ShellIcon name="sidebar"/></button>
     </div>
-    <button className={props.collapsed ? styles.railIcon : styles.newConversation} onClick={props.create} disabled={props.busy} aria-label={t("新建会话")} title={t("新建会话")}><ShellIcon name="plus"/>{!props.collapsed ? <span><UiText text="新建会话"/></span> : null}</button>
+    <button className={props.collapsed ? styles.railIcon : styles.newConversation} onClick={props.create} disabled={props.navigationBusy??props.busy} aria-label={t("新建会话")} title={t("新建会话")}><ShellIcon name="plus"/>{!props.collapsed ? <span><UiText text="新建会话"/></span> : null}</button>
     {!props.collapsed ? <>
       <label className={ui.field}><span className={styles.visuallyHidden}><UiText text="会话列表"/></span><select aria-label={t("会话列表")} value={props.view} onChange={e => props.setView(e.target.value as ConversationView)} className="app-field"><option value="active"><UiText text="最近会话"/></option><option value="archived"><UiText text="已归档"/></option><option value="deleted"><UiText text="回收站"/></option></select></label>
       <input className={["app-field", (ui.search)].filter(Boolean).join(' ')} aria-label={t("搜索历史会话")} placeholder={t("搜索会话")} value={props.query} onChange={e => props.setQuery(e.target.value)}/>
       <div className={styles.railList} aria-busy={props.loading}>
         {props.error ? <p className={["app-feedback-error", (ui.error)].filter(Boolean).join(' ')} role="alert"><UiErrorText text={props.error} /><button className={ui.link} onClick={props.refresh}><UiText text="重新加载"/></button></p> : null}
         {props.error ? null : props.loading && !props.items.length ? <p role="status"><UiText text="正在查找会话…"/></p> : props.items.length ? props.items.map(item => <div className={styles.railItem} key={item.id} data-current={props.currentId === item.id}>
-          <button className={styles.railMain} disabled={props.busy} aria-current={props.currentId === item.id ? "true" : undefined} onClick={() => props.open(item.id)}>
+          <button className={styles.railMain} disabled={props.navigationBusy??props.busy} aria-current={props.currentId === item.id ? "true" : undefined} onClick={() => props.open(item.id)}>
             <span className={styles.railTitle}>{item.pinned ? <ShellIcon name="flag" className={styles.iconSmall}/> : null}{item.title}</span>
-            <small>{language === "en" ? `${item.turnCount} ${item.turnCount === 1 ? "turn" : "turns"}` : `${item.turnCount} 轮问答`}</small>
+            <small>{item.currentRequestId && item.turnCount===0 ? t("未完成 · 可恢复") : language === "en" ? `${item.turnCount} ${item.turnCount === 1 ? "turn" : "turns"}` : `${item.turnCount} 轮问答`}</small>
           </button>
           <ConversationActions item={item} disabled={props.busy} update={patch => props.update(item, patch)} rename={() => props.rename(item)}/>
         </div>) : <p className={styles.railEmpty}><UiText text="暂无匹配会话"/></p>}

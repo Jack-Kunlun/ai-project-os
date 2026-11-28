@@ -10,6 +10,8 @@ export class UnifiedQuestionPreview {
   private emitted = 0;
   private invalid = false;
 
+  constructor(private readonly maximumAnswerLength = 50_000) {}
+
   push(chunk: string): string {
     if (this.invalid) return "";
     for (const character of chunk) {
@@ -48,7 +50,7 @@ export class UnifiedQuestionPreview {
     if (this.string === "key") this.key = (this.key + text).slice(0, 100);
     if (this.string === "answer") {
       this.answer += text;
-      if (this.answer.length > 50_000) throw new Error("UNIFIED_QUESTION_INVALID_MODEL_OUTPUT");
+      if (this.answer.length > this.maximumAnswerLength) throw new Error("UNIFIED_QUESTION_OUTPUT_TRUNCATED");
     }
   }
 }

@@ -67,7 +67,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
   assert.equal(DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX.length, 7);
   assert.equal(DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX.length, 10);
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 124);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 126);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false
@@ -78,6 +78,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   assert.equal(new Set(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.map((trigger) => trigger.name)).size, DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length);
   assert.ok(Object.isFrozen(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX));
   for (const [directory, names] of [
+    ["20261128010000_add_unified_question_recovery", ["unified_question_progress_guard", "unified_question_resume_binding_guard"]],
     ["20261008010000_add_account_security", ["app_user_security_revision_guard", "app_user_security_audit_insert_guard", "app_user_security_audit_immutable_guard", "app_user_security_audit_transition_guard"]],
     ["20261006010000_add_phone_sms_auth", ["app_user_phone_auth_guard"]],
     ["20261006014000_add_sms_provider_adapters", ["sms_auth_expected_code_guard"]],
@@ -380,7 +381,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
   }
   assert.match(gitAutomationMaterialMigration, /"ProjectGitRepositoryMaterialPublicationHead"[\s\S]*?project_git_material_head_guard/u);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.some((trigger) => trigger.name === "legacy_mcp_source_reference_guard"));
-  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 151/u);
+  assert.match(principalGateRunner, /EXPECTED_MIGRATION_COUNT = 152/u);
   for (const roleName of ["ai_project_os_runtime", "ai_project_os_entitlement_writer", "ai_project_os_git_automation_worker"]) {
     assert.ok(emailAuthMigration.includes(`'${roleName}'`));
   }

@@ -20,20 +20,21 @@ test("answer preview decodes split JSON escapes and emits only the top-level ans
   const decoder = new UnifiedQuestionPreview();
   assert.equal(decoder.push('{"untrusted":{"answer":"hidden"},"answer":"visible"}'), "visible");
   assert.equal(new UnifiedQuestionPreview().push('{"answer":"bad\\x"}'), "");
-  assert.throws(() => new UnifiedQuestionPreview().push(`{"answer":"${"x".repeat(50_001)}`), /INVALID_MODEL_OUTPUT/u);
+  assert.throws(() => new UnifiedQuestionPreview().push(`{"answer":"${"x".repeat(50_001)}`), /OUTPUT_TRUNCATED/u);
 });
 
 test("client delivers partial Chinese text before the final network chunk", async () => {
   const encoder = new TextEncoder();
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
-  let preview = "", complete = false;
-  const reading = readInquiryResponse(new Response(body, { headers: { "content-type": INQUIRY_STREAM_TYPE } }), text => { preview += text; });
+  let preview = "", complete = false, started = false;
+  const reading = readInquiryResponse(new Response(body, { headers: { "content-type": INQUIRY_STREAM_TYPE } }), text => { preview += text; }, () => { started = true; });
   void reading.then(() => { complete = true; });
+  controller.enqueue(encoder.encode('{"type":"started"}\n'));
   const bytes = encoder.encode(`${JSON.stringify({ type: "delta", text: "你好🚀" })}\n`);
   for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
   await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(preview, "你好🚀"); assert.equal(complete, false);
+  assert.equal(started, true); assert.equal(preview, "你好🚀"); assert.equal(complete, false);
   const conversation = { id: "fixture", turns: [], lastTurnId: null, title: "fixture" };
   controller.enqueue(encoder.encode(`${JSON.stringify({ type: "complete", conversation })}\n`));
   assert.deepEqual(await reading, { conversation });

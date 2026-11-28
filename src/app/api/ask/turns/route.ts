@@ -45,7 +45,7 @@ export async function POST(request: Request) {
           };
           void (async () => {
             try {
-              const result = await executeUnifiedQuestion(record, actor, undefined, text => send({ type: "delta", text }));
+              const result = await executeUnifiedQuestion(record, actor, undefined, text => send({ type: "delta", text }), () => send({ type: "started" }));
               send({ type: "complete", ...result as object });
             } catch (error) {
               const response = errorResponse(error);

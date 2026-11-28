@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { beginInquiryRead, beginInquiryRequest, clearInquirySession, finishInquiryRequest, inquiryDrafts, inquiryEpochIsCurrent, inquiryReadIsCurrent, inquiryRequestIsCurrent, invalidateInquiryReads } from "../src/lib/inquiry-session";
+import { beginInquiryRead, beginInquiryRequest, clearInquirySession, finishInquiryRequest, inquiryDrafts, inquiryEpochIsCurrent, inquiryReadIsCurrent, inquiryRequestIsCurrent, invalidateInquiryReads, savedInquiryRequest, setInquiryRecovery } from "../src/lib/inquiry-session";
 
 test("the full page and floating Ask share one request lock and stale completion cannot unlock a new account", () => {
   clearInquirySession();
@@ -54,4 +54,24 @@ test("a confirmation keeps reads and other senders locked until its own executio
   finishInquiryRequest(executing);
   assert.ok(beginInquiryRead());
   clearInquirySession();
+});
+
+test("browser recovery persistence contains only an opaque request id and is cleared at sign-out", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window"), storage = new Map<string, string>();
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { sessionStorage: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+  } } });
+  try {
+    clearInquirySession();
+    setInquiryRecovery({ id: "opaque-request", conversationId: "private-conversation", status: "stopped", question: "private question", answer: "private answer", scope: "personal", contextName: "private scope", canResume: true, errorCode: null });
+    assert.equal(savedInquiryRequest(), "opaque-request");
+    assert.deepEqual([...storage.values()], ["opaque-request"]);
+    clearInquirySession();
+    assert.equal(storage.size, 0);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "window", previous);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
 });

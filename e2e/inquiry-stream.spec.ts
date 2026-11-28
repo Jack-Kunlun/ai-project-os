@@ -32,17 +32,19 @@ for (const [surface, reducedMotion] of [["page", false], ["floating", false], ["
     const activeResponse = () => { if (!response) throw new Error("STREAM_FIXTURE_NOT_CONNECTED"); return response; };
     const emit = (event: unknown) => activeResponse().write(`${JSON.stringify(event)}\n`);
     let conversation: unknown = null;
+    let requestId = randomUUID(), currentQuestion = "";
+    await page.route("**/api/ask/requests/*", route => route.fulfill({json:{request:{id:requestId,conversationId,status:"unknown",question:currentQuestion,answer:"这段未完成内容不能被保存为成功回答。",scope:"all",contextName:"全量可访问内容",errorCode:"UNIFIED_QUESTION_PROVIDER_UNCERTAIN",canResume:false},conversation}}));
     try {
       await page.route("**/api/ask/sources*", route => route.fulfill({ json: { sources: [], model } }));
       await page.route("**/api/ask/conversations?*", route => route.fulfill({ json: { conversations: [], pagination: { page: 1, totalPages: 1, total: 0 } } }));
       await page.route(`**/api/ask/conversations/${conversationId}`, route => route.fulfill({ json: { conversation } }));
       await page.route("**/api/ask/turns", async route => {
         const body = route.request().postDataJSON();
-        if (body.phase === "prepare") return route.fulfill({ json: { confirmation: {
-          confirmationId: randomUUID(), conversationId, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        if (body.phase === "prepare") {requestId=randomUUID();currentQuestion=body.question;return route.fulfill({ json: { confirmation: {
+          confirmationId: requestId, conversationId, expiresAt: new Date(Date.now() + 60_000).toISOString(),
           ...model, billing: { mode: "platform", ...model, estimatedTokens: 100, estimatedRawTokens: 100, estimatedChargedTokens: 100 },
           contextTurnCount: 0, contextName: "全量可访问内容", sources: [], question: body.question, expectedLastTurnId: body.expectedLastTurnId,
-        } } });
+        } } });}
         expect(route.request().headers().accept).toContain("application/x-ndjson");
         return route.continue({ url: `http://127.0.0.1:${address.port}/reply` });
       });
@@ -80,7 +82,7 @@ for (const [surface, reducedMotion] of [["page", false], ["floating", false], ["
       await writeFile(samplesPath, JSON.stringify(samples, null, 2));
       await testInfo.attach("character-reveal-samples", { path: samplesPath, contentType: "application/json" });
       await expect(preview).toContainText("正在生成回答…");
-      await expect(view.getByRole("button", { name: "正在处理…", exact: true })).toBeDisabled();
+      await expect(view.getByRole("button", { name: "停止生成", exact: true })).toBeEnabled();
       expect(activeResponse().writableEnded).toBe(false);
       const longText = "\n已核对来源与验收条件，正在逐步输出。".repeat(45);
       if (surface === "floating") await view.getByRole("button", { name: "收起问答", exact: true }).click();
@@ -147,9 +149,10 @@ for (const [surface, reducedMotion] of [["page", false], ["floating", false], ["
       await expect(preview).toContainText("这段未完成内容");
       activeResponse().end();
       await expect(preview).toHaveCount(0);
-      await expect(view.getByRole("alert")).toContainText("连接中断");
+      await expect(view.getByRole("alert")).toContainText("本次生成结果尚未确认");
       await expect(view.getByRole("textbox", { name: "输入问题", exact: true })).toHaveValue("请继续核对异常场景");
-      await expect(view.getByRole("article")).toHaveCount(1);
+      await expect(view.getByRole("article", {name:"第 1 轮",exact:true})).toHaveCount(1);
+      await expect(view.locator("[data-inquiry-recovery]")).toContainText("这段未完成内容");
     } finally {
       response?.end();
       server.closeAllConnections();

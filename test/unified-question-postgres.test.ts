@@ -20,6 +20,8 @@ import {
 import { createPersonalKnowledgeDocument, revisePersonalKnowledgeDocument } from "../src/lib/personal-knowledge-service";
 import {
   executeUnifiedQuestion,
+  getUnifiedQuestionRequest,
+  stopUnifiedQuestionRequest,
   getUnifiedQuestionConversation,
   listUnifiedQuestionConversations,
   updateUnifiedQuestionPresentation,
@@ -27,10 +29,13 @@ import {
   UnifiedQuestionError,
 } from "../src/lib/unified-question-service";
 
+import { reconcileStaleUnifiedQuestionRequests } from "../src/lib/unified-question-recovery";
+import { AiEntitlementError, reservePlatformTokens, releasePlatformTokenReservation } from "../src/lib/ai-entitlements";
+
 const shouldRun = process.env.UNIFIED_QUESTION_POSTGRES_GATE === "1";
 
 function unifiedCode(error: unknown): string | null {
-  return error instanceof UnifiedQuestionError ? error.code : null;
+  return error instanceof UnifiedQuestionError || error instanceof AiEntitlementError ? error.code : null;
 }
 
 function totalAnalyticsValue(
@@ -321,6 +326,8 @@ test(
         conversationId: string;
         expectedLastTurnId: string | null;
         billing: { estimatedChargedTokens: number };
+        resumeAnswer?: string;
+        resumeFromConfirmationId?: string;
         sources: Array<{ id: string; scope: string; projectId?: string; content: string }>;
       };
     };
@@ -966,11 +973,11 @@ test(
         const previews: string[] = [];
         await assert.rejects(executeUnifiedQuestion({ ...streamInput, phase: "execute", conversationId: confirmation.conversationId,
           confirmationId: confirmation.confirmationId }, owner, db, text => previews.push(text)),
-        (error: unknown) => unifiedCode(error) === (outcome === "invalidCitation" ? "UNIFIED_QUESTION_INVALID_CITATION" : "UNIFIED_QUESTION_PROVIDER_UNAVAILABLE"));
+        (error: unknown) => unifiedCode(error) === (outcome === "invalidCitation" ? "UNIFIED_QUESTION_INVALID_CITATION" : "UNIFIED_QUESTION_PROVIDER_UNCERTAIN"));
         assert.equal(previews[0], "统一问答");
         assert.equal(await db.unifiedQuestionTurn.count({ where: { conversationId: confirmation.conversationId } }), 0, "partial output is never a saved turn");
         const audit = await db.unifiedQuestionAudit.findFirstOrThrow({ where: { confirmationId: confirmation.confirmationId } });
-        assert.equal(audit.status, "failed");
+        assert.equal(audit.status, outcome === "invalidCitation" ? "failed" : "unknown");
         assert.equal(audit.usageKnown, outcome === "invalidCitation");
         const reservation = await db.platformTokenReservation.findFirstOrThrow({ where: { callKey: `unified-question:${confirmation.confirmationId}` } });
         assert.equal(reservation.status, outcome === "invalidCitation" ? "settled" : "held");
@@ -985,6 +992,166 @@ test(
       assert.equal(unmeteredAudit.usageKnown, false, "intermediate counters are not a final provider bill");
       const heldUsage = await db.platformTokenReservation.findFirstOrThrow({ where: { callKey: `unified-question:${unmetered.confirmationId}` } });
       assert.equal(heldUsage.status, "held", "unknown final usage stays pending reconciliation instead of charging intermediate counts");
+
+      // Real request-state lifecycle with an abortable, paused provider stream.
+      const successfulProvider = globalThis.fetch;
+      type RequestState = { request: { id: string; conversationId: string; status: string; question: string; answer: string; errorCode: string | null; canResume: boolean }; conversation?: Conversation["conversation"] };
+      const readRequest = async (id: string) => await getUnifiedQuestionRequest(id, owner, db) as RequestState;
+      async function stoppedRequest() {
+        const input = { ...firstInput, clientKey: `uq-stop-${randomUUID()}` };
+        const prepared = (await prepareUnifiedQuestion(input, owner, db) as Prepared).confirmation;
+        let received!: () => void;
+        const firstDelta = new Promise<void>(resolve => { received = resolve; });
+        let aborted = false;
+        globalThis.fetch = async (_input, init) => {
+          dispatches++;
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: '{"answer":"这是可恢复的部分答案' }, finish_reason: null }] })}\n\n`));
+              init?.signal?.addEventListener("abort", () => { aborted = true; controller.error(new DOMException("stopped", "AbortError")); }, { once: true });
+            },
+          }), { headers: { "content-type": "text/event-stream" } });
+        };
+        const execution = executeUnifiedQuestion({ ...input, phase: "execute", conversationId: prepared.conversationId, confirmationId: prepared.confirmationId }, owner, db, () => received())
+          .then(value => ({ value, error: null }), error => ({ value: null, error }));
+        await Promise.race([firstDelta, execution.then(outcome => { throw outcome.error ?? new Error("PAUSED_PROVIDER_COMPLETED_EARLY"); })]);
+        const running = await readRequest(prepared.confirmationId);
+        assert.equal(running.request.status, "running");
+        assert.match(running.request.answer, /可恢复的部分/u);
+        const inFlightList = await listUnifiedQuestionConversations({}, owner, db) as { conversations: Array<{ id: string; currentRequestId?: string }> };
+        assert.equal(inFlightList.conversations.find(item => item.id === prepared.conversationId)?.currentRequestId, prepared.confirmationId, "first unfinished request is visible in history");
+        await assert.rejects(() => getUnifiedQuestionRequest(prepared.confirmationId, admin, db));
+        await assert.rejects(() => stopUnifiedQuestionRequest(prepared.confirmationId, admin, db));
+        await stopUnifiedQuestionRequest(prepared.confirmationId, owner, db);
+        await stopUnifiedQuestionRequest(prepared.confirmationId, owner, db);
+        const outcome = await execution;
+        assert.equal(unifiedCode(outcome.error), "UNIFIED_QUESTION_STOPPED");
+        assert.equal(aborted, true, "stop aborts the real provider transport signal");
+        const stopped = await readRequest(prepared.confirmationId);
+        assert.equal(stopped.request.status, "stopped");
+        assert.equal(stopped.request.canResume, true);
+        assert.match(stopped.request.answer, /可恢复的部分/u);
+        assert.equal(await db.unifiedQuestionTurn.count({ where: { conversationId: prepared.conversationId } }), 0);
+        const audit = await db.unifiedQuestionAudit.findFirstOrThrow({ where: { confirmationId: prepared.confirmationId } });
+        assert.equal(audit.status, "failed"); assert.equal(audit.usageKnown, false);
+        assert.equal((await db.platformTokenReservation.findFirstOrThrow({ where: { unifiedQuestionConfirmationId: prepared.confirmationId } })).status, "held");
+        assert.equal(await db.unifiedQuestionAudit.count({ where: { ownerUserId: owner.id, status: "running" } }), 0);
+        globalThis.fetch = successfulProvider;
+        return { input, prepared, stopped };
+      }
+      providerOutcome = "success";
+      const earlyStopInput = { ...firstInput, clientKey: `uq-admitted-stop-${randomUUID()}` };
+      const earlyStop = (await prepareUnifiedQuestion(earlyStopInput, owner, db) as Prepared).confirmation;
+      const dispatchesBeforeEarlyStop = dispatches;
+      await assert.rejects(() => executeUnifiedQuestion({ ...earlyStopInput, phase: "execute", conversationId: earlyStop.conversationId, confirmationId: earlyStop.confirmationId }, owner, db, undefined, async () => {
+        assert.equal((await readRequest(earlyStop.confirmationId)).request.status, "running", "the started event follows durable admission");
+        await stopUnifiedQuestionRequest(earlyStop.confirmationId, owner, db);
+      }), error => unifiedCode(error) === "UNIFIED_QUESTION_STOPPED");
+      assert.equal(dispatches, dispatchesBeforeEarlyStop, "a stop immediately after admission prevents provider dispatch");
+      assert.equal((await readRequest(earlyStop.confirmationId)).request.status, "stopped");
+      assert.equal((await db.platformTokenReservation.findFirstOrThrow({ where: { unifiedQuestionConfirmationId: earlyStop.confirmationId } })).status, "released");
+      const paused = await stoppedRequest();
+      let resumeInput = { ...paused.input, conversationId: paused.prepared.conversationId, resumeFromConfirmationId: paused.prepared.confirmationId, clientKey: `uq-resume-${randomUUID()}` };
+      let resumed = (await prepareUnifiedQuestion(resumeInput, owner, db) as Prepared).confirmation;
+      assert.notEqual(resumed.confirmationId, paused.prepared.confirmationId);
+      assert.equal(resumed.resumeFromConfirmationId, paused.prepared.confirmationId);
+      assert.ok(resumed.resumeAnswer?.startsWith(paused.stopped.request.answer));
+      assert.equal((await prepareUnifiedQuestion(resumeInput, owner, db) as Prepared).confirmation.confirmationId, resumed.confirmationId);
+      const supersededInput = resumeInput, superseded = resumed;
+      resumeInput = { ...resumeInput, clientKey: `uq-reprepared-resume-${randomUUID()}` };
+      resumed = (await prepareUnifiedQuestion(resumeInput, owner, db) as Prepared).confirmation;
+      assert.notEqual(resumed.confirmationId, superseded.confirmationId, "a new explicit preparation supersedes an unused continuation");
+      await assert.rejects(() => executeUnifiedQuestion({ ...supersededInput, phase: "execute", confirmationId: superseded.confirmationId }, owner, db));
+      globalThis.fetch = async () => { dispatches++; return Response.json({ error: { code: "insufficient_quota" } }, { status: 429 }); };
+      await assert.rejects(() => executeUnifiedQuestion({ ...resumeInput, phase: "execute", confirmationId: resumed.confirmationId }, owner, db), error => unifiedCode(error) === "AI_PROVIDER_QUOTA_EXHAUSTED");
+      const rejectedContinuation = await readRequest(resumed.confirmationId);
+      assert.equal(rejectedContinuation.request.status, "failed");
+      assert.equal(rejectedContinuation.request.canResume, true, "quota rejection must retain the inherited partial answer for explicit continuation after replenishment");
+      assert.ok(rejectedContinuation.request.answer.startsWith(paused.stopped.request.answer));
+      resumeInput = { ...resumeInput, resumeFromConfirmationId: resumed.confirmationId, clientKey: `uq-resume-after-quota-${randomUUID()}` };
+      resumed = (await prepareUnifiedQuestion(resumeInput, owner, db) as Prepared).confirmation;
+      globalThis.fetch = successfulProvider;
+      const resumedResult = await executeUnifiedQuestion({ ...resumeInput, phase: "execute", confirmationId: resumed.confirmationId }, owner, db) as Conversation;
+      assert.equal(resumedResult.conversation.turns.length, 1);
+      assert.equal(resumedResult.conversation.turns[0]?.question, paused.input.question);
+      assert.ok(resumedResult.conversation.turns[0]?.answer.startsWith(resumed.resumeAnswer!));
+      assert.equal((await readRequest(resumed.confirmationId)).request.status, "succeeded");
+      await assert.rejects(() => prepareUnifiedQuestion({ ...resumeInput, clientKey: `uq-consumed-parent-${randomUUID()}` }, owner, db), "a consumed continuation cannot be replayed from its old parent/head");
+      assert.equal(((await stopUnifiedQuestionRequest(resumed.confirmationId, owner, db)) as RequestState).request.status, "succeeded", "late stop cannot replace success");
+      await assert.rejects(() => executeUnifiedQuestion({ ...resumeInput, phase: "execute", confirmationId: resumed.confirmationId }, owner, db));
+      assert.equal((await readRequest(unknownPrepared.confirmationId)).request.status, "unknown");
+      await assert.rejects(() => getUnifiedQuestionRequest(failedPrepared.confirmationId, owner, db), "revoked request sources cannot be exposed through recovery");
+
+      const drifted = await stoppedRequest();
+      await revisePersonalKnowledgeDocument(personalDocument.id, { expectedVersion: 3, content: `${personalRevisionTwo} 新增恢复后的证据要求。` }, owner, db);
+      assert.equal((await readRequest(resumed.confirmationId)).request.status, "succeeded", "completed answers retain their immutable historical citations after source edits");
+      await assert.rejects(() => readRequest(firstConfirmation.confirmationId), "successful request recovery still respects revoked projects elsewhere in the conversation");
+      await assert.rejects(() => prepareUnifiedQuestion({ ...drifted.input, conversationId: drifted.prepared.conversationId, resumeFromConfirmationId: drifted.prepared.confirmationId, clientKey: `uq-drifted-resume-${randomUUID()}` }, owner, db), "source changes invalidate a saved partial answer continuation");
+
+      // A pre-migration process crash has a running audit but no progress row.
+      const orphanInput = { ...firstInput, clientKey: `uq-orphan-${randomUUID()}` };
+      const orphan = (await prepareUnifiedQuestion(orphanInput, owner, db) as Prepared).confirmation;
+      const beforeExecutionList = await listUnifiedQuestionConversations({}, owner, db) as { conversations: Array<{ id: string }> };
+      assert.ok(!beforeExecutionList.conversations.some(item => item.id === orphan.conversationId), "issued-only drafts are not history items");
+      const orphanProof = await db.unifiedQuestionConfirmation.findUniqueOrThrow({ where: { id: orphan.confirmationId } });
+      await db.$transaction(async tx => {
+        await tx.$executeRaw`SELECT set_config('app.unified_question_mutation_context', 'service-v1', true)`;
+        await tx.unifiedQuestionConfirmation.update({ where: { id: orphanProof.id }, data: { status: "consumed", consumedAt: new Date() } });
+        await tx.unifiedQuestionAudit.create({ data: { ownerUserId: owner.id, confirmationId: orphanProof.id,
+          questionHash: orphanProof.questionHash, historyFingerprint: orphanProof.historyFingerprint, evidenceManifest: orphanProof.evidenceManifest!,
+          scopeProjectIds: orphanProof.scopeProjectIds, providerConnectionId: orphanProof.providerConnectionId, providerConfigurationVersion: orphanProof.providerConfigurationVersion,
+          modelId: orphanProof.modelId, credentialSecretFingerprint: orphanProof.credentialSecretFingerprint, actorAccountAccessVersion: orphanProof.actorAccountAccessVersion,
+          routeFenceFingerprint: orphanProof.routeFenceFingerprint, status: "running", createdAt: new Date(Date.now() - 180_000) } });
+      });
+      await reservePlatformTokens({ userId: owner.id, unifiedQuestionConfirmationId: orphanProof.id, providerConnectionId: orphanProof.providerConnectionId,
+        callKey: `unified-question:${orphanProof.id}`, operation: "generateWithContext", modelId: orphanProof.modelId, rawEstimatedTokens: 100,
+        routeSnapshot: { source: "platform_default", routeId: orphanProof.routeId, routeVersion: orphanProof.routeVersion, routeUpdatedAt: orphanProof.routeUpdatedAt,
+          providerConfigurationVersion: orphanProof.providerConfigurationVersion, quotaMultiplierBps: orphanProof.quotaMultiplierBps, routeFenceFingerprint: orphanProof.routeFenceFingerprint } }, db);
+      assert.equal(await reconcileStaleUnifiedQuestionRequests(owner.id, db), 1);
+      assert.equal(await reconcileStaleUnifiedQuestionRequests(owner.id, db), 0, "reconciliation is idempotent");
+      assert.equal((await readRequest(orphan.confirmationId)).request.status, "unknown");
+      assert.equal((await readRequest(orphan.confirmationId)).request.canResume, false, "an old crash without a checkpoint cannot invent a partial answer");
+      assert.equal((await db.platformTokenReservation.findFirstOrThrow({ where: { unifiedQuestionConfirmationId: orphan.confirmationId } })).status, "held");
+      assert.equal(await db.unifiedQuestionAudit.count({ where: { ownerUserId: owner.id, status: "running" } }), 0);
+
+      // Clear provider rejections return unused reservations; quota and rate limits remain distinct.
+      for (const [providerCode, expectedCode] of [["insufficient_quota", "AI_PROVIDER_QUOTA_EXHAUSTED"], ["rate_limit_exceeded", "AI_PROVIDER_RATE_LIMITED"]] as const) { for (const stream of [false, true]) {
+        const rejectedInput = { ...firstInput, clientKey: `uq-rejected-${randomUUID()}` };
+        const rejected = (await prepareUnifiedQuestion(rejectedInput, owner, db) as Prepared).confirmation;
+        globalThis.fetch = async () => {
+          dispatches++;
+          const error = { error: { code: providerCode, message: "untrusted rejection" } };
+          return stream ? new Response(`event: error\ndata: ${JSON.stringify(error)}\n\n`, { headers: { "content-type": "text/event-stream" } }) : Response.json(error, { status: 429 });
+        };
+        await assert.rejects(() => executeUnifiedQuestion({ ...rejectedInput, phase: "execute", conversationId: rejected.conversationId, confirmationId: rejected.confirmationId }, owner, db), error => unifiedCode(error) === expectedCode);
+        assert.equal((await db.platformTokenReservation.findFirstOrThrow({ where: { unifiedQuestionConfirmationId: rejected.confirmationId } })).status, "released");
+        assert.equal((await readRequest(rejected.confirmationId)).request.errorCode, expectedCode);
+      } }
+      const midstreamInput = { ...firstInput, clientKey: `uq-midstream-quota-${randomUUID()}` };
+      const midstream = (await prepareUnifiedQuestion(midstreamInput, owner, db) as Prepared).confirmation;
+      globalThis.fetch = async () => {
+        dispatches++;
+        const prefix = { choices: [{ delta: { content: '{"answer":"已经生成的内容' }, finish_reason: null }] };
+        return new Response(`data: ${JSON.stringify(prefix)}\n\nevent: error\ndata: ${JSON.stringify({ error: { code: "insufficient_quota" } })}\n\n`, { headers: { "content-type": "text/event-stream" } });
+      };
+      await assert.rejects(() => executeUnifiedQuestion({ ...midstreamInput, phase: "execute", conversationId: midstream.conversationId, confirmationId: midstream.confirmationId }, owner, db), error => unifiedCode(error) === "UNIFIED_QUESTION_PROVIDER_UNCERTAIN");
+      assert.equal((await db.platformTokenReservation.findFirstOrThrow({ where: { unifiedQuestionConfirmationId: midstream.confirmationId } })).status, "held", "a quota error after output is never treated as an unbilled rejection");
+      assert.equal((await readRequest(midstream.confirmationId)).request.answer, "已经生成的内容");
+      globalThis.fetch = successfulProvider;
+      const exhaustedInput = { ...firstInput, clientKey: `uq-quota-${randomUUID()}` };
+      const exhausted = (await prepareUnifiedQuestion(exhaustedInput, owner, db) as Prepared).confirmation;
+      const balance = await db.platformTokenGrant.aggregate({ where: { userId: owner.id, remainingTokens: { gt: 0 } }, _sum: { remainingTokens: true } });
+      const drainKey = `uq-quota-block-${randomUUID()}`;
+      await reservePlatformTokens({ userId: owner.id, callKey: drainKey, operation: "autoExtract", modelId: "fixture", estimatedTokens: balance._sum.remainingTokens! }, db);
+      const callsBeforeExhausted = dispatches;
+      await assert.rejects(() => executeUnifiedQuestion({ ...exhaustedInput, phase: "execute", conversationId: exhausted.conversationId, confirmationId: exhausted.confirmationId }, owner, db), error => unifiedCode(error) === "AI_PLATFORM_TOKEN_EXHAUSTED");
+      assert.equal(dispatches, callsBeforeExhausted, "local exhaustion is reported before provider dispatch");
+      await releasePlatformTokenReservation({ userId: owner.id, callKey: drainKey }, db);
+      const healthyInput = { ...firstInput, clientKey: `uq-healthy-${randomUUID()}` };
+      const healthy = (await prepareUnifiedQuestion(healthyInput, owner, db) as Prepared).confirmation;
+      const healthyResult = await executeUnifiedQuestion({ ...healthyInput, phase: "execute", conversationId: healthy.conversationId, confirmationId: healthy.confirmationId }, owner, db) as Conversation;
+      assert.equal(healthyResult.conversation.turns.length, 1, "a later new conversation succeeds after rejection, stale recovery, and replenished quota");
+
     } finally {
       globalThis.fetch = originalFetch;
       if (originalMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

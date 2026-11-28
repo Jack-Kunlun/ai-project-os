@@ -234,6 +234,15 @@ enum UnifiedQuestionAuditStatus {
   unknown
 }
 
+enum UnifiedQuestionProgressStatus {
+  running
+  stopping
+  stopped
+  succeeded
+  failed
+  unknown
+}
+
 /// A short-lived, owner-bound network proof.  The proof binds the exact
 /// connection draft (including the secret fingerprint) to one actor epoch and
 /// is consumed atomically by the subsequent create or governed update.
@@ -5361,6 +5370,7 @@ model AppUser {
   unifiedQuestionTurns                              UnifiedQuestionTurn[]                 @relation("UnifiedQuestionTurnOwner")
   unifiedQuestionConfirmations                      UnifiedQuestionConfirmation[]        @relation("UnifiedQuestionConfirmationOwner")
   unifiedQuestionAudits                             UnifiedQuestionAudit[]                @relation("UnifiedQuestionAuditOwner")
+  unifiedQuestionProgresses                         UnifiedQuestionProgress[]             @relation("UnifiedQuestionProgressOwner")
 }
 
 /// Network proof for personal Git/MCP connection setup and governed updates.
@@ -5737,6 +5747,7 @@ model UnifiedQuestionConversation {
   turns         UnifiedQuestionTurn[]
   confirmations UnifiedQuestionConfirmation[]
   presentationRevisions UnifiedQuestionPresentationRevision[]
+  progress UnifiedQuestionProgress[]
 
   @@unique([ownerUserId, id])
   @@index([ownerUserId, updatedAt, id])
@@ -5830,6 +5841,11 @@ model UnifiedQuestionConfirmation {
   providerConnection           AiProviderConnection              @relation("UnifiedQuestionConfirmationProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   audit                        UnifiedQuestionAudit?
   tokenReservation             PlatformTokenReservation?
+  resumeFrom                   UnifiedQuestionConfirmation? @relation("UnifiedQuestionResume", fields: [resumeFromConfirmationId], references: [id], onDelete: NoAction, onUpdate: Cascade, map: "UnifiedQuestionConfirmation_resume_from_fkey")
+  resumptions                  UnifiedQuestionConfirmation[] @relation("UnifiedQuestionResume")
+  progress                     UnifiedQuestionProgress?
+
+  resumeFromConfirmationId     String?                           @db.Uuid
 
   @@unique([ownerUserId, id])
   @@unique([ownerUserId, clientKeyHash])
@@ -5837,6 +5853,26 @@ model UnifiedQuestionConfirmation {
   @@index([expiresAt, consumedAt])
   @@index([providerConnectionId, status, issuedAt])
   @@index([inputFingerprint])
+}
+
+/// Mutable, owner-scoped recovery state for one consumed confirmation. It
+/// stores only the bounded assistant answer prefix; source evidence remains
+/// bound to the immutable confirmation and successful answers remain turns.
+model UnifiedQuestionProgress {
+  confirmationId String                         @id @db.Uuid
+  ownerUserId    String                         @db.Uuid
+  conversationId String                         @db.Uuid
+  status         UnifiedQuestionProgressStatus
+  partialAnswer  String                         @default("") @db.VarChar(50000)
+  stopRequestedAt DateTime?
+  heartbeatAt    DateTime
+  updatedAt      DateTime                       @updatedAt
+  owner          AppUser                        @relation("UnifiedQuestionProgressOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade, map: "UnifiedQuestionProgress_owner_fkey")
+  conversation   UnifiedQuestionConversation    @relation(fields: [ownerUserId, conversationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade, map: "UnifiedQuestionProgress_conversation_fkey")
+  confirmation   UnifiedQuestionConfirmation    @relation(fields: [confirmationId], references: [id], onDelete: NoAction, onUpdate: Cascade, map: "UnifiedQuestionProgress_confirmation_fkey")
+
+  @@index([ownerUserId, conversationId, updatedAt], map: "UnifiedQuestionProgress_owner_conversation_updated_idx")
+  @@index([status, heartbeatAt], map: "UnifiedQuestionProgress_status_heartbeat_idx")
 }
 
 /// Body-free provider outcome evidence. Durable Q&A bodies live on immutable

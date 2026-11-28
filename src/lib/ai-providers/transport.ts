@@ -11,6 +11,8 @@ export const PROVIDER_REQUEST_TIMEOUT_MS = 45_000;
  */
 export const PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS = PROVIDER_REQUEST_TIMEOUT_MS + 10_000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_PROVIDER_ERROR_BYTES = 16 * 1024;
+const PROVIDER_ERROR_READ_TIMEOUT_MS = 500;
 const MAX_EMBEDDING_BATCH = 32;
 const MAX_EMBEDDING_INPUT_CHARS = 24_000;
 
@@ -33,6 +35,12 @@ export class ProviderTransportError extends Error {
     readonly requestDispatched = true,
     /** Whether a provider response was received before the error was raised. */
     readonly responseReceived = false,
+    /** The HTTP status received from the provider, if any. */
+    readonly providerHttpStatus: number | null = null,
+    /** True only for an allowlisted structured quota/balance rejection. */
+    readonly providerQuotaExceeded = false,
+    /** True only for an allowlisted explicit rejection before content or usage arrived. */
+    readonly providerRejectedBeforeOutput = false,
   ) {
     super(code);
     this.name = "ProviderTransportError";
@@ -86,8 +94,10 @@ type RuntimeConnection = Pick<
   onBeforeRequest?: () => void | boolean | Promise<void | boolean>;
 }>;
 
-function fail(code: ProviderTransportErrorCode, status = 502, responseReceived = false): never {
-  throw new ProviderTransportError(code, status, true, responseReceived);
+function fail(code: ProviderTransportErrorCode, status = 502, responseReceived = false,
+  providerHttpStatus: number | null = null, providerQuotaExceeded = false, providerRejectedBeforeOutput = false): never {
+  throw new ProviderTransportError(code, status, true, responseReceived, providerHttpStatus,
+    providerQuotaExceeded, providerRejectedBeforeOutput);
 }
 
 function safeRequestId(response: Response): string | null {
@@ -129,11 +139,107 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   }
 }
 
-function mapHttpError(status: number): never {
-  if (status === 401 || status === 403) return fail("AI_PROVIDER_AUTH_FAILED", 422, true);
-  if (status === 429) return fail("AI_PROVIDER_RATE_LIMITED", 429, true);
-  if (status >= 400 && status < 500) return fail("AI_PROVIDER_REJECTED", 422, true);
-  return fail("AI_PROVIDER_UNAVAILABLE", 502, true);
+async function readProviderErrorJson(response: Response): Promise<unknown | null> {
+  const type = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!type.includes("application/json") && !type.includes("+json")) {
+    cancelResponseBody(response);
+    return null;
+  }
+  const lengthHeader = response.headers.get("content-length");
+  if (lengthHeader !== null) {
+    const length = Number(lengthHeader);
+    if (!Number.isFinite(length) || length < 0 || length > MAX_PROVIDER_ERROR_BYTES) {
+      cancelResponseBody(response);
+      return null;
+    }
+  }
+  if (response.body === null) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const deadline = Date.now() + PROVIDER_ERROR_READ_TIMEOUT_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    while (true) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error("PROVIDER_ERROR_BODY_TIMEOUT");
+      const next = await Promise.race([
+        reader.read(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("PROVIDER_ERROR_BODY_TIMEOUT")), remaining);
+        }),
+      ]);
+      if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > MAX_PROVIDER_ERROR_BYTES) {
+        void reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(next.value);
+    }
+  } catch {
+    void reader.cancel().catch(() => {});
+    return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    try { reader.releaseLock(); } catch { /* A failed bounded read remains a generic provider rejection. */ }
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown; }
+  catch { return null; }
+}
+
+function structuredProviderError(payload: unknown, eventName?: string): Record<string, unknown> | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  const error = record.error;
+  if (typeof error === "object" && error !== null && !Array.isArray(error)) return error as Record<string, unknown>;
+  return eventName === "error" ? record : null;
+}
+
+function hasAllowlistedStructuredCode(payload: unknown, allowedCodes: readonly string[], eventName?: string): boolean {
+  const record = structuredProviderError(payload, eventName);
+  if (record === null) return false;
+  const allowed = new Set(allowedCodes);
+  return [record.code, record.type].some(value => typeof value === "string" && allowed.has(value.toLowerCase()));
+}
+
+function hasAllowlistedQuotaCode(payload: unknown, eventName?: string): boolean {
+  return hasAllowlistedStructuredCode(payload,
+    ["insufficient_quota", "billing_hard_limit_reached", "credit_balance_exhausted"], eventName);
+}
+
+function mapStructuredStreamError(payload: unknown, eventName: string, beforeOutput: boolean): never {
+  if (hasAllowlistedQuotaCode(payload, eventName)) {
+    return fail("AI_PROVIDER_REJECTED", 402, true, 200, true, beforeOutput);
+  }
+  if (hasAllowlistedStructuredCode(payload, ["rate_limit_exceeded", "ai_provider_rate_limited"], eventName)) {
+    return fail("AI_PROVIDER_RATE_LIMITED", 429, true, 200, false, beforeOutput);
+  }
+  if (hasAllowlistedStructuredCode(payload, ["ai_provider_auth_failed"], eventName)) {
+    return fail("AI_PROVIDER_AUTH_FAILED", 422, true, 200, false, beforeOutput);
+  }
+  return fail("AI_PROVIDER_UNAVAILABLE", 502, true, 200);
+}
+
+async function mapHttpError(status: number, kind: AiProviderConnection["kind"], response: Response): Promise<never> {
+  let quotaExceeded = false;
+  if (kind === "deepseek" && status === 402) {
+    quotaExceeded = true;
+    cancelResponseBody(response);
+  } else if (kind === "openai" && (status === 402 || status === 429)) {
+    quotaExceeded = hasAllowlistedQuotaCode(await readProviderErrorJson(response));
+  } else if (!quotaExceeded) {
+    cancelResponseBody(response);
+  }
+  if (quotaExceeded) return fail("AI_PROVIDER_REJECTED", status, true, status, true);
+  if (status === 401 || status === 403) return fail("AI_PROVIDER_AUTH_FAILED", 422, true, status);
+  if (status === 429) return fail("AI_PROVIDER_RATE_LIMITED", 429, true, status);
+  if (status >= 400 && status < 500) return fail("AI_PROVIDER_REJECTED", 422, true, status);
+  return fail("AI_PROVIDER_UNAVAILABLE", 502, true, status);
 }
 
 async function providerPost(
@@ -142,6 +248,7 @@ async function providerPost(
   body: Readonly<Record<string, unknown>>,
   absoluteDeadlineAt?: Date,
   onVisionUsage?: (usage: VisionUsageObservation) => void,
+  externalSignal?: AbortSignal,
 ): Promise<Readonly<{ payload: unknown; requestId: string | null }>> {
   if (connection.status === "disabled") throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
   const remaining = absoluteDeadlineAt === undefined
@@ -187,9 +294,15 @@ async function providerPost(
   if (remainingAfterCredential <= 0) {
     throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
   }
+  if (externalSignal?.aborted) throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
   await runProviderBoundary(connection.onBeforeRequest);
+  if (externalSignal?.aborted) throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (externalSignal?.aborted) abortFromCaller();
   const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_REQUEST_TIMEOUT_MS, remainingAfterCredential));
+  let responseReceived = false;
   try {
     const response = await (openAiProxyFetch ?? fetch)(endpoint, {
       method: "POST",
@@ -202,10 +315,10 @@ async function providerPost(
       },
       body: JSON.stringify(body),
     });
+    responseReceived = true;
     const requestId = safeRequestId(response);
     if (!response.ok) {
-      cancelResponseBody(response);
-      return mapHttpError(response.status);
+      return await mapHttpError(response.status, connection.kind, response);
     }
     const payload = await readBoundedJson(response);
     if (onVisionUsage !== undefined && typeof payload === "object" && payload !== null) {
@@ -219,11 +332,12 @@ async function providerPost(
   } catch (error) {
     if (error instanceof ProviderTransportError) throw error;
     if (controller.signal.aborted || isAbortError(error)) {
-      return fail("AI_PROVIDER_TIMEOUT", 504);
+      return fail("AI_PROVIDER_TIMEOUT", 504, responseReceived);
     }
-    return fail("AI_PROVIDER_UNAVAILABLE", 502);
+    return fail("AI_PROVIDER_UNAVAILABLE", 502, responseReceived);
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -245,6 +359,7 @@ async function providerPostStream(
   absoluteDeadlineAt: Date | undefined,
   onContentDelta: (delta: string) => void | Promise<void>,
   onUsage: ((usage: VisionUsageObservation) => void | Promise<void>) | undefined,
+  externalSignal?: AbortSignal,
 ): Promise<Readonly<{ result: StreamedChatResult; requestId: string | null }>> {
   if (connection.status === "disabled") throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
   const remaining = absoluteDeadlineAt === undefined
@@ -283,7 +398,9 @@ async function providerPostStream(
     ? PROVIDER_REQUEST_TIMEOUT_MS
     : absoluteDeadlineAt.getTime() - Date.now();
   if (remainingAfterCredential <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
+  if (externalSignal?.aborted) throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
   await runProviderBoundary(connection.onBeforeRequest);
+  if (externalSignal?.aborted) throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
 
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -298,6 +415,14 @@ async function providerPostStream(
     if (reader !== undefined) void reader.cancel().catch(() => {});
     timeoutReject?.(new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, true, responseReceived));
   }, Math.min(PROVIDER_REQUEST_TIMEOUT_MS, remainingAfterCredential));
+  const abortFromCaller = () => {
+    timedOut = true;
+    controller.abort();
+    if (reader !== undefined) void reader.cancel().catch(() => {});
+    timeoutReject?.(new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, true, responseReceived));
+  };
+  externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (externalSignal?.aborted) abortFromCaller();
   let callbackFailed = false;
   let callbackFailure: unknown;
   const deliverContent = async (value: string) => {
@@ -338,8 +463,7 @@ async function providerPostStream(
     responseReceived = true;
     const requestId = safeRequestId(response);
     if (!response.ok) {
-      cancelResponseBody(response);
-      return mapHttpError(response.status);
+      return await mapHttpError(response.status, connection.kind, response);
     }
     if (response.body === null || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
       cancelResponseBody(response);
@@ -359,6 +483,8 @@ async function providerPostStream(
     let outputTokens = 0;
     let usageKnown = false;
     let usageFinalSeen = false;
+    let usageFrameSeen = false;
+    let dataFrameSeen = false;
 
     const processData = async (data: string) => {
       if (sawDone) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
@@ -372,8 +498,14 @@ async function providerPostStream(
       try { payload = JSON.parse(data) as unknown; } catch { return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true); }
       if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
       const record = payload as Record<string, unknown>;
-      if (eventName === "error" || record.error !== undefined && record.error !== null) return fail("AI_PROVIDER_UNAVAILABLE", 502, true);
       const frameHasUsage = record.usage !== undefined && record.usage !== null;
+      if (frameHasUsage) usageFrameSeen = true;
+      // Earlier frames may contain reasoning or other billable output we do not render.
+      const firstFrameRejection = !dataFrameSeen && !usageFrameSeen && record.choices === undefined;
+      dataFrameSeen = true;
+      if (eventName === "error" || record.error !== undefined && record.error !== null) {
+        return mapStructuredStreamError(payload, eventName, firstFrameRejection);
+      }
       if (frameHasUsage) {
         const counts = usageCounts(record);
         inputTokens = counts.input;
@@ -493,6 +625,7 @@ async function providerPostStream(
     return fail("AI_PROVIDER_UNAVAILABLE", 502, responseReceived);
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
     if (reader !== undefined) {
       if (sawDone) {
         try { void reader.cancel().catch(() => {}); } catch { /* A completed terminal frame still wins. */ }
@@ -585,6 +718,8 @@ export async function invokeChatCompletion(input: Readonly<{
   /** Request a JSON object response from providers that support JSON mode. */
   jsonOutput?: boolean;
   absoluteDeadlineAt?: Date;
+  /** Optional caller cancellation; omitted consumers keep existing behavior. */
+  signal?: AbortSignal;
   /** Optional raw assistant text deltas for an explicitly streamed request. */
   onContentDelta?: (delta: string) => void | Promise<void>;
   /** Latest provider usage metadata received during a streamed request. */
@@ -600,7 +735,7 @@ export async function invokeChatCompletion(input: Readonly<{
     ...(input.connection.kind === "deepseek" && input.jsonOutput ? { response_format: { type: "json_object" } } : {}),
   };
   if (input.onContentDelta !== undefined) {
-    const streamed = await providerPostStream(input.connection, body, input.absoluteDeadlineAt, input.onContentDelta, input.onUsage);
+    const streamed = await providerPostStream(input.connection, body, input.absoluteDeadlineAt, input.onContentDelta, input.onUsage, input.signal);
     const { result, requestId } = streamed;
     if (result.content.trim().length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
     return Object.freeze({
@@ -612,7 +747,7 @@ export async function invokeChatCompletion(input: Readonly<{
       outputTruncated: result.outputTruncated,
     });
   }
-  const { payload, requestId } = await providerPost(input.connection, "/chat/completions", { ...body, stream: false }, input.absoluteDeadlineAt);
+  const { payload, requestId } = await providerPost(input.connection, "/chat/completions", { ...body, stream: false }, input.absoluteDeadlineAt, undefined, input.signal);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
   const choices = record.choices;

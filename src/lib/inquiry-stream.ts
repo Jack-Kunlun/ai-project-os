@@ -1,18 +1,19 @@
 import type { Conversation } from "./inquiry-session";
-import { safeResponseError } from "./safe-error-presentation";
+import { inquiryResponseError, InquiryResponseError, inquiryCodeFeedback } from "./inquiry-errors";
 
 export const INQUIRY_STREAM_TYPE = "application/x-ndjson";
 export type InquiryStreamEvent =
+  | { type: "started" }
   | { type: "delta"; text: string }
   | { type: "complete"; conversation: Conversation }
   | { type: "error"; error: { code: string; message: string } };
-const interrupted = () => new Error("回答连接中断，请重新核对会话后再试。");
+const interrupted = () => new InquiryResponseError(inquiryCodeFeedback("INQUIRY_CONNECTION_INTERRUPTED")!);
 
 /** Consume real network chunks; only a complete event is a successful turn. */
-export async function readInquiryResponse(response: Response, onDelta: (text: string) => void): Promise<{ conversation: Conversation }> {
+export async function readInquiryResponse(response: Response, onDelta: (text: string) => void, onStarted?: () => void): Promise<{ conversation: Conversation }> {
   if (!response.ok) {
-    const error = await safeResponseError(response, "请求未完成，请稍后重试。");
-    throw new Error(error.message);
+    const error = await inquiryResponseError(response, "请求未完成，请稍后重试。");
+    throw error;
   }
   // Older servers and existing JSON callers remain compatible.
   if (!response.headers.get("content-type")?.includes(INQUIRY_STREAM_TYPE)) {
@@ -36,15 +37,17 @@ export async function readInquiryResponse(response: Response, onDelta: (text: st
         let event: InquiryStreamEvent;
         try { event = JSON.parse(line) as InquiryStreamEvent; } catch { throw interrupted(); }
         if (!event || typeof event !== "object") throw interrupted();
-        if (event.type === "delta" && typeof event.text === "string") {
+        if (event.type === "started") {
+          onStarted?.();
+        } else if (event.type === "delta" && typeof event.text === "string") {
           answerLength += event.text.length;
           if (answerLength > 50_000) throw interrupted();
           onDelta(event.text);
         } else if (event.type === "complete" && event.conversation && typeof event.conversation.id === "string" && Array.isArray(event.conversation.turns)) {
           return { conversation: event.conversation };
         } else if (event.type === "error" && event.error && typeof event.error.code === "string") {
-          const error = await safeResponseError(Response.json({ error: event.error }, { status: 502 }), "提问未完成。请核对会话状态后重试。");
-          throw new Error(error.message);
+          const error = await inquiryResponseError(Response.json({ error: event.error }, { status: 502 }), "提问未完成。请核对会话状态后重试。");
+          throw error;
         } else throw interrupted();
       }
       if (done) throw interrupted();

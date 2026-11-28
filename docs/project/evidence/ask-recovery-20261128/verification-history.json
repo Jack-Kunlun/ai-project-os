@@ -1,0 +1,63 @@
+[
+  {
+    "check": "first targeted PostgreSQL",
+    "result": "failed",
+    "cause": "conversation updatedAt-only write rejected by existing append-only head guard",
+    "resolution": "removed write; order by request consumption time; subsequent targeted and final full-catalogue inquiry group passed"
+  },
+  {
+    "check": "first default coverage",
+    "result": "3 failures",
+    "cause": "trigger count, migration count, generated English resource contract",
+    "resolution": "updated actual counts and generated resource; 11 targeted contracts passed"
+  },
+  {
+    "check": "sandbox default coverage retry",
+    "result": "failed before valid integration evidence",
+    "cause": "loopback HTTP fixture listen EPERM",
+    "resolution": "rerun with isolated loopback permission; 1798 tests, 1625 passed, 173 skipped, 0 failed"
+  },
+  {
+    "check": "full PostgreSQL initial run",
+    "log": "postgres-full.log",
+    "result": "failed at group 19/91; 3 of 7 web-ai-governance cases failed",
+    "cause": "invalid platform token reservation request; original cause unresolved",
+    "resolution": "same source isolated group 7/7 passed, prior failure retained; remaining 72 groups run separately",
+    "logSha256": "8521695b645f66645d155cc747ff301bb397a2ce86e649f30c38f4968325072e"
+  },
+  {
+    "check": "performance v1",
+    "log": "v1-performance.json",
+    "result": "900764 bytes exceeds 897024",
+    "resolution": "Ask-only imports verified, final measurement budget accounts for new functionality and observed CI variance",
+    "logSha256": "7a7ff5d6930ad3ac6a90a6c969bdb9c980d7485e8f75e1199dab2d8d3d952c61"
+  },
+  {
+    "check": "performance v2",
+    "log": "v2-performance.json",
+    "result": "stale exported assets double-counted",
+    "resolution": "final export uses an empty task-owned directory",
+    "logSha256": "591a162af20f7d415001f89835393e7e0d76065585b33f35194ce83d0a10ec46"
+  },
+  {
+    "check": "build v3",
+    "log": "v3-build.log",
+    "result": "TypeScript nullable recovery guard failed",
+    "resolution": "explicit current && guard; final production build passed",
+    "logSha256": "4f8e209cd9ce944b157472d3fc7f7f36733699d103d7c32a46ccb660b3cf9fb0"
+  },
+  {
+    "check": "browser attempt 1",
+    "result": "not started: POSTGRES_GATE_ADMIN_URL_INVALID",
+    "cause": "temporary second cluster used a port outside runner allowlist",
+    "resolution": "unused container removed; use existing approved cluster serially"
+  },
+  {
+    "check": "browser v1",
+    "result": "5 passed / 2 failed",
+    "log": "v4-browser.log",
+    "cause": "old URL race on page and account epoch remount on floating history",
+    "resolution": "explicit navigation intent, unchanged account epoch, original assertions retained; final 7/7 passed",
+    "logSha256": "07262b6eb24d3dab7f5566774d56bd5e707034452d879788c328d5baf4f289a5"
+  }
+]

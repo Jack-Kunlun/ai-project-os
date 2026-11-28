@@ -224,3 +224,15 @@ E-036 开工时已接收 E-035 产品交付，等待精确提交、正式 CI 与
 E-036 正式接收：候选 b8aacce22011afa9eb6695d3bb31ee3499cfc4a4 的[主分支 CI](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45563950940) 成功，源码/覆盖率、Prisma、Lint/类型、预算、数据库门禁、同镜像浏览器和隔离发布候选通过。正式数量、计划指纹、不可变镜像和候选身份见[发布回执](evidence/ask-character-reveal-20261125/release.json)。
 
 [正式发布](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/45569058698) 已将 v1.2.31 切换上线，annotated tag、生产部署回执、镜像和公网应用/数据库/Worker 健康一致。无新增迁移，不要求备份/恢复；已按既有流程完成镜像/缓存维护。真实外部模型未在本轮现场调用。
+
+## E-037 / T-081 问答错误与中断恢复
+
+验收进行中。来源为用户 2026-11-28 的三张截图及“两类中断恢复都要”补充；截图仅证明收到未知结果错误，不能据此认定生产供应商确切响应或额度账本。
+
+当前直接证据：本地 inquiry 流式、字符游标、会话锁与恢复查询定向检查通过；provider chat/stream 与新增额度分类、总时限、主动取消共 23 项通过；Prisma schema 有效，迁移目录校验为 152 条。受影响代码仍在集成，最终哈希、PostgreSQL、浏览器、完整适用检查和独立 review 待补；这些局部检查不构成正式验收。
+
+## E-038 / T-082 v1.2.32 发布
+
+待精确候选主分支 CI、不可变镜像、迁移权限协调、发布 Workflow 和生产健康证据。当前尚未提交或发布 v1.2.32。
+
+E-037 本地接收：[最终验收](evidence/ask-recovery-20261128/acceptance.json)、[独立审查](evidence/ask-recovery-20261128/review.json)、[失败与修复历史](evidence/ask-recovery-20261128/verification-history.json)。最终同镜像 7/7 浏览器通过，桌面与 390px 通知已实际审阅；完整目录 91 组分次通过，原失败保留。默认覆盖率集成版通过、最终增量定向通过；正式精确候选的全套 CI 与生产仍由 E-038 闭合。

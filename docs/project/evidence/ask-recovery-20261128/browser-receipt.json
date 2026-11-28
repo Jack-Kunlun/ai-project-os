@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "releaseEligible": false,
+  "revision": "d995c6bb69e1cc0535155227a6dfb72b1850f736",
+  "version": "1.2.32",
+  "mode": "selected",
+  "files": [
+    "e2e/inquiry-recovery.spec.ts",
+    "e2e/inquiry-stream.spec.ts",
+    "e2e/unified-question.spec.ts"
+  ],
+  "testCount": 7,
+  "executedCount": 7,
+  "skippedCount": 0
+}

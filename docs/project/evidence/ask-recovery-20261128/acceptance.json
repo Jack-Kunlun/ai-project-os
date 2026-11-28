@@ -1,0 +1,188 @@
+{
+  "task": "T-081",
+  "date": "2026-11-28",
+  "status": "local acceptance passed; release tracked by T-082",
+  "baseline": "d995c6bb69e1cc0535155227a6dfb72b1850f736",
+  "candidateVersion": "1.2.32",
+  "releaseEligible": false,
+  "sourceSha256": {
+    "Dockerfile": "4a4939cbb964c7b85fc8dd37bd0684677fca0d8619f104eebe1f44bad418ccaf",
+    "config/performance-budgets.json": "0623350e32699098831767018b05df08f20645151c23139ac66967eb9de017c5",
+    "e2e/inquiry-recovery.spec.ts": "ab1655e4c761e33e7210dcdf73e80a2d2a6dd3fdf81788cda3f587e6d98858d4",
+    "e2e/inquiry-stream.spec.ts": "fe2d657eab70b3eb174b346ce84878375ee9f344cf02c62c7fb5a52b5e926595",
+    "package.json": "1ef32f0aff5b68c03b9e52911be47af0dce6540885eab99e65a7f83315d2c1e3",
+    "prisma/migrations/20261128010000_add_unified_question_recovery/migration.sql": "f19bd92d60766d4d91b6cb3a61968cc4ba41d435487938778cad448a023c5213",
+    "prisma/schema.prisma": "f67067185f5ee4785ac40fa02ce232b0d5c399947b003a181e7ac76160134792",
+    "scripts/run-database-principal-oid10-gate.ts": "4479629e16639fc3d1d2ecdb44efce7c9e03662cd9f68dd3c6e145e4d4d99555",
+    "src/app/api/ask/requests/[confirmationId]/route.ts": "182e889360e8af9e0ae72bc28122435155ef9fbe630246134b30527797798c33",
+    "src/app/api/ask/turns/route.ts": "ae60a4e8b2aac4c66ff01271a0b98ee65a07d1c09dd9c1b5b3fdd07da2cd05d8",
+    "src/app/ask/ask-client.module.css": "0f48da948aef7e757d7858b656ea029a37ff2cf237451994f1f347dad5deb93e",
+    "src/app/ask/ask-client.tsx": "9967dc5e3e6c7c26c192fc816e3f38d0d21964a44f78d0f8cb7216342933f9db",
+    "src/app/ask/ask-notice.tsx": "cc133bf6fc5bd0272f775ea895dd11f3e5afdbd311d89c6dab00f23c4087ad0b",
+    "src/app/ask/conversation-rail.tsx": "8a06e6c63db8acbc7af3b76fcd9301b733fc68d60d18086333629500dbc69cda",
+    "src/lib/ai-providers/transport.ts": "19901499ba7ba9662fab81bcd5cbfea0eeccf282b20b18d378aa8eb00dcfbebd",
+    "src/lib/database-principal-catalog.ts": "1836fd52a2ca5132dc5db8dc0808e55ec770fb0c487ebd547f9e28ce27498d5a",
+    "src/lib/inquiry-errors.ts": "96666260aaa4d9e77d80dede78fa36228841f427ab831c9c677350a28c7b5eff",
+    "src/lib/inquiry-recovery.ts": "4157d6905acc773df11b79ac16477c91c33a88cae8666052d010a5f44d1d79ff",
+    "src/lib/inquiry-session.ts": "18072acc53cd51a546b57f457d079483f2c0caac1796d11c31201024597cb4b7",
+    "src/lib/inquiry-stream.ts": "dc440518841f9e91f5c54fd6b362c5120d271096c086fb3c36cdbd8940f6550b",
+    "src/lib/ui-user-messages.ts": "a2742df4e39a7d3c5a90790c623bac2b0ea579c48456de7f5170af1a031b1fb1",
+    "src/lib/unified-question-contract.ts": "d68086ff5d9ce9fbe4b411e4d1147c39533584e090fdf11f092ab43880f2f0de",
+    "src/lib/unified-question-preview.ts": "6404983ecacb0b6b645eb4e725c6739813ee2fee5de895f8b59a7e0964a8f5e4",
+    "src/lib/unified-question-recovery.ts": "ebcbc36d0fbd817f7e2fa2c721aa50f560a695fba4c369a30cfd023d0b6efb0b",
+    "src/lib/unified-question-service.ts": "1b3bfb50bee59c31e7d863c631583cb8adfa76b095ff5e2384fe001fd30220e2",
+    "src/lib/version.ts": "f4f2b17f8624b95c31f3eb42b8b2f5d8416383dbad299990f9783cdbe3378db2",
+    "test/database-principal-contract.test.ts": "67aa9d96ad2e5eed9e7e5a8b52b9d56e4e3993930daf2b419eb57a78b76a6c4b",
+    "test/database-principal-oid10-contract.test.ts": "656f14c42af8f24f8430c9a5fb0e471ab2c0b6d3a9dbf67d088416979b3376f5",
+    "test/inquiry-recovery.test.ts": "3faba43e29dbc8fef0720966a5bbebc2b08602cd43fd215b43085fbaefd8867c",
+    "test/inquiry-session.test.ts": "80483240904f1929699bae250f97ddc51e2704679a20dcbc006e44e7cb4c7e95",
+    "test/inquiry-stream.test.ts": "e429599e0a72d94d03f9746147c492a3e10e486b7b07dc17937d310240354e19",
+    "test/performance-budget.test.ts": "a1efa436760f469a5b3d0524d46df34922b74a92f46fd389b641f4bfe9eda1c4",
+    "test/production-stable-deploy.py": "569848fec5059b2d01fe6e0a0ff31a24ddc5fde08a9328f230fb0cd54f5d63da",
+    "test/provider-quota-recovery.test.ts": "8ec9b450bd9b70f458c1bf27a3d0f38b7e087ade90bad4b2125ad7baa0ef68fa",
+    "test/unified-question-postgres.test.ts": "23650ce1cfed46f385aadf0f977406267eeda49593f7b05d536d8e90e89ec653"
+  },
+  "checks": {
+    "inquiry": {
+      "passed": 24,
+      "failed": 0
+    },
+    "provider": {
+      "passed": 17,
+      "failed": 0
+    },
+    "coverage": {
+      "stage": "integration snapshot before final review deltas; final deltas separately tested; formal CI must rerun full coverage",
+      "total": 1798,
+      "passed": 1625,
+      "skipped": 173,
+      "failed": 0,
+      "lines": 63.33,
+      "branches": 80.1,
+      "functions": 69.06
+    },
+    "postgresCatalogue": {
+      "totalGroups": 91,
+      "initialPassedGroups": 18,
+      "isolatedRetriedGroup": "web-ai-governance 7/7",
+      "remainingPassedGroups": 72,
+      "initialFullCommand": "failed; retained in verification-history.json",
+      "finalInquiryRecheck": "2/2 passed after final server changes"
+    },
+    "authentication": "PHONE_AUTH_POSTGRES_GATE_OK",
+    "oid10": {
+      "result": "passed",
+      "migrationCount": 152
+    },
+    "prisma": {
+      "generate": "passed in final image build",
+      "schema": "valid; migrations subcommand IPC failure replaced by successful equivalent Node runner",
+      "migrationDirectories": 152
+    },
+    "lint": "full lint passed; later modified files targeted lint passed",
+    "build": "v5 Docker shared build graph, TypeScript and production output passed; final source hashes match",
+    "performance": {
+      "report": {
+        "sharedJavaScriptGzipBytes": 132417,
+        "largestJavaScriptAsset": {
+          "path": "static/chunks/5922-292479552ca25dd2.js",
+          "gzipBytes": 65839
+        },
+        "globalCssGzipBytes": 11826,
+        "totalStaticClientGzipBytes": 901052,
+        "criticalRoutes": {
+          "/setup": 152759,
+          "/dashboard": 164619,
+          "/personal/projects": 164684,
+          "/guide": 159237,
+          "/connections/mcp": 138873,
+          "/system/account-access": 138873,
+          "/personal": 159544,
+          "/personal/knowledge": 160991,
+          "/personal/knowledge/graph": 183752,
+          "/login": 157524,
+          "/register": 159290,
+          "/admin/sms": 164423,
+          "/ask": 182230
+        }
+      },
+      "failures": []
+    },
+    "browser": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "durationSeconds": 50.7,
+      "files": [
+        "e2e/inquiry-recovery.spec.ts",
+        "e2e/inquiry-stream.spec.ts",
+        "e2e/unified-question.spec.ts"
+      ],
+      "scenarios": [
+        "reload GET original request without redispatch",
+        "stop and explicit continuation",
+        "server admission ACK before enabling Stop",
+        "quota notification and bill link",
+        "notification does not reduce content height by 3px or more",
+        "hanging recovery can leave for a new conversation without stale overwrite",
+        "desktop and 390px floating axe/overflow",
+        "smooth streamed character reveal and reduced motion",
+        "cross-surface history and user URL intent"
+      ]
+    },
+    "independentReview": "accepted"
+  },
+  "localImages": {
+    "schema": 1,
+    "revision": "d995c6bb69e1cc0535155227a6dfb72b1850f736",
+    "version": "1.2.32",
+    "runId": 81001,
+    "images": {
+      "app": {
+        "ref": "ai-project-os-ci/app:d995c6bb69e1cc0535155227a6dfb72b1850f736",
+        "id": "sha256:c242a4edc3f269b4d9637dca7133e8f36019c25c5b1f6b46d5c6cda277361673"
+      },
+      "worker": {
+        "ref": "ai-project-os-ci/worker:d995c6bb69e1cc0535155227a6dfb72b1850f736",
+        "id": "sha256:d4a7c153487ecb1cc7d4b47e40eb4511ed6598fc1d631df79172a38798187faf"
+      },
+      "migrate": {
+        "ref": "ai-project-os-ci/migrate:d995c6bb69e1cc0535155227a6dfb72b1850f736",
+        "id": "sha256:72a536217d892f27c6c858f56faca85ca479b6a3aa8f0af5572406aee6341f19"
+      }
+    }
+  },
+  "screenshots": [
+    {
+      "file": "page-quota-notification.png",
+      "sha256": "dbbbdff594bdc4fc9a7e0928ca6edc5ebf2dce77afbf9a9eb3c7e74f5f380a31",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "floating-quota-notification.png",
+      "sha256": "b5936550e0a5dbab5d8615db4026aba948ef855312447cfff9957b3f28b4857d",
+      "visuallyReviewed": true
+    }
+  ],
+  "logSha256": {
+    "inquiry-final.log": "333e81a159358adae5682f90eb7ce32778e4adabad42131f4103fbd446d46ab4",
+    "provider-final.log": "c1bcf58c1b4c911026247cd11c4a3e23a7e77765560345771312a6e9be200171",
+    "coverage.log": "e7fb114e1156d1b3ffff0f2b295fb5200fdc704a14476efea5ce5b2bf2d362f6",
+    "postgres-full.log": "8521695b645f66645d155cc747ff301bb397a2ce86e649f30c38f4968325072e",
+    "postgres-governance.log": "6f64c7295002b09ec5b68bc5d6810d6a2f1c545625e4d907b24abad48fd9a42d",
+    "postgres-remaining.log": "af4ebacd87037b5f46fda8d5dd421563b6ee63cc0e4fc46eb014e1582d7c74db",
+    "postgres-targeted.log": "b669560452a0c67a508552ac752d02d56357c2dc1b3d1fbfb3fce5436239c841",
+    "auth.log": "464602c5089eaaaf157b306ee8cdbd4901415d4bd13ffde512c4ab72b20d990a",
+    "oid10.log": "0759fc9cb1e9e70a9a830b6d09fab7059e9d3d953ed027257a6993b0d4caadbf",
+    "lint.log": "8120a08aa8c7a7a254955bac88973027d2a085ea91b5bb83a4e7d12721c6278a",
+    "build.log": "de16bb3caeabc4c148ff5b7d8c6b343a85038a0f0903649c39be0ab4de5a2b9b",
+    "browser.log": "a2301a06dd0a4f862d8a85e82205e81285714c4dd1e748d2cef59d5a7318c560",
+    "performance-contract.log": "f6fa215dcada138513a982b9947620c39721fc1e4386cbb001266a596894d1e9",
+    "migrations-validate.log": "3b37c0c4d2dd14a6ef1a2d509a634e754b03d4d909656caa410ee8da0411a6ce"
+  },
+  "limitations": [
+    "No real external model provider calls or real billing acceptance.",
+    "Historical requests without a persisted prefix cannot reconstruct missing text.",
+    "Exact candidate CI, immutable release images, migration coordination and production health remain separate release prerequisites."
+  ]
+}

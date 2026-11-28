@@ -1,6 +1,6 @@
 # AI Project OS 项目总览
 
-更新于 2026-11-25（Asia/Shanghai）。当前生产版本为 v1.2.31 / b8aacce。智能问答已支持逐字平滑显示，浮窗收起恢复保留阅读位置；工作区搜索仍在切换器下拉内。[生产回执](evidence/ask-character-reveal-20261125/release.json)
+更新于 2026-11-28（Asia/Shanghai）。当前生产版本为 v1.2.32 / 8f8b464。智能问答支持明确额度提示、紧凑通知、刷新恢复原请求及主动停止后继续；逐字显示和下拉工作区搜索保持。[生产回执](evidence/ask-recovery-20261128/release.json)
 
 2026-11-25 上线：完整问答页和浮窗的滚动、键盘、减少动态效果及失败恢复已通过隔离验收；正式 CI 与生产健康通过。真实外部模型未在本轮现场调用。见 [T-075 / E-032](evidence/ask-stream-20261125/acceptance.json) 与 [E-034 发布回执](evidence/release-stream-workspace-20261125/release.json)。
 
@@ -130,3 +130,5 @@ C-011 / T-029 将升级触发、边界修订和效果复验接入 LESSONS；当�
 工作区搜索已合并到现有切换器下拉中，重复查找入口已移除。桌面/手机及中英文代表交互、资源预算、正式 CI 与生产健康均已通过，随 v1.2.30 上线。状态见 [T-077](TASKS.md#t-077-工作区切换与搜索统一入口)，证据见 [E-034](evidence/release-stream-workspace-20261125/release.json)。
 
 2026-11-28：问答额度提示、通知、中断恢复和停止继续已完成本地接收，见 [T-081 / E-037](evidence/ask-recovery-20261128/acceptance.json)；v1.2.32 的精确 CI 与发布由 T-082 跟踪，当前生产仍以上方回执为准。
+
+2026-11-28 发布接收：T-081/T-082 已随 v1.2.32 上线。精确 CI、152 条迁移账本、同镜像候选与公网健康一致，见 [E-038](evidence/ask-recovery-20261128/release.json)；上方本地接收记录保留原时间边界。

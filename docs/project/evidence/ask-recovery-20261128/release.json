@@ -1,0 +1,213 @@
+{
+  "version": "v1.2.32",
+  "sourceRevision": "b8aacce22011afa9eb6695d3bb31ee3499cfc4a4",
+  "candidateRevision": "8f8b46464110e52b51ad8e5c4bed6efcf4bcd3c8",
+  "annotatedTag": "692ad5d8b316f42f9e613bfd9b180036f093d64e",
+  "ci": {
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/46138875569",
+    "conclusion": "success",
+    "base": "b8aacce22011afa9eb6695d3bb31ee3499cfc4a4",
+    "target": "8f8b46464110e52b51ad8e5c4bed6efcf4bcd3c8",
+    "risk": "high",
+    "planFingerprint": "bbc3b94c8ee43cbae5e0c348510dd69125ac6bf509105e851d6108d85bfeef19",
+    "checks": {
+      "unit": {
+        "schemaVersion": 1,
+        "kind": "unit",
+        "base": "b8aacce22011afa9eb6695d3bb31ee3499cfc4a4",
+        "target": "8f8b46464110e52b51ad8e5c4bed6efcf4bcd3c8",
+        "releaseEligible": true,
+        "planFingerprint": "bbc3b94c8ee43cbae5e0c348510dd69125ac6bf509105e851d6108d85bfeef19",
+        "mode": "full",
+        "status": "passed",
+        "fingerprint": "e948c139c8a07be3c7f08bdd7296f0fcd58d88b6dff6c1c41d96ecb3b55cbac4",
+        "tests": 1801,
+        "pass": 1626,
+        "fail": 0,
+        "skipped": 175,
+        "coverage": {
+          "lines": 63.39,
+          "branches": 80.15,
+          "functions": 69.05
+        }
+      },
+      "browser": {
+        "schemaVersion": 1,
+        "kind": "browser",
+        "base": "b8aacce22011afa9eb6695d3bb31ee3499cfc4a4",
+        "target": "8f8b46464110e52b51ad8e5c4bed6efcf4bcd3c8",
+        "releaseEligible": true,
+        "planFingerprint": "bbc3b94c8ee43cbae5e0c348510dd69125ac6bf509105e851d6108d85bfeef19",
+        "mode": "full",
+        "status": "passed",
+        "testCount": 127,
+        "executedCount": 120,
+        "skippedCount": 7,
+        "fingerprint": "b40411d38ce1d9b2cdc8370669a326ce87944caefaad12de04981f9c7ac52eae"
+      },
+      "performance": "passed",
+      "isolatedCandidate": {
+        "version": "1.2.32",
+        "revision": "8f8b46464110e52b51ad8e5c4bed6efcf4bcd3c8",
+        "releaseEligible": true,
+        "migrations": 152,
+        "health": "ok",
+        "restartPersistence": "ok",
+        "businessDataPersistence": "ok",
+        "businessDataPersistenceEvidence": {
+          "entities": [
+            "AppUser",
+            "Workspace",
+            "WorkspaceMembership",
+            "Project",
+            "ProjectMembership",
+            "ProjectSource"
+          ],
+          "rows": 6,
+          "snapshotSha256": "6769c74c34e3bc43c52c4d0dbf366092013cf1179f68b44bf82d3f9d0263018a",
+          "prePostEqual": true
+        },
+        "workerRestart": "ok",
+        "cleanup": "verified"
+      },
+      "database": {
+        "postgresGatesPassed": 91,
+        "job": "success",
+        "steps": [
+          {
+            "name": "Set up job",
+            "conclusion": "success"
+          },
+          {
+            "name": "Initialize containers",
+            "conclusion": "success"
+          },
+          {
+            "name": "Check out repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Set up Node.js",
+            "conclusion": "success"
+          },
+          {
+            "name": "Enable pnpm",
+            "conclusion": "success"
+          },
+          {
+            "name": "Install dependencies",
+            "conclusion": "success"
+          },
+          {
+            "name": "Generate Prisma client",
+            "conclusion": "success"
+          },
+          {
+            "name": "Validate Prisma schema and migrations when changed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run selected PostgreSQL gates",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run phone authentication gate when affected",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run PostgreSQL 18 OID10 gate when affected",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Set up Node.js",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Check out repository",
+            "conclusion": "success"
+          },
+          {
+            "name": "Stop containers",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "conclusion": "success"
+          }
+        ]
+      }
+    },
+    "images": {
+      "app": {
+        "ref": "ghcr.io/jack-kunlun/ai-project-os-app@sha256:b1ccd745cd6258d8a2e0e8b3eb37c330d594b543cba7b3ea87e543dbdb74e312",
+        "id": "sha256:104f5467e7ccca7fd0dbd294ce5a8fadd976bc03b64c1d8c880c380a4acb0f2a"
+      },
+      "worker": {
+        "ref": "ghcr.io/jack-kunlun/ai-project-os-worker@sha256:85a836e9c4128ef74dfd22b965e75b79189df4cde880e55bfc4842c944c6d363",
+        "id": "sha256:3aaaa42482058b2007c6d9f2fa9102b2f78f073d27204f0661b6fd59ad7ca493"
+      },
+      "migrate": {
+        "ref": "ghcr.io/jack-kunlun/ai-project-os-migrate@sha256:e2603e6dac7177b67789466c9afae50abb3815e59105f20d9be258ff451eeee1",
+        "id": "sha256:b9dd5d51afd6b5e795df8569a10d7d38b9b92140abff8cde39e4295d6d61aa50"
+      }
+    }
+  },
+  "release": {
+    "url": "https://github.com/Jack-Kunlun/ai-project-os/actions/runs/46141477702",
+    "conclusion": "success",
+    "successfulAttempt": 1,
+    "receipt": "STABLE_DEPLOY_OK tag=v1.2.32 revision=8f8b46464110e52b51ad8e5c4bed6efcf4bcd3c8 migration_count=152 backup=not-required restore=not-required",
+    "receiptLogSha256": "d85badb1591f8fb432d118c1464b1c14aa416be82364f7e1d01d0de2c97264a8",
+    "publishedAt": "2026-11-28T11:54:40Z",
+    "github": "https://github.com/Jack-Kunlun/ai-project-os/releases/tag/v1.2.32",
+    "migrationExecution": "20261128010000_add_unified_question_recovery applied; database principals reconciled",
+    "migrationEvidence": {
+      "sourceCount": 151,
+      "targetCount": 152,
+      "added": [
+        "prisma/migrations/20261128010000_add_unified_question_recovery/migration.sql"
+      ],
+      "existingManifestsUnchanged": true,
+      "verification": "successful deployment requires migrate, principal reconciliation, exact migration ledger and target health before emitting STABLE_DEPLOY_OK; raw migration output is not exported by the restricted gateway"
+    },
+    "backup": "not-required",
+    "restore": "not-required"
+  },
+  "publicHealth": {
+    "checkedAt": "2026-11-28T11:56:42.190121+00:00",
+    "version": "1.2.32",
+    "status": "ok",
+    "database": "up",
+    "worker": "up",
+    "consecutiveFailures": 0
+  },
+  "publicEntryChecks": {
+    "/login": {
+      "status": 200,
+      "signedOutFinalPath": "/login"
+    },
+    "/ask": {
+      "status": 200,
+      "signedOutFinalPath": "/login"
+    }
+  },
+  "maintenance": {
+    "imageCleanup": "passed",
+    "retainedVersions": [
+      "1.2.31",
+      "1.2.32"
+    ],
+    "removedOlderImages": 3,
+    "cacheTargetBytes": 2000000000,
+    "cacheTargetMet": true,
+    "protectionVerified": true
+  },
+  "review": "review.json",
+  "limitations": [
+    "Real external model providers were not called; quota, stop and recovery behavior used isolated transport/database fixtures and the formal browser gate."
+  ],
+  "retainedHistory": [
+    "acceptance.json",
+    "verification-history.json"
+  ]
+}

@@ -236,3 +236,7 @@ E-036 正式接收：候选 b8aacce22011afa9eb6695d3bb31ee3499cfc4a4 的[主分�
 待精确候选主分支 CI、不可变镜像、迁移权限协调、发布 Workflow 和生产健康证据。当前尚未提交或发布 v1.2.32。
 
 E-037 本地接收：[最终验收](evidence/ask-recovery-20261128/acceptance.json)、[独立审查](evidence/ask-recovery-20261128/review.json)、[失败与修复历史](evidence/ask-recovery-20261128/verification-history.json)。最终同镜像 7/7 浏览器通过，桌面与 390px 通知已实际审阅；完整目录 91 组分次通过，原失败保留。默认覆盖率集成版通过、最终增量定向通过；正式精确候选的全套 CI 与生产仍由 E-038 闭合。
+
+E-038 正式接收：候选 8f8b46464110e52b51ad8e5c4bed6efcf4bcd3c8 的[主分支 CI](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/46138875569) 成功，默认测试/覆盖率、Prisma、Lint/类型、资源预算、完整 PostgreSQL 业务门禁、认证/OID10、同镜像浏览器和隔离候选通过。实际数量、源/目标 SHA、计划指纹和不可变镜像见[发布回执](evidence/ask-recovery-20261128/release.json)。
+
+[正式发布](https://github.com/Jack-Kunlun/ai-project-os/actions/runs/46141477702) 完成 v1.2.32 切换；annotated tag、152 条迁移账本、数据库权限协调、生产镜像和公网应用/数据库/Worker 健康一致。新增 `20261128010000_add_unified_question_recovery` 在生产 ai_project_os 数据库应用，随后协调权限并启动目标版本。按既有策略不要求备份/恢复；保留当前及上一版镜像，缓存维护通过。真实外部供应商的在线计费未执行。
